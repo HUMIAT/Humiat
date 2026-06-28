@@ -1,0 +1,491 @@
+:root{
+    --azul:#00aeff;
+    --azul2:#0066ff;
+    --fundo:#02070f;
+    --fundo2:#07111f;
+    --texto:#eef7ff;
+    --muted:#a8bdd3;
+    --linha:rgba(0,174,255,.24);
+    --vidro:rgba(8,20,36,.68);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+    margin:0;
+    background:var(--fundo);
+    color:var(--texto);
+    font-family:Inter,Segoe UI,Arial,sans-serif;
+    overflow-x:hidden;
+}
+a{color:inherit;text-decoration:none}
+#particulas{
+    position:fixed;
+    inset:0;
+    z-index:-2;
+    background:radial-gradient(circle at 70% 20%,#062b5a 0,#02070f 38%,#000 100%);
+}
+
+.topo{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    z-index:20;
+    height:78px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 5vw;
+    background:linear-gradient(to bottom,rgba(1,6,14,.92),rgba(1,6,14,.52));
+    backdrop-filter:blur(16px);
+    border-bottom:1px solid var(--linha);
+}
+.marca{
+    display:flex;
+    align-items:center;
+    height:58px;
+}
+.marca img{
+    height:58px;
+    width:auto;
+    display:block;
+    filter:drop-shadow(0 0 18px rgba(0,174,255,.35));
+}
+nav{
+    display:flex;
+    gap:28px;
+    color:#cbd8ea;
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+}
+nav a:hover{color:var(--azul)}
+
+.secao{
+    position:relative;
+    padding:110px 5vw;
+}
+.hero{
+    min-height:100vh;
+    display:grid;
+    align-items:center;
+    padding-top:120px;
+}
+.hero-imagem{
+    position:absolute;
+    inset:0;
+    background:
+        linear-gradient(90deg,rgba(0,0,0,.86),rgba(0,0,0,.42),rgba(0,0,0,.18)),
+        url('/static/img/humiat-hero.png') center/cover no-repeat;
+    z-index:-1;
+}
+.hero-imagem:after{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(to top,#02070f 0,rgba(2,7,15,.25) 42%,rgba(2,7,15,.08) 100%);
+}
+.hero-conteudo{max-width:760px}
+.tag{
+    margin:0 0 18px;
+    color:var(--azul);
+    text-transform:uppercase;
+    letter-spacing:5px;
+    font-weight:900;
+    font-size:14px;
+}
+.tag span{color:#fff;text-shadow:0 0 20px rgba(0,174,255,.9)}
+.hero h1,.secao h2{
+    margin:0;
+    line-height:1.02;
+    font-size:clamp(44px,7vw,108px);
+    letter-spacing:-3px;
+}
+.hero h1 span{
+    display:block;
+    background:linear-gradient(90deg,#fff,var(--azul));
+    -webkit-background-clip:text;
+    color:transparent;
+}
+.secao h2{
+    font-size:clamp(34px,5vw,72px);
+    max-width:1060px;
+}
+.texto-grande{
+    font-size:clamp(18px,2vw,25px);
+    line-height:1.55;
+    color:#d4e4f7;
+    max-width:720px;
+}
+.acoes{
+    display:flex;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-top:36px;
+}
+.botao{
+    padding:16px 24px;
+    border:1px solid var(--linha);
+    border-radius:14px;
+    background:rgba(255,255,255,.04);
+    font-weight:800;
+    transition:.25s ease;
+}
+.botao:hover{transform:translateY(-2px);border-color:rgba(0,174,255,.6)}
+.botao.primario{
+    background:linear-gradient(135deg,var(--azul2),var(--azul));
+    color:#00142a;
+    box-shadow:0 0 38px rgba(0,174,255,.35);
+}
+
+.manifesto{background:linear-gradient(180deg,#02070f,#06101d)}
+.grade{
+    display:grid;
+    gap:32px;
+    margin-top:34px;
+}
+.duas{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grade p,.card p,.painel p,.contato p{
+    font-size:18px;
+    line-height:1.7;
+    color:var(--muted);
+}
+
+.cards-produtos{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:24px;
+    margin-top:42px;
+}
+.card,.painel{
+    position:relative;
+    overflow:hidden;
+    border:1px solid var(--linha);
+    border-radius:28px;
+    background:linear-gradient(145deg,rgba(8,20,36,.76),rgba(0,7,18,.72));
+    box-shadow:inset 0 0 40px rgba(0,174,255,.06),0 30px 80px rgba(0,0,0,.3);
+    padding:34px;
+}
+.card:before{
+    content:"";
+    position:absolute;
+    inset:-1px;
+    background:radial-gradient(circle at 18% 0,rgba(0,174,255,.20),transparent 42%);
+    pointer-events:none;
+}
+.card.destaque{
+    background:linear-gradient(145deg,rgba(0,74,155,.38),rgba(8,20,36,.72));
+}
+.icone-produto{
+    width:92px;
+    height:92px;
+    display:grid;
+    place-items:center;
+    border-radius:24px;
+    border:1px solid rgba(0,174,255,.28);
+    background:rgba(0,174,255,.06);
+    box-shadow:0 0 36px rgba(0,174,255,.14);
+    margin-bottom:20px;
+}
+.icone-produto img{
+    width:78px;
+    height:78px;
+    display:block;
+}
+.card h3{
+    font-size:38px;
+    margin:12px 0 14px;
+}
+.card ul{
+    padding-left:20px;
+    color:#d6e5f6;
+    line-height:1.9;
+}
+
+.fluxo{
+    display:grid;
+    grid-template-columns:repeat(6,1fr);
+    gap:12px;
+    margin-top:42px;
+}
+.fluxo span{
+    padding:22px 14px;
+    text-align:center;
+    border:1px solid var(--linha);
+    border-radius:18px;
+    background:rgba(255,255,255,.04);
+    color:#dcecff;
+    font-weight:800;
+}
+.painel{
+    padding:56px;
+    background:linear-gradient(135deg,rgba(0,102,255,.18),rgba(0,174,255,.08),rgba(255,255,255,.03));
+}
+.contato a{color:var(--azul)}
+footer{
+    padding:36px 5vw;
+    border-top:1px solid var(--linha);
+    display:flex;
+    justify-content:space-between;
+    color:var(--muted);
+    background:#01050b;
+}
+footer strong{
+    color:#fff;
+    letter-spacing:3px;
+}
+footer strong span{color:var(--azul);text-shadow:0 0 16px rgba(0,174,255,.8)}
+.revelar{
+    opacity:0;
+    transform:translateY(28px);
+    transition:900ms ease;
+}
+.revelar.visivel{
+    opacity:1;
+    transform:translateY(0);
+}
+
+.whatsapp-flutuante{
+    position:fixed;
+    right:24px;
+    bottom:24px;
+    z-index:50;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    padding:16px 20px;
+    border-radius:999px;
+    background:linear-gradient(135deg,#00d26a,#00a859);
+    color:#001b0c;
+    font-weight:900;
+    box-shadow:0 0 34px rgba(0,210,106,.45),0 18px 50px rgba(0,0,0,.35);
+    border:1px solid rgba(255,255,255,.32);
+    transition:.25s ease;
+}
+.whatsapp-flutuante:before{
+    content:"";
+    width:30px;
+    height:30px;
+    display:block;
+    background-image:url("/static/img/whatsapp.svg");
+    background-size:contain;
+    background-position:center;
+    background-repeat:no-repeat;
+    border-radius:0;
+    box-shadow:none;
+}
+.whatsapp-flutuante:hover{
+    transform:translateY(-2px);
+    filter:brightness(1.08);
+}
+
+/* ======================================================
+   HUMIAT MOBILE v2.2 - CORRIGIDO
+   ====================================================== */
+
+@media (max-width:900px){
+
+    body{
+        background:#02070f;
+        overflow-x:hidden;
+    }
+
+    .topo{
+        height:70px;
+        padding:0 18px;
+        background:rgba(1,6,14,.96);
+        backdrop-filter:blur(18px);
+    }
+
+    .marca img{
+        height:46px;
+        width:auto;
+        max-width:200px;
+        object-fit:contain;
+    }
+
+    nav{
+        display:none;
+    }
+
+    .secao{
+        padding:64px 20px;
+        overflow:hidden;
+    }
+
+    .hero{
+        min-height:78vh;
+        padding-top:92px;
+        padding-bottom:50px;
+        align-items:flex-start;
+    }
+
+    .hero-imagem{
+        background:
+            linear-gradient(90deg,rgba(0,0,0,.92) 0%,rgba(0,0,0,.72) 46%,rgba(0,0,0,.28) 100%),
+            linear-gradient(to bottom,rgba(2,7,15,.08),rgba(2,7,15,.92)),
+            url('/static/img/humiat-hero-mobile.png') center top/cover no-repeat;
+    }
+
+    .hero-conteudo{
+        max-width:340px;
+        padding-top:25px;
+    }
+
+    .tag{
+        font-size:11px;
+        letter-spacing:5px;
+        margin-bottom:16px;
+    }
+
+    .hero h1{
+        font-size:clamp(40px,11vw,54px);
+        line-height:1.05;
+        letter-spacing:-1.8px;
+        max-width:340px;
+    }
+
+    .secao h2{
+        font-size:clamp(30px,8.4vw,42px);
+        line-height:1.12;
+        letter-spacing:-1.4px;
+        max-width:100%;
+    }
+
+    .texto-grande{
+        margin-top:22px;
+        font-size:17px;
+        line-height:1.65;
+        color:#edf6ff;
+        max-width:330px;
+    }
+
+    .acoes{
+        display:grid;
+        gap:14px;
+        margin-top:34px;
+        width:100%;
+        max-width:310px;
+    }
+
+    .botao{
+        width:100%;
+        padding:17px;
+        border-radius:16px;
+        text-align:center;
+        font-size:16px;
+    }
+
+    .grade,
+    .duas{
+        grid-template-columns:1fr !important;
+        gap:22px;
+    }
+
+    .grade p,
+    .card p,
+    .painel p,
+    .contato p{
+        font-size:16px;
+        line-height:1.65;
+        max-width:100%;
+    }
+
+    .cards-produtos{
+        grid-template-columns:1fr;
+        gap:18px;
+        margin-top:28px;
+    }
+
+    .card,
+    .painel{
+        width:100%;
+        max-width:100%;
+        padding:22px;
+        border-radius:22px;
+    }
+
+    .icone-produto{
+        width:70px;
+        height:70px;
+        margin-bottom:16px;
+        border-radius:18px;
+    }
+
+    .icone-produto img{
+        width:54px;
+        height:54px;
+    }
+
+    .card h3{
+        font-size:28px;
+        margin:8px 0 12px;
+    }
+
+    .card ul{
+        padding-left:18px;
+        font-size:15px;
+        line-height:1.75;
+        margin-bottom:0;
+    }
+
+    .fluxo{
+        grid-template-columns:1fr;
+        gap:12px;
+    }
+
+    .fluxo span{
+        padding:17px 14px;
+    }
+
+    footer{
+        padding:35px 20px 90px;
+        display:grid;
+        gap:12px;
+        text-align:center;
+    }
+
+    .whatsapp-flutuante{
+        width:62px;
+        height:62px;
+        right:20px;
+        bottom:20px;
+        padding:0;
+        border-radius:50%;
+        display:flex;
+        justify-content:center;
+        align-items:center;
+    }
+
+    .whatsapp-flutuante span{
+        display:none;
+    }
+
+    .whatsapp-flutuante:before{
+        width:32px;
+        height:32px;
+        background-image:url("/static/img/whatsapp.svg");
+        background-size:contain;
+        background-position:center;
+        background-repeat:no-repeat;
+        box-shadow:none;
+    }
+}
+
+@media (max-width:420px){
+
+    .secao{
+        padding-left:18px;
+        padding-right:18px;
+    }
+
+    .hero h1{
+        max-width:320px;
+        font-size:clamp(38px,11vw,50px);
+    }
+
+    .texto-grande{
+        max-width:315px;
+    }
+}

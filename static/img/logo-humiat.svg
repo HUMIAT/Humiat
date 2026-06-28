@@ -1,0 +1,30 @@
+<svg width="520" height="140" viewBox="0 0 520 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="g1" x1="0" y1="0" x2="160" y2="140" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#EAF8FF"/>
+    <stop offset="0.42" stop-color="#00AEFF"/>
+    <stop offset="1" stop-color="#0057FF"/>
+  </linearGradient>
+  <linearGradient id="g2" x1="170" y1="38" x2="492" y2="106" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF"/>
+    <stop offset="0.72" stop-color="#D8ECFF"/>
+    <stop offset="1" stop-color="#00AEFF"/>
+  </linearGradient>
+  <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="7" result="blur"/>
+    <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0  0 0 0 0 0.65  0 0 0 0 1  0 0 0 .85 0"/>
+    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+<rect x="12" y="14" width="116" height="112" rx="28" fill="rgba(0,174,255,0.08)" stroke="url(#g1)" stroke-width="3"/>
+<g filter="url(#glow)">
+  <path d="M42 40V100" stroke="url(#g1)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M98 40V100" stroke="url(#g1)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M46 70H94" stroke="url(#g1)" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="42" cy="40" r="5" fill="#EAF8FF"/>
+  <circle cx="98" cy="100" r="5" fill="#00AEFF"/>
+</g>
+<text x="158" y="91" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="56" font-weight="900" letter-spacing="7" fill="url(#g2)">HUMIA</text>
+<text x="420" y="91" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="56" font-weight="900" letter-spacing="7" fill="#00AEFF" filter="url(#glow)">T</text>
+<text x="162" y="116" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="3" fill="#A8BDD3">TECNOLOGIA QUE CONECTA</text>
+</svg>
