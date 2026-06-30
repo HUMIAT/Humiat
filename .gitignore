@@ -1,6 +1,3 @@
-# ==============================
-# AMBIENTE PYTHON (CRÍTICO)
-# ==============================
 .venv/
 venv/
 .env
@@ -10,31 +7,21 @@ __pycache__/
 *.pyo
 *.pyd
 
-# ==============================
-# BANCO LOCAL - NUNCA NO GIT
-# ==============================
+# Banco local - nunca enviar para o Git
+organiza.db
+*.db
+*.db-wal
+*.db-shm
 data/*.db
 data/*.db-wal
 data/*.db-shm
-data/**/*.db
 
-# ==============================
-# IDEs
-# ==============================
 .idea/
 .vscode/
 
-# ==============================
-# BACKUPS E LIXO
-# ==============================
 *.zip
 *_backup*
 _backup_original/
 
-# ==============================
-# LOGS
-# ==============================
 *.log
-
-# Windows
 Thumbs.db

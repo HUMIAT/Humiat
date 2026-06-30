@@ -10,25 +10,18 @@ from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime, Date, func, inspect, text, or_
-from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Date, func, inspect, text, or_
+from sqlalchemy.orm import Session, relationship
+
+from config import CHAVE_SESSAO, ORGANIZA_VERSAO, ADMIN_NOME, ADMIN_SENHA
+from database import Base, SessionLocal, engine, get_db
 
 
-app = FastAPI(title="HUMIAT", version="6.0")
+app = FastAPI(title="HUMIAT", version=ORGANIZA_VERSAO)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-BANCO_URL = os.getenv("DATABASE_URL", "sqlite:///./organiza.db")
-if BANCO_URL.startswith("postgres://"):
-    BANCO_URL = BANCO_URL.replace("postgres://", "postgresql://", 1)
-
-argumentos_conexao = {"check_same_thread": False} if BANCO_URL.startswith("sqlite") else {}
-engine = create_engine(BANCO_URL, connect_args=argumentos_conexao, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
-
-CHAVE_SESSAO = os.getenv("SECRET_KEY", "troque-esta-chave-no-render")
 STATUS_VALIDOS = ["Para Fazer", "Em andamento", "Pendente", "Aguardando Cliente", "Aguardando Compras", "Aguardando Financeiro", "Aguardando Externo", "Concluída", "Cancelada"]
 DEPARTAMENTOS_CHAMADO = ["Cliente", "Compras", "Financeiro", "Externo"]
 STATUS_CHAMADO = ["Aberto", "Em andamento", "Pedido realizado", "Previsão de entrega", "Produto recebido", "Concluído"]
@@ -224,14 +217,6 @@ class Chamado(Base):
     concluido_em = Column(DateTime, nullable=True)
     tarefa = relationship("Tarefa", back_populates="chamados", foreign_keys=[tarefa_id])
     externo = relationship("Externo")
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def gerar_hash_senha(senha: str, salt: Optional[str] = None) -> str:
@@ -495,8 +480,8 @@ def iniciar_banco():
         # Banco novo em produção:
         # cria somente 1 administrador inicial.
         # Depois, os demais usuários devem ser criados pela tela de Usuários.
-        admin_nome = os.getenv("ORGANIZA_ADMIN_NOME", "Admin").strip() or "Admin"
-        admin_senha = os.getenv("ORGANIZA_ADMIN_SENHA", os.getenv("ORGANIZA_SENHA_PADRAO", "humiat123"))
+        admin_nome = ADMIN_NOME
+        admin_senha = ADMIN_SENHA
 
         total_usuarios = db.query(Usuario).count()
         if total_usuarios == 0:
@@ -534,7 +519,7 @@ def pagina_inicial(request: Request):
 
 @app.get("/saude")
 def saude():
-    return {"ok": True, "projeto": "HUMIAT", "modulo": "Organiza", "versao": "6.0"}
+    return {"ok": True, "projeto": "HUMIAT", "modulo": "Organiza", "versao": ORGANIZA_VERSAO}
 
 
 @app.get("/area-restrita/login", response_class=HTMLResponse)
