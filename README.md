@@ -37,3 +37,8 @@ E-mail: humiat@gmail.com
 ## Versão
 
 v1.1 - ajustes de responsividade mobile, WhatsApp flutuante e identidade HUMIAT.
+
+
+## Versão V4.3
+
+Inclui data/hora real no painel, foco em tarefas, ordem manual por setas, número de posição e exclusão de tarefa com regra de permissão.

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>{{ titulo or "Organiza | HUMIAT" }}</title>
+    <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml"/>
+    <link rel="stylesheet" href="/static/css/estilo.css"/>
+    <link rel="stylesheet" href="/static/css/organiza.css"/>
+</head>
+<body class="organiza-corpo">
+
+{% if usuario %}
+<div class="app-shell">
+    <aside class="app-sidebar">
+        <a class="side-logo" href="/organiza">
+            <span class="logo-check">✓</span>
+            <strong>ORGANIZA</strong>
+        </a>
+
+        <nav class="side-nav">
+            <a href="/organiza"><span>⌂</span> Painel</a>
+            <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span> Minhas Tarefas</a>
+            <a href="/organiza/projetos"><span>▣</span> Projetos</a>
+
+            {% if tem_permissao(usuario, 'pode_criar_tarefa') %}
+            <a href="/organiza/tarefas/nova"><span>＋</span> Criar Tarefa</a>
+            {% endif %}
+
+            <a href="/organiza/clientes/novo"><span>👥</span> Clientes</a>
+            <a href="/organiza/chamados"><span>▤</span> Chamados</a>
+            <a href="#"><span>▣</span> Equipamentos</a>
+            <a href="#"><span>💲</span> Financeiro</a>
+            <a href="#"><span>▤</span> Relatórios</a>
+        </nav>
+
+        <div class="side-bottom">
+            {% if tem_permissao(usuario, 'pode_criar_usuario') %}
+            <a href="/organiza/usuarios"><span>👤</span> Usuários</a>
+            {% endif %}
+            <a href="#"><span>⚙</span> Configurações</a>
+            <a href="/area-restrita/sair"><span>⇥</span> Sair</a>
+            <div class="side-user">
+                <div class="avatar">{{ usuario.nome[:1] }}</div>
+                <div>
+                    <strong>{{ usuario.nome }}</strong>
+                    <small>{{ usuario.cargo or ("Admin" if usuario.is_admin else "Equipe") }}</small>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="app-main">
+{% else %}
+    <main class="organiza-container">
+{% endif %}
+
+        {% block conteudo %}{% endblock %}
+
+    </main>
+
+{% if usuario %}
+    <nav class="mobile-nav">
+        <a href="/organiza"><span>⌂</span><small>Painel</small></a>
+        <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span><small>Tarefas</small></a>
+        {% if tem_permissao(usuario, 'pode_criar_tarefa') %}<a class="plus" href="/organiza/tarefas/nova">+</a>{% else %}<a class="plus" href="/organiza/acesso-negado">+</a>{% endif %}
+        <a href="/organiza/projetos"><span>📁</span><small>Projetos</small></a>
+        <a href="/organiza/chamados"><span>▤</span><small>Chamados</small></a>
+    </nav>
+</div>
+{% endif %}
+
+</body>
+</html>

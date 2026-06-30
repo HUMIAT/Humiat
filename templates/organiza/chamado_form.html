@@ -1,0 +1,144 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao formulario-cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Chamado #{{ chamado.id }}</p>
+            <h1>{{ chamado.departamento }}</h1>
+            <p class="texto-suave">Tarefa original: {{ chamado.tarefa.descricao }} · Responsável: {{ chamado.tarefa.responsavel }}</p>
+        </div>
+        <a class="botao" href="/organiza/chamados">Voltar</a>
+    </div>
+
+    <form method="post" class="formulario">
+        <label>Ação solicitada
+            <textarea name="descricao" required>{{ chamado.descricao }}</textarea>
+        </label>
+        <label>Status do chamado
+            <select name="status">
+                {% for st in status_chamado %}
+                <option value="{{ st }}" {% if chamado.status == st %}selected{% endif %}>{{ st }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        {% if chamado.departamento == 'Compras' %}
+        <div class="chamado-bloco">
+            <p class="campo-titulo">Compras</p>
+            <label>Fornecedor
+                <input name="fornecedor" value="{{ chamado.fornecedor or '' }}" placeholder="Fornecedor">
+            </label>
+            <label>Valor
+                <input name="valor" value="{{ chamado.valor or '' }}" placeholder="Ex.: R$ 250,00">
+            </label>
+            <label>Previsão de entrega
+                <input name="previsao_entrega" type="date" value="{{ chamado.previsao_entrega.isoformat() if chamado.previsao_entrega else '' }}">
+            </label>
+            <label>Data de recebimento *
+                <input name="data_recebimento" type="date" value="{{ chamado.data_recebimento.isoformat() if chamado.data_recebimento else '' }}">
+            </label>
+            <p class="ajuda">Compras só finaliza depois de informar a data de recebimento.</p>
+        </div>
+        {% endif %}
+
+        {% if chamado.departamento == 'Externo' %}
+        <div class="chamado-bloco">
+            <p class="campo-titulo">Externo</p>
+            <input type="hidden" name="externo_id" id="externo_id" value="{{ chamado.externo_id or '' }}">
+            <label>Pesquisar externo por nome ou telefone
+                <input id="externo_busca" placeholder="Digite nome ou telefone" value="{{ chamado.externo.nome if chamado.externo else '' }}">
+            </label>
+            <div class="cliente-status" id="externo_resultado">Digite para procurar.</div>
+            <div class="cliente-cadastro-rapido" id="externo_cadastro" style="display:none">
+                <label>Nome do externo
+                    <input name="externo_nome" id="externo_nome" placeholder="Nome da assistência / fornecedor">
+                </label>
+                <label>Telefone
+                    <input name="externo_telefone" id="externo_telefone" placeholder="DDD + número">
+                </label>
+            </div>
+            <label>Data de envio
+                <input name="data_envio" type="date" value="{{ chamado.data_envio.isoformat() if chamado.data_envio else '' }}">
+            </label>
+            <label>Previsão / data de devolução
+                <input name="data_devolucao" type="date" value="{{ chamado.data_devolucao.isoformat() if chamado.data_devolucao else '' }}">
+            </label>
+        </div>
+        {% endif %}
+
+        <label>Observação
+            <textarea name="observacao" placeholder="Observações internas do chamado">{{ chamado.observacao or '' }}</textarea>
+        </label>
+
+        <button class="botao primario botao-cheio" type="submit">Salvar chamado e voltar ao painel</button>
+    </form>
+
+    <form method="post" action="/organiza/chamados/{{ chamado.id }}/concluir" class="formulario concluir-chamado" onsubmit="return confirm('Concluir este chamado? A tarefa voltará para Pendente.')">
+        <button class="botao sucesso botao-cheio" type="submit">Concluir chamado e devolver tarefa para Pendente</button>
+    </form>
+</section>
+
+<section class="cartao compacto organiza-bloco-6">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Timeline</p>
+            <h2>Histórico da tarefa</h2>
+            <p class="texto-suave">Acompanhe aqui tudo que aconteceu antes e depois deste chamado.</p>
+        </div>
+        <a class="botao pequeno" href="/organiza/tarefas/{{ chamado.tarefa_id }}/editar">Abrir tarefa</a>
+    </div>
+
+    {% if historicos %}
+    <div class="timeline-organiza">
+        {% for item in historicos %}
+        <div class="timeline-item">
+            <span></span>
+            <div>
+                <strong>{{ item.titulo }}</strong>
+                {% if item.descricao %}<p>{{ item.descricao }}</p>{% endif %}
+                <small>{{ item.criado_em.strftime('%d/%m/%Y %H:%M') if item.criado_em else '' }} · {{ item.usuario or 'Sistema' }}</small>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="texto-suave">Nenhum histórico registrado ainda.</p>
+    {% endif %}
+</section>
+
+<script>
+const busca = document.getElementById('externo_busca');
+if(busca){
+    let timer = null;
+    busca.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            const q = busca.value.trim();
+            const resultado = document.getElementById('externo_resultado');
+            const cadastro = document.getElementById('externo_cadastro');
+            document.getElementById('externo_id').value = '';
+            if(q.length < 2){ resultado.textContent = 'Digite para procurar.'; cadastro.style.display='none'; return; }
+            resultado.textContent = 'Procurando...';
+            fetch(`/api/externos/buscar?q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if(data.ok){
+                        resultado.innerHTML = '';
+                        data.externos.forEach(e => {
+                            const btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'resultado-busca';
+                            btn.textContent = `${e.nome} · ${e.telefone_formatado}`;
+                            btn.onclick = () => { document.getElementById('externo_id').value = e.id; busca.value = e.nome; resultado.textContent = `Selecionado: ${e.nome}`; cadastro.style.display='none'; };
+                            resultado.appendChild(btn);
+                        });
+                    } else {
+                        resultado.textContent = 'Externo não encontrado. Cadastre abaixo.';
+                        cadastro.style.display = 'grid';
+                    }
+                });
+        }, 350);
+    });
+}
+</script>
+{% endblock %}

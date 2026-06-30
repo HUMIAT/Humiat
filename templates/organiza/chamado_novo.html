@@ -1,0 +1,29 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao formulario-cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Novo chamado</p>
+            <h1>{{ tarefa.descricao }}</h1>
+            <p class="texto-suave">O chamado fica vinculado a esta tarefa e será visto por todos do departamento escolhido.</p>
+        </div>
+        <a class="botao" href="/organiza/tarefas/{{ tarefa.id }}/editar">Voltar</a>
+    </div>
+
+    <form method="post" class="formulario">
+        <label>Departamento do chamado
+            <select name="departamento" required>
+                {% for dep in departamentos %}
+                <option value="{{ dep }}" {% if departamento_atual == dep %}selected{% endif %}>{{ dep }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>Ação solicitada
+            <textarea name="descricao" required placeholder="Ex.: Comprar cabo HDMI 5 metros. Cliente precisa para sexta-feira."></textarea>
+        </label>
+
+        <button class="botao primario botao-cheio" type="submit">Abrir chamado e voltar ao painel</button>
+    </form>
+</section>
+{% endblock %}

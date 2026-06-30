@@ -1,0 +1,4 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao"><div class="titulo-linha"><div><p class="tag">Nova etapa</p><h1>Escolha o projeto</h1><p class="texto-suave">A etapa pertence a um projeto. Isso mantém cada fluxo organizado.</p></div><a class="botao" href="/organiza/etapas">Voltar</a></div><div class="grade-projetos">{% for projeto in projetos %}<a class="projeto-card" href="/organiza/projetos/{{ projeto.id }}/missoes/nova"><strong>{{ projeto.nome }}</strong><span>{{ projeto.missoes|length }} etapa(s)</span></a>{% else %}<p class="texto-suave">Nenhum projeto cadastrado.</p>{% endfor %}</div></section>
+{% endblock %}

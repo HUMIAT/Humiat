@@ -1,0 +1,85 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+
+{% if grupos %}
+{% for projeto,tarefas in grupos.items() %}
+<section class="cartao compacto">
+
+<div class="titulo-linha">
+<h2>{{ projeto }}</h2>
+<a class="botao pequeno" href="javascript:history.back()">Voltar</a>
+</div>
+
+<div class="lista-tarefas">
+
+{% for tarefa in tarefas %}
+<article class="tarefa tarefa-com-ordem">
+
+<div class="tarefa-ordem">{{ loop.index }}</div>
+
+<div class="tarefa-info">
+<strong>{{ tarefa.descricao }}</strong>
+
+<p>{{ tarefa.missao.nome }}</p>
+{% if tarefa.cliente %}<p class="texto-suave">Cliente: {{ tarefa.cliente.nome }} · {{ tarefa.cliente.telefone|telefone }}</p>{% endif %}
+
+{% if tarefa.dependencia %}
+<p class="texto-suave">
+Depende de {{ tarefa.dependencia.descricao }}
+</p>
+{% endif %}
+
+{% if tarefa.observacao %}
+<p class="texto-suave">
+{{ tarefa.observacao }}
+</p>
+{% endif %}
+
+</div>
+
+<div class="tarefa-acoes">
+
+<span class="selo">{{ tarefa.status }}</span>
+
+<div class="order-actions linha">
+<form method="post" action="/organiza/tarefas/{{ tarefa.id }}/ordem">
+<input type="hidden" name="direcao" value="subir">
+<input type="hidden" name="voltar" value="/organiza/detalhes/{{ tipo if tipo is defined else 'responsavel' }}/{{ valor if valor is defined else usuario.nome }}">
+<button type="submit">↑</button>
+</form>
+<form method="post" action="/organiza/tarefas/{{ tarefa.id }}/ordem">
+<input type="hidden" name="direcao" value="descer">
+<input type="hidden" name="voltar" value="/organiza/detalhes/{{ tipo if tipo is defined else 'responsavel' }}/{{ valor if valor is defined else usuario.nome }}">
+<button type="submit">↓</button>
+</form>
+</div>
+
+<a class="botao pequeno" href="/organiza/tarefas/{{ tarefa.id }}/editar">Abrir</a>
+
+{% if usuario.is_admin or tarefa.responsavel == usuario.nome %}
+<form method="post" action="/organiza/tarefas/{{ tarefa.id }}/excluir" onsubmit="return confirm('Excluir esta tarefa?')" class="form-inline">
+<input type="hidden" name="voltar" value="/organiza/detalhes/{{ tipo if tipo is defined else 'responsavel' }}/{{ valor if valor is defined else usuario.nome }}">
+<button class="botao pequeno perigo" type="submit">Excluir</button>
+</form>
+{% endif %}
+
+</div>
+
+</article>
+{% endfor %}
+
+</div>
+
+</section>
+{% endfor %}
+{% else %}
+
+<section class="cartao">
+<p class="texto-suave">
+Nenhuma tarefa encontrada.
+</p>
+</section>
+
+{% endif %}
+
+{% endblock %}

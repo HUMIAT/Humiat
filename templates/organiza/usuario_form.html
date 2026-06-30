@@ -1,0 +1,49 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Usuário</p>
+            <h1>{% if editado %}Editar usuário{% else %}Novo usuário{% endif %}</h1>
+            <p class="texto-suave">Marque os departamentos que este usuário pode enxergar nos chamados.</p>
+        </div>
+        <a class="botao" href="/organiza/usuarios">Voltar</a>
+    </div>
+    <form method="post" class="formulario">
+        <label>Nome *
+            <input name="nome" required value="{{ editado.nome if editado else '' }}" placeholder="Ex.: Luiz">
+        </label>
+        <label>Telefone / WhatsApp *
+            <input name="telefone" required value="{{ editado.telefone if editado and editado.telefone else '' }}" placeholder="DDD + número">
+        </label>
+        <label>Email
+            <input name="email" type="email" value="{{ editado.email if editado and editado.email else '' }}" placeholder="opcional">
+        </label>
+        <label>Cargo
+            <input name="cargo" value="{{ editado.cargo if editado and editado.cargo else '' }}" placeholder="Ex.: Técnico, Financeiro, Admin">
+        </label>
+        <label>Senha {% if not editado %}*{% else %}(preencha só para alterar){% endif %}
+            <input name="senha" type="password" {% if not editado %}required{% endif %} placeholder="Senha de acesso">
+        </label>
+
+        {% set deps = (editado.departamentos.split(',') if editado and editado.departamentos else []) %}
+        <div class="tipo-etapa-box">
+            <p class="campo-titulo">Departamentos de chamados</p>
+            <label class="opcao-etapa"><input type="checkbox" name="departamentos" value="Compras" {% if 'Compras' in deps %}checked{% endif %}><span><strong>Compras</strong><small>Vê chamados de compras.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="departamentos" value="Financeiro" {% if 'Financeiro' in deps %}checked{% endif %}><span><strong>Financeiro</strong><small>Vê chamados financeiros.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="departamentos" value="Externo" {% if 'Externo' in deps %}checked{% endif %}><span><strong>Externo</strong><small>Vê chamados enviados para terceiros.</small></span></label>
+        </div>
+
+        <div class="tipo-etapa-box">
+            <p class="campo-titulo">Permissões</p>
+            <label class="opcao-etapa"><input type="checkbox" name="is_admin" value="1" {% if editado and editado.is_admin %}checked{% endif %}><span><strong>Administrador</strong><small>Libera todos os módulos administrativos.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="pode_criar_tarefa" value="1" {% if not editado or editado.pode_criar_tarefa %}checked{% endif %}><span><strong>Criar tarefa</strong><small>Pode abrir novas tarefas operacionais.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="pode_criar_projeto" value="1" {% if editado and editado.pode_criar_projeto %}checked{% endif %}><span><strong>Criar projeto</strong><small>Pode criar fluxos principais.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="pode_criar_etapa" value="1" {% if editado and editado.pode_criar_etapa %}checked{% endif %}><span><strong>Criar etapa</strong><small>Pode montar as etapas dos projetos.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="pode_criar_usuario" value="1" {% if editado and editado.pode_criar_usuario %}checked{% endif %}><span><strong>Criar usuário</strong><small>Pode cadastrar e editar equipe.</small></span></label>
+            <label class="opcao-etapa"><input type="checkbox" name="ativo" value="1" {% if not editado or editado.ativo %}checked{% endif %}><span><strong>Usuário ativo</strong><small>Permite login no sistema.</small></span></label>
+        </div>
+        <button class="botao primario" type="submit">Salvar usuário</button>
+    </form>
+</section>
+{% endblock %}

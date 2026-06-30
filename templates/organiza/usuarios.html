@@ -1,0 +1,35 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cabecalho-pagina">
+    <div>
+        <p class="tag">Administração</p>
+        <h1>Usuários</h1>
+        <p class="texto-suave">Cadastro da equipe com telefone obrigatório para WhatsApp e permissões do Organiza.</p>
+    </div>
+    <div class="acoes-linha">
+        <a class="botao" href="/organiza">Voltar</a>
+        <a class="botao primario" href="/organiza/usuarios/novo">Novo usuário</a>
+    </div>
+</section>
+<section class="cartao">
+    <div class="lista-tarefas">
+        {% for u in usuarios %}
+        <article class="tarefa">
+            <div>
+                <strong>{{ u.nome }}</strong>
+                <p>{{ u.telefone|telefone if u.telefone else 'Telefone não informado' }} · {{ u.cargo or 'Sem cargo' }}</p>
+                <p class="texto-suave">{% if u.is_admin %}Administrador{% else %}Usuário operacional{% endif %} · {% if u.ativo %}Ativo{% else %}Inativo{% endif %}</p>
+            </div>
+            <div class="acoes-linha">
+                {% if u.pode_criar_tarefa %}<span class="selo">Tarefas</span>{% endif %}
+                {% if u.pode_criar_usuario %}<span class="selo cliente-selo">Usuários</span>{% endif %}
+                {% if u.pode_criar_etapa %}<span class="selo">Etapas</span>{% endif %}
+                <a class="botao pequeno" href="/organiza/usuarios/{{ u.id }}/editar">Editar</a>
+            </div>
+        </article>
+        {% else %}
+        <p class="texto-suave">Nenhum usuário cadastrado.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

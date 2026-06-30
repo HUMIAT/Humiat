@@ -1,0 +1,93 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cabecalho-pagina">
+    <div>
+        <p class="tag">Fluxo do projeto</p>
+        <h1>{{ projeto.nome }}</h1>
+        {% if projeto.observacao %}<p class="texto-suave">{{ projeto.observacao }}</p>{% endif %}
+        <p class="texto-suave">Visualize e edite os departamentos/etapas deste projeto.</p>
+    </div>
+    <div class="acoes-linha">
+        <a class="botao" href="/organiza/projetos">Voltar</a>
+        {% if tem_permissao(usuario, 'pode_criar_projeto') %}<a class="botao" href="/organiza/projetos/{{ projeto.id }}/editar">Editar projeto</a>{% endif %}
+        {% if tem_permissao(usuario, 'pode_criar_etapa') %}<a class="botao primario" href="/organiza/projetos/{{ projeto.id }}/missoes/nova">+ Nova etapa/departamento</a>{% endif %}
+    </div>
+</section>
+
+<section class="cartao">
+    <div class="titulo-linha">
+        <div>
+            <h2>Departamentos / Etapas</h2>
+            <p class="texto-suave">Cada linha abaixo representa uma etapa do fluxo. A tarefa entra depois, dentro da etapa correta.</p>
+        </div>
+        <strong>{{ projeto.missoes|length }} etapa(s)</strong>
+    </div>
+
+    {% if projeto.missoes %}
+    <div class="etapas-lista fluxo-editor">
+        {% for missao in projeto.missoes %}
+        <article class="etapa-linha etapa-card">
+            <div class="etapa-numero">{{ loop.index }}</div>
+            <div class="etapa-info">
+                <strong>{{ missao.nome }}</strong>
+                {% if missao.observacao %}<p class="texto-suave">{{ missao.observacao }}</p>{% endif %}
+                <small>{% if missao.finalidade == 'cliente' %}Atendimento ao cliente · pede telefone/WhatsApp do cliente{% else %}Interna · sem cliente obrigatório{% endif %}</small>
+            </div>
+            <div class="acoes-linha">
+                {% if tem_permissao(usuario, 'pode_criar_etapa') %}
+                <a class="botao pequeno" href="/organiza/projetos/{{ projeto.id }}/missoes/{{ missao.id }}/editar">Editar etapa</a>
+                {% endif %}
+                {% if tem_permissao(usuario, 'pode_criar_tarefa') %}
+                <a class="botao pequeno" href="/organiza/tarefas/nova?projeto_id={{ projeto.id }}&missao_id={{ missao.id }}">Criar tarefa</a>
+                {% endif %}
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="vazio-admin">
+        <h3>Projeto sem etapas</h3>
+        <p class="texto-suave">Agora cadastre o primeiro departamento/etapa para montar o fluxo.</p>
+        {% if tem_permissao(usuario, 'pode_criar_etapa') %}
+        <a class="botao primario" href="/organiza/projetos/{{ projeto.id }}/missoes/nova">Criar primeira etapa/departamento</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>
+
+<section class="cartao">
+    <div class="titulo-linha">
+        <div>
+            <h2>Tarefas vinculadas</h2>
+            <p class="texto-suave">As tarefas aparecem aqui somente para consulta e manutenção.</p>
+        </div>
+        <div class="barra resumo-barra"><i style="width: {{ percentual }}%"></i></div>
+    </div>
+
+    {% if tarefas %}
+    <div class="lista-tarefas">
+        {% for tarefa in tarefas %}
+        <article class="tarefa">
+            <div>
+                <strong>{{ tarefa.descricao }}</strong>
+                <p>{{ tarefa.missao.nome }} · {{ tarefa.responsavel }} · {{ tarefa.tipo }}</p>
+                {% if tarefa.cliente %}<p class="texto-suave">Cliente: {{ tarefa.cliente.nome }} · {{ tarefa.cliente.telefone|telefone }}</p>{% endif %}
+            </div>
+            <div class="acoes-linha">
+                <span class="selo">{{ tarefa.status }}</span>
+                <a class="botao pequeno" href="/organiza/tarefas/{{ tarefa.id }}/editar">Editar</a>
+                {% if usuario.is_admin or tarefa.responsavel == usuario.nome %}
+                <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/excluir" onsubmit="return confirm('Excluir esta tarefa?')" class="form-inline">
+                    <input type="hidden" name="voltar" value="/organiza/projetos/{{ projeto.id }}">
+                    <button class="botao pequeno perigo" type="submit">Excluir</button>
+                </form>
+                {% endif %}
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="texto-suave">Nenhuma tarefa cadastrada neste projeto.</p>
+    {% endif %}
+</section>
+{% endblock %}

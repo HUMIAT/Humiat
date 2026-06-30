@@ -1,0 +1,67 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cabecalho-pagina">
+    <div>
+        <p class="tag">Organiza</p>
+        <h1>Projetos / Etapas</h1>
+        <p class="texto-suave">Aqui nasce o fluxo: primeiro crie o projeto, depois cadastre os departamentos/etapas dentro dele.</p>
+    </div>
+    <div class="acoes-linha">
+        <a class="botao" href="/organiza">Voltar</a>
+        {% if tem_permissao(usuario, 'pode_criar_projeto') %}
+        <a class="botao primario" href="/organiza/projetos/novo">+ Novo projeto</a>
+        {% else %}
+        <a class="botao desativado" href="/organiza/acesso-negado">Novo projeto</a>
+        {% endif %}
+    </div>
+</section>
+
+{% for projeto in projetos %}
+<section class="cartao projeto-fluxo-card">
+    <div class="titulo-linha projeto-topo">
+        <div>
+            <h2>{{ projeto.nome }}</h2>
+            <p class="texto-suave">{{ projeto.missoes|length }} departamento(s)/etapa(s) · {{ percentuais[projeto.id] }}% concluído</p>
+        </div>
+        <div class="acoes-linha">
+            <a class="botao pequeno primario" href="/organiza/projetos/{{ projeto.id }}">Abrir fluxo</a>
+            {% if tem_permissao(usuario, 'pode_criar_projeto') %}
+            <a class="botao pequeno" href="/organiza/projetos/{{ projeto.id }}/editar">Editar projeto</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="barra grande"><i style="width: {{ percentuais[projeto.id] }}%"></i></div>
+
+    <div class="etapas-lista compacta">
+        {% for etapa in projeto.missoes %}
+        <div class="etapa-linha">
+            <div>
+                <strong>{{ loop.index }}. {{ etapa.nome }}</strong>
+                <small>{% if etapa.finalidade == 'cliente' %}Atendimento ao cliente{% else %}Interna{% endif %}</small>
+            </div>
+            {% if tem_permissao(usuario, 'pode_criar_etapa') %}
+            <a class="botao pequeno" href="/organiza/projetos/{{ projeto.id }}/missoes/{{ etapa.id }}/editar">Editar</a>
+            {% endif %}
+        </div>
+        {% else %}
+        <p class="texto-suave">Este projeto ainda não possui departamentos/etapas.</p>
+        {% endfor %}
+    </div>
+
+    {% if tem_permissao(usuario, 'pode_criar_etapa') %}
+    <div class="acoes-linha espaco-topo">
+        <a class="botao pequeno" href="/organiza/projetos/{{ projeto.id }}/missoes/nova">+ Criar departamento/etapa</a>
+    </div>
+    {% endif %}
+</section>
+{% else %}
+<section class="cartao vazio-admin">
+    <h2>Nenhum projeto cadastrado</h2>
+    <p class="texto-suave">Crie o primeiro projeto para depois montar as etapas do fluxo.</p>
+    {% if tem_permissao(usuario, 'pode_criar_projeto') %}
+    <a class="botao primario" href="/organiza/projetos/novo">Criar primeiro projeto</a>
+    {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

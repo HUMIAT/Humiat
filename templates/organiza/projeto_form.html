@@ -1,0 +1,21 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Projeto</p>
+            <h1>{% if projeto %}Editar projeto{% else %}Novo projeto{% endif %}</h1>
+        </div>
+        <a class="botao" href="javascript:history.back()">Voltar</a>
+    </div>
+    <form method="post" class="formulario">
+        <label>Nome do projeto
+            <input name="nome" required value="{{ projeto.nome if projeto else '' }}" />
+        </label>
+        <label>Descrição opcional
+            <textarea name="observacao">{{ projeto.observacao if projeto and projeto.observacao else "" }}</textarea>
+        </label>
+        <button class="botao primario" type="submit">Salvar projeto</button>
+    </form>
+</section>
+{% endblock %}

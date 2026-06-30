@@ -1,0 +1,35 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao formulario-cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Cliente</p>
+            <h1>Novo cliente</h1>
+            <p class="texto-suave">O telefone é único e será usado futuramente no WhatsApp.</p>
+        </div>
+        <a class="botao" href="javascript:history.back()">Voltar</a>
+    </div>
+
+    <form method="post" class="formulario">
+        <input type="hidden" name="voltar" value="{{ voltar }}">
+
+        <label>Nome do cliente
+            <input name="nome" required placeholder="Ex.: João Silva">
+        </label>
+
+        <label>Telefone / WhatsApp
+            <input name="telefone" required inputmode="numeric" placeholder="21999999999" value="{{ telefone }}">
+        </label>
+
+        <label>Empresa opcional
+            <input name="empresa" placeholder="Ex.: Karaokê RJ">
+        </label>
+
+        <label>Observação opcional
+            <textarea name="observacao" placeholder="Detalhes do cliente"></textarea>
+        </label>
+
+        <button class="botao primario botao-cheio" type="submit">Salvar cliente</button>
+    </form>
+</section>
+{% endblock %}

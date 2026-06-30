@@ -280,6 +280,27 @@ footer strong span{color:var(--azul);text-shadow:0 0 16px rgba(0,174,255,.8)}
     filter:brightness(1.08);
 }
 
+
+.area-restrita-mobile{
+    display:none;
+    align-items:center;
+    justify-content:center;
+    min-height:42px;
+    padding:0 14px;
+    border:1px solid var(--linha);
+    border-radius:999px;
+    color:#d8ecff;
+    font-size:11px;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    background:rgba(255,255,255,.045);
+}
+.area-restrita-mobile:hover{
+    border-color:rgba(0,174,255,.7);
+    color:#fff;
+}
+
 /* ======================================================
    HUMIAT MOBILE v2.2 - CORRIGIDO
    ====================================================== */
@@ -307,6 +328,12 @@ footer strong span{color:var(--azul);text-shadow:0 0 16px rgba(0,174,255,.8)}
 
     nav{
         display:none;
+    }
+
+
+    .area-restrita-mobile{
+        display:flex;
+        flex:0 0 auto;
     }
 
     .secao{

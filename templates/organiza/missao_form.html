@@ -1,0 +1,44 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">{{ projeto.nome }}</p>
+            <h1>{% if missao %}Editar etapa{% else %}Nova etapa{% endif %}</h1>
+        </div>
+        <a class="botao" href="javascript:history.back()">Voltar</a>
+    </div>
+
+    <form method="post" class="formulario">
+        <label>Nome da etapa
+            <input name="nome" required placeholder="Ex.: Manutenção" value="{{ missao.nome if missao else '' }}" />
+        </label>
+
+        <div class="tipo-etapa-box">
+            <p class="campo-titulo">Finalidade da etapa</p>
+
+            <label class="opcao-etapa">
+                <input type="radio" name="finalidade" value="interna" {% if not missao or missao.finalidade != 'cliente' %}checked{% endif %}>
+                <span>
+                    <strong>Interna</strong>
+                    <small>Tarefas da própria equipe, sem cliente obrigatório.</small>
+                </span>
+            </label>
+
+            <label class="opcao-etapa">
+                <input type="radio" name="finalidade" value="cliente" {% if missao and missao.finalidade == 'cliente' %}checked{% endif %}>
+                <span>
+                    <strong>Atendimento ao Cliente</strong>
+                    <small>As tarefas desta etapa exigem cliente e telefone válido.</small>
+                </span>
+            </label>
+        </div>
+
+        <label>Descrição opcional
+            <textarea name="observacao">{{ missao.observacao if missao and missao.observacao else "" }}</textarea>
+        </label>
+
+        <button class="botao primario" type="submit">Salvar etapa</button>
+    </form>
+</section>
+{% endblock %}

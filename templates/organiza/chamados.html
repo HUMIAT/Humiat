@@ -1,0 +1,43 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao compacto">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Chamados</p>
+            <h1>Chamados abertos</h1>
+            <p class="texto-suave">Um chamado pertence ao departamento. Todos daquele departamento enxergam o mesmo chamado.</p>
+        </div>
+        <a class="botao" href="/organiza">Painel</a>
+    </div>
+
+    <div class="filtros-chamado">
+        <a class="botao pequeno" href="/organiza/chamados">Todos</a>
+        {% for dep in departamentos %}
+        <a class="botao pequeno" href="/organiza/chamados?departamento={{ dep }}">{{ dep }}</a>
+        {% endfor %}
+    </div>
+
+    {% if chamados %}
+    <div class="lista-tarefas">
+        {% for chamado in chamados %}
+        <article class="tarefa tarefa-com-ordem">
+            <div class="tarefa-ordem">#{{ chamado.id }}</div>
+            <div class="tarefa-info">
+                <strong>{{ chamado.departamento }} · {{ chamado.tarefa.descricao }}</strong>
+                <p>{{ chamado.descricao }}</p>
+                <p class="texto-suave">Tarefa de {{ chamado.tarefa.responsavel }} · Projeto: {{ chamado.tarefa.projeto.nome }}</p>
+                {% if chamado.departamento == 'Compras' and chamado.previsao_entrega %}<p class="texto-suave">Previsão de entrega: {{ chamado.previsao_entrega.strftime('%d/%m/%Y') }}</p>{% endif %}
+                {% if chamado.departamento == 'Externo' and chamado.externo %}<p class="texto-suave">Externo: {{ chamado.externo.nome }} · {{ chamado.externo.telefone|telefone }}</p>{% endif %}
+            </div>
+            <div class="tarefa-acoes">
+                <span class="selo">{{ chamado.status }}</span>
+                <a class="botao pequeno" href="/organiza/chamados/{{ chamado.id }}">Abrir</a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="texto-suave">Nenhum chamado aberto para você agora.</p>
+    {% endif %}
+</section>
+{% endblock %}
