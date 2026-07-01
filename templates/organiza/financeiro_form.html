@@ -1,0 +1,109 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+<header class="dash-header">
+  <div>
+    <h1>{{ "Recebimento da manutenção" if conta and conta.origem == "manutencao" and conta.tipo == "receber" else ("Editar conta" if conta else ("Nova conta a receber" if tipo=="receber" else "Nova conta a pagar")) }}</h1>
+    <p>{% if conta and conta.origem == "manutencao" %}Confirme onde entrou o dinheiro. Pode receber tudo em um banco ou dividir em vários.{% else %}Ao marcar como pago/recebido, o lançamento vai para o Banco.{% endif %}</p>
+  </div>
+</header>
+
+<form class="form-card" method="post">
+  {% if not conta %}<input type="hidden" name="tipo" value="{{ tipo }}">{% endif %}
+
+  <div class="form-grid">
+    <label>Pessoa/Fornecedor<input name="pessoa" required value="{{ conta.pessoa if conta else '' }}"></label>
+    <label>Categoria<input name="categoria" value="{{ conta.categoria if conta else '' }}"></label>
+    <label>Valor total<input name="valor" required value="{{ conta.valor if conta else '' }}"></label>
+    <label>Vencimento<input type="date" name="vencimento" value="{{ conta.vencimento if conta else hoje }}"></label>
+    <label>Banco principal
+      <select name="banco">
+        <option value="">Selecione...</option>
+        {% for b in bancos or [] %}
+        <option value="{{ b.nome }}" {% if conta and conta.banco == b.nome %}selected{% endif %}>{{ b.nome }}</option>
+        {% endfor %}
+        {% if conta and conta.banco and (bancos or [])|selectattr("nome","equalto",conta.banco)|list|length == 0 %}
+        <option selected value="{{ conta.banco }}">{{ conta.banco }}</option>
+        {% endif %}
+      </select>
+    </label>
+    <label>Forma<input name="forma" value="{{ conta.forma if conta else '' }}" placeholder="PIX, cartão, dinheiro..."></label>
+    {% if conta %}
+    <label>Status
+      <select name="status">
+        {% if conta.tipo == "receber" %}
+        <option value="A receber" {% if conta.status == "A receber" or conta.status == "Pendente" %}selected{% endif %}>A receber</option>
+        <option value="Recebido" {% if conta.status == "Recebido" %}selected{% endif %}>Recebido</option>
+        <option value="Cancelado" {% if conta.status == "Cancelado" %}selected{% endif %}>Cancelado</option>
+        {% else %}
+        <option value="Pendente" {% if conta.status == "Pendente" %}selected{% endif %}>Pendente</option>
+        <option value="Pago" {% if conta.status == "Pago" %}selected{% endif %}>Pago</option>
+        <option value="Cancelado" {% if conta.status == "Cancelado" %}selected{% endif %}>Cancelado</option>
+        {% endif %}
+      </select>
+    </label>
+    <label>Data do recebimento/pagamento<input type="date" name="pago_em" value="{{ conta.pago_em if conta and conta.pago_em else hoje }}"></label>
+    {% endif %}
+  </div>
+
+  <label>Descrição<textarea name="descricao" required>{{ conta.descricao if conta else '' }}</textarea></label>
+
+  {% if conta and conta.origem == "manutencao" and conta.tipo == "receber" %}
+  <section class="mini-card" style="margin:18px 0;">
+    <div class="panel-title">
+      <h2>Divisão do recebimento</h2>
+      <button type="button" class="btn-secondary" onclick="adicionarRecebimento()">+ adicionar banco</button>
+    </div>
+    <p class="muted">Use uma linha para recebimento total ou várias linhas até fechar o valor total.</p>
+    <div id="recebimentos">
+      {% if conta.movimentos %}
+        {% for mov in conta.movimentos %}
+        <div class="form-grid recebimento-linha">
+          <label>Data<input type="date" name="movimento_data" value="{{ mov.data if mov.data else hoje }}"></label>
+          <label>Banco
+            <select name="movimento_banco">
+              {% for b in bancos or [] %}<option value="{{ b.nome }}" {% if mov.banco == b.nome %}selected{% endif %}>{{ b.nome }}</option>{% endfor %}
+              {% if mov.banco %}<option value="{{ mov.banco }}" selected>{{ mov.banco }}</option>{% endif %}
+            </select>
+          </label>
+          <label>Forma<input name="movimento_forma" value="{{ conta.forma or '' }}" placeholder="PIX, cartão, dinheiro..."></label>
+          <label>Valor<input name="movimento_valor" value="{{ mov.valor }}"></label>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="form-grid recebimento-linha">
+          <label>Data<input type="date" name="movimento_data" value="{{ hoje }}"></label>
+          <label>Banco
+            <select name="movimento_banco">
+              <option value="">Selecione...</option>
+              {% for b in bancos or [] %}<option value="{{ b.nome }}" {% if conta.banco == b.nome %}selected{% endif %}>{{ b.nome }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Forma<input name="movimento_forma" value="{{ conta.forma or '' }}" placeholder="PIX, cartão, dinheiro..."></label>
+          <label>Valor<input name="movimento_valor" value="{{ conta.valor }}"></label>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <label>Observação<textarea name="observacao">{{ conta.observacao if conta else '' }}</textarea></label>
+  <div class="form-actions"><button class="btn-new" type="submit">Salvar</button><a class="btn-secondary" href="/organiza/financeiro">Voltar</a></div>
+</form>
+</section>
+
+<script>
+function adicionarRecebimento(){
+  const base = document.querySelector('.recebimento-linha');
+  const destino = document.getElementById('recebimentos');
+  if(!base || !destino) return;
+  const nova = base.cloneNode(true);
+  nova.querySelectorAll('input').forEach(campo => {
+    if(campo.name === 'movimento_data') campo.value = '{{ hoje }}';
+    else campo.value = '';
+  });
+  nova.querySelectorAll('select').forEach(campo => campo.selectedIndex = 0);
+  destino.appendChild(nova);
+}
+</script>
+{% endblock %}

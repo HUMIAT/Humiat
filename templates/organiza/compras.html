@@ -1,0 +1,14 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+  <header class="dash-header"><div><h1>Compras</h1><p>Necessidades de compra e recebimento.</p></div><div class="dash-actions"><a class="btn-new" href="/organiza/compras/nova">+ Nova compra</a></div></header>
+  <article class="panel-card"><div class="panel-title"><h2>Compras</h2></div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Produto</th><th>Origem</th><th>Fornecedor</th><th>Valor</th><th>Situação</th><th></th></tr></thead>
+      <tbody>{% for c in compras %}
+      <tr><td><strong>{{ c.produto }}</strong><br><small>Qtd: {{ c.quantidade or '-' }}</small></td><td>{% if c.manutencao %}Manutenção #{{ c.manutencao.id }} - {{ c.manutencao.nome_cliente }}{% else %}Geral{% endif %}</td><td>{{ c.fornecedor or '-' }}</td><td>{{ c.valor or '-' }}</td><td>{% if c.manutencao %}<span class="badge">{{ c.status }}</span>{% else %}-{% endif %}</td><td><a class="btn-small" href="/organiza/compras/{{ c.id }}/editar">Abrir</a></td></tr>
+      {% else %}<tr><td colspan="6">Nenhuma compra cadastrada.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </article>
+</section>
+{% endblock %}

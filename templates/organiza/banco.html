@@ -1,0 +1,18 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+<header class="dash-header"><div><h1>Banco</h1><p>Movimentos gerados pelo Financeiro.</p></div><div class="dash-actions"><a class="btn-secondary" href="/organiza/bancos">Cadastrar bancos</a></div></header>
+<article class="panel-card"><div class="panel-title"><h2>Bancos</h2></div>
+<div class="table-wrap"><table class="data-table">
+<thead><tr><th>Nome</th><th>Saldo inicial</th><th>Status</th></tr></thead>
+<tbody>{% for b in bancos %}<tr><td>{{ b.nome }}</td><td>R$ {{ b.saldo_inicial or '0,00' }}</td><td>{{ "Ativo" if b.ativo else "Inativo" }}</td></tr>{% else %}<tr><td colspan="3">Nenhum banco cadastrado.</td></tr>{% endfor %}</tbody>
+</table></div></article>
+<article class="panel-card"><div class="panel-title"><h2>Lançamentos</h2></div>
+<div class="table-wrap"><table class="data-table">
+<thead><tr><th>Data</th><th>Banco</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th>Conciliado</th><th>Ação</th></tr></thead>
+<tbody>{% for m in movimentos %}
+<tr><td>{{ m.data|data_br }}</td><td>{{ m.banco }}</td><td>{{ m.tipo }}</td><td>{{ m.descricao }}<br><small>{{ m.categoria or '-' }}</small></td><td>{{ m.valor }}</td><td>{{ "Sim" if m.conciliado else "Não" }}</td><td>{% if not m.conciliado %}<form method="post" action="/organiza/banco/{{ m.id }}/conciliar"><button class="btn-small" type="submit">Conciliar</button></form>{% else %}-{% endif %}</td></tr>
+{% else %}<tr><td colspan="7">Nenhum lançamento no banco.</td></tr>{% endfor %}</tbody>
+</table></div></article>
+</section>
+{% endblock %}

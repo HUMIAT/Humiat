@@ -1,0 +1,89 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clientes">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Cadastro mestre</p>
+            <h1>Clientes</h1>
+            <p class="texto-suave">Cadastro leve: clientes da primeira planilha e equipamentos apenas quando tiverem vínculo com o cadastro.</p>
+        </div>
+        <a class="botao primario" href="/organiza/clientes/novo">+ Novo Cliente</a>
+    </div>
+
+    <div class="grade-metricas clientes-metricas">
+        <article class="cartao metrica discreta"><span>👥</span><div><small>Total de clientes</small><strong>{{ total_clientes }}</strong></div></article>
+        <article class="cartao metrica discreta"><span>🎮</span><div><small>Equipamentos vinculados</small><strong>{{ total_equipamentos }}</strong></div></article>
+        <article class="cartao metrica discreta"><span>🔗</span><div><small>Clientes com equipamento</small><strong>{{ clientes_com_equipamento }}</strong></div></article>
+        <a class="cartao metrica discreta metrica-link {% if sem_equipamento_atual %}ativo{% endif %}" href="/organiza/clientes?sem_equipamento=1" title="Listar clientes sem equipamento vinculado"><span>○</span><div><small>Sem equipamento</small><strong>{{ clientes_sem_equipamento }}</strong></div></a>
+    </div>
+
+    <section class="cartao tabela-cartao">
+        <form method="get" class="filtros-clientes">
+            <input name="busca" value="{{ busca }}" placeholder="Pesquisar cliente, telefone, cidade ou empresa...">
+            <select name="pacote">
+                <option value="">Todos os pacotes</option>
+                {% for pacote in pacotes %}
+                <option value="{{ pacote }}" {% if pacote == pacote_atual %}selected{% endif %}>{{ pacote }}</option>
+                {% endfor %}
+            </select>
+            <select name="tipo">
+                <option value="">Todos os equipamentos</option>
+                {% for item in tipos %}
+                <option value="{{ item }}" {% if item == tipo_atual %}selected{% endif %}>{{ item }}</option>
+                {% endfor %}
+            </select>
+            <select name="status">
+                <option value="">Todos os status</option>
+                {% for item in status_opcoes %}
+                <option value="{{ item }}" {% if item == status_atual %}selected{% endif %}>{{ item }}</option>
+                {% endfor %}
+            </select>
+            <button class="botao" type="submit">Filtrar</button>
+            <a class="botao fantasma" href="/organiza/clientes">Limpar</a>
+        </form>
+
+        <div class="tabela-responsiva">
+            <table class="tabela-organiza">
+                <thead>
+                    <tr>
+                        <th>Cliente</th>
+                        <th>Telefone</th>
+                        <th>Empresa</th>
+                        <th>Pacote</th>
+                        <th>Plano</th>
+                        <th>Equipamentos</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cliente in clientes %}
+                    <tr>
+                        <td><strong>{{ cliente.nome }}</strong>{% if cliente.cidade %}<small>{{ cliente.cidade }}</small>{% endif %}</td>
+                        <td>{{ cliente.telefone|telefone }}</td>
+                        <td>{{ cliente.empresa or "-" }}</td>
+                        <td><span class="pill azul">{{ cliente.pacote or "-" }}</span></td>
+                        <td>{{ cliente.plano or "-" }}</td>
+                        <td>
+                            {% if cliente.equipamentos %}
+                                {% for eq in cliente.equipamentos[:3] %}
+                                    <span class="pill">{{ eq.tipo or "Equipamento" }}</span>
+                                {% endfor %}
+                                {% if cliente.equipamentos|length > 3 %}<span class="texto-suave">+{{ cliente.equipamentos|length - 3 }}</span>{% endif %}
+                            {% else %}
+                                <span class="texto-suave">Nenhum</span>
+                            {% endif %}
+                        </td>
+                        <td class="acoes-tabela">
+                            <a href="/organiza/clientes/{{ cliente.id }}">Abrir</a>
+                            <a href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="texto-suave">Nenhum cliente encontrado.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</section>
+{% endblock %}

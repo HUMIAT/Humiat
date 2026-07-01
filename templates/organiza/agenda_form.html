@@ -1,0 +1,45 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cartao">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Agenda</p>
+            <h1>Novo compromisso</h1>
+            <p class="texto-suave">Use apenas para retirada de cliente, reunião, entrega ou lembrete simples.</p>
+        </div>
+        <a class="botao" href="/organiza">Voltar</a>
+    </div>
+
+    <form method="post" class="formulario">
+        <label>Título *
+            <input name="titulo" required placeholder="Ex.: Cliente João buscar equipamento">
+        </label>
+
+        <div class="grade-2">
+            <label>Data *
+                <input name="data_evento" type="date" required value="{{ hoje }}">
+            </label>
+            <label>Hora
+                <input name="hora_evento" type="time">
+            </label>
+        </div>
+
+        <label>Relacionado à tarefa (opcional)
+            <select name="tarefa_id">
+                <option value="">Sem tarefa vinculada</option>
+                {% for tarefa in tarefas %}
+                <option value="{{ tarefa.id }}" {% if tarefa_id and tarefa.id == tarefa_id %}selected{% endif %}>
+                    #{{ tarefa.id }} - {{ tarefa.descricao }}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>Observação
+            <textarea name="observacao" rows="3" placeholder="Opcional"></textarea>
+        </label>
+
+        <button class="botao primario" type="submit">Salvar compromisso</button>
+    </form>
+</section>
+{% endblock %}

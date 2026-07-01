@@ -1,0 +1,20 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+<header class="dash-header"><div><h1>Financeiro</h1><p>Contas a pagar e receber. O banco nasce daqui.</p></div><div class="dash-actions"><a class="btn-new" href="/organiza/financeiro/nova?tipo=receber">+ Receber</a><a class="btn-new" href="/organiza/financeiro/nova?tipo=pagar">+ Pagar</a></div></header>
+<article class="panel-card"><div class="panel-title"><h2>Contas</h2></div>
+<div class="table-wrap"><table class="data-table">
+<thead><tr><th>Tipo</th><th>Pessoa</th><th>Descrição</th><th>Valor</th><th>Situação</th><th>Origem</th><th></th></tr></thead>
+<tbody>{% for c in contas %}
+<tr><td>{{ "A receber" if c.tipo=="receber" else "A pagar" }}</td><td>{{ c.pessoa }}</td><td>{{ c.descricao }}<br><small>{{ c.categoria or '-' }}</small></td><td>{{ c.valor }}</td><td>{% if c.origem %}<span class="badge">{{ c.status }}</span>{% else %}-{% endif %}</td><td>{{ c.origem or "Manual" }}</td><td>
+  {% if c.status not in ["Recebido", "Pago", "Cancelado"] %}
+  <form method="post" action="/organiza/financeiro/{{ c.id }}/receber" style="display:inline">
+    <button class="btn-small" type="submit">{{ "Receber" if c.tipo=="receber" else "Pagar" }}</button>
+  </form>
+  {% endif %}
+  <a class="btn-small" href="/organiza/financeiro/{{ c.id }}/editar">Abrir</a>
+</td></tr>
+{% else %}<tr><td colspan="7">Nenhuma conta cadastrada.</td></tr>{% endfor %}</tbody>
+</table></div></article>
+</section>
+{% endblock %}

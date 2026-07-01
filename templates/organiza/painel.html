@@ -1,183 +1,228 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 
-{% set total_abertas = tarefas_hoje_usuario|length %}
-{% set total_aguardando = aguardando_cliente|length %}
+{% set total_pendente = tarefas_hoje_usuario|length %}
+{% set total_cliente = aguardando_cliente|length %}
+{% set total_compras = aguardando_compras|length %}
+{% set total_financeiro = aguardando_financeiro|length %}
+{% set total_externo = aguardando_externo|length %}
+{% set total_cancelado = tarefas_canceladas|length %}
 {% set total_chamados = chamados_visiveis|length %}
-{% set total_atrasadas = chamados_atrasados|length %}
+{% set total_atrasados = chamados_atrasados|length %}
+{% set total_agenda = agenda_eventos|length %}
+{% set total_tarefas_painel = tarefas_do_responsavel|length %}
+{% set maior_responsavel = por_responsavel.values()|max if por_responsavel else 1 %}
+{% set maior_status = resumo.values()|max if resumo else 1 %}
+{% set maior_chamado = resumo_chamados.values()|max if resumo_chamados else 1 %}
 
-<section class="dashboard">
-    <header class="dash-header">
+<section class="humiat-dashboard">
+    <header class="humiat-topbar">
         <div>
-            <h1>Bom dia, {{ responsavel_painel }}! <span>👋</span></h1>
-            <p>{{ agora.data_extenso }} <span class="hora-real">◷ {{ agora.hora }}</span></p>
+            <span class="eyebrow">HUMIAT • Organiza</span>
+            <h1>Dashboard</h1>
+            <p>Visão geral para decidir rápido, acompanhar tarefas e evitar pendências esquecidas.</p>
         </div>
-        <div class="dash-actions">
-            <a class="btn-new" href="/organiza/tarefas/nova">+ Nova Tarefa</a>
-            <a class="top-icon whatsapp" href="#">☘<small>WhatsApp</small></a>
-            <a class="top-icon" href="/organiza/chamados"><b>{{ total_chamados }}</b>🔔<small>Chamados</small></a>
+
+        <div class="humiat-top-actions">
+            <form method="get" action="/organiza" class="responsavel-switch">
+                <label>Responsável</label>
+                <select name="responsavel" onchange="this.form.submit()">
+                    {% for nome in responsaveis %}
+                    <option value="{{ nome }}" {% if nome == responsavel_painel %}selected{% endif %}>{{ nome }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            <a class="btn-premium ghost" href="/organiza/chamados">🔔 {{ total_chamados }} chamados</a>
+            <a class="btn-premium" href="/organiza/tarefas/nova">＋ Nova tarefa</a>
         </div>
     </header>
 
-    <section class="metric-grid painel-metricas">
-        <a class="metric blue" href="/organiza/detalhes/status/Pendente?responsavel={{ responsavel_painel }}">
-            <div><span>Pendente</span><strong>{{ total_abertas }}</strong><small>tarefas</small>
-                <p>Na mão de {{ responsavel_painel }}</p></div>
-            <i>📋</i>
+    <section class="kpi-grid">
+        <a class="kpi-card azul" href="/organiza/detalhes/status/Pendente?responsavel={{ responsavel_painel }}">
+            <div class="kpi-icon">☑</div>
+            <div>
+                <span>Tarefas pendentes</span>
+                <strong>{{ total_pendente }}</strong>
+                <small>Para {{ responsavel_painel }}</small>
+            </div>
         </a>
-        <a class="metric orange" href="/organiza/detalhes/status/Aguardando Cliente?responsavel={{ responsavel_painel }}">
-            <div><span>Aguardando Cliente</span><strong>{{ total_aguardando }}</strong><small>tarefas</small>
-                <p>Aguardando resposta</p></div>
-            <i>👤</i>
+
+        <a class="kpi-card amarelo" href="/organiza/detalhes/status/Aguardando Cliente?responsavel={{ responsavel_painel }}">
+            <div class="kpi-icon">👥</div>
+            <div>
+                <span>Aguardando cliente</span>
+                <strong>{{ total_cliente }}</strong>
+                <small>Orçamento, resposta ou retirada</small>
+            </div>
         </a>
-        <a class="metric yellow" href="/organiza/chamados">
-            <div><span>Chamados dos seus setores</span><strong>{{ total_chamados }}</strong><small>abertos</small>
-                <p>Compras, financeiro e externo</p></div>
-            <i>▤</i>
+
+        <a class="kpi-card verde" href="/organiza/agenda/nova">
+            <div class="kpi-icon">📅</div>
+            <div>
+                <span>Agenda aberta</span>
+                <strong>{{ total_agenda }}</strong>
+                <small>Compromissos futuros</small>
+            </div>
         </a>
-        <a class="metric red" href="/organiza/chamados">
-            <div><span>Atrasados</span><strong>{{ total_atrasadas }}</strong><small>chamados</small>
-                <p>Entrega ou retorno vencido</p></div>
-            <i>🕘</i>
+
+        <a class="kpi-card vermelho" href="/organiza/chamados">
+            <div class="kpi-icon">⚠</div>
+            <div>
+                <span>Alertas críticos</span>
+                <strong>{{ total_atrasados }}</strong>
+                <small>Chamados atrasados</small>
+            </div>
         </a>
     </section>
 
-    <section class="painel-departamentos">
-        <a class="dept-card compras" href="/organiza/chamados?departamento=Compras">
-            <span>Compras</span>
-            <strong>{{ resumo_chamados.get('Compras', 0) }}</strong>
-            <small>chamados abertos</small>
-        </a>
-        <a class="dept-card financeiro" href="/organiza/chamados?departamento=Financeiro">
-            <span>Financeiro</span>
-            <strong>{{ resumo_chamados.get('Financeiro', 0) }}</strong>
-            <small>chamados abertos</small>
-        </a>
-        <a class="dept-card externo" href="/organiza/chamados?departamento=Externo">
-            <span>Externo</span>
-            <strong>{{ resumo_chamados.get('Externo', 0) }}</strong>
-            <small>chamados abertos</small>
-        </a>
-    </section>
-
-    <section class="dash-layout">
-        <div class="main-column">
-            <article class="panel-card tasks-card">
-                <div class="panel-title"><h2>☷ Pendentes de {{ responsavel_painel }}</h2><a
-                        href="/organiza/detalhes/status/Pendente?responsavel={{ responsavel_painel }}">Ver todas</a></div>
-
-                {% if tarefas_hoje_usuario %}
-                <div class="task-list">
-                    {% for tarefa in tarefas_hoje_usuario[:6] %}
-                    <article class="task-row task-row-actions">
-                        <span class="task-number">{{ loop.index }}</span>
-                        <div class="task-info">
-                            <strong>{{ tarefa.descricao }}</strong>
-                            <small>Cliente: {{ tarefa.cliente.nome if tarefa.cliente else '-' }}</small>
-                            <em class="tag-pill {{ 'equip' if tarefa.missao.nome|lower in ['equipamento','equipamentos'] else 'interna' }}">{{ tarefa.missao.nome }}</em>
-                        </div>
-                        <div class="order-actions" aria-label="Ordenar tarefa">
-                            <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/ordem">
-                                <input type="hidden" name="direcao" value="subir">
-                                <input type="hidden" name="voltar" value="/organiza">
-                                <button type="submit" title="Subir">↑</button>
-                            </form>
-                            <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/ordem">
-                                <input type="hidden" name="direcao" value="descer">
-                                <input type="hidden" name="voltar" value="/organiza">
-                                <button type="submit" title="Descer">↓</button>
-                            </form>
-                        </div>
-                        <div class="task-actions-menu">
-                            <a class="mini-link" href="/organiza/tarefas/{{ tarefa.id }}/editar">Abrir</a>
-                            {% if usuario.is_admin or tarefa.responsavel == usuario.nome %}
-                            <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/excluir" onsubmit="return confirm('Excluir esta tarefa?')">
-                                <input type="hidden" name="voltar" value="/organiza">
-                                <button class="mini-link danger-link" type="submit">Excluir</button>
-                            </form>
-                            {% endif %}
-                        </div>
-                    </article>
-                    {% endfor %}
+    <section class="dashboard-main-grid">
+        <article class="glass-card chart-card">
+            <div class="card-head">
+                <div>
+                    <h2>Tarefas por status</h2>
+                    <p>Onde o trabalho está parado agora.</p>
                 </div>
-                {% else %}
-                <p class="empty">Nenhuma tarefa pendente para {{ responsavel_painel }}.</p>
-                {% endif %}
+                <a href="/organiza/detalhes/responsavel/{{ responsavel_painel }}">Ver tarefas</a>
+            </div>
 
-                <div class="tip-box">💡 <strong>Fluxo:</strong> quando compras, financeiro ou externo concluir um chamado, a tarefa volta para <strong>Pendente</strong>.</div>
-            </article>
+            <div class="status-bars">
+                {% for status, total in resumo.items() %}
+                {% set largura = ((total / maior_status) * 100)|round(0, 'floor') if maior_status else 0 %}
+                <a href="/organiza/detalhes/status/{{ status }}?responsavel={{ responsavel_painel }}" class="bar-line">
+                    <span>{{ status }}</span>
+                    <div class="bar-track"><i style="width: {{ largura }}%"></i></div>
+                    <strong>{{ total }}</strong>
+                </a>
+                {% endfor %}
+            </div>
+        </article>
 
-            <article class="panel-card tasks-card">
-                <div class="panel-title"><h2>▤ Chamados dos seus setores</h2><a href="/organiza/chamados">Ver todos</a></div>
-                {% if chamados_visiveis %}
-                <div class="chamados-painel-lista">
-                    {% for chamado in chamados_visiveis[:6] %}
-                    <a class="chamado-painel-item" href="/organiza/chamados/{{ chamado.id }}">
-                        <span class="badge-dept {{ chamado.departamento|lower }}">{{ chamado.departamento }}</span>
-                        <strong>{{ chamado.tarefa.descricao }}</strong>
-                        <small>{{ chamado.status }} · criado por {{ chamado.criado_por or '-' }}</small>
-                        {% if chamado.departamento == 'Compras' and chamado.previsao_entrega %}
-                            <em>Entrega: {{ chamado.previsao_entrega|data_br }}</em>
-                        {% elif chamado.departamento == 'Externo' and chamado.data_devolucao %}
-                            <em>Retorno: {{ chamado.data_devolucao|data_br }}</em>
-                        {% else %}
-                            <em>Abrir</em>
-                        {% endif %}
+        <article class="glass-card donut-card">
+            <div class="card-head">
+                <div>
+                    <h2>Chamados por setor</h2>
+                    <p>Compras, financeiro, cliente e externo.</p>
+                </div>
+                <a href="/organiza/chamados">Abrir chamados</a>
+            </div>
+
+            <div class="donut-layout">
+                <div class="donut-fake">
+                    <strong>{{ total_chamados }}</strong>
+                    <span>Total</span>
+                </div>
+                <div class="legend-list">
+                    {% for dep, total in resumo_chamados.items() %}
+                    {% set largura = ((total / maior_chamado) * 100)|round(0, 'floor') if maior_chamado else 0 %}
+                    <a href="/organiza/chamados" class="legend-row">
+                        <span class="dot"></span>
+                        <b>{{ dep }}</b>
+                        <em>{{ total }}</em>
+                        <i style="width: {{ largura }}%"></i>
                     </a>
                     {% endfor %}
                 </div>
-                {% else %}
-                <p class="empty">Nenhum chamado aberto para seus departamentos.</p>
-                {% endif %}
-            </article>
-        </div>
-
-        <aside class="side-column">
-            <article class="panel-card mini-list">
-                <div class="panel-title"><h2>Aguardando Cliente</h2><a
-                        href="/organiza/detalhes/status/Aguardando Cliente?responsavel={{ responsavel_painel }}">Ver todas</a></div>
-                {% for tarefa in aguardando_cliente[:3] %}
-                <a class="mini-item mini-link-card" href="/organiza/tarefas/{{ tarefa.id }}/editar"><strong>{{ tarefa.descricao }}</strong><small>{{ tarefa.cliente.nome if tarefa.cliente else 'Sem cliente' }}</small><span>Abrir</span></a>
-                {% else %}<p class="empty">Nenhuma tarefa aguardando cliente.</p>{% endfor %}
-            </article>
-
-            <article class="panel-card mini-list">
-                <div class="panel-title"><h2>Aguardando Compras</h2><a
-                        href="/organiza/detalhes/status/Aguardando Compras?responsavel={{ responsavel_painel }}">Ver todas</a></div>
-                {% for tarefa in aguardando_compras[:3] %}
-                <a class="mini-item mini-link-card" href="/organiza/tarefas/{{ tarefa.id }}/editar"><strong>{{ tarefa.descricao }}</strong><small>Chamado criado automaticamente</small><span>Compras</span></a>
-                {% else %}<p class="empty">Nenhuma tarefa aguardando compras.</p>{% endfor %}
-            </article>
-
-            <article class="panel-card mini-list">
-                <div class="panel-title"><h2>Aguardando Financeiro</h2><a
-                        href="/organiza/detalhes/status/Aguardando Financeiro?responsavel={{ responsavel_painel }}">Ver todas</a></div>
-                {% for tarefa in aguardando_financeiro[:3] %}
-                <a class="mini-item mini-link-card" href="/organiza/tarefas/{{ tarefa.id }}/editar"><strong>{{ tarefa.descricao }}</strong><small>Chamado criado automaticamente</small><span>Financeiro</span></a>
-                {% else %}<p class="empty">Nenhuma tarefa aguardando financeiro.</p>{% endfor %}
-            </article>
-
-            <article class="panel-card mini-list danger">
-                <div class="panel-title"><h2>Atrasados</h2><a href="/organiza/chamados">Ver todos</a></div>
-                {% for chamado in chamados_atrasados[:3] %}
-                <a class="mini-item mini-link-card" href="/organiza/chamados/{{ chamado.id }}"><strong>{{ chamado.tarefa.descricao }}</strong><small>{{ chamado.departamento }} · {{ chamado.status }}</small><span>Atrasado</span></a>
-                {% else %}<p class="empty">Nenhum chamado atrasado.</p>{% endfor %}
-            </article>
-
-            <article class="panel-card summary-card">
-                <h2>Resumo do dia</h2>
-                <p><span>✅ Tarefas concluídas</span><strong>{{ resumo.get('Concluída', 0) }}</strong></p>
-                <p><span>📌 Pendentes</span><strong>{{ total_abertas }}</strong></p>
-                <p><span>▤ Chamados abertos</span><strong>{{ total_chamados }}</strong></p>
-            </article>
-        </aside>
+            </div>
+        </article>
     </section>
 
-    <section class="quick-actions">
-        <a href="/organiza/tarefas/nova"><i>＋</i><strong>Nova tarefa</strong><span>Crie a tarefa principal</span><b>›</b></a>
-        <a href="/organiza/chamados?departamento=Compras"><i>🛒</i><strong>Compras</strong><span>Ver solicitações abertas</span><b>›</b></a>
-        <a href="/organiza/chamados?departamento=Financeiro"><i>$</i><strong>Financeiro</strong><span>Ver chamados financeiros</span><b>›</b></a>
-        <a href="/organiza/chamados?departamento=Externo"><i>🔧</i><strong>Externo</strong><span>Assistências e devoluções</span><b>›</b></a>
+    <section class="dashboard-secondary-grid">
+        <article class="glass-card">
+            <div class="card-head">
+                <div>
+                    <h2>Equipe</h2>
+                    <p>Carga de tarefas de hoje por pessoa.</p>
+                </div>
+                <a href="/organiza/projetos">Projetos</a>
+            </div>
+
+            <div class="people-bars">
+                {% for nome, total in por_responsavel.items() %}
+                {% set largura = ((total / maior_responsavel) * 100)|round(0, 'floor') if maior_responsavel else 0 %}
+                <a href="/organiza?responsavel={{ nome }}" class="person-row {% if nome == responsavel_painel %}ativo{% endif %}">
+                    <div class="avatar mini">{{ nome[:1] }}</div>
+                    <span>{{ nome }}</span>
+                    <div class="bar-track"><i style="width: {{ largura }}%"></i></div>
+                    <strong>{{ total }}</strong>
+                </a>
+                {% endfor %}
+            </div>
+        </article>
+
+        <article class="glass-card">
+            <div class="card-head">
+                <div>
+                    <h2>Agenda</h2>
+                    <p>Próximos compromissos.</p>
+                </div>
+                <a href="/organiza/agenda/nova">Novo</a>
+            </div>
+
+            <div class="compact-list">
+                {% for evento in agenda_eventos[:5] %}
+                <article class="compact-item">
+                    <div>
+                        <strong>{{ evento.titulo }}</strong>
+                        <small>{{ evento.data_evento|data_br }} · {{ evento.hora_evento or '--:--' }}</small>
+                    </div>
+                    <form method="post" action="/organiza/agenda/{{ evento.id }}/concluir">
+                        <button type="submit">Concluir</button>
+                    </form>
+                </article>
+                {% else %}
+                <p class="empty dark">Nenhum compromisso aberto.</p>
+                {% endfor %}
+            </div>
+        </article>
+
+        <article class="glass-card">
+            <div class="card-head">
+                <div>
+                    <h2>Ações rápidas</h2>
+                    <p>Atalhos para alimentar o sistema.</p>
+                </div>
+            </div>
+
+            <div class="quick-grid">
+                <a href="/organiza/tarefas/nova">＋ Tarefa</a>
+                <a href="/organiza/clientes/novo">👥 Cliente</a>
+                <a href="/organiza/manutencoes/nova">🛠 Manutenção</a>
+                <a href="/organiza/compras/nova">🛒 Compra</a>
+                <a href="/organiza/financeiro/nova">💰 Financeiro</a>
+                <a href="/organiza/chamados">🔔 Chamados</a>
+            </div>
+        </article>
+    </section>
+
+    <section class="glass-card tarefas-operacao">
+        <div class="card-head">
+            <div>
+                <h2>Fila operacional de {{ responsavel_painel }}</h2>
+                <p>Tarefas pendentes aparecem primeiro para facilitar a execução.</p>
+            </div>
+            <a href="/organiza/tarefas/nova">Cadastrar tarefa</a>
+        </div>
+
+        <div class="task-table">
+            <div class="task-row header">
+                <span>Tarefa</span>
+                <span>Cliente</span>
+                <span>Projeto</span>
+                <span>Status</span>
+                <span>Ação</span>
+            </div>
+            {% for tarefa in tarefas_do_responsavel[:10] %}
+            <div class="task-row">
+                <strong>{{ tarefa.descricao }}</strong>
+                <span>{{ tarefa.cliente.nome if tarefa.cliente else '-' }}</span>
+                <span>{{ tarefa.projeto.nome if tarefa.projeto else '-' }}</span>
+                <em class="status-chip">{{ tarefa.status }}</em>
+                <a href="/organiza/tarefas/{{ tarefa.id }}/editar">Abrir</a>
+            </div>
+            {% else %}
+            <p class="empty dark">Nenhuma tarefa para este responsável.</p>
+            {% endfor %}
+        </div>
     </section>
 </section>
 

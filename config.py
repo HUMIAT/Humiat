@@ -1,6 +1,6 @@
 import os
 
-ORGANIZA_VERSAO = "7.0"
+ORGANIZA_VERSAO = "8.0"
 
 # Render/Neon: configure DATABASE_URL nas variáveis de ambiente.
 # Local: se DATABASE_URL não existir, usa SQLite em organiza.db.

@@ -1,0 +1,44 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+  <header class="dash-header">
+    <div><h1>{{ "Editar manutenção" if manutencao else "Nova manutenção" }}</h1><p>Registro simples para o Luiz iniciar rápido.</p></div>
+  </header>
+
+  <form class="form-card" method="post">
+    <div class="form-grid">
+      <label>Cliente<input name="nome_cliente" required value="{{ manutencao.nome_cliente if manutencao else '' }}"></label>
+      <label>Telefone<input name="telefone" value="{{ manutencao.telefone if manutencao else '' }}"></label>
+      <label>Equipamento<input name="equipamento" value="{{ manutencao.equipamento if manutencao else '' }}"></label>
+      {% if manutencao %}
+      <label>Status<select name="status">{% for s in status_manutencao %}<option value="{{ s }}" {% if manutencao.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+      <label>Valor orçamento<input name="valor_orcamento" value="{{ manutencao.valor_orcamento or '' }}" placeholder="1200,00"></label>
+      <label>Data conclusão<input type="date" name="data_conclusao" value="{{ manutencao.data_conclusao }}"></label>
+      <label>Data retirada<input type="date" name="data_retirada" value="{{ manutencao.data_retirada }}"></label>
+      {% else %}
+      <label>Responsável<input name="responsavel" value="Luiz"></label>
+      {% endif %}
+    </div>
+    <label>Problema informado<textarea name="problema" required>{{ manutencao.problema if manutencao else '' }}</textarea></label>
+    {% if manutencao %}
+    <label>Forma de pagamento combinada<textarea name="forma_pagamento" placeholder="Santander 700 / Cartão 500">{{ manutencao.forma_pagamento or '' }}</textarea></label>
+    {% endif %}
+    <label>Observação<textarea name="observacao">{{ manutencao.observacao if manutencao else '' }}</textarea></label>
+    <div class="form-actions"><a class="btn-secondary" href="/organiza/manutencoes">Voltar</a><button class="btn-new" type="submit">Salvar</button></div>
+  </form>
+
+  {% if manutencao %}
+  <article class="form-card">
+    <h2>Gerar compra de peça</h2>
+    <form method="post" action="/organiza/manutencoes/{{ manutencao.id }}/compra">
+      <div class="form-grid">
+        <label>Produto/peça<input name="produto" required placeholder="HD SSD"></label>
+        <label>Quantidade<input name="quantidade" value="1"></label>
+      </div>
+      <label>Observação<textarea name="observacao" placeholder="Cliente João, máquina X..."></textarea></label>
+      <button class="btn-new" type="submit">Gerar solicitação de compra</button>
+    </form>
+  </article>
+  {% endif %}
+</section>
+{% endblock %}

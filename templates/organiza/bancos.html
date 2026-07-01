@@ -1,0 +1,62 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+  <header class="dash-header">
+    <div>
+      <h1>Cadastro de bancos</h1>
+      <p>Cadastro simples usado pela manutenção e pelo financeiro.</p>
+    </div>
+    <div class="dash-actions">
+      <a class="btn-secondary" href="/organiza/banco">Ver lançamentos</a>
+    </div>
+  </header>
+
+  <article class="form-card">
+    <h2>Novo banco</h2>
+    <form method="post" action="/organiza/bancos">
+      <div class="form-grid">
+        <label>Nome
+          <input name="nome" placeholder="Ex.: Santander, Dinheiro, Cartão" required>
+        </label>
+        <label>Saldo inicial
+          <input name="saldo_inicial" value="0,00">
+        </label>
+        <label>Status
+          <select name="ativo">
+            <option value="1">Ativo</option>
+            <option value="0">Inativo</option>
+          </select>
+        </label>
+      </div>
+      <button class="btn-new" type="submit">Salvar banco</button>
+    </form>
+  </article>
+
+  <article class="panel-card">
+    <div class="panel-title"><h2>Bancos cadastrados</h2></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr><th>Nome</th><th>Saldo inicial</th><th>Status</th><th>Ação</th></tr>
+        </thead>
+        <tbody>
+          {% for b in bancos %}
+          <tr>
+            <td><strong>{{ b.nome }}</strong></td>
+            <td>R$ {{ b.saldo_inicial or '0,00' }}</td>
+            <td>{{ "Ativo" if b.ativo else "Inativo" }}</td>
+            <td>
+              <form method="post" action="/organiza/bancos/{{ b.id }}/alternar">
+                <button class="btn-small" type="submit">{{ "Inativar" if b.ativo else "Ativar" }}</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">Nenhum banco cadastrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

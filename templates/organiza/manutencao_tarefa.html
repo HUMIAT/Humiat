@@ -1,0 +1,420 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<style>
+  .badge-ok, .badge-cancelado, .badge-neutro {
+    display:inline-block; padding:6px 10px; border-radius:999px; font-weight:700; font-size:12px;
+    background:#f4f7fb; border:1px solid #d7e2f0;
+  }
+</style>
+<section class="dashboard">
+  <header class="dash-header">
+    <div>
+      <p class="tag">Orçamento vinculado à tarefa #{{ tarefa.id }}</p>
+      <h1>{{ tarefa.descricao }}</h1>
+      <p>{{ manutencao.nome_cliente }}{% if manutencao.telefone %} · {{ manutencao.telefone|telefone }}{% endif %}</p>
+    </div>
+    <div class="dash-actions">
+      <a class="btn-secondary" href="/organiza/tarefas/{{ tarefa.id }}/editar">Voltar</a>
+      <a class="btn-new" href="/organiza/produtos-servicos">Produtos/Serviços</a>
+    </div>
+  </header>
+
+  <article class="form-card">
+    <h2>Itens do orçamento</h2>
+    <p class="texto-suave">Inclua somente o que vai para o cliente. Depois selecione o item e execute a ação abaixo.</p>
+
+    <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/itens">
+      <div class="form-grid">
+        <label>Produto/serviço
+          <select name="produto_servico_id" required>
+            <option value="">Selecionar cadastrado...</option>
+            {% for p in produtos %}
+            <option value="{{ p.id }}">{{ p.nome }}{% if p.valor_padrao %} · R$ {{ p.valor_padrao }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label>Qtd.
+          <input name="quantidade" value="1">
+        </label>
+
+        <label>Valor
+          <input name="valor_unitario" placeholder="Ex.: 500,00">
+        </label>
+      </div>
+
+      <button class="btn-new" type="submit">Adicionar item</button>
+    </form>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr><th style="width:58px">Selecionar</th><th style="width:120px">Status</th><th>Item</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+        {% for item in manutencao.itens %}
+          <tr>
+            <td>
+              <input class="selecionar-item" type="checkbox" name="item_ids" value="{{ item.id }}" data-nome="{{ item.nome }}" data-aprovado="{{ item.aprovado }}" data-qtd="{{ item.quantidade or '1' }}" data-valor="{{ item.valor_total or item.valor_unitario or '' }}" {% if tarefa.status == "Pendente" and orcamento_enviado and item.aprovado != 1 %}disabled title="Apenas itens aprovados podem seguir para Compras, Financeiro ou Externo"{% endif %}>
+            </td>
+            <td>
+              <form method="post" action="/organiza/manutencao/itens/{{ item.id }}/marcar" style="display:inline">
+                {% if item.aprovado == 1 %}
+                  <input type="hidden" name="acao" value="nao_aprovado">
+                  <button class="badge-ok" type="submit" title="Clique para trocar para não aprovado">✅ Aprovado</button>
+                {% elif item.aprovado == -1 %}
+                  <input type="hidden" name="acao" value="sem_decisao">
+                  <button class="badge-cancelado" type="submit" title="Clique para voltar para sem decisão">❌ Não aprovado</button>
+                {% else %}
+                  <input type="hidden" name="acao" value="aprovado">
+                  <button class="badge-neutro" type="submit" title="Clique para aprovar">⚪ Sem decisão</button>
+                {% endif %}
+              </form>
+            </td>
+            <td>
+              <form id="editar-item-{{ item.id }}" method="post" action="/organiza/manutencao/itens/{{ item.id }}/atualizar">
+                <input class="campo-item" data-item="{{ item.id }}" name="nome" value="{{ item.nome }}">
+              </form>
+            </td>
+            <td><input class="campo-item" data-item="{{ item.id }}" form="editar-item-{{ item.id }}" name="quantidade" value="{{ item.quantidade or '1' }}" style="max-width:70px"></td>
+            <td><input class="campo-item" data-item="{{ item.id }}" form="editar-item-{{ item.id }}" name="valor_unitario" value="{{ item.valor_unitario or '' }}" style="max-width:110px"></td>
+            <td>{% if item.valor_total %}R$ {{ item.valor_total }}{% else %}-{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">Nenhum item incluído ainda.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="total-box">
+      <strong>Total do orçamento:</strong>
+      <span>R$ {{ manutencao.valor_orcamento or '0,00' }}</span>
+    </div>
+  </article>
+
+  <article class="form-card">
+    <h2>Ações do orçamento</h2>
+    <p class="texto-suave">
+      Etapa atual:
+      <strong>
+      {% if tarefa.status == "Aguardando Cliente" and manutencao.status == "Orçamento Cliente" %}
+        Aguardando Cliente (Orçamento)
+      {% elif tarefa.status == "Aguardando Cliente" and manutencao.status == "Aguardando Cliente Buscar" %}
+        Aguardando Cliente (Retirada)
+      {% elif tarefa.status == "Encerrado" %}
+        Entregue
+      {% else %}
+        {{ tarefa.status }}
+      {% endif %}
+      </strong>
+    </p>
+
+    <div class="total-box" style="margin-top:10px">
+      <strong>Itens selecionados:</strong>
+      <span id="itens_resumo">Nenhum item selecionado</span>
+    </div>
+
+    <div class="acoes-linha" style="gap:10px; flex-wrap:wrap; margin-top:16px">
+      {% if tarefa.status == "Pendente" and not orcamento_enviado %}
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/salvar">
+        <button class="btn-new" type="submit">Salvar</button>
+      </form>
+      {% endif %}
+
+      {% if orcamento_enviado and tarefa.status == "Pendente" %}
+      <button class="btn-new" id="btn_salvar_item" type="button" disabled>✅ Salvar item</button>
+      {% endif %}
+
+      {% if tarefa.status == "Aguardando Cliente" and manutencao.status == "Orçamento Cliente" %}
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/aprovar-orcamento">
+        <div class="inputs-itens-acao"></div>
+        <input type="hidden" name="decisao" value="aprovado">
+        <button class="btn-new acao-decisao" type="submit" disabled>✅ Cliente aprovou selecionados</button>
+      </form>
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/aprovar-orcamento">
+        <div class="inputs-itens-acao"></div>
+        <input type="hidden" name="decisao" value="nao_aprovado">
+        <button class="btn-secondary acao-decisao" type="submit" disabled>❌ Cliente não aprovou selecionados</button>
+      </form>
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/aprovar-orcamento">
+        <div class="inputs-itens-acao"></div>
+        <input type="hidden" name="decisao" value="sem_decisao">
+        <button class="btn-secondary acao-decisao" type="submit" disabled>⚪ Voltar para sem decisão</button>
+      </form>
+      {% endif %}
+
+      {% if tarefa.status == "Pendente" and orcamento_enviado %}
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/enviar-compras">
+        <div class="inputs-itens-acao"></div>
+        <button class="btn-secondary acao-item" type="submit" disabled>🛒 Enviar para Compras</button>
+      </form>
+
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/enviar-externo" onsubmit="return confirmarExterno()">
+        <div class="inputs-itens-acao"></div>
+        <button class="btn-secondary acao-item" type="submit" disabled>🚚 Enviar para Externo</button>
+      </form>
+
+      <form id="form_financeiro_orcamento" method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/pagamento">
+        <div class="inputs-itens-acao"></div>
+        <div id="parcelas_financeiro" style="display:none"></div>
+        <button class="btn-secondary acao-item" type="button" onclick="abrirFinanceiroOrcamento()" disabled>💰 Enviar para Financeiro</button>
+      </form>
+
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/concluir">
+        <button class="btn-secondary" type="submit">🔧 Comunicar cliente retirada</button>
+      </form>
+      {% endif %}
+
+      {% if tarefa.status in ["Compras", "Financeiro", "Externo"] %}
+        <p class="texto-suave" style="margin:0">Esta etapa deve ser concluída no módulo correspondente. Depois de concluída, a OS volta para Pendente.</p>
+      {% endif %}
+
+      {% if tarefa.status == "Aguardando Cliente" and manutencao.status == "Aguardando Cliente Buscar" %}
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/retirar">
+        <button class="btn-new" type="submit">👤 Cliente retirou</button>
+      </form>
+      {% endif %}
+
+      <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/cancelar" onsubmit="return confirm('Cancelar esta OS?')">
+        <button class="btn-secondary" type="submit">❌ Cancelar</button>
+      </form>
+    </div>
+
+    <p id="aviso_item" class="texto-suave">Clique no status do item para alternar entre Sem decisão, Aprovado e Não aprovado. Marque os itens aprovados para executar uma ação.</p>
+  </article>
+
+  <article id="modal_financeiro_orcamento" class="form-card" style="display:none; border:2px solid #cfe0ff;">
+    <h2>Dividir recebimento para o Financeiro</h2>
+    <p class="texto-suave">Informe onde e como recebeu. A soma das parcelas precisa bater com o total dos itens selecionados.</p>
+    <div class="total-box" style="margin-top:10px">
+      <strong>Total selecionado:</strong>
+      <span id="total_financeiro_texto">R$ 0,00</span>
+    </div>
+    <div id="linhas_financeiro" style="margin-top:12px"></div>
+    <div class="acoes-linha" style="gap:10px; margin-top:14px">
+      <button class="btn-secondary" type="button" onclick="adicionarLinhaFinanceiro()">+ Adicionar parcela</button>
+      <button class="btn-new" type="button" onclick="confirmarFinanceiroOrcamento()">Confirmar envio ao Financeiro</button>
+      <button class="btn-secondary" type="button" onclick="fecharFinanceiroOrcamento()">Cancelar</button>
+    </div>
+  </article>
+
+  <article class="form-card">
+    <h2>Timeline da OS</h2>
+    <div class="historico-lista">
+      {% set ignorar = [
+        "Item adicionado à manutenção",
+        "Item removido da manutenção",
+        "Item atualizado",
+        "Item aprovado e pago",
+        "Item desmarcado como aprovado",
+        "Item marcado para compras",
+        "Item removido de compras",
+        "Item marcado para externo",
+        "Item removido de externo",
+        "Mensagem registrada"
+      ] %}
+      {% for h in historicos %}
+        {% if h.titulo not in ignorar and not h.titulo.startswith("Status da tarefa alterado") %}
+        <div class="historico-item">
+          <strong>{{ h.titulo }}</strong>
+          {% if h.descricao %}<p>{{ h.descricao }}</p>{% endif %}
+          <small>{{ h.usuario or '-' }} · {{ h.criado_em|data_br }}</small>
+        </div>
+        {% endif %}
+      {% else %}
+      <p class="texto-suave">Nenhum histórico operacional registrado.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+</section>
+
+<textarea id="texto_orcamento" style="display:none">Olá {{ manutencao.nome_cliente }}, segue o orçamento da manutenção:
+
+{% for item in manutencao.itens %}- {{ item.quantidade or '1' }}x {{ item.nome }}{% if item.valor_total %}: R$ {{ item.valor_total }}{% elif item.valor_unitario %}: R$ {{ item.valor_unitario }}{% endif %}
+{% endfor %}
+Total: R$ {{ manutencao.valor_orcamento or '0,00' }}
+
+Qualquer dúvida estou à disposição.</textarea>
+
+<textarea id="texto_retirada" style="display:none">Olá {{ manutencao.nome_cliente }}, sua manutenção foi concluída.
+
+O equipamento já está disponível para retirada.</textarea>
+
+<textarea id="texto_externo" style="display:none">Tenho equipamento para manutenção a ser enviado ao externo.</textarea>
+
+<template id="template_linha_financeiro">
+  <div class="form-grid linha-financeiro" style="align-items:end; margin-top:10px">
+    <label>Data<input type="date" class="fin-data" value="{{ hoje }}"></label>
+    <label>Banco
+      <select class="fin-banco">
+        {% for b in bancos or [] %}
+        <option value="{{ b.nome }}" {% if loop.first %}selected{% endif %}>{{ b.nome }}</option>
+        {% endfor %}
+        {% if not bancos %}<option value="Santander">Santander</option>{% endif %}
+      </select>
+    </label>
+    <label>Forma<input class="fin-forma" placeholder="PIX, cartão, dinheiro..."></label>
+    <label>Valor<input class="fin-valor" placeholder="Ex.: 500,00"></label>
+  </div>
+</template>
+
+<script>
+function copiarMensagemSistema(id, redirecionarPainel){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const texto = el.value || el.innerText || "";
+  window.prompt("Copie a mensagem para enviar no WhatsApp:", texto);
+  if(redirecionarPainel){ window.location.href = "/organiza"; }
+}
+
+function confirmarExterno(){
+  const selecionados = Array.from(document.querySelectorAll(".selecionar-item:checked")).map(i => i.dataset.nome).join(", ");
+  const texto = "Tenho equipamento para manutenção a ser enviado ao externo" + (selecionados ? ": " + selecionados : "") + ".";
+  window.prompt("Copie a descrição para o WhatsApp/externo:", texto);
+  return true;
+}
+
+function valorNumeroBR(valor){
+  if(!valor) return 0;
+  return Number(String(valor).replace(/\./g, "").replace(",", ".")) || 0;
+}
+function moedaBR(valor){
+  return "R$ " + (Number(valor)||0).toLocaleString("pt-BR", {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function selecionadosAprovados(){
+  return Array.from(document.querySelectorAll(".selecionar-item:checked")).filter(i => String(i.dataset.aprovado) === "1");
+}
+function totalSelecionadoAprovado(){
+  return selecionadosAprovados().reduce((total, item) => total + valorNumeroBR(item.dataset.valor || "0"), 0);
+}
+function abrirFinanceiroOrcamento(){
+  const total = totalSelecionadoAprovado();
+  if(total <= 0){
+    alert("Selecione pelo menos um item aprovado para enviar ao Financeiro.");
+    return;
+  }
+  const modal = document.getElementById("modal_financeiro_orcamento");
+  const linhas = document.getElementById("linhas_financeiro");
+  const totalTexto = document.getElementById("total_financeiro_texto");
+  if(totalTexto) totalTexto.textContent = moedaBR(total);
+  if(linhas && !linhas.querySelector(".linha-financeiro")){
+    adicionarLinhaFinanceiro();
+    const valor = linhas.querySelector(".fin-valor");
+    if(valor) valor.value = total.toLocaleString("pt-BR", {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  if(modal) modal.style.display = "block";
+}
+function fecharFinanceiroOrcamento(){
+  const modal = document.getElementById("modal_financeiro_orcamento");
+  if(modal) modal.style.display = "none";
+}
+function adicionarLinhaFinanceiro(){
+  const template = document.getElementById("template_linha_financeiro");
+  const destino = document.getElementById("linhas_financeiro");
+  if(!template || !destino) return;
+  destino.appendChild(template.content.cloneNode(true));
+}
+function confirmarFinanceiroOrcamento(){
+  const total = totalSelecionadoAprovado();
+  const linhas = Array.from(document.querySelectorAll("#linhas_financeiro .linha-financeiro"));
+  const destino = document.getElementById("parcelas_financeiro");
+  const form = document.getElementById("form_financeiro_orcamento");
+  if(!destino || !form) return;
+  destino.innerHTML = "";
+  let soma = 0;
+  linhas.forEach(linha => {
+    const banco = linha.querySelector(".fin-banco")?.value || "";
+    const forma = linha.querySelector(".fin-forma")?.value || "";
+    const valor = linha.querySelector(".fin-valor")?.value || "";
+    const data = linha.querySelector(".fin-data")?.value || "";
+    if(!valor) return;
+    soma += valorNumeroBR(valor);
+    [["parcela_banco", banco], ["parcela_forma", forma], ["parcela_valor", valor], ["parcela_data", data]].forEach(([nome, val]) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = nome;
+      input.value = val;
+      destino.appendChild(input);
+    });
+  });
+  if(Math.abs(soma - total) > 0.01){
+    alert("A soma das parcelas precisa bater com o total selecionado. Total: " + moedaBR(total) + " | Informado: " + moedaBR(soma));
+    return;
+  }
+  form.submit();
+}
+
+
+(function(){
+  const checks = document.querySelectorAll(".selecionar-item");
+  const resumo = document.getElementById("itens_resumo");
+  const botoesAcao = document.querySelectorAll(".acao-item");
+  const botoesDecisao = document.querySelectorAll(".acao-decisao");
+  const avisos = document.getElementById("aviso_item");
+  const containers = document.querySelectorAll(".inputs-itens-acao");
+  const btnSalvarItem = document.getElementById("btn_salvar_item");
+
+  function atualizar(){
+    const selecionados = Array.from(document.querySelectorAll(".selecionar-item:checked"));
+    const aprovados = selecionados.filter(i => String(i.dataset.aprovado) === "1");
+    const ids = selecionados.map(i => i.value);
+    const idsAprovados = aprovados.map(i => i.value);
+    const nomes = selecionados.map(i => i.dataset.nome);
+    const nomesAprovados = aprovados.map(i => i.dataset.nome);
+
+    containers.forEach(container => {
+      container.innerHTML = "";
+      const form = container.closest("form");
+      const ehDecisaoCliente = form && form.action.includes("/aprovar-orcamento");
+      const lista = ehDecisaoCliente ? ids : idsAprovados;
+      lista.forEach(id => {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = "item_ids";
+        input.value = id;
+        container.appendChild(input);
+      });
+    });
+
+    botoesDecisao.forEach(btn => btn.disabled = ids.length === 0);
+    botoesAcao.forEach(btn => btn.disabled = idsAprovados.length === 0);
+    if(btnSalvarItem) btnSalvarItem.disabled = ids.length !== 1;
+    if(resumo) resumo.textContent = nomes.length ? nomes.join(", ") : "Nenhum item selecionado";
+    if(avisos){
+      const etapaCliente = {{ 'true' if tarefa.status == "Aguardando Cliente" and manutencao.status == "Orçamento Cliente" else 'false' }};
+      if(!nomes.length){
+        avisos.textContent = etapaCliente
+          ? "Marque os itens que o cliente aprovou, não aprovou ou deixou sem decisão."
+          : "Marque apenas itens aprovados para executar Compras, Financeiro ou Externo.";
+      } else if(etapaCliente) {
+        avisos.textContent = "Escolha a decisão do cliente para os itens selecionados: " + nomes.join(", ") + ".";
+      } else if(!nomesAprovados.length) {
+        avisos.textContent = "Nenhum item aprovado selecionado.";
+      } else {
+        avisos.textContent = "Ações liberadas para os itens aprovados: " + nomesAprovados.join(", ") + ".";
+      }
+    }
+  }
+
+  if(btnSalvarItem){
+    btnSalvarItem.addEventListener("click", () => {
+      const selecionado = document.querySelector(".selecionar-item:checked");
+      if(!selecionado) return;
+      const form = document.getElementById("editar-item-" + selecionado.value);
+      if(form) form.submit();
+    });
+  }
+
+  checks.forEach(check => check.addEventListener("change", atualizar));
+  atualizar();
+
+  {% if copiar == "orcamento" %}
+  copiarMensagemSistema("texto_orcamento", true);
+  {% elif copiar == "retirada" %}
+  copiarMensagemSistema("texto_retirada", true);
+  {% endif %}
+})();
+</script>
+{% endblock %}

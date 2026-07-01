@@ -4,32 +4,56 @@
     <div class="titulo-linha">
         <div>
             <p class="tag">Cliente</p>
-            <h1>Novo cliente</h1>
-            <p class="texto-suave">O telefone é único e será usado futuramente no WhatsApp.</p>
+            <h1>{{ "Editar cliente" if cliente else "Novo cliente" }}</h1>
+            <p class="texto-suave">Cadastro mestre. Equipamentos ficam vinculados dentro da ficha do cliente.</p>
         </div>
-        <a class="botao" href="javascript:history.back()">Voltar</a>
+        <a class="botao" href="{{ voltar or '/organiza/clientes' }}">Voltar</a>
     </div>
 
-    <form method="post" class="formulario">
-        <input type="hidden" name="voltar" value="{{ voltar }}">
+    <form method="post" class="formulario formulario-grade">
+        <input type="hidden" name="voltar" value="{{ voltar or '/organiza/clientes' }}">
 
         <label>Nome do cliente
-            <input name="nome" required placeholder="Ex.: João Silva">
+            <input name="nome" required placeholder="Ex.: João Silva" value="{{ cliente.nome if cliente else '' }}">
         </label>
 
         <label>Telefone / WhatsApp
-            <input name="telefone" required inputmode="numeric" placeholder="21999999999" value="{{ telefone }}">
+            <input name="telefone" required inputmode="numeric" placeholder="21999999999" value="{{ telefone or (cliente.telefone if cliente else '') }}">
         </label>
 
-        <label>Empresa opcional
-            <input name="empresa" placeholder="Ex.: Karaokê RJ">
+        <label>Empresa
+            <input name="empresa" placeholder="Ex.: Karaokê RJ" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}">
         </label>
 
-        <label>Observação opcional
-            <textarea name="observacao" placeholder="Detalhes do cliente"></textarea>
+        <label>CPF/CNPJ
+            <input name="documento" placeholder="Opcional" value="{{ cliente.documento if cliente and cliente.documento else '' }}">
         </label>
 
-        <button class="botao primario botao-cheio" type="submit">Salvar cliente</button>
+        <label>Cidade
+            <input name="cidade" placeholder="Ex.: Rio de Janeiro - RJ" value="{{ cliente.cidade if cliente and cliente.cidade else '' }}">
+        </label>
+
+        <label>Endereço
+            <input name="endereco" placeholder="Rua, número, bairro" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
+        </label>
+
+        <label>Pacote atual
+            <input name="pacote" placeholder="Ex.: 2025.3" value="{{ cliente.pacote if cliente and cliente.pacote else '' }}">
+        </label>
+
+        <label>Falta pacote
+            <input name="falta_pacote" inputmode="numeric" placeholder="Ex.: 2" value="{{ cliente.falta_pacote if cliente and cliente.falta_pacote is not none else '' }}">
+        </label>
+
+        <label>Plano
+            <input name="plano" placeholder="Ex.: Básico" value="{{ cliente.plano if cliente and cliente.plano else '' }}">
+        </label>
+
+        <label class="campo-largo">Observação
+            <textarea name="observacao" placeholder="Detalhes do cliente">{{ cliente.observacao if cliente and cliente.observacao else '' }}</textarea>
+        </label>
+
+        <button class="botao primario botao-cheio campo-largo" type="submit">Salvar cliente</button>
     </form>
 </section>
 {% endblock %}

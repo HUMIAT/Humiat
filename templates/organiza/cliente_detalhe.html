@@ -1,0 +1,81 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="cliente-detalhe">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Ficha do cliente</p>
+            <h1>{{ cliente.nome }}</h1>
+            <p class="texto-suave">{{ cliente.telefone|telefone }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p>
+        </div>
+        <div class="acoes-titulo">
+            <a class="botao" href="/organiza/clientes">Voltar</a>
+            <a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar cliente</a>
+            <a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a>
+        </div>
+    </div>
+
+    <div class="grade-ficha">
+        <article class="cartao">
+            <p class="tag">Dados</p>
+            <dl class="lista-dados">
+                <dt>Empresa</dt><dd>{{ cliente.empresa or "-" }}</dd>
+                <dt>Documento</dt><dd>{{ cliente.documento or "-" }}</dd>
+                <dt>Cidade</dt><dd>{{ cliente.cidade or "-" }}</dd>
+                <dt>Endereço</dt><dd>{{ cliente.endereco or "-" }}</dd>
+                <dt>Pacote</dt><dd>{{ cliente.pacote or "-" }}</dd>
+                <dt>Plano</dt><dd>{{ cliente.plano or "-" }}</dd>
+            </dl>
+            {% if cliente.observacao %}<p class="observacao">{{ cliente.observacao }}</p>{% endif %}
+        </article>
+
+        <article class="cartao">
+            <p class="tag">Resumo</p>
+            <div class="resumo-ficha">
+                <div><small>Equipamentos</small><strong>{{ cliente.equipamentos|length }}</strong></div>
+                <div><small>Pacote falta</small><strong>{{ cliente.falta_pacote if cliente.falta_pacote is not none else "-" }}</strong></div>
+                <div><small>Tarefas</small><strong>{{ tarefas|length }}</strong></div>
+            </div>
+        </article>
+    </div>
+
+    <section class="cartao tabela-cartao">
+        <div class="titulo-linha compacto"><h2>Equipamentos do cliente</h2></div>
+        <div class="tabela-responsiva">
+            <table class="tabela-organiza">
+                <thead><tr><th>Tipo</th><th>Modelo</th><th>Pacote</th><th>Compra</th><th>Entrega</th><th>Valor</th><th>Pago</th><th>Falta</th><th>Máquina</th><th>Rede</th><th>AnyDesk</th><th>Status</th></tr></thead>
+                <tbody>
+                {% for eq in cliente.equipamentos %}
+                    <tr>
+                        <td><span class="pill">{{ eq.tipo or "-" }}</span></td>
+                        <td>{{ eq.modelo or "-" }}</td>
+                        <td><span class="pill azul">{{ eq.pacote or "-" }}</span></td>
+                        <td>{{ eq.data_compra|data_br }}</td>
+                        <td>{{ eq.previsao_entrega|data_br }}</td>
+                        <td>{{ eq.valor|moeda }}</td>
+                        <td>{{ eq.pago|moeda }}</td>
+                        <td>{{ eq.falta|moeda }}</td>
+                        <td>{{ eq.maquina or "-" }}</td>
+                        <td>{{ eq.rede_instalada or "-" }}</td>
+                        <td>{{ eq.anydesk or "-" }}</td>
+                        <td><span class="pill verde">{{ eq.status }}</span></td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="12" class="texto-suave">Nenhum equipamento cadastrado.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="cartao tabela-cartao">
+        <div class="titulo-linha compacto"><h2>Tarefas vinculadas</h2><a class="botao" href="/organiza/tarefas/nova?cliente_id={{ cliente.id }}">+ Tarefa</a></div>
+        <div class="lista-simples">
+            {% for tarefa in tarefas %}
+                <a href="/organiza/tarefas/{{ tarefa.id }}"><strong>{{ tarefa.descricao }}</strong><span>{{ tarefa.status }} · {{ tarefa.responsavel }}</span></a>
+            {% else %}
+                <p class="texto-suave">Nenhuma tarefa vinculada a este cliente.</p>
+            {% endfor %}
+        </div>
+    </section>
+</section>
+{% endblock %}

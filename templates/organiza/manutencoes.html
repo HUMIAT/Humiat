@@ -1,0 +1,31 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+  <header class="dash-header">
+    <div><h1>Manutenções vinculadas</h1><p>A manutenção agora nasce dentro de uma tarefa. Crie uma tarefa e abra a manutenção dentro dela.</p></div>
+    <div class="dash-actions"><a class="btn-new" href="/organiza/tarefas/nova">+ Nova tarefa</a></div>
+  </header>
+  <article class="panel-card">
+    <div class="panel-title"><h2>Manutenções</h2></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Cliente</th><th>Equipamento</th><th>Status</th><th>Valor</th><th>Entrada</th><th></th></tr></thead>
+        <tbody>
+        {% for m in manutencoes %}
+          <tr>
+            <td><strong>{{ m.nome_cliente }}</strong><br><small>{{ m.telefone|telefone }}</small></td>
+            <td>{{ m.equipamento or '-' }}<br><small>{{ m.problema[:80] }}</small></td>
+            <td><span class="badge">{{ m.status }}</span></td>
+            <td>{{ m.valor_orcamento or '-' }}</td>
+            <td>{{ m.data_entrada|data_br }}</td>
+            <td>{% if m.tarefa_id %}<a class="btn-small" href="/organiza/tarefas/{{ m.tarefa_id }}/manutencao">Abrir na tarefa</a>{% else %}<a class="btn-small" href="/organiza/manutencoes/{{ m.id }}/editar">Legado</a>{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">Nenhuma manutenção cadastrada.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

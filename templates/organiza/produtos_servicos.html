@@ -1,0 +1,65 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+  <header class="dash-header">
+    <div>
+      <h1>Produtos e serviços</h1>
+      <p>Cadastro usado pelo técnico para montar orçamento dentro da manutenção.</p>
+    </div>
+  </header>
+
+  <article class="form-card">
+    <h2>Novo produto/serviço</h2>
+    <form method="post" action="/organiza/produtos-servicos/novo" class="formulario">
+      <div class="form-grid">
+        <label>Nome
+          <input name="nome" required placeholder="HD SSD, Mão de obra, Limpeza...">
+        </label>
+        <label>Tipo
+          <select name="tipo">
+            <option>Produto</option>
+            <option>Serviço</option>
+          </select>
+        </label>
+        <label>Categoria
+          <input name="categoria" placeholder="Peça, Serviço, Atualização...">
+        </label>
+        <label>Valor padrão
+          <input name="valor_padrao" placeholder="120,00">
+        </label>
+      </div>
+      <label>Observação
+        <textarea name="observacao" placeholder="Informações internas"></textarea>
+      </label>
+      <button class="btn-new" type="submit">Cadastrar</button>
+    </form>
+  </article>
+
+  <article class="panel-card">
+    <div class="panel-title"><h2>Itens cadastrados</h2></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Nome</th><th>Tipo</th><th>Categoria</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for item in itens %}
+          <tr>
+            <td><strong>{{ item.nome }}</strong>{% if item.observacao %}<br><small>{{ item.observacao }}</small>{% endif %}</td>
+            <td>{{ item.tipo }}</td>
+            <td>{{ item.categoria or '-' }}</td>
+            <td>{{ item.valor_padrao or '-' }}</td>
+            <td><span class="badge">{{ "Ativo" if item.ativo else "Inativo" }}</span></td>
+            <td>
+              <form method="post" action="/organiza/produtos-servicos/{{ item.id }}/alternar">
+                <button class="btn-small" type="submit">{{ "Desativar" if item.ativo else "Ativar" }}</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">Nenhum produto ou serviço cadastrado.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

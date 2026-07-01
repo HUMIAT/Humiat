@@ -1,0 +1,17 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard">
+<header class="dash-header"><div><h1>{{ "Editar compra" if compra else "Nova compra" }}</h1><p>Compras controla necessidade, não estoque.</p></div></header>
+<form class="form-card" method="post">
+  <div class="form-grid">
+    <label>Produto<input name="produto" required value="{{ compra.produto if compra else '' }}"></label>
+    <label>Quantidade<input name="quantidade" value="{{ compra.quantidade if compra else '1' }}"></label>
+    <label>Fornecedor<input name="fornecedor" value="{{ compra.fornecedor if compra else '' }}"></label>
+    <label>Valor<input name="valor" value="{{ compra.valor if compra else '' }}"></label>
+    <label>Previsão entrega<input type="date" name="previsao_entrega" value="{{ compra.previsao_entrega if compra else '' }}"></label>
+  </div>
+  <label>PIX ou dados bancários<textarea name="observacao" placeholder="Ex.: chave PIX, banco, agência, conta ou instruções de pagamento">{{ compra.observacao if compra else '' }}</textarea></label>
+  <div class="form-actions"><button class="btn-new" type="submit">Salvar</button><a class="btn-secondary" href="/organiza/compras">Voltar</a></div>
+</form>
+</section>
+{% endblock %}

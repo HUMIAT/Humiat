@@ -6,14 +6,15 @@
             <p class="tag">Tarefa</p>
             <h1>{% if tarefa %}Editar tarefa{% else %}Nova tarefa{% endif %}</h1>
         </div>
-        <a class="botao" href="javascript:history.back()">Voltar</a>
     </div>
 
     <form method="post" class="formulario" id="form_tarefa">
         <label>Projeto
             <select name="projeto_id" id="projeto_id" required>
                 {% for projeto in projetos %}
-                <option value="{{ projeto.id }}" {% if projeto_id == projeto.id %}selected{% endif %}>{{ projeto.nome }}</option>
+                <option value="{{ projeto.id }}" {% if projeto_id== projeto.id %}selected{% endif %}>{{ projeto.nome
+                    }}
+                </option>
                 {% endfor %}
             </select>
         </label>
@@ -22,39 +23,48 @@
             <select name="missao_id" id="missao_id" required></select>
         </label>
 
+        <label>Data da tarefa
+            <input type="date" name="data_tarefa"
+                   value="{% if tarefa and tarefa.data_tarefa %}{{ tarefa.data_tarefa }}{% else %}{{ hoje }}{% endif %}">
+        </label>
+
         <div class="cliente-bloco" id="cliente_bloco" style="display:none">
             <p class="campo-titulo">Cliente desta tarefa</p>
-            <input type="hidden" name="cliente_id" id="cliente_id" value="{{ tarefa.cliente_id if tarefa and tarefa.cliente_id else '' }}">
+            <input type="hidden" name="cliente_id" id="cliente_id"
+                   value="{{ tarefa.cliente_id if tarefa and tarefa.cliente_id else '' }}">
 
             <label>Pesquisar cliente por nome ou telefone
-                <input id="cliente_busca" placeholder="Digite nome ou telefone" value="{{ tarefa.cliente.nome if tarefa and tarefa.cliente else '' }}">
+                <input id="cliente_busca" placeholder="Digite nome ou telefone"
+                       value="{{ tarefa.cliente.nome if tarefa and tarefa.cliente else '' }}">
             </label>
-            <input type="hidden" name="cliente_telefone" id="cliente_telefone" value="{{ tarefa.cliente.telefone if tarefa and tarefa.cliente else '' }}">
+            <input type="hidden" name="cliente_telefone" id="cliente_telefone"
+                   value="{{ tarefa.cliente.telefone if tarefa and tarefa.cliente else '' }}">
 
             <div class="cliente-status" id="cliente_status">Digite nome ou telefone para procurar o cliente.</div>
 
             <div class="cliente-cadastro-rapido" id="cliente_cadastro" style="display:none">
                 <label>Nome do cliente
-                    <input name="cliente_nome" id="cliente_nome" placeholder="Nome obrigatório se o cliente não existir" value="{{ tarefa.cliente.nome if tarefa and tarefa.cliente else '' }}">
+                    <input name="cliente_nome" id="cliente_nome" placeholder="Nome obrigatório se o cliente não existir"
+                           value="{{ tarefa.cliente.nome if tarefa and tarefa.cliente else '' }}">
                 </label>
 
                 <label>Telefone / WhatsApp
-                    <input name="cliente_telefone_manual" id="cliente_telefone_manual" inputmode="numeric" placeholder="DDD + número" value="{{ tarefa.cliente.telefone if tarefa and tarefa.cliente else '' }}">
+                    <input name="cliente_telefone_manual" id="cliente_telefone_manual" inputmode="numeric"
+                           placeholder="DDD + número"
+                           value="{{ tarefa.cliente.telefone if tarefa and tarefa.cliente else '' }}">
                 </label>
                 <label>Empresa opcional
-                    <input name="cliente_empresa" id="cliente_empresa" placeholder="Empresa" value="{{ tarefa.cliente.empresa if tarefa and tarefa.cliente and tarefa.cliente.empresa else '' }}">
+                    <input name="cliente_empresa" id="cliente_empresa" placeholder="Empresa"
+                           value="{{ tarefa.cliente.empresa if tarefa and tarefa.cliente and tarefa.cliente.empresa else '' }}">
                 </label>
             </div>
         </div>
 
-        <label>Descrição da tarefa
-            <textarea name="descricao" required placeholder="Ex.: Cliente perdeu o comando. Comprar outro e configurar.">{{ tarefa.descricao if tarefa else "" }}</textarea>
-        </label>
-
         <label>Responsável
             <select name="responsavel" required>
                 {% for nome in responsaveis %}
-                <option value="{{ nome }}" {% if tarefa and tarefa.responsavel == nome %}selected{% endif %}>{{ nome }}</option>
+                <option value="{{ nome }}" {% if tarefa and tarefa.responsavel== nome %}selected{% endif %}>{{ nome }}
+                </option>
                 {% endfor %}
             </select>
         </label>
@@ -62,80 +72,32 @@
         <label>Status
             <select name="status" id="status_tarefa">
                 {% for status in status_validos %}
-                <option value="{{ status }}" {% if tarefa and tarefa.status == status %}selected{% endif %}>{{ status }}</option>
+                <option value="{{ status }}" {% if tarefa and tarefa.status== status %}selected{% endif %}>{{ status
+                    }}
+                </option>
                 {% endfor %}
             </select>
         </label>
 
         <input type="hidden" name="dependencia_id" value="">
 
-
-        <label>Observação interna da tarefa
-            <textarea name="observacao" id="observacao_tarefa" placeholder="Informação geral da tarefa. Não será usada como chamado.">{{ tarefa.observacao if tarefa and tarefa.observacao else "" }}</textarea>
-        </label>
-
-        <div class="cliente-bloco" id="acao_chamado_bloco" style="display:none">
-            <p class="campo-titulo">Ação do chamado</p>
-            <p class="texto-suave">Preencha quando estiver enviando agora para Aguardando Cliente, Compras, Financeiro ou Externo. Este texto ficará no chamado, separado da descrição da tarefa.</p>
-            <label>Ação solicitada ao departamento
-                <textarea name="acao_chamado" id="acao_chamado" placeholder="Ex.: Compras: comprar 1 comando PPA. Financeiro: autorizar pagamento."></textarea>
-            </label>
+        <div class="acoes-linha">
+            <button class="botao primario" type="submit">Salvar</button>
+            <a class="botao" href="javascript:history.back()">Voltar</a>
         </div>
-
-        <button class="botao primario botao-cheio" type="submit">Salvar tarefa</button>
     </form>
 </section>
+
 {% if tarefa %}
-<section class="cartao compacto organiza-bloco-6">
-    <div class="titulo-linha">
-        <div>
-            <p class="tag">Fluxo da tarefa</p>
-            <h2>Chamados</h2>
-            <p class="texto-suave">Um chamado pertence a um departamento. Todos do departamento visualizam o mesmo chamado.</p>
-        </div>
-        <a class="botao primario" href="/organiza/tarefas/{{ tarefa.id }}/chamados/novo">+ Novo Chamado</a>
-    </div>
-
-    <div class="chamado-rapido-grid">
-        {% for dep in departamentos_chamado %}
-        <form class="chamado-rapido-card" method="post" action="/organiza/tarefas/{{ tarefa.id }}/chamados/novo">
-            <input type="hidden" name="departamento" value="{{ dep }}">
-            <strong>Enviar para {{ dep }}</strong>
-            <textarea name="descricao" required placeholder="Ação para {{ dep }}"></textarea>
-            <button class="botao pequeno primario" type="submit">Abrir chamado</button>
-        </form>
-        {% endfor %}
-    </div>
-
-    {% if chamados_tarefa %}
-    <div class="lista-tarefas">
-        {% for chamado in chamados_tarefa %}
-        <article class="tarefa tarefa-com-ordem">
-            <div class="tarefa-ordem">#{{ chamado.id }}</div>
-            <div class="tarefa-info">
-                <strong>{{ chamado.departamento }}</strong>
-                <p>{{ chamado.descricao }}</p>
-                <p class="texto-suave">Status: {{ chamado.status }} · Aberto por {{ chamado.criado_por or '-' }}</p>
-            </div>
-            <div class="tarefa-acoes">
-                <a class="botao pequeno" href="/organiza/chamados/{{ chamado.id }}">Abrir</a>
-            </div>
-        </article>
-        {% endfor %}
-    </div>
-    {% else %}
-    <p class="texto-suave">Nenhum chamado aberto nesta tarefa.</p>
-    {% endif %}
-</section>
-
 <section class="cartao compacto organiza-bloco-6">
     <div class="titulo-linha">
         <div>
             <p class="tag">Timeline</p>
             <h2>Histórico da tarefa</h2>
-            <p class="texto-suave">Toda ação importante fica registrada aqui, inclusive estrutura futura de WhatsApp.</p>
+            <p class="texto-suave">Tudo que acontecer com esta tarefa aparece aqui.</p>
         </div>
     </div>
+
     {% if historicos %}
     <div class="timeline-organiza">
         {% for item in historicos %}
@@ -155,205 +117,186 @@
 </section>
 {% endif %}
 
+{% if tarefa and tarefa.cliente_id and tarefa.missao and tarefa.missao.finalidade == "cliente" %}
+<section class="cartao compacto organiza-bloco-6">
+    <div class="titulo-linha">
+        <div>
+            <p class="tag">Atendimento ao cliente</p>
+            <h2>Orçamento</h2>
+            <p class="texto-suave">Abra o orçamento para montar itens e enviar para cliente, financeiro, compras ou externo.</p>
+        </div>
+    </div>
+    <div class="acoes-linha">
+        <a class="botao primario" href="/organiza/tarefas/{{ tarefa.id }}/manutencao">📄 Orçamento</a>
+    </div>
+</section>
+{% endif %}
+
 <script>
-const etapas = [
-    {% for missao in missoes %}
-    {id: {{ missao.id }}, projeto_id: {{ missao.projeto_id }}, nome: {{ missao.nome|tojson }}, finalidade: {{ missao.finalidade|tojson }}},
-    {% endfor %}
-];
-const dependencias = [
-    {% for item in tarefas %}
-    {id: {{ item.id }}, projeto_id: {{ item.projeto_id }}, nome: {{ item.descricao|tojson }}},
-    {% endfor %}
-];
-const etapaSelecionadaInicial = "{{ missao_id or '' }}";
-const dependenciaSelecionadaInicial = "{{ dependencia_id or '' }}";
-const statusInicial = "{{ tarefa.status if tarefa else '' }}";
-const clienteInicialId = "{{ tarefa.cliente_id if tarefa and tarefa.cliente_id else '' }}";
-let timerCliente = null;
+    const etapas = [
+        {% for missao in missoes %}
+        {id: {{ missao.id }}, projeto_id: {{ missao.projeto_id }}, nome: {{ missao.nome|tojson }}, finalidade: {{ missao.finalidade|tojson }}},
+        {% endfor %}
+    ];
+    const dependencias = [
+        {% for item in tarefas %}
+        {id: {{ item.id }}, projeto_id: {{ item.projeto_id }}, nome: {{ item.descricao|tojson }}},
+        {% endfor %}
+    ];
+    const etapaSelecionadaInicial = "{{ missao_id or '' }}";
+    const dependenciaSelecionadaInicial = "{{ dependencia_id or '' }}";
+    const statusInicial = "{{ tarefa.status if tarefa else '' }}";
+    const clienteInicialId = "{{ tarefa.cliente_id if tarefa and tarefa.cliente_id else '' }}";
+    let timerCliente = null;
 
-function termoCliente(){
-    const busca = document.getElementById("cliente_busca");
-    return busca ? busca.value.trim() : "";
-}
-
-function telefoneLimpo(){
-    return (document.getElementById("cliente_telefone").value || termoCliente()).replace(/\D/g, "");
-}
-
-function preencherEtapas(){
-    const projeto = Number(document.getElementById("projeto_id").value);
-    const select = document.getElementById("missao_id");
-    const atual = select.value || etapaSelecionadaInicial;
-    select.innerHTML = "";
-    etapas.filter(e => e.projeto_id === projeto).forEach(e => {
-        const option = document.createElement("option");
-        option.value = e.id;
-        option.textContent = e.nome + (e.finalidade === "cliente" ? " · Atendimento ao Cliente" : " · Interna");
-        if(String(e.id) === String(atual)){ option.selected = true; }
-        select.appendChild(option);
-    });
-    if(!select.value && select.options.length){ select.options[0].selected = true; }
-    ajustarClientePorEtapa();
-}
-
-function etapaAtual(){
-    const id = Number(document.getElementById("missao_id").value);
-    return etapas.find(e => e.id === id);
-}
-
-function ajustarClientePorEtapa(){
-    const etapa = etapaAtual();
-    const bloco = document.getElementById("cliente_bloco");
-    const telefone = document.getElementById("cliente_telefone");
-    const exigeCliente = etapa && etapa.finalidade === "cliente";
-    bloco.style.display = exigeCliente ? "grid" : "none";
-    telefone.required = false;
-    const buscaCliente = document.getElementById("cliente_busca");
-    if(buscaCliente){ buscaCliente.required = !!exigeCliente; }
-    if(!exigeCliente){
-        document.getElementById("cliente_id").value = "";
-        document.getElementById("cliente_status").textContent = "";
-        document.getElementById("cliente_cadastro").style.display = "none";
-    } else if(termoCliente().length >= 2 || clienteInicialId){
-        buscarCliente();
-    }
-}
-
-function escolherCliente(cliente){
-    document.getElementById("cliente_id").value = cliente.id;
-    document.getElementById("cliente_telefone").value = cliente.telefone;
-    document.getElementById("cliente_busca").value = cliente.nome;
-    document.getElementById("cliente_status").textContent = `✅ Cliente selecionado: ${cliente.nome} - ${cliente.telefone_formatado}`;
-    document.getElementById("cliente_cadastro").style.display = "none";
-    document.getElementById("cliente_nome").required = false;
-}
-
-function buscarCliente(){
-    const termo = termoCliente();
-    const status = document.getElementById("cliente_status");
-    const cadastro = document.getElementById("cliente_cadastro");
-    const clienteId = document.getElementById("cliente_id");
-
-    clienteId.value = "";
-    if(termo.length < 2){
-        status.textContent = "Digite pelo menos 2 letras ou números.";
-        cadastro.style.display = "none";
-        return;
+    function termoCliente(){
+        const busca = document.getElementById("cliente_busca");
+        return busca ? busca.value.trim() : "";
     }
 
-    status.textContent = "Procurando cliente...";
-    fetch(`/api/clientes/buscar?q=${encodeURIComponent(termo)}`)
-        .then(r => r.json())
-        .then(data => {
-            if(data.ok){
-                status.innerHTML = "";
-                data.clientes.forEach(cliente => {
-                    const botao = document.createElement("button");
-                    botao.type = "button";
-                    botao.className = "resultado-busca";
-                    botao.textContent = `${cliente.nome} · ${cliente.telefone_formatado}${cliente.empresa ? " · " + cliente.empresa : ""}`;
-                    botao.onclick = () => escolherCliente(cliente);
-                    status.appendChild(botao);
-                });
-                cadastro.style.display = "none";
-                document.getElementById("cliente_nome").required = false;
-            } else {
-                status.textContent = "Cliente não encontrado. Preencha o nome e telefone para cadastrar junto com a tarefa.";
-                cadastro.style.display = "grid";
-                document.getElementById("cliente_nome").required = true;
-                const manual = document.getElementById("cliente_telefone_manual");
-                const numeros = telefoneLimpo();
-                document.getElementById("cliente_telefone").value = numeros;
-                if(manual && numeros){ manual.value = numeros; }
-            }
-        })
-        .catch(() => {
-            status.textContent = "Não foi possível procurar agora. Preencha o cadastro rápido.";
-            cadastro.style.display = "grid";
+    function telefoneLimpo(){
+        return (document.getElementById("cliente_telefone").value || termoCliente()).replace(/\D/g, "");
+    }
+
+    function preencherEtapas(){
+        const projeto = Number(document.getElementById("projeto_id").value);
+        const select = document.getElementById("missao_id");
+        const atual = select.value || etapaSelecionadaInicial;
+        select.innerHTML = "";
+        etapas.filter(e => e.projeto_id === projeto).forEach(e => {
+            const option = document.createElement("option");
+            option.value = e.id;
+            option.textContent = e.nome + (e.finalidade === "cliente" ? " · Atendimento ao Cliente" : " · Interna");
+            if(String(e.id) === String(atual)){ option.selected = true; }
+            select.appendChild(option);
         });
-}
+        if(!select.value && select.options.length){ select.options[0].selected = true; }
+        ajustarClientePorEtapa();
+    }
 
-function preencherDependencias(){
-    const projeto = Number(document.getElementById("projeto_id").value);
-    const select = document.getElementById("dependencia_id");
-    if(!select){ return; }
-    const atual = select.value || dependenciaSelecionadaInicial;
-    select.innerHTML = "";
+    function etapaAtual(){
+        const id = Number(document.getElementById("missao_id").value);
+        return etapas.find(e => e.id === id);
+    }
 
-    const sem = document.createElement("option");
-    sem.value = "";
-    sem.textContent = "Sem dependência";
-    select.appendChild(sem);
+    function ajustarClientePorEtapa(){
+        const etapa = etapaAtual();
+        const bloco = document.getElementById("cliente_bloco");
+        const telefone = document.getElementById("cliente_telefone");
+        const exigeCliente = etapa && etapa.finalidade === "cliente";
+        bloco.style.display = exigeCliente ? "grid" : "none";
+        telefone.required = false;
+        const buscaCliente = document.getElementById("cliente_busca");
+        if(buscaCliente){ buscaCliente.required = !!exigeCliente; }
+        if(!exigeCliente){
+            document.getElementById("cliente_id").value = "";
+            document.getElementById("cliente_status").textContent = "";
+            document.getElementById("cliente_cadastro").style.display = "none";
+        } else if(termoCliente().length >= 2 || clienteInicialId){
+            buscarCliente();
+        }
+    }
 
-    dependencias.filter(d => d.projeto_id === projeto).forEach(d => {
-        const option = document.createElement("option");
-        option.value = d.id;
-        option.textContent = d.nome;
-        if(String(d.id) === String(atual)){ option.selected = true; }
-        select.appendChild(option);
+    function escolherCliente(cliente){
+        document.getElementById("cliente_id").value = cliente.id;
+        document.getElementById("cliente_telefone").value = cliente.telefone;
+        document.getElementById("cliente_busca").value = cliente.nome;
+        document.getElementById("cliente_status").textContent = `✅ Cliente selecionado: ${cliente.nome} - ${cliente.telefone_formatado}`;
+        document.getElementById("cliente_cadastro").style.display = "none";
+        document.getElementById("cliente_nome").required = false;
+    }
+
+    function buscarCliente(){
+        const termo = termoCliente();
+        const status = document.getElementById("cliente_status");
+        const cadastro = document.getElementById("cliente_cadastro");
+        const clienteId = document.getElementById("cliente_id");
+
+        clienteId.value = "";
+        if(termo.length < 2){
+            status.textContent = "Digite pelo menos 2 letras ou números.";
+            cadastro.style.display = "none";
+            return;
+        }
+
+        status.textContent = "Procurando cliente...";
+        fetch(`/api/clientes/buscar?q=${encodeURIComponent(termo)}`)
+            .then(r => r.json())
+            .then(data => {
+                if(data.ok){
+                    status.innerHTML = "";
+                    data.clientes.forEach(cliente => {
+                        const botao = document.createElement("button");
+                        botao.type = "button";
+                        botao.className = "resultado-busca";
+                        botao.textContent = `${cliente.nome} · ${cliente.telefone_formatado}${cliente.empresa ? " · " + cliente.empresa : ""}`;
+                        botao.onclick = () => escolherCliente(cliente);
+                        status.appendChild(botao);
+                    });
+                    cadastro.style.display = "none";
+                    document.getElementById("cliente_nome").required = false;
+                } else {
+                    status.textContent = "Cliente não encontrado. Preencha o nome e telefone para cadastrar junto com a tarefa.";
+                    cadastro.style.display = "grid";
+                    document.getElementById("cliente_nome").required = true;
+                    const manual = document.getElementById("cliente_telefone_manual");
+                    const numeros = telefoneLimpo();
+                    document.getElementById("cliente_telefone").value = numeros;
+                    if(manual && numeros){ manual.value = numeros; }
+                }
+            })
+            .catch(() => {
+                status.textContent = "Não foi possível procurar agora. Preencha o cadastro rápido.";
+                cadastro.style.display = "grid";
+            });
+    }
+
+    function preencherDependencias(){
+        const projeto = Number(document.getElementById("projeto_id").value);
+        const select = document.getElementById("dependencia_id");
+        if(!select){ return; }
+        const atual = select.value || dependenciaSelecionadaInicial;
+        select.innerHTML = "";
+
+        const sem = document.createElement("option");
+        sem.value = "";
+        sem.textContent = "Sem dependência";
+        select.appendChild(sem);
+
+        dependencias.filter(d => d.projeto_id === projeto).forEach(d => {
+            const option = document.createElement("option");
+            option.value = d.id;
+            option.textContent = d.nome;
+            if(String(d.id) === String(atual)){ option.selected = true; }
+            select.appendChild(option);
+        });
+    }
+
+
+    function atualizarLinkDependencia(){
+        const projeto = document.getElementById("projeto_id").value;
+        const etapa = document.getElementById("missao_id").value;
+        const link = document.getElementById("criar_dependencia_link");
+        if(link){ link.href = `/organiza/tarefas/nova?projeto_id=${projeto}&missao_id=${etapa}`; }
+    }
+
+    document.getElementById("projeto_id").addEventListener("change", () => {
+        preencherEtapas();
+        preencherDependencias();
+        atualizarLinkDependencia();
     });
-}
+    document.getElementById("missao_id").addEventListener("change", () => {
+        ajustarClientePorEtapa();
+        atualizarLinkDependencia();
+    });
+    document.getElementById("cliente_busca").addEventListener("input", () => {
+        clearTimeout(timerCliente);
+        timerCliente = setTimeout(buscarCliente, 350);
+    });
 
-
-function atualizarLinkDependencia(){
-    const projeto = document.getElementById("projeto_id").value;
-    const etapa = document.getElementById("missao_id").value;
-    const link = document.getElementById("criar_dependencia_link");
-    if(link){ link.href = `/organiza/tarefas/nova?projeto_id=${projeto}&missao_id=${etapa}`; }
-}
-
-document.getElementById("projeto_id").addEventListener("change", () => {
     preencherEtapas();
     preencherDependencias();
     atualizarLinkDependencia();
-});
-document.getElementById("missao_id").addEventListener("change", () => {
-    ajustarClientePorEtapa();
-    atualizarLinkDependencia();
-});
-document.getElementById("cliente_busca").addEventListener("input", () => {
-    clearTimeout(timerCliente);
-    timerCliente = setTimeout(buscarCliente, 350);
-});
-
-preencherEtapas();
-preencherDependencias();
-atualizarLinkDependencia();
-
-function statusExigeChamado(){
-    const status = document.getElementById("status_tarefa");
-    const statusComChamado = ["Aguardando Cliente", "Aguardando Compras", "Aguardando Financeiro", "Aguardando Externo"];
-    return status && statusComChamado.includes(status.value) && status.value !== statusInicial;
-}
-
-function ajustarAcaoChamado(){
-    const bloco = document.getElementById("acao_chamado_bloco");
-    if(!bloco) return;
-    bloco.style.display = statusExigeChamado() ? "grid" : "none";
-}
-
-function validarChamadoAutomatico(){
-    const acao = document.getElementById("acao_chamado");
-    if(statusExigeChamado() && acao && !acao.value.trim()){
-        alert("Para usar este status, preencha a Ação do chamado. A descrição da tarefa não será copiada para o chamado.");
-        acao.focus();
-        return false;
-    }
-    return true;
-}
-
-document.getElementById("status_tarefa").addEventListener("change", ajustarAcaoChamado);
-ajustarAcaoChamado();
-
-const formTarefa = document.getElementById("form_tarefa");
-if(formTarefa){
-    formTarefa.addEventListener("submit", function(event){
-        if(!validarChamadoAutomatico()){
-            event.preventDefault();
-        }
-    });
-}
-
 </script>
+
 {% endblock %}

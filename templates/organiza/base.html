@@ -18,27 +18,50 @@
             <strong>ORGANIZA</strong>
         </a>
 
-        <nav class="side-nav">
+        <nav class="side-nav side-nav-simples">
             <a href="/organiza"><span>⌂</span> Painel</a>
-            <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span> Minhas Tarefas</a>
-            <a href="/organiza/projetos"><span>▣</span> Projetos</a>
 
             {% if tem_permissao(usuario, 'pode_criar_tarefa') %}
-            <a href="/organiza/tarefas/nova"><span>＋</span> Criar Tarefa</a>
+            <a class="menu-principal" href="/organiza/tarefas/nova"><span>＋</span> Nova Tarefa</a>
             {% endif %}
 
-            <a href="/organiza/clientes/novo"><span>👥</span> Clientes</a>
-            <a href="/organiza/chamados"><span>▤</span> Chamados</a>
-            <a href="#"><span>▣</span> Equipamentos</a>
-            <a href="#"><span>💲</span> Financeiro</a>
-            <a href="#"><span>▤</span> Relatórios</a>
+            {% if tem_permissao(usuario, 'pode_acessar_compras') or tem_permissao(usuario, 'pode_cadastrar_item') %}
+            <div class="menu-grupo">
+                <strong>Compras</strong>
+                {% if tem_permissao(usuario, 'pode_acessar_compras') %}
+                <a href="/organiza/compras"><span>🛒</span> Compras</a>
+                {% endif %}
+                {% if tem_permissao(usuario, 'pode_cadastrar_item') %}
+                <a href="/organiza/produtos-servicos"><span>🧰</span> Itens</a>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if tem_permissao(usuario, 'pode_acessar_financeiro') or tem_permissao(usuario, 'pode_cadastrar_banco') %}
+            <div class="menu-grupo">
+                <strong>Financeiro</strong>
+                {% if tem_permissao(usuario, 'pode_acessar_financeiro') %}
+                <a href="/organiza/financeiro"><span>💲</span> Financeiro</a>
+                {% endif %}
+                {% if tem_permissao(usuario, 'pode_cadastrar_banco') %}
+                <a href="/organiza/bancos"><span>🏦</span> Bancos</a>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if tem_permissao(usuario, 'pode_cadastrar_cliente') %}
+            <a href="/organiza/clientes"><span>👥</span> Clientes</a>
+            {% endif %}
+
+            <a href="/organiza/agenda/nova"><span>📅</span> Agenda</a>
+            <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span> Minhas Tarefas</a>
+            <a class="menu-futuro" href="#"><span>▤</span> Relatórios <small>futuro</small></a>
         </nav>
 
         <div class="side-bottom">
             {% if tem_permissao(usuario, 'pode_criar_usuario') %}
             <a href="/organiza/usuarios"><span>👤</span> Usuários</a>
             {% endif %}
-            <a href="#"><span>⚙</span> Configurações</a>
             <a href="/area-restrita/sair"><span>⇥</span> Sair</a>
             <div class="side-user">
                 <div class="avatar">{{ usuario.nome[:1] }}</div>
@@ -64,11 +87,54 @@
         <a href="/organiza"><span>⌂</span><small>Painel</small></a>
         <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span><small>Tarefas</small></a>
         {% if tem_permissao(usuario, 'pode_criar_tarefa') %}<a class="plus" href="/organiza/tarefas/nova">+</a>{% else %}<a class="plus" href="/organiza/acesso-negado">+</a>{% endif %}
-        <a href="/organiza/projetos"><span>📁</span><small>Projetos</small></a>
-        <a href="/organiza/chamados"><span>▤</span><small>Chamados</small></a>
+        <a href="/organiza/agenda/nova"><span>📅</span><small>Agenda</small></a>
+        {% if tem_permissao(usuario, 'pode_acessar_financeiro') %}<a href="/organiza/financeiro"><span>💲</span><small>Financeiro</small></a>{% endif %}
     </nav>
 </div>
 {% endif %}
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const ehEdicao = window.location.pathname.includes("/editar");
+    if (!ehEdicao) return;
+
+    document.querySelectorAll("form").forEach(function (form) {
+        if (form.dataset.naoBloquear === "1") return;
+
+        const submitButtons = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
+        const campos = form.querySelectorAll("input:not([type='hidden']), select, textarea");
+
+        campos.forEach(function (campo) {
+            campo.dataset.bloqueadoInicial = "1";
+            campo.disabled = true;
+        });
+
+        submitButtons.forEach(function (botao) {
+            botao.dataset.displayOriginal = botao.style.display || "";
+            botao.style.display = "none";
+        });
+
+        const acoes = form.querySelector(".form-actions, .acoes-linha") || form;
+        if (!form.querySelector(".botao-editar-campos")) {
+            const editar = document.createElement("button");
+            editar.type = "button";
+            editar.className = "botao btn-secondary botao-editar-campos";
+            editar.textContent = "Editar";
+            editar.addEventListener("click", function () {
+                campos.forEach(function (campo) {
+                    campo.disabled = false;
+                });
+                submitButtons.forEach(function (botao) {
+                    botao.style.display = botao.dataset.displayOriginal;
+                });
+                editar.style.display = "none";
+            });
+            acoes.insertBefore(editar, acoes.firstChild);
+        }
+    });
+});
+</script>
 
 </body>
 </html>
