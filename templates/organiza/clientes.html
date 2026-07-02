@@ -42,6 +42,22 @@
             <a class="botao fantasma" href="/organiza/clientes">Limpar</a>
         </form>
 
+
+        {% if total_paginas and total_paginas > 1 %}
+        <div class="paginacao-clientes">
+            {% set base_url = "/organiza/clientes?busca=" ~ busca ~ "&pacote=" ~ pacote_atual ~ "&tipo=" ~ tipo_atual ~ "&status=" ~ status_atual ~ "&sem_equipamento=" ~ sem_equipamento_atual %}
+            {% if pagina > 1 %}
+                <a class="botao fantasma" href="{{ base_url }}&pagina={{ pagina - 1 }}">← Anterior</a>
+            {% endif %}
+
+            <span class="texto-suave">Página {{ pagina }} de {{ total_paginas }} · {{ total_filtrado }} resultado(s)</span>
+
+            {% if pagina < total_paginas %}
+                <a class="botao fantasma" href="{{ base_url }}&pagina={{ pagina + 1 }}">Próxima →</a>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="tabela-responsiva">
             <table class="tabela-organiza">
                 <thead>
@@ -84,6 +100,22 @@
                 </tbody>
             </table>
         </div>
+
+        {% if total_paginas and total_paginas > 1 %}
+        <div class="paginacao-clientes">
+            {% set base_url = "/organiza/clientes?busca=" ~ busca ~ "&pacote=" ~ pacote_atual ~ "&tipo=" ~ tipo_atual ~ "&status=" ~ status_atual ~ "&sem_equipamento=" ~ sem_equipamento_atual %}
+            {% if pagina > 1 %}
+                <a class="botao fantasma" href="{{ base_url }}&pagina={{ pagina - 1 }}">← Anterior</a>
+            {% endif %}
+
+            <span class="texto-suave">Página {{ pagina }} de {{ total_paginas }} · {{ total_filtrado }} resultado(s)</span>
+
+            {% if pagina < total_paginas %}
+                <a class="botao fantasma" href="{{ base_url }}&pagina={{ pagina + 1 }}">Próxima →</a>
+            {% endif %}
+        </div>
+        {% endif %}
+
     </section>
 </section>
 {% endblock %}

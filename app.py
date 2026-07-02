@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Date, func, inspect, text, or_
-from sqlalchemy.orm import Session, relationship
+from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import CHAVE_SESSAO, ORGANIZA_VERSAO, ADMIN_NOME, ADMIN_SENHA
 from database import Base, SessionLocal, engine, get_db
@@ -1255,9 +1255,37 @@ def salvar_usuario(usuario_id: int, nome: str = Form(...), telefone: str = Form(
 
 
 @app.get("/organiza/clientes", response_class=HTMLResponse)
-def listar_clientes(request: Request, busca: str = "", pacote: str = "", status: str = "", tipo: str = "", sem_equipamento: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    query = db.query(Cliente)
+def listar_clientes(
+    request: Request,
+    busca: str = "",
+    pacote: str = "",
+    status: str = "",
+    tipo: str = "",
+    sem_equipamento: str = "",
+    pagina: int = 1,
+    por_pagina: int = 50,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista de clientes otimizada.
+
+    Antes, a tela carregava todos os clientes e depois acessava cliente.equipamentos
+    dentro do HTML. Isso gerava muitas consultas no banco e deixava a página lenta
+    no Render/Neon.
+
+    Agora:
+    - carrega no máximo 50 clientes por página;
+    - traz os equipamentos junto com selectinload;
+    - aplica filtros no banco sempre que possível;
+    - evita varrer todos os clientes em Python.
+    """
+    pagina = max(int(pagina or 1), 1)
+    por_pagina = min(max(int(por_pagina or 50), 10), 100)
+
+    query = db.query(Cliente).options(selectinload(Cliente.equipamentos))
     termo = (busca or "").strip()
+
     if termo:
         like = f"%{termo}%"
         numero = limpar_telefone(termo)
@@ -1265,30 +1293,37 @@ def listar_clientes(request: Request, busca: str = "", pacote: str = "", status:
         if numero:
             filtros.append(Cliente.telefone.like(f"%{numero}%"))
         query = query.filter(or_(*filtros))
+
     if pacote:
         query = query.filter(Cliente.pacote == pacote)
 
-    clientes = query.order_by(Cliente.nome).all()
-
     if sem_equipamento:
-        clientes = [cliente for cliente in clientes if not cliente.equipamentos]
+        query = query.filter(~Cliente.equipamentos.any())
 
-    if tipo or status:
-        filtrados = []
-        for cliente in clientes:
-            equipamentos = cliente.equipamentos
-            if tipo:
-                equipamentos = [e for e in equipamentos if (e.tipo or "") == tipo]
-            if status:
-                equipamentos = [e for e in equipamentos if (e.status or "") == status]
-            if equipamentos:
-                filtrados.append(cliente)
-        clientes = filtrados
+    if tipo:
+        query = query.filter(Cliente.equipamentos.any(Equipamento.tipo == tipo))
+
+    if status:
+        query = query.filter(Cliente.equipamentos.any(Equipamento.status == status))
+
+    total_filtrado = query.count()
+    total_paginas = max((total_filtrado + por_pagina - 1) // por_pagina, 1)
+    if pagina > total_paginas:
+        pagina = total_paginas
+
+    clientes = (
+        query
+        .order_by(Cliente.nome)
+        .offset((pagina - 1) * por_pagina)
+        .limit(por_pagina)
+        .all()
+    )
 
     total_clientes = db.query(Cliente).count()
     total_equipamentos = db.query(Equipamento).count()
-    clientes_com_equipamento = db.query(Cliente).join(Equipamento).distinct().count()
+    clientes_com_equipamento = db.query(Cliente.id).join(Equipamento).distinct().count()
     clientes_sem_equipamento = max(total_clientes - clientes_com_equipamento, 0)
+
     pacotes = [p[0] for p in db.query(Cliente.pacote).filter(Cliente.pacote.isnot(None)).distinct().order_by(Cliente.pacote).all() if p[0]]
     tipos = [t[0] for t in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None)).distinct().order_by(Equipamento.tipo).all() if t[0]]
     status_opcoes = [st[0] for st in db.query(Equipamento.status).filter(Equipamento.status.isnot(None)).distinct().order_by(Equipamento.status).all() if st[0]]
@@ -1309,6 +1344,10 @@ def listar_clientes(request: Request, busca: str = "", pacote: str = "", status:
         "total_equipamentos": total_equipamentos,
         "clientes_com_equipamento": clientes_com_equipamento,
         "clientes_sem_equipamento": clientes_sem_equipamento,
+        "total_filtrado": total_filtrado,
+        "pagina": pagina,
+        "por_pagina": por_pagina,
+        "total_paginas": total_paginas,
     })
 
 

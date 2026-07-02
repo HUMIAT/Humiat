@@ -2351,3 +2351,5 @@ img{max-width:100%;display:block}
     border:1px solid #e2e8f0 !important;
     color:#0f172a !important;
 }
+
+.paginacao-clientes{display:flex;align-items:center;gap:12px;justify-content:flex-end;margin:14px 0;flex-wrap:wrap}
