@@ -7,7 +7,7 @@ from datetime import date, datetime
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Date, func, inspect, text, or_
@@ -1863,6 +1863,77 @@ def tarefa_manutencao_adicionar_item(tarefa_id: int, produto_servico_id: str = F
     # Item adicionado não entra na timeline operacional da OS.
     db.commit()
     return RedirectResponse(f"/organiza/tarefas/{tarefa_id}/manutencao", status_code=303)
+
+
+@app.post("/organiza/tarefas/{tarefa_id}/manutencao/itens-rapido")
+def tarefa_manutencao_adicionar_item_rapido(
+    tarefa_id: int,
+    produto_servico_id: str = Form(""),
+    quantidade: str = Form("1"),
+    valor_unitario: str = Form(""),
+    observacao: str = Form(""),
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db)
+):
+    """Adiciona item ao orçamento sem recarregar a tela inteira.
+
+    Usado pela tela de orçamento para dar resposta imediata ao técnico.
+    A rota antiga continua existindo como fallback.
+    """
+    tarefa = db.query(Tarefa).filter(Tarefa.id == tarefa_id).first()
+    if not tarefa:
+        return JSONResponse({"ok": False, "erro": "Tarefa não encontrada."}, status_code=404)
+
+    manutencao = obter_ou_criar_manutencao_da_tarefa(db, tarefa, usuario)
+
+    produto = None
+    if produto_servico_id:
+        produto = db.query(ProdutoServico).filter(ProdutoServico.id == int(produto_servico_id)).first()
+
+    if not produto:
+        return JSONResponse({"ok": False, "erro": "Selecione um produto/serviço cadastrado."}, status_code=400)
+
+    valor = _valor(valor_unitario) or (produto.valor_padrao if produto else "")
+    qtd = _valor(quantidade) or "1"
+    total = _moeda_br(_numero_decimal(qtd) * _numero_decimal(valor)) if valor else ""
+
+    item = ManutencaoItem(
+        manutencao_id=manutencao.id,
+        produto_servico_id=produto.id,
+        nome=produto.nome,
+        tipo=produto.tipo,
+        quantidade=qtd,
+        valor_unitario=valor,
+        valor_total=total,
+        observacao=_valor(observacao),
+    )
+    db.add(item)
+    db.flush()
+
+    _recalcular_orcamento_manutencao(manutencao)
+
+    tarefa.status = "Pendente"
+    manutencao.status = "Orçamento Cliente"
+    manutencao.data_orcamento = manutencao.data_orcamento or date.today()
+    manutencao.hora_orcamento = manutencao.hora_orcamento or datetime.now().strftime("%H:%M")
+    manutencao.prazo_dias = manutencao.prazo_dias or "20"
+
+    db.commit()
+    db.refresh(item)
+    db.refresh(manutencao)
+
+    return {
+        "ok": True,
+        "item": {
+            "id": item.id,
+            "nome": item.nome or "",
+            "quantidade": item.quantidade or "1",
+            "valor_unitario": item.valor_unitario or "",
+            "valor_total": item.valor_total or "",
+            "aprovado": item.aprovado or 0,
+        },
+        "total_orcamento": manutencao.valor_orcamento or "0,00",
+    }
 
 
 @app.post("/organiza/manutencao/itens/{item_id}/excluir")

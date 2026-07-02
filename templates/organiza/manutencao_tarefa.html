@@ -23,7 +23,7 @@
     <h2>Itens do orçamento</h2>
     <p class="texto-suave">Inclua somente o que vai para o cliente. Depois selecione o item e execute a ação abaixo.</p>
 
-    <form method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/itens">
+    <form id="form_adicionar_item_orcamento" method="post" action="/organiza/tarefas/{{ tarefa.id }}/manutencao/itens">
       <div class="form-grid">
         <label>Produto/serviço
           <select name="produto_servico_id" required>
@@ -51,7 +51,7 @@
         <thead>
           <tr><th style="width:58px">Selecionar</th><th style="width:120px">Status</th><th>Item</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th></tr>
         </thead>
-        <tbody>
+        <tbody id="tabela_itens_orcamento">
         {% for item in manutencao.itens %}
           <tr>
             <td>
@@ -89,7 +89,7 @@
 
     <div class="total-box">
       <strong>Total do orçamento:</strong>
-      <span>R$ {{ manutencao.valor_orcamento or '0,00' }}</span>
+      <span id="total_orcamento_valor">R$ {{ manutencao.valor_orcamento or '0,00' }}</span>
     </div>
   </article>
 
@@ -348,7 +348,6 @@ function confirmarFinanceiroOrcamento(){
 
 
 (function(){
-  const checks = document.querySelectorAll(".selecionar-item");
   const resumo = document.getElementById("itens_resumo");
   const botoesAcao = document.querySelectorAll(".acao-item");
   const botoesDecisao = document.querySelectorAll(".acao-decisao");
@@ -398,6 +397,8 @@ function confirmarFinanceiroOrcamento(){
     }
   }
 
+  window.atualizarSelecaoOrcamento = atualizar;
+
   if(btnSalvarItem){
     btnSalvarItem.addEventListener("click", () => {
       const selecionado = document.querySelector(".selecionar-item:checked");
@@ -407,7 +408,12 @@ function confirmarFinanceiroOrcamento(){
     });
   }
 
-  checks.forEach(check => check.addEventListener("change", atualizar));
+  document.addEventListener("change", function(event){
+    if(event.target && event.target.classList.contains("selecionar-item")){
+      atualizar();
+    }
+  });
+
   atualizar();
 
   {% if copiar == "orcamento" %}
@@ -415,6 +421,92 @@ function confirmarFinanceiroOrcamento(){
   {% elif copiar == "retirada" %}
   copiarMensagemSistema("texto_retirada", true);
   {% endif %}
+})();
+
+(function(){
+  const form = document.getElementById("form_adicionar_item_orcamento");
+  const tabela = document.getElementById("tabela_itens_orcamento");
+  const totalTexto = document.getElementById("total_orcamento_valor");
+  if(!form || !tabela) return;
+
+  form.addEventListener("submit", async function(event){
+    event.preventDefault();
+
+    const botao = form.querySelector("button[type='submit']");
+    const textoOriginal = botao ? botao.textContent : "";
+    if(botao){
+      botao.disabled = true;
+      botao.textContent = "Adicionando...";
+    }
+
+    try{
+      const dados = new FormData(form);
+      const resposta = await fetch("/organiza/tarefas/{{ tarefa.id }}/manutencao/itens-rapido", {
+        method: "POST",
+        body: dados,
+        headers: {"X-Requested-With": "fetch"}
+      });
+
+      const retorno = await resposta.json();
+      if(!resposta.ok || !retorno.ok){
+        alert(retorno.erro || "Não foi possível adicionar o item.");
+        return;
+      }
+
+      const item = retorno.item;
+      const linhaVazia = tabela.querySelector("tr td[colspan='6']");
+      if(linhaVazia && linhaVazia.closest("tr")) linhaVazia.closest("tr").remove();
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>
+          <input class="selecionar-item" type="checkbox" name="item_ids" value="${item.id}" data-nome="${escapeHtml(item.nome)}" data-aprovado="${item.aprovado || 0}" data-qtd="${escapeHtml(item.quantidade || '1')}" data-valor="${escapeHtml(item.valor_total || item.valor_unitario || '')}">
+        </td>
+        <td>
+          <form method="post" action="/organiza/manutencao/itens/${item.id}/marcar" style="display:inline">
+            <input type="hidden" name="acao" value="aprovado">
+            <button class="badge-neutro" type="submit" title="Clique para aprovar">⚪ Sem decisão</button>
+          </form>
+        </td>
+        <td>
+          <form id="editar-item-${item.id}" method="post" action="/organiza/manutencao/itens/${item.id}/atualizar">
+            <input class="campo-item" data-item="${item.id}" name="nome" value="${escapeHtml(item.nome)}">
+          </form>
+        </td>
+        <td><input class="campo-item" data-item="${item.id}" form="editar-item-${item.id}" name="quantidade" value="${escapeHtml(item.quantidade || '1')}" style="max-width:70px"></td>
+        <td><input class="campo-item" data-item="${item.id}" form="editar-item-${item.id}" name="valor_unitario" value="${escapeHtml(item.valor_unitario || '')}" style="max-width:110px"></td>
+        <td>${item.valor_total ? "R$ " + escapeHtml(item.valor_total) : "-"}</td>
+      `;
+      tabela.appendChild(tr);
+
+      if(totalTexto) totalTexto.textContent = "R$ " + (retorno.total_orcamento || "0,00");
+
+      const qtd = form.querySelector("input[name='quantidade']");
+      const valor = form.querySelector("input[name='valor_unitario']");
+      const produto = form.querySelector("select[name='produto_servico_id']");
+      if(qtd) qtd.value = "1";
+      if(valor) valor.value = "";
+      if(produto) produto.selectedIndex = 0;
+
+      if(window.atualizarSelecaoOrcamento) window.atualizarSelecaoOrcamento();
+    }catch(erro){
+      alert("Erro de comunicação ao adicionar o item.");
+    }finally{
+      if(botao){
+        botao.disabled = false;
+        botao.textContent = textoOriginal || "Adicionar item";
+      }
+    }
+  });
+
+  function escapeHtml(valor){
+    return String(valor ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 })();
 </script>
 {% endblock %}
