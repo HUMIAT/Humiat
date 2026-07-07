@@ -170,8 +170,11 @@ def garantir_colunas_novas():
             colunas = [c["name"] for c in insp.get_columns("clientes")]
             novas = {
                 "documento": "VARCHAR(30)",
+                "cep": "VARCHAR(20)",
                 "cidade": "VARCHAR(120)",
+                "bairro": "VARCHAR(120)",
                 "endereco": "VARCHAR(255)",
+                "email": "VARCHAR(140)",
                 "pacote": "VARCHAR(30)",
                 "falta_pacote": "INTEGER",
                 "plano": "VARCHAR(60)",
@@ -230,6 +233,12 @@ def importar(caminho=ARQUIVO_PADRAO):
 
             cliente.nome = nome
             cliente.empresa = texto(valor_linha(linha, cab, "Empresa"))
+            cliente.documento = texto(valor_linha(linha, cab, "Documento") or valor_linha(linha, cab, "CPF/CNPJ"))
+            cliente.cep = texto(valor_linha(linha, cab, "CEP"))
+            cliente.cidade = texto(valor_linha(linha, cab, "Cidade"))
+            cliente.bairro = texto(valor_linha(linha, cab, "Bairro"))
+            cliente.endereco = texto(valor_linha(linha, cab, "Endereço") or valor_linha(linha, cab, "Endereco"))
+            cliente.email = texto(valor_linha(linha, cab, "Email") or valor_linha(linha, cab, "E-mail"))
             cliente.pacote = texto(valor_linha(linha, cab, "PACOTE"))
             cliente.falta_pacote = inteiro(valor_linha(linha, cab, "FALTA PACOTE"))
             cliente.plano = texto(valor_linha(linha, cab, "PLANO"))

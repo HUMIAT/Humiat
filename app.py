@@ -62,8 +62,11 @@ class Cliente(Base):
     telefone = Column(String(20), unique=True, nullable=False)
     empresa = Column(String(140), nullable=True)
     documento = Column(String(30), nullable=True)
+    cep = Column(String(20), nullable=True)
     cidade = Column(String(120), nullable=True)
+    bairro = Column(String(120), nullable=True)
     endereco = Column(String(255), nullable=True)
+    email = Column(String(140), nullable=True)
     pacote = Column(String(30), nullable=True)
     falta_pacote = Column(Integer, nullable=True)
     plano = Column(String(60), nullable=True)
@@ -693,8 +696,11 @@ def iniciar_banco():
             colunas_clientes = [c["name"] for c in insp.get_columns("clientes")]
             novas_colunas_clientes = {
                 "documento": "VARCHAR(30)",
+                "cep": "VARCHAR(20)",
                 "cidade": "VARCHAR(120)",
+                "bairro": "VARCHAR(120)",
                 "endereco": "VARCHAR(255)",
+                "email": "VARCHAR(140)",
                 "pacote": "VARCHAR(30)",
                 "falta_pacote": "INTEGER",
                 "plano": "VARCHAR(60)",
@@ -1358,7 +1364,7 @@ def novo_cliente(request: Request, telefone: str = "", voltar: str = "/organiza"
 
 
 @app.post("/organiza/clientes/novo")
-def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cidade: str = Form(""), endereco: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_cliente")
     numero = limpar_telefone(telefone)
     if not telefone_valido(numero):
@@ -1371,8 +1377,11 @@ def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str
         telefone=numero,
         empresa=empresa.strip() or None,
         documento=documento.strip() or None,
+        cep=cep.strip() or None,
         cidade=cidade.strip() or None,
+        bairro=bairro.strip() or None,
         endereco=endereco.strip() or None,
+        email=email.strip() or None,
         pacote=pacote.strip() or None,
         falta_pacote=int(falta_pacote) if str(falta_pacote).strip().isdigit() else None,
         plano=plano.strip() or None,
@@ -1409,7 +1418,7 @@ def editar_cliente(cliente_id: int, request: Request, usuario: Usuario = Depends
 
 
 @app.post("/organiza/clientes/{cliente_id}/editar")
-def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cidade: str = Form(""), endereco: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_cliente")
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
@@ -1424,8 +1433,11 @@ def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(
     cliente.telefone = numero
     cliente.empresa = empresa.strip() or None
     cliente.documento = documento.strip() or None
+    cliente.cep = cep.strip() or None
     cliente.cidade = cidade.strip() or None
+    cliente.bairro = bairro.strip() or None
     cliente.endereco = endereco.strip() or None
+    cliente.email = email.strip() or None
     cliente.pacote = pacote.strip() or None
     cliente.falta_pacote = int(falta_pacote) if str(falta_pacote).strip().isdigit() else None
     cliente.plano = plano.strip() or None
@@ -1461,6 +1473,45 @@ def criar_equipamento(cliente_id: int, tipo: str = Form(""), modelo: str = Form(
         status=status.strip() or "Ativo", observacao=observacao.strip() or None
     )
     db.add(equipamento)
+    db.commit()
+    return RedirectResponse(f"/organiza/clientes/{cliente.id}", status_code=303)
+
+
+@app.get("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar", response_class=HTMLResponse)
+def editar_equipamento(cliente_id: int, equipamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    equipamento = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
+    if not cliente or not equipamento:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": equipamento})
+
+
+@app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar")
+def salvar_equipamento(cliente_id: int, equipamento_id: int, tipo: str = Form(""), modelo: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), valor: str = Form(""), pago: str = Form(""), falta: str = Form(""), data_compra: str = Form(""), previsao_entrega: str = Form(""), maquina: str = Form(""), rede_instalada: str = Form(""), anydesk: str = Form(""), status: str = Form("Ativo"), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    equipamento = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
+    if not cliente or not equipamento:
+        raise HTTPException(status_code=404)
+    def parse_data(v):
+        try:
+            return datetime.strptime(v, "%Y-%m-%d").date() if v else None
+        except Exception:
+            return None
+    equipamento.tipo = tipo.strip() or None
+    equipamento.modelo = modelo.strip() or None
+    equipamento.pacote = pacote.strip() or None
+    equipamento.falta_pacote = int(falta_pacote) if str(falta_pacote).strip().isdigit() else None
+    equipamento.plano = plano.strip() or None
+    equipamento.valor = valor.strip() or None
+    equipamento.pago = pago.strip() or None
+    equipamento.falta = falta.strip() or None
+    equipamento.data_compra = parse_data(data_compra)
+    equipamento.previsao_entrega = parse_data(previsao_entrega)
+    equipamento.maquina = maquina.strip() or None
+    equipamento.rede_instalada = rede_instalada.strip() or None
+    equipamento.anydesk = anydesk.strip() or None
+    equipamento.status = status.strip() or "Ativo"
+    equipamento.observacao = observacao.strip() or None
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente.id}", status_code=303)
 

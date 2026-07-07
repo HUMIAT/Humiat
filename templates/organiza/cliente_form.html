@@ -29,12 +29,24 @@
             <input name="documento" placeholder="Opcional" value="{{ cliente.documento if cliente and cliente.documento else '' }}">
         </label>
 
+        <label>CEP
+            <input name="cep" placeholder="Ex.: 22730-000" value="{{ cliente.cep if cliente and cliente.cep else '' }}">
+        </label>
+
         <label>Cidade
             <input name="cidade" placeholder="Ex.: Rio de Janeiro - RJ" value="{{ cliente.cidade if cliente and cliente.cidade else '' }}">
         </label>
 
+        <label>Bairro
+            <input name="bairro" placeholder="Ex.: Taquara" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}">
+        </label>
+
         <label>Endereço
-            <input name="endereco" placeholder="Rua, número, bairro" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
+            <input name="endereco" placeholder="Rua, número" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
+        </label>
+
+        <label>E-mail
+            <input type="email" name="email" placeholder="cliente@email.com" value="{{ cliente.email if cliente and cliente.email else '' }}">
         </label>
 
         <label>Pacote atual

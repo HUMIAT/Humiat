@@ -4,7 +4,7 @@
     <div class="titulo-linha">
         <div>
             <p class="tag">Equipamento</p>
-            <h1>Novo equipamento</h1>
+            <h1>{{ "Editar equipamento" if equipamento else "Novo equipamento" }}</h1>
             <p class="texto-suave">Cliente: <strong>{{ cliente.nome }}</strong></p>
         </div>
         <a class="botao" href="/organiza/clientes/{{ cliente.id }}">Voltar</a>
@@ -12,55 +12,55 @@
 
     <form method="post" class="formulario formulario-grade">
         <label>Tipo
-            <input name="tipo" placeholder="Jukebox, Fliperama, Sistema, Totem">
+            <input name="tipo" placeholder="Jukebox, Fliperama, Sistema, Totem" value="{{ equipamento.tipo if equipamento and equipamento.tipo else '' }}">
         </label>
         <label>Modelo
-            <input name="modelo" placeholder="Modelo do equipamento">
+            <input name="modelo" placeholder="Modelo do equipamento" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}">
         </label>
         <label>Pacote
-            <input name="pacote" placeholder="Ex.: 2025.3">
+            <input name="pacote" placeholder="Ex.: 2025.3" value="{{ equipamento.pacote if equipamento and equipamento.pacote else '' }}">
         </label>
         <label>Falta pacote
-            <input name="falta_pacote" inputmode="numeric">
+            <input name="falta_pacote" inputmode="numeric" value="{{ equipamento.falta_pacote if equipamento and equipamento.falta_pacote is not none else '' }}">
         </label>
         <label>Plano
-            <input name="plano" placeholder="Ex.: Básico">
+            <input name="plano" placeholder="Ex.: Básico" value="{{ equipamento.plano if equipamento and equipamento.plano else '' }}">
         </label>
         <label>Status
             <select name="status">
-                <option>Ativo</option>
-                <option>Vencendo</option>
-                <option>Vencido</option>
-                <option>Entregue</option>
-                <option>Cancelado</option>
+                <option {% if equipamento and equipamento.status == "Ativo" %}selected{% endif %}>Ativo</option>
+                <option {% if equipamento and equipamento.status == "Vencendo" %}selected{% endif %}>Vencendo</option>
+                <option {% if equipamento and equipamento.status == "Vencido" %}selected{% endif %}>Vencido</option>
+                <option {% if equipamento and equipamento.status == "Entregue" %}selected{% endif %}>Entregue</option>
+                <option {% if equipamento and equipamento.status == "Cancelado" %}selected{% endif %}>Cancelado</option>
             </select>
         </label>
         <label>Valor
-            <input name="valor" placeholder="2530">
+            <input name="valor" placeholder="2530" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}">
         </label>
         <label>Pago
-            <input name="pago" placeholder="2530">
+            <input name="pago" placeholder="2530" value="{{ equipamento.pago if equipamento and equipamento.pago else '' }}">
         </label>
         <label>Falta
-            <input name="falta" placeholder="0">
+            <input name="falta" placeholder="0" value="{{ equipamento.falta if equipamento and equipamento.falta else '' }}">
         </label>
         <label>Data da compra
-            <input type="date" name="data_compra">
+            <input type="date" name="data_compra" value="{{ equipamento.data_compra if equipamento and equipamento.data_compra else '' }}">
         </label>
         <label>Previsão de entrega
-            <input type="date" name="previsao_entrega">
+            <input type="date" name="previsao_entrega" value="{{ equipamento.previsao_entrega if equipamento and equipamento.previsao_entrega else '' }}">
         </label>
         <label>Máquina
-            <input name="maquina">
+            <input name="maquina" value="{{ equipamento.maquina if equipamento and equipamento.maquina else '' }}">
         </label>
         <label>Rede instalada
-            <input name="rede_instalada">
+            <input name="rede_instalada" value="{{ equipamento.rede_instalada if equipamento and equipamento.rede_instalada else '' }}">
         </label>
         <label>AnyDesk
-            <input name="anydesk">
+            <input name="anydesk" value="{{ equipamento.anydesk if equipamento and equipamento.anydesk else '' }}">
         </label>
         <label class="campo-largo">Observação
-            <textarea name="observacao"></textarea>
+            <textarea name="observacao">{{ equipamento.observacao if equipamento and equipamento.observacao else '' }}</textarea>
         </label>
         <button class="botao primario botao-cheio campo-largo" type="submit">Salvar equipamento</button>
     </form>

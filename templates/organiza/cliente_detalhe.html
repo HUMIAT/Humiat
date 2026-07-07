@@ -20,8 +20,11 @@
             <dl class="lista-dados">
                 <dt>Empresa</dt><dd>{{ cliente.empresa or "-" }}</dd>
                 <dt>Documento</dt><dd>{{ cliente.documento or "-" }}</dd>
+                <dt>CEP</dt><dd>{{ cliente.cep or "-" }}</dd>
                 <dt>Cidade</dt><dd>{{ cliente.cidade or "-" }}</dd>
+                <dt>Bairro</dt><dd>{{ cliente.bairro or "-" }}</dd>
                 <dt>Endereço</dt><dd>{{ cliente.endereco or "-" }}</dd>
+                <dt>E-mail</dt><dd>{{ cliente.email or "-" }}</dd>
                 <dt>Pacote</dt><dd>{{ cliente.pacote or "-" }}</dd>
                 <dt>Plano</dt><dd>{{ cliente.plano or "-" }}</dd>
             </dl>
@@ -42,7 +45,7 @@
         <div class="titulo-linha compacto"><h2>Equipamentos do cliente</h2></div>
         <div class="tabela-responsiva">
             <table class="tabela-organiza">
-                <thead><tr><th>Tipo</th><th>Modelo</th><th>Pacote</th><th>Compra</th><th>Entrega</th><th>Valor</th><th>Pago</th><th>Falta</th><th>Máquina</th><th>Rede</th><th>AnyDesk</th><th>Status</th></tr></thead>
+                <thead><tr><th>Tipo</th><th>Modelo</th><th>Pacote</th><th>Compra</th><th>Entrega</th><th>Valor</th><th>Pago</th><th>Falta</th><th>Máquina</th><th>Rede</th><th>AnyDesk</th><th>Status</th><th>Ações</th></tr></thead>
                 <tbody>
                 {% for eq in cliente.equipamentos %}
                     <tr>
@@ -58,9 +61,10 @@
                         <td>{{ eq.rede_instalada or "-" }}</td>
                         <td>{{ eq.anydesk or "-" }}</td>
                         <td><span class="pill verde">{{ eq.status }}</span></td>
+                        <td><a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a></td>
                     </tr>
                 {% else %}
-                    <tr><td colspan="12" class="texto-suave">Nenhum equipamento cadastrado.</td></tr>
+                    <tr><td colspan="13" class="texto-suave">Nenhum equipamento cadastrado.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
