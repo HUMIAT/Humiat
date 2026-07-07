@@ -2353,3 +2353,10 @@ img{max-width:100%;display:block}
 }
 
 .paginacao-clientes{display:flex;align-items:center;gap:12px;justify-content:flex-end;margin:14px 0;flex-wrap:wrap}
+
+.link-ficha-cliente{border:1px solid #b9d0ff;background:#eef5ff;color:#2563eb;border-radius:10px;padding:8px 10px;font-weight:700;cursor:pointer}
+.publico-body{background:#f4f7fb;min-height:100vh}
+.publico-container{max-width:760px;margin:0 auto;padding:28px 16px}
+.publico-card{margin-top:24px}
+.alerta.sucesso{background:#dcfce7;border-color:#86efac;color:#166534}
+@media (max-width:700px){.publico-container{padding:16px 10px}.publico-card{margin-top:8px}.formulario-grade{grid-template-columns:1fr}}

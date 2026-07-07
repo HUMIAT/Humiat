@@ -71,6 +71,7 @@ class Cliente(Base):
     falta_pacote = Column(Integer, nullable=True)
     plano = Column(String(60), nullable=True)
     observacao = Column(Text, nullable=True)
+    token_ficha = Column(String(64), nullable=True, unique=True)
     criado_em = Column(DateTime, server_default=func.now())
     equipamentos = relationship("Equipamento", back_populates="cliente", cascade="all, delete-orphan")
     tarefas = relationship("Tarefa", back_populates="cliente")
@@ -454,6 +455,19 @@ def criar_assinatura(valor: str) -> str:
     return hmac.new(CHAVE_SESSAO.encode("utf-8"), valor.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def gerar_token_ficha() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def garantir_token_cliente(cliente: Cliente, db: Session) -> str:
+    if not getattr(cliente, "token_ficha", None):
+        cliente.token_ficha = gerar_token_ficha()
+        db.add(cliente)
+        db.commit()
+        db.refresh(cliente)
+    return cliente.token_ficha
+
+
 def criar_cookie_sessao(nome_usuario: str) -> str:
     return f"{nome_usuario}|{criar_assinatura(nome_usuario)}"
 
@@ -704,6 +718,7 @@ def iniciar_banco():
                 "pacote": "VARCHAR(30)",
                 "falta_pacote": "INTEGER",
                 "plano": "VARCHAR(60)",
+                "token_ficha": "VARCHAR(64)",
             }
             for coluna, tipo_sql in novas_colunas_clientes.items():
                 if coluna not in colunas_clientes:
@@ -1334,6 +1349,15 @@ def listar_clientes(
     tipos = [t[0] for t in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None)).distinct().order_by(Equipamento.tipo).all() if t[0]]
     status_opcoes = [st[0] for st in db.query(Equipamento.status).filter(Equipamento.status.isnot(None)).distinct().order_by(Equipamento.status).all() if st[0]]
 
+    alterou_token = False
+    for cliente in clientes:
+        if not getattr(cliente, "token_ficha", None):
+            cliente.token_ficha = gerar_token_ficha()
+            db.add(cliente)
+            alterou_token = True
+    if alterou_token:
+        db.commit()
+
     return templates.TemplateResponse("organiza/clientes.html", {
         "request": request,
         "usuario": usuario,
@@ -1386,11 +1410,80 @@ def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str
         falta_pacote=int(falta_pacote) if str(falta_pacote).strip().isdigit() else None,
         plano=plano.strip() or None,
         observacao=observacao.strip() or None,
+        token_ficha=gerar_token_ficha(),
     )
     db.add(cliente)
     db.commit()
     return RedirectResponse(voltar or "/organiza/clientes", status_code=303)
 
+
+
+
+@app.get("/ficha-cliente/{token}", response_class=HTMLResponse)
+def ficha_cliente_validar(token: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse("organiza/cliente_publico_validar.html", {
+        "request": request,
+        "cliente": cliente,
+        "token": token,
+        "erro": erro,
+    })
+
+
+@app.post("/ficha-cliente/{token}", response_class=HTMLResponse)
+def ficha_cliente_confirmar(token: str, request: Request, telefone: str = Form(""), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(status_code=404)
+    numero = limpar_telefone(telefone)
+    if numero != limpar_telefone(cliente.telefone):
+        return templates.TemplateResponse("organiza/cliente_publico_validar.html", {
+            "request": request,
+            "cliente": cliente,
+            "token": token,
+            "erro": "Telefone não confere com este cadastro.",
+        })
+    return templates.TemplateResponse("organiza/cliente_publico_form.html", {
+        "request": request,
+        "cliente": cliente,
+        "token": token,
+        "telefone_confirmado": numero,
+        "salvo": False,
+    })
+
+
+@app.post("/ficha-cliente/{token}/salvar", response_class=HTMLResponse)
+def ficha_cliente_salvar(token: str, request: Request, telefone_confirmado: str = Form(""), nome: str = Form(""), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), email: str = Form(""), observacao: str = Form(""), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(status_code=404)
+    if limpar_telefone(telefone_confirmado) != limpar_telefone(cliente.telefone):
+        return templates.TemplateResponse("organiza/cliente_publico_validar.html", {
+            "request": request,
+            "cliente": cliente,
+            "token": token,
+            "erro": "Sessão inválida. Confirme o telefone novamente.",
+        })
+    cliente.nome = nome.strip() or cliente.nome
+    cliente.empresa = empresa.strip() or None
+    cliente.documento = documento.strip() or None
+    cliente.cep = cep.strip() or None
+    cliente.cidade = cidade.strip() or None
+    cliente.bairro = bairro.strip() or None
+    cliente.endereco = endereco.strip() or None
+    cliente.email = email.strip() or None
+    cliente.observacao = observacao.strip() or None
+    db.commit()
+    db.refresh(cliente)
+    return templates.TemplateResponse("organiza/cliente_publico_form.html", {
+        "request": request,
+        "cliente": cliente,
+        "token": token,
+        "telefone_confirmado": limpar_telefone(cliente.telefone),
+        "salvo": True,
+    })
 
 
 

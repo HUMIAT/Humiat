@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Atualizar ficha do cliente</title>
+    <link rel="stylesheet" href="/static/css/organiza.css">
+</head>
+<body class="organiza-body publico-body">
+<main class="publico-container">
+    <section class="cartao formulario-cartao publico-card">
+        <p class="tag">Atualização de ficha</p>
+        <h1>Confirmar telefone</h1>
+        <p class="texto-suave">Digite o telefone cadastrado para acessar sua ficha.</p>
+        {% if erro %}<div class="alerta">{{ erro }}</div>{% endif %}
+        <form method="post" class="formulario">
+            <label>Telefone / WhatsApp
+                <input name="telefone" required inputmode="numeric" placeholder="DDD + número">
+            </label>
+            <button class="botao primario botao-cheio" type="submit">Acessar minha ficha</button>
+        </form>
+    </section>
+</main>
+</body>
+</html>
