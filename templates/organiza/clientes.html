@@ -92,7 +92,7 @@
                         <td class="acoes-tabela">
                             <a href="/organiza/clientes/{{ cliente.id }}">Abrir</a>
                             <a href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a>
-                            <button type="button" class="link-ficha-cliente" data-link="{{ request.base_url }}ficha-cliente/{{ cliente.token_ficha }}?telefone={{ cliente.telefone }}" onclick="copiarLinkFicha(this)">Link ficha</button>
+                            <button type="button" class="link-ficha-cliente" data-nome="{{ cliente.nome }}" data-telefone="{{ cliente.telefone or '' }}" data-link="{{ request.base_url }}ficha-cliente/{{ cliente.token_ficha }}?telefone={{ cliente.telefone }}" onclick="compartilharFichaWhatsApp(this)">Link ficha</button>
                         </td>
                     </tr>
                     {% else %}
@@ -120,17 +120,54 @@
     </section>
 </section>
 <script>
-function copiarLinkFicha(botao){
-    const link = botao.getAttribute("data-link");
-    if(!link){ return; }
-    if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(link).then(function(){
-            botao.textContent = "Copiado";
-            setTimeout(function(){ botao.textContent = "Link ficha"; }, 1800);
-        }).catch(function(){ prompt("Copie o link da ficha:", link); });
-    } else {
-        prompt("Copie o link da ficha:", link);
+function limparTelefoneCliente(valor){
+    let telefone = String(valor || "").replace(/\D/g, "");
+    if(telefone.startsWith("55") && telefone.length > 11){
+        telefone = telefone.substring(2);
     }
+    return telefone;
+}
+
+function telefoneWhatsApp(valor){
+    const telefone = limparTelefoneCliente(valor);
+    if(!telefone){ return ""; }
+    return telefone.startsWith("55") ? telefone : "55" + telefone;
+}
+
+function linkFichaComTelefone(link, telefone){
+    const telLimpo = limparTelefoneCliente(telefone);
+    try{
+        const url = new URL(link);
+        if(telLimpo){ url.searchParams.set("telefone", telLimpo); }
+        return url.toString();
+    } catch(e){
+        return link;
+    }
+}
+
+function compartilharFichaWhatsApp(botao){
+    const nome = botao.getAttribute("data-nome") || "Cliente";
+    const telefoneOriginal = botao.getAttribute("data-telefone") || "";
+    const linkOriginal = botao.getAttribute("data-link") || "";
+    const telefoneZap = telefoneWhatsApp(telefoneOriginal);
+    const linkFicha = linkFichaComTelefone(linkOriginal, telefoneOriginal);
+
+    if(!telefoneZap || telefoneZap.length < 12){
+        alert("Este cliente não possui telefone válido cadastrado.");
+        return;
+    }
+
+    const mensagem = `Olá, ${nome}!
+
+Para mantermos seu cadastro atualizado, pedimos a gentileza de acessar o link abaixo e confirmar ou atualizar suas informações.
+
+${linkFicha}
+
+Obrigado!
+
+Equipe Karaokê RJ`;
+    const urlWhatsApp = `https://wa.me/${telefoneZap}?text=${encodeURIComponent(mensagem)}`;
+    window.open(urlWhatsApp, "_blank");
 }
 </script>
 {% endblock %}
