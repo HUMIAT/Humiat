@@ -11,37 +11,64 @@
     <section class="cartao formulario-cartao publico-card">
         <p class="tag">Minha ficha</p>
         <h1>Atualizar cadastro</h1>
-        <p class="texto-suave">Confira e atualize seus dados abaixo.</p>
+        <p class="texto-suave">Confira seus dados e atualize somente o que estiver incorreto.</p>
         {% if salvo %}<div class="alerta sucesso">Ficha atualizada com sucesso.</div>{% endif %}
-        <form method="post" action="/ficha-cliente/{{ token }}/salvar" class="formulario formulario-grade">
+        <form method="post" action="/ficha-cliente/{{ token }}/salvar" class="formulario formulario-grade ficha-publica-form">
             <input type="hidden" name="telefone_confirmado" value="{{ telefone_confirmado }}">
-            <label>Nome
+
+            <div class="grupo-form campo-largo">
+                <h2>1. Dados do cliente</h2>
+            </div>
+
+            <label class="campo-largo">Nome completo
                 <input name="nome" required value="{{ cliente.nome or '' }}">
             </label>
-            <label>Empresa
-                <input name="empresa" value="{{ cliente.empresa or '' }}">
+            <label>Telefone / WhatsApp
+                <input value="{{ cliente.telefone|telefone }}" disabled>
             </label>
             <label>CPF/CNPJ
                 <input name="documento" value="{{ cliente.documento or '' }}">
             </label>
+            <label class="campo-largo">E-mail
+                <input type="email" name="email" value="{{ cliente.email or '' }}">
+            </label>
+            <label class="campo-largo">Empresa
+                <input name="empresa" value="{{ cliente.empresa or '' }}">
+            </label>
+
+            <div class="grupo-form campo-largo">
+                <h2>2. Endereço</h2>
+            </div>
+
             <label>CEP
                 <input name="cep" inputmode="numeric" value="{{ cliente.cep or '' }}">
             </label>
-            <label>Cidade
-                <input name="cidade" value="{{ cliente.cidade or '' }}">
+            <label>Município
+                <input name="municipio" value="{{ cliente.municipio or cliente.cidade or '' }}">
+            </label>
+            <label>Estado
+                <input name="estado" value="{{ cliente.estado or '' }}">
+            </label>
+            <label class="campo-largo">Rua / endereço
+                <input name="endereco" value="{{ cliente.endereco or '' }}">
+            </label>
+            <label>Número
+                <input name="endereco_numero" value="{{ cliente.endereco_numero or '' }}">
+            </label>
+            <label>Complemento
+                <input name="complemento" value="{{ cliente.complemento or '' }}">
             </label>
             <label>Bairro
                 <input name="bairro" value="{{ cliente.bairro or '' }}">
             </label>
-            <label class="campo-largo">Endereço
-                <input name="endereco" value="{{ cliente.endereco or '' }}">
-            </label>
-            <label class="campo-largo">E-mail
-                <input type="email" name="email" value="{{ cliente.email or '' }}">
-            </label>
+
+            <div class="grupo-form campo-largo">
+                <h2>3. Observações</h2>
+            </div>
             <label class="campo-largo">Observação
                 <textarea name="observacao">{{ cliente.observacao or '' }}</textarea>
             </label>
+
             <button class="botao primario botao-cheio campo-largo" type="submit">Salvar minha ficha</button>
         </form>
     </section>

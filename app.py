@@ -64,8 +64,12 @@ class Cliente(Base):
     documento = Column(String(30), nullable=True)
     cep = Column(String(20), nullable=True)
     cidade = Column(String(120), nullable=True)
+    municipio = Column(String(120), nullable=True)
+    estado = Column(String(60), nullable=True)
     bairro = Column(String(120), nullable=True)
     endereco = Column(String(255), nullable=True)
+    endereco_numero = Column(String(30), nullable=True)
+    complemento = Column(String(120), nullable=True)
     email = Column(String(140), nullable=True)
     pacote = Column(String(30), nullable=True)
     falta_pacote = Column(Integer, nullable=True)
@@ -712,8 +716,12 @@ def iniciar_banco():
                 "documento": "VARCHAR(30)",
                 "cep": "VARCHAR(20)",
                 "cidade": "VARCHAR(120)",
+                "municipio": "VARCHAR(120)",
+                "estado": "VARCHAR(60)",
                 "bairro": "VARCHAR(120)",
                 "endereco": "VARCHAR(255)",
+                "endereco_numero": "VARCHAR(30)",
+                "complemento": "VARCHAR(120)",
                 "email": "VARCHAR(140)",
                 "pacote": "VARCHAR(30)",
                 "falta_pacote": "INTEGER",
@@ -1310,7 +1318,7 @@ def listar_clientes(
     if termo:
         like = f"%{termo}%"
         numero = limpar_telefone(termo)
-        filtros = [Cliente.nome.ilike(like), Cliente.empresa.ilike(like), Cliente.cidade.ilike(like)]
+        filtros = [Cliente.nome.ilike(like), Cliente.empresa.ilike(like), Cliente.cidade.ilike(like), Cliente.municipio.ilike(like), Cliente.bairro.ilike(like)]
         if numero:
             filtros.append(Cliente.telefone.like(f"%{numero}%"))
         query = query.filter(or_(*filtros))
@@ -1388,7 +1396,7 @@ def novo_cliente(request: Request, telefone: str = "", voltar: str = "/organiza"
 
 
 @app.post("/organiza/clientes/novo")
-def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), municipio: str = Form(""), estado: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_cliente")
     numero = limpar_telefone(telefone)
     if not telefone_valido(numero):
@@ -1402,9 +1410,13 @@ def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str
         empresa=empresa.strip() or None,
         documento=documento.strip() or None,
         cep=cep.strip() or None,
-        cidade=cidade.strip() or None,
+        cidade=(cidade.strip() or municipio.strip() or None),
+        municipio=(municipio.strip() or cidade.strip() or None),
+        estado=estado.strip() or None,
         bairro=bairro.strip() or None,
         endereco=endereco.strip() or None,
+        endereco_numero=endereco_numero.strip() or None,
+        complemento=complemento.strip() or None,
         email=email.strip() or None,
         pacote=pacote.strip() or None,
         falta_pacote=int(falta_pacote) if str(falta_pacote).strip().isdigit() else None,
@@ -1457,7 +1469,7 @@ def ficha_cliente_confirmar(token: str, request: Request, telefone: str = Form("
 
 
 @app.post("/ficha-cliente/{token}/salvar", response_class=HTMLResponse)
-def ficha_cliente_salvar(token: str, request: Request, telefone_confirmado: str = Form(""), nome: str = Form(""), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), email: str = Form(""), observacao: str = Form(""), db: Session = Depends(get_db)):
+def ficha_cliente_salvar(token: str, request: Request, telefone_confirmado: str = Form(""), nome: str = Form(""), empresa: str = Form(""), documento: str = Form(""), email: str = Form(""), cep: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), bairro: str = Form(""), municipio: str = Form(""), cidade: str = Form(""), estado: str = Form(""), observacao: str = Form(""), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
     if not cliente:
         raise HTTPException(status_code=404)
@@ -1472,11 +1484,15 @@ def ficha_cliente_salvar(token: str, request: Request, telefone_confirmado: str 
     cliente.nome = nome.strip() or cliente.nome
     cliente.empresa = empresa.strip() or None
     cliente.documento = documento.strip() or None
-    cliente.cep = cep.strip() or None
-    cliente.cidade = cidade.strip() or None
-    cliente.bairro = bairro.strip() or None
-    cliente.endereco = endereco.strip() or None
     cliente.email = email.strip() or None
+    cliente.cep = cep.strip() or None
+    cliente.endereco = endereco.strip() or None
+    cliente.endereco_numero = endereco_numero.strip() or None
+    cliente.complemento = complemento.strip() or None
+    cliente.bairro = bairro.strip() or None
+    cliente.municipio = (municipio.strip() or cidade.strip() or None)
+    cliente.cidade = (cidade.strip() or municipio.strip() or None)
+    cliente.estado = estado.strip() or None
     cliente.observacao = observacao.strip() or None
     db.commit()
     db.refresh(cliente)
@@ -1514,7 +1530,7 @@ def editar_cliente(cliente_id: int, request: Request, usuario: Usuario = Depends
 
 
 @app.post("/organiza/clientes/{cliente_id}/editar")
-def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), municipio: str = Form(""), estado: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_cliente")
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
@@ -1529,11 +1545,15 @@ def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(
     cliente.telefone = numero
     cliente.empresa = empresa.strip() or None
     cliente.documento = documento.strip() or None
-    cliente.cep = cep.strip() or None
-    cliente.cidade = cidade.strip() or None
-    cliente.bairro = bairro.strip() or None
-    cliente.endereco = endereco.strip() or None
     cliente.email = email.strip() or None
+    cliente.cep = cep.strip() or None
+    cliente.endereco = endereco.strip() or None
+    cliente.endereco_numero = endereco_numero.strip() or None
+    cliente.complemento = complemento.strip() or None
+    cliente.bairro = bairro.strip() or None
+    cliente.municipio = (municipio.strip() or cidade.strip() or None)
+    cliente.cidade = (cidade.strip() or municipio.strip() or None)
+    cliente.estado = estado.strip() or None
     cliente.pacote = pacote.strip() or None
     cliente.falta_pacote = int(falta_pacote) if str(falta_pacote).strip().isdigit() else None
     cliente.plano = plano.strip() or None

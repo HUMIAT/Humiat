@@ -21,9 +21,12 @@
                 <dt>Empresa</dt><dd>{{ cliente.empresa or "-" }}</dd>
                 <dt>Documento</dt><dd>{{ cliente.documento or "-" }}</dd>
                 <dt>CEP</dt><dd>{{ cliente.cep or "-" }}</dd>
-                <dt>Cidade</dt><dd>{{ cliente.cidade or "-" }}</dd>
+                <dt>Município</dt><dd>{{ cliente.municipio or cliente.cidade or "-" }}</dd>
+                <dt>Estado</dt><dd>{{ cliente.estado or "-" }}</dd>
                 <dt>Bairro</dt><dd>{{ cliente.bairro or "-" }}</dd>
                 <dt>Endereço</dt><dd>{{ cliente.endereco or "-" }}</dd>
+                <dt>Número</dt><dd>{{ cliente.endereco_numero or "-" }}</dd>
+                <dt>Complemento</dt><dd>{{ cliente.complemento or "-" }}</dd>
                 <dt>E-mail</dt><dd>{{ cliente.email or "-" }}</dd>
                 <dt>Pacote</dt><dd>{{ cliente.pacote or "-" }}</dd>
                 <dt>Plano</dt><dd>{{ cliente.plano or "-" }}</dd>

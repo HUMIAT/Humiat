@@ -2369,3 +2369,11 @@ img{max-width:100%;display:block}
 .publico-card{margin-top:24px}
 .alerta.sucesso{background:#dcfce7;border-color:#86efac;color:#166534}
 @media (max-width:700px){.publico-container{padding:16px 10px}.publico-card{margin-top:8px}.formulario-grade{grid-template-columns:1fr}}
+
+/* Ficha pública do cliente */
+.ficha-publica-form{gap:18px}
+.ficha-publica-form .grupo-form{margin-top:8px;padding-top:4px;border-top:1px solid #e6edf6}
+.ficha-publica-form .grupo-form:first-of-type{margin-top:0;border-top:0}
+.ficha-publica-form .grupo-form h2{font-size:1.12rem;margin:0;color:#061a3b}
+.ficha-publica-form label input:disabled{background:#f1f5f9;color:#64748b}
+@media (max-width:700px){.ficha-publica-form{grid-template-columns:1fr}}

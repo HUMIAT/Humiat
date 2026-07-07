@@ -33,16 +33,28 @@
             <input name="cep" placeholder="Ex.: 22730-000" value="{{ cliente.cep if cliente and cliente.cep else '' }}">
         </label>
 
-        <label>Cidade
-            <input name="cidade" placeholder="Ex.: Rio de Janeiro - RJ" value="{{ cliente.cidade if cliente and cliente.cidade else '' }}">
+        <label>Município
+            <input name="municipio" placeholder="Ex.: Rio de Janeiro" value="{{ cliente.municipio if cliente and cliente.municipio else (cliente.cidade if cliente and cliente.cidade else '') }}">
+        </label>
+
+        <label>Estado
+            <input name="estado" placeholder="Ex.: RJ" value="{{ cliente.estado if cliente and cliente.estado else '' }}">
         </label>
 
         <label>Bairro
             <input name="bairro" placeholder="Ex.: Taquara" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}">
         </label>
 
-        <label>Endereço
-            <input name="endereco" placeholder="Rua, número" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
+        <label>Rua / endereço
+            <input name="endereco" placeholder="Rua" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
+        </label>
+
+        <label>Número
+            <input name="endereco_numero" placeholder="Ex.: 3245" value="{{ cliente.endereco_numero if cliente and cliente.endereco_numero else '' }}">
+        </label>
+
+        <label>Complemento
+            <input name="complemento" placeholder="Casa, bloco, apto" value="{{ cliente.complemento if cliente and cliente.complemento else '' }}">
         </label>
 
         <label>E-mail
