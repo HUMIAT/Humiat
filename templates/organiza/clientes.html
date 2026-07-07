@@ -92,7 +92,7 @@
                         <td class="acoes-tabela">
                             <a href="/organiza/clientes/{{ cliente.id }}">Abrir</a>
                             <a href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a>
-                            <button type="button" class="link-ficha-cliente" data-link="{{ request.base_url }}ficha-cliente/{{ cliente.token_ficha }}" onclick="copiarLinkFicha(this)">Link ficha</button>
+                            <button type="button" class="link-ficha-cliente" data-link="{{ request.base_url }}ficha-cliente/{{ cliente.token_ficha }}?telefone={{ cliente.telefone }}" onclick="copiarLinkFicha(this)">Link ficha</button>
                         </td>
                     </tr>
                     {% else %}

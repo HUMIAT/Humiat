@@ -15,7 +15,7 @@
         {% if erro %}<div class="alerta">{{ erro }}</div>{% endif %}
         <form method="post" class="formulario">
             <label>Telefone / WhatsApp
-                <input name="telefone" required inputmode="numeric" placeholder="DDD + número">
+                <input name="telefone" required inputmode="numeric" placeholder="DDD + número" value="{{ telefone or '' }}">
             </label>
             <button class="botao primario botao-cheio" type="submit">Acessar minha ficha</button>
         </form>

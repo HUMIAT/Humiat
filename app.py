@@ -1420,7 +1420,7 @@ def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str
 
 
 @app.get("/ficha-cliente/{token}", response_class=HTMLResponse)
-def ficha_cliente_validar(token: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
+def ficha_cliente_validar(token: str, request: Request, erro: str = "", telefone: str = "", db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
     if not cliente:
         raise HTTPException(status_code=404)
@@ -1429,6 +1429,7 @@ def ficha_cliente_validar(token: str, request: Request, erro: str = "", db: Sess
         "cliente": cliente,
         "token": token,
         "erro": erro,
+        "telefone": limpar_telefone(telefone),
     })
 
 
@@ -1444,6 +1445,7 @@ def ficha_cliente_confirmar(token: str, request: Request, telefone: str = Form("
             "cliente": cliente,
             "token": token,
             "erro": "Telefone não confere com este cadastro.",
+            "telefone": telefone,
         })
     return templates.TemplateResponse("organiza/cliente_publico_form.html", {
         "request": request,
@@ -1465,6 +1467,7 @@ def ficha_cliente_salvar(token: str, request: Request, telefone_confirmado: str 
             "cliente": cliente,
             "token": token,
             "erro": "Sessão inválida. Confirme o telefone novamente.",
+            "telefone": telefone_confirmado,
         })
     cliente.nome = nome.strip() or cliente.nome
     cliente.empresa = empresa.strip() or None
