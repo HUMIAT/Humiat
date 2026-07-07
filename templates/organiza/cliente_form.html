@@ -10,24 +10,40 @@
         <a class="botao" href="{{ voltar or '/organiza/clientes' }}">Voltar</a>
     </div>
 
-    <form method="post" class="formulario formulario-grade">
+    <form method="post" class="formulario formulario-grade ficha-publica-form">
         <input type="hidden" name="voltar" value="{{ voltar or '/organiza/clientes' }}">
 
-        <label>Nome do cliente
-            <input name="nome" required placeholder="Ex.: João Silva" value="{{ cliente.nome if cliente else '' }}">
+        <div class="grupo-form campo-largo">
+            <h2>1. Dados do cliente</h2>
+        </div>
+
+        <label>Código WhatsApp
+            <input name="codigo_whatsapp" placeholder="Ex.: BR-001" value="{{ cliente|codigo_whatsapp if cliente else '' }}">
+        </label>
+
+        <label>Nome completo
+            <input name="nome" required placeholder="Ex.: João Silva" value="{{ cliente|nome_cliente_limpo if cliente else '' }}">
         </label>
 
         <label>Telefone / WhatsApp
             <input name="telefone" required inputmode="numeric" placeholder="21999999999" value="{{ telefone or (cliente.telefone if cliente else '') }}">
         </label>
 
-        <label>Empresa
-            <input name="empresa" placeholder="Ex.: Karaokê RJ" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}">
-        </label>
-
         <label>CPF/CNPJ
             <input name="documento" placeholder="Opcional" value="{{ cliente.documento if cliente and cliente.documento else '' }}">
         </label>
+
+        <label class="campo-largo">E-mail
+            <input type="email" name="email" placeholder="cliente@email.com" value="{{ cliente.email if cliente and cliente.email else '' }}">
+        </label>
+
+        <label class="campo-largo">Empresa
+            <input name="empresa" placeholder="Ex.: Karaokê RJ" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}">
+        </label>
+
+        <div class="grupo-form campo-largo">
+            <h2>2. Endereço</h2>
+        </div>
 
         <label>CEP
             <input name="cep" placeholder="Ex.: 22730-000" value="{{ cliente.cep if cliente and cliente.cep else '' }}">
@@ -41,11 +57,7 @@
             <input name="estado" placeholder="Ex.: RJ" value="{{ cliente.estado if cliente and cliente.estado else '' }}">
         </label>
 
-        <label>Bairro
-            <input name="bairro" placeholder="Ex.: Taquara" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}">
-        </label>
-
-        <label>Rua / endereço
+        <label class="campo-largo">Rua / endereço
             <input name="endereco" placeholder="Rua" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
         </label>
 
@@ -57,9 +69,13 @@
             <input name="complemento" placeholder="Casa, bloco, apto" value="{{ cliente.complemento if cliente and cliente.complemento else '' }}">
         </label>
 
-        <label>E-mail
-            <input type="email" name="email" placeholder="cliente@email.com" value="{{ cliente.email if cliente and cliente.email else '' }}">
+        <label>Bairro
+            <input name="bairro" placeholder="Ex.: Taquara" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}">
         </label>
+
+        <div class="grupo-form campo-largo">
+            <h2>3. Pacote / Plano</h2>
+        </div>
 
         <label>Pacote atual
             <input name="pacote" placeholder="Ex.: 2025.3" value="{{ cliente.pacote if cliente and cliente.pacote else '' }}">
@@ -72,6 +88,10 @@
         <label>Plano
             <input name="plano" placeholder="Ex.: Básico" value="{{ cliente.plano if cliente and cliente.plano else '' }}">
         </label>
+
+        <div class="grupo-form campo-largo">
+            <h2>4. Observações</h2>
+        </div>
 
         <label class="campo-largo">Observação
             <textarea name="observacao" placeholder="Detalhes do cliente">{{ cliente.observacao if cliente and cliente.observacao else '' }}</textarea>

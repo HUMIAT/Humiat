@@ -3,6 +3,7 @@ import os
 import secrets
 import hashlib
 import hmac
+import re
 from datetime import date, datetime
 from typing import Optional, List, Dict
 
@@ -59,6 +60,7 @@ class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(Integer, primary_key=True)
     nome = Column(String(140), nullable=False)
+    codigo_whatsapp = Column(String(40), nullable=True)
     telefone = Column(String(20), unique=True, nullable=False)
     empresa = Column(String(140), nullable=True)
     documento = Column(String(30), nullable=True)
@@ -146,6 +148,36 @@ def formatar_telefone(valor: str) -> str:
 
 
 templates.env.filters["telefone"] = formatar_telefone
+
+
+def separar_codigo_nome_whatsapp(nome: str):
+    texto = (nome or "").strip()
+    if not texto:
+        return "", ""
+    # Ex.: BR-001 1__Crescencio -> codigo=BR-001, nome=Crescencio
+    match = re.match(r"^([A-Za-z]{1,5}-?\d{1,6})\s+(?:\d+[_\- ]*)?(.+)$", texto)
+    if match:
+        codigo = match.group(1).strip()
+        nome_limpo = re.sub(r"^[\s_\-]+", "", match.group(2).strip())
+        return codigo, nome_limpo or texto
+    return "", texto
+
+
+def codigo_whatsapp_cliente(cliente):
+    codigo = getattr(cliente, "codigo_whatsapp", None)
+    if codigo:
+        return codigo
+    codigo, _ = separar_codigo_nome_whatsapp(getattr(cliente, "nome", ""))
+    return codigo
+
+
+def nome_cliente_limpo(cliente):
+    _, nome = separar_codigo_nome_whatsapp(getattr(cliente, "nome", ""))
+    return nome
+
+
+templates.env.filters["codigo_whatsapp"] = codigo_whatsapp_cliente
+templates.env.filters["nome_cliente_limpo"] = nome_cliente_limpo
 
 
 def formatar_data_br(valor):
@@ -713,6 +745,7 @@ def iniciar_banco():
         if "clientes" in insp.get_table_names():
             colunas_clientes = [c["name"] for c in insp.get_columns("clientes")]
             novas_colunas_clientes = {
+                "codigo_whatsapp": "VARCHAR(40)",
                 "documento": "VARCHAR(30)",
                 "cep": "VARCHAR(20)",
                 "cidade": "VARCHAR(120)",
@@ -1318,7 +1351,7 @@ def listar_clientes(
     if termo:
         like = f"%{termo}%"
         numero = limpar_telefone(termo)
-        filtros = [Cliente.nome.ilike(like), Cliente.empresa.ilike(like), Cliente.cidade.ilike(like), Cliente.municipio.ilike(like), Cliente.bairro.ilike(like)]
+        filtros = [Cliente.nome.ilike(like), Cliente.codigo_whatsapp.ilike(like), Cliente.empresa.ilike(like), Cliente.cidade.ilike(like), Cliente.municipio.ilike(like), Cliente.bairro.ilike(like)]
         if numero:
             filtros.append(Cliente.telefone.like(f"%{numero}%"))
         query = query.filter(or_(*filtros))
@@ -1396,7 +1429,7 @@ def novo_cliente(request: Request, telefone: str = "", voltar: str = "/organiza"
 
 
 @app.post("/organiza/clientes/novo")
-def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), municipio: str = Form(""), estado: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def criar_cliente(nome: str = Form(...), codigo_whatsapp: str = Form(""), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), municipio: str = Form(""), estado: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_cliente")
     numero = limpar_telefone(telefone)
     if not telefone_valido(numero):
@@ -1406,6 +1439,7 @@ def criar_cliente(nome: str = Form(...), telefone: str = Form(...), empresa: str
         return RedirectResponse(voltar or "/organiza", status_code=303)
     cliente = Cliente(
         nome=nome.strip(),
+        codigo_whatsapp=codigo_whatsapp.strip() or None,
         telefone=numero,
         empresa=empresa.strip() or None,
         documento=documento.strip() or None,
@@ -1530,7 +1564,7 @@ def editar_cliente(cliente_id: int, request: Request, usuario: Usuario = Depends
 
 
 @app.post("/organiza/clientes/{cliente_id}/editar")
-def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), municipio: str = Form(""), estado: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def salvar_cliente(cliente_id: int, nome: str = Form(...), codigo_whatsapp: str = Form(""), telefone: str = Form(...), empresa: str = Form(""), documento: str = Form(""), cep: str = Form(""), cidade: str = Form(""), municipio: str = Form(""), estado: str = Form(""), bairro: str = Form(""), endereco: str = Form(""), endereco_numero: str = Form(""), complemento: str = Form(""), email: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), observacao: str = Form(""), voltar: str = Form("/organiza/clientes"), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_cliente")
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
@@ -1542,6 +1576,7 @@ def salvar_cliente(cliente_id: int, nome: str = Form(...), telefone: str = Form(
     if existe:
         raise HTTPException(status_code=400, detail="Já existe outro cliente com este telefone.")
     cliente.nome = nome.strip()
+    cliente.codigo_whatsapp = codigo_whatsapp.strip() or None
     cliente.telefone = numero
     cliente.empresa = empresa.strip() or None
     cliente.documento = documento.strip() or None
