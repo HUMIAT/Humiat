@@ -1,229 +1,67 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-
-{% set total_pendente = tarefas_hoje_usuario|length %}
-{% set total_cliente = aguardando_cliente|length %}
-{% set total_compras = aguardando_compras|length %}
-{% set total_financeiro = aguardando_financeiro|length %}
-{% set total_externo = aguardando_externo|length %}
-{% set total_cancelado = tarefas_canceladas|length %}
-{% set total_chamados = chamados_visiveis|length %}
-{% set total_atrasados = chamados_atrasados|length %}
-{% set total_agenda = agenda_eventos|length %}
-{% set total_tarefas_painel = tarefas_do_responsavel|length %}
-{% set maior_responsavel = por_responsavel.values()|max if por_responsavel else 1 %}
-{% set maior_status = resumo.values()|max if resumo else 1 %}
-{% set maior_chamado = resumo_chamados.values()|max if resumo_chamados else 1 %}
-
-<section class="humiat-dashboard">
-    <header class="humiat-topbar">
+<section class="dashboard humiat-home">
+    <header class="dash-header home-header">
         <div>
-            <span class="eyebrow">HUMIAT • Organiza</span>
-            <h1>Dashboard</h1>
-            <p>Visão geral para decidir rápido, acompanhar tarefas e evitar pendências esquecidas.</p>
+            <p class="tag">HUMIAT</p>
+            <h1>Vendas e manutenção</h1>
+            <p>Um fluxo simples: cliente, equipamento, orçamento, pagamento e retirada.</p>
         </div>
-
-        <div class="humiat-top-actions">
-            <form method="get" action="/organiza" class="responsavel-switch">
-                <label>Responsável</label>
-                <select name="responsavel" onchange="this.form.submit()">
-                    {% for nome in responsaveis %}
-                    <option value="{{ nome }}" {% if nome == responsavel_painel %}selected{% endif %}>{{ nome }}</option>
-                    {% endfor %}
-                </select>
-            </form>
-            <a class="btn-premium ghost" href="/organiza/chamados">🔔 {{ total_chamados }} chamados</a>
-            <a class="btn-premium" href="/organiza/tarefas/nova">＋ Nova tarefa</a>
+        <div class="dash-actions">
+            <a class="btn-secondary" href="/organiza/vendas/nova">＋ Nova venda</a>
+            <a class="btn-new" href="/organiza/os/nova">＋ Nova manutenção</a>
         </div>
     </header>
 
-    <section class="kpi-grid">
-        <a class="kpi-card azul" href="/organiza/detalhes/status/Pendente?responsavel={{ responsavel_painel }}">
-            <div class="kpi-icon">☑</div>
-            <div>
-                <span>Tarefas pendentes</span>
-                <strong>{{ total_pendente }}</strong>
-                <small>Para {{ responsavel_painel }}</small>
-            </div>
-        </a>
-
-        <a class="kpi-card amarelo" href="/organiza/detalhes/status/Aguardando Cliente?responsavel={{ responsavel_painel }}">
-            <div class="kpi-icon">👥</div>
-            <div>
-                <span>Aguardando cliente</span>
-                <strong>{{ total_cliente }}</strong>
-                <small>Orçamento, resposta ou retirada</small>
-            </div>
-        </a>
-
-        <a class="kpi-card verde" href="/organiza/agenda/nova">
-            <div class="kpi-icon">📅</div>
-            <div>
-                <span>Agenda aberta</span>
-                <strong>{{ total_agenda }}</strong>
-                <small>Compromissos futuros</small>
-            </div>
-        </a>
-
-        <a class="kpi-card vermelho" href="/organiza/chamados">
-            <div class="kpi-icon">⚠</div>
-            <div>
-                <span>Alertas críticos</span>
-                <strong>{{ total_atrasados }}</strong>
-                <small>Chamados atrasados</small>
-            </div>
-        </a>
+    <section class="simple-kpis">
+        <a href="/organiza/os" class="simple-kpi"><span>🔧</span><div><small>Manutenções abertas</small><strong>{{ manutencoes_abertas_total }}</strong></div></a>
+        <a href="/organiza/os" class="simple-kpi"><span>📄</span><div><small>Aguardando aprovação</small><strong>{{ aguardando_aprovacao_total }}</strong></div></a>
+        <a href="/organiza/os" class="simple-kpi"><span>✅</span><div><small>Prontos para retirada</small><strong>{{ equipamentos_prontos_total }}</strong></div></a>
+        <a href="/organiza/clientes" class="simple-kpi"><span>👥</span><div><small>Clientes / equipamentos</small><strong>{{ clientes_total }} / {{ equipamentos_total }}</strong></div></a>
     </section>
 
-    <section class="dashboard-main-grid">
-        <article class="glass-card chart-card">
-            <div class="card-head">
-                <div>
-                    <h2>Tarefas por status</h2>
-                    <p>Onde o trabalho está parado agora.</p>
-                </div>
-                <a href="/organiza/detalhes/responsavel/{{ responsavel_painel }}">Ver tarefas</a>
-            </div>
-
-            <div class="status-bars">
-                {% for status, total in resumo.items() %}
-                {% set largura = ((total / maior_status) * 100)|round(0, 'floor') if maior_status else 0 %}
-                <a href="/organiza/detalhes/status/{{ status }}?responsavel={{ responsavel_painel }}" class="bar-line">
-                    <span>{{ status }}</span>
-                    <div class="bar-track"><i style="width: {{ largura }}%"></i></div>
-                    <strong>{{ total }}</strong>
+    <section class="home-grid">
+        <article class="panel-card home-main-card">
+            <div class="card-head"><div><h2>Manutenções recentes</h2><p>Abra a manutenção e resolva tudo na mesma tela.</p></div><a href="/organiza/os">Ver todas</a></div>
+            <div class="cards-lista-os compacta">
+                {% for m in manutencoes %}
+                <a class="card-os" href="/organiza/os/{{ m.id }}">
+                    <div><small>#{{ m.id }} · {{ m.data_entrada|data_br }}</small><h3>{{ m.nome_cliente }}</h3><p>{{ m.equipamento_obj.tipo if m.equipamento_obj else m.equipamento }} {{ m.equipamento_obj.modelo if m.equipamento_obj else '' }}</p></div>
+                    <span class="status-pill">{{ m.status }}</span>
                 </a>
-                {% endfor %}
+                {% else %}<div class="empty-state"><strong>Nenhuma manutenção</strong><p>Cadastre a primeira manutenção para iniciar o fluxo.</p></div>{% endfor %}
             </div>
         </article>
 
-        <article class="glass-card donut-card">
-            <div class="card-head">
-                <div>
-                    <h2>Chamados por setor</h2>
-                    <p>Compras, financeiro, cliente e externo.</p>
+        <aside class="home-side">
+            <article class="panel-card">
+                <div class="card-head"><div><h2>Próximas retiradas</h2><p>Agenda operacional.</p></div><a href="/organiza/agenda/nova">Abrir</a></div>
+                <div class="compact-list">
+                    {% for evento in agenda_eventos %}
+                    <article class="compact-item"><div><strong>{{ evento.titulo }}</strong><small>{{ evento.data_evento|data_br }} · {{ evento.hora_evento or '--:--' }}</small></div></article>
+                    {% else %}<p class="empty dark">Nenhuma retirada agendada.</p>{% endfor %}
                 </div>
-                <a href="/organiza/chamados">Abrir chamados</a>
-            </div>
+            </article>
 
-            <div class="donut-layout">
-                <div class="donut-fake">
-                    <strong>{{ total_chamados }}</strong>
-                    <span>Total</span>
+            <article class="panel-card quick-simple">
+                <div class="card-head"><div><h2>Ações rápidas</h2></div></div>
+                <div class="quick-grid-simple">
+                    <a href="/organiza/os/nova">🔧 Nova manutenção</a>
+                    <a href="/organiza/vendas/nova">🧾 Nova venda</a>
+                    <a href="/organiza/clientes/novo">👤 Novo cliente</a>
+                    <a href="/organiza/produtos-servicos">🧰 Tabela de itens</a>
                 </div>
-                <div class="legend-list">
-                    {% for dep, total in resumo_chamados.items() %}
-                    {% set largura = ((total / maior_chamado) * 100)|round(0, 'floor') if maior_chamado else 0 %}
-                    <a href="/organiza/chamados" class="legend-row">
-                        <span class="dot"></span>
-                        <b>{{ dep }}</b>
-                        <em>{{ total }}</em>
-                        <i style="width: {{ largura }}%"></i>
-                    </a>
-                    {% endfor %}
-                </div>
-            </div>
-        </article>
+            </article>
+        </aside>
     </section>
 
-    <section class="dashboard-secondary-grid">
-        <article class="glass-card">
-            <div class="card-head">
-                <div>
-                    <h2>Equipe</h2>
-                    <p>Carga de tarefas de hoje por pessoa.</p>
-                </div>
-                <a href="/organiza/projetos">Projetos</a>
-            </div>
-
-            <div class="people-bars">
-                {% for nome, total in por_responsavel.items() %}
-                {% set largura = ((total / maior_responsavel) * 100)|round(0, 'floor') if maior_responsavel else 0 %}
-                <a href="/organiza?responsavel={{ nome }}" class="person-row {% if nome == responsavel_painel %}ativo{% endif %}">
-                    <div class="avatar mini">{{ nome[:1] }}</div>
-                    <span>{{ nome }}</span>
-                    <div class="bar-track"><i style="width: {{ largura }}%"></i></div>
-                    <strong>{{ total }}</strong>
-                </a>
-                {% endfor %}
-            </div>
-        </article>
-
-        <article class="glass-card">
-            <div class="card-head">
-                <div>
-                    <h2>Agenda</h2>
-                    <p>Próximos compromissos.</p>
-                </div>
-                <a href="/organiza/agenda/nova">Novo</a>
-            </div>
-
-            <div class="compact-list">
-                {% for evento in agenda_eventos[:5] %}
-                <article class="compact-item">
-                    <div>
-                        <strong>{{ evento.titulo }}</strong>
-                        <small>{{ evento.data_evento|data_br }} · {{ evento.hora_evento or '--:--' }}</small>
-                    </div>
-                    <form method="post" action="/organiza/agenda/{{ evento.id }}/concluir">
-                        <button type="submit">Concluir</button>
-                    </form>
-                </article>
-                {% else %}
-                <p class="empty dark">Nenhum compromisso aberto.</p>
-                {% endfor %}
-            </div>
-        </article>
-
-        <article class="glass-card">
-            <div class="card-head">
-                <div>
-                    <h2>Ações rápidas</h2>
-                    <p>Atalhos para alimentar o sistema.</p>
-                </div>
-            </div>
-
-            <div class="quick-grid">
-                <a href="/organiza/tarefas/nova">＋ Tarefa</a>
-                <a href="/organiza/clientes/novo">👥 Cliente</a>
-                <a href="/organiza/manutencoes/nova">🛠 Manutenção</a>
-                <a href="/organiza/compras/nova">🛒 Compra</a>
-                <a href="/organiza/financeiro/nova">💰 Financeiro</a>
-                <a href="/organiza/chamados">🔔 Chamados</a>
-            </div>
-        </article>
-    </section>
-
-    <section class="glass-card tarefas-operacao">
-        <div class="card-head">
-            <div>
-                <h2>Fila operacional de {{ responsavel_painel }}</h2>
-                <p>Tarefas pendentes aparecem primeiro para facilitar a execução.</p>
-            </div>
-            <a href="/organiza/tarefas/nova">Cadastrar tarefa</a>
+    <article class="panel-card vendas-resumo">
+        <div class="card-head"><div><h2>Vendas recentes</h2><p>Venda concluída gera o equipamento dentro do cliente.</p></div><a href="/organiza/vendas">Ver vendas</a></div>
+        <div class="simple-table">
+            {% for venda in vendas %}
+            <a href="/organiza/vendas/{{ venda.id }}"><strong>#{{ venda.id }} · {{ venda.cliente.nome }}</strong><span>{{ venda.equipamento_tipo }} {{ venda.equipamento_modelo or '' }}</span><em>{{ venda.status }}</em></a>
+            {% else %}<p class="empty dark">Nenhuma venda cadastrada.</p>{% endfor %}
         </div>
-
-        <div class="task-table">
-            <div class="task-row header">
-                <span>Tarefa</span>
-                <span>Cliente</span>
-                <span>Projeto</span>
-                <span>Status</span>
-                <span>Ação</span>
-            </div>
-            {% for tarefa in tarefas_do_responsavel[:10] %}
-            <div class="task-row">
-                <strong>{{ tarefa.descricao }}</strong>
-                <span>{{ tarefa.cliente.nome if tarefa.cliente else '-' }}</span>
-                <span>{{ tarefa.projeto.nome if tarefa.projeto else '-' }}</span>
-                <em class="status-chip">{{ tarefa.status }}</em>
-                <a href="/organiza/tarefas/{{ tarefa.id }}/editar">Abrir</a>
-            </div>
-            {% else %}
-            <p class="empty dark">Nenhuma tarefa para este responsável.</p>
-            {% endfor %}
-        </div>
-    </section>
+    </article>
 </section>
-
 {% endblock %}

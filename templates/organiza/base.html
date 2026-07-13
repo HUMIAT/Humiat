@@ -3,29 +3,29 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>{{ titulo or "Organiza | HUMIAT" }}</title>
+    <title>{{ titulo or "HUMIAT" }}</title>
     <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml"/>
     <link rel="stylesheet" href="/static/css/estilo.css"/>
     <link rel="stylesheet" href="/static/css/organiza.css"/>
 </head>
 <body class="organiza-corpo">
-
 {% if usuario %}
-<div class="app-shell">
+{% set rota = request.url.path %}
+<div class="app-shell humiat-simples">
     <aside class="app-sidebar">
         <a class="side-logo" href="/organiza">
-            <span class="logo-check">✓</span>
-            <strong>ORGANIZA</strong>
+            <span class="logo-check">H</span>
+            <div><strong>HUMIAT</strong><small>Vendas e manutenção</small></div>
         </a>
 
         <nav class="side-nav side-nav-simples">
-            <a href="/organiza"><span>⌂</span> Início</a>
-            <a class="menu-principal" href="/organiza/os/nova"><span>＋</span> Nova manutenção</a>
-            <a href="/organiza/os"><span>🔧</span> Manutenções</a>
-            <a href="/organiza/vendas"><span>🧾</span> Vendas</a>
-            <a href="/organiza/clientes"><span>👥</span> Clientes</a>
-            <a href="/organiza/produtos-servicos"><span>🧰</span> Itens</a>
-            <a href="/organiza/agenda/nova"><span>📅</span> Agenda</a>
+            <a class="{% if rota == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Início</a>
+            <a class="menu-principal {% if rota == '/organiza/os/nova' %}ativo{% endif %}" href="/organiza/os/nova"><span>＋</span> Nova manutenção</a>
+            <a class="{% if rota.startswith('/organiza/os') and rota != '/organiza/os/nova' %}ativo{% endif %}" href="/organiza/os"><span>🔧</span> Manutenções</a>
+            <a class="{% if rota.startswith('/organiza/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span>🧾</span> Vendas</a>
+            <a class="{% if rota.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>
+            <a class="{% if rota.startswith('/organiza/produtos-servicos') %}ativo{% endif %}" href="/organiza/produtos-servicos"><span>🧰</span> Itens</a>
+            <a class="{% if rota.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda/nova"><span>📅</span> Agenda</a>
         </nav>
 
         <div class="side-bottom">
@@ -35,24 +35,13 @@
             <a href="/area-restrita/sair"><span>⇥</span> Sair</a>
             <div class="side-user">
                 <div class="avatar">{{ usuario.nome[:1] }}</div>
-                <div>
-                    <strong>{{ usuario.nome }}</strong>
-                    <small>{{ usuario.cargo or ("Admin" if usuario.is_admin else "Equipe") }}</small>
-                </div>
+                <div><strong>{{ usuario.nome }}</strong><small>{{ usuario.cargo or ("Admin" if usuario.is_admin else "Equipe") }}</small></div>
             </div>
         </div>
     </aside>
 
-    <main class="app-main">
-{% else %}
-    <main class="organiza-container">
-{% endif %}
+    <main class="app-main">{% block conteudo %}{% endblock %}</main>
 
-        {% block conteudo %}{% endblock %}
-
-    </main>
-
-{% if usuario %}
     <nav class="mobile-nav">
         <a href="/organiza"><span>⌂</span><small>Início</small></a>
         <a href="/organiza/os"><span>🔧</span><small>Manutenções</small></a>
@@ -61,30 +50,20 @@
         <a href="/organiza/clientes"><span>👥</span><small>Clientes</small></a>
     </nav>
 </div>
+{% else %}
+<main class="organiza-container">{% block conteudo_publico %}{% block conteudo %}{% endblock %}{% endblock %}</main>
 {% endif %}
-
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
     const ehEdicao = window.location.pathname.includes("/editar");
     if (!ehEdicao) return;
-
     document.querySelectorAll("form").forEach(function (form) {
         if (form.dataset.naoBloquear === "1") return;
-
         const submitButtons = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
         const campos = form.querySelectorAll("input:not([type='hidden']), select, textarea");
-
-        campos.forEach(function (campo) {
-            campo.dataset.bloqueadoInicial = "1";
-            campo.disabled = true;
-        });
-
-        submitButtons.forEach(function (botao) {
-            botao.dataset.displayOriginal = botao.style.display || "";
-            botao.style.display = "none";
-        });
-
+        campos.forEach(campo => campo.disabled = true);
+        submitButtons.forEach(botao => { botao.dataset.displayOriginal = botao.style.display || ""; botao.style.display = "none"; });
         const acoes = form.querySelector(".form-actions, .acoes-linha") || form;
         if (!form.querySelector(".botao-editar-campos")) {
             const editar = document.createElement("button");
@@ -92,12 +71,8 @@ document.addEventListener("DOMContentLoaded", function () {
             editar.className = "botao btn-secondary botao-editar-campos";
             editar.textContent = "Editar";
             editar.addEventListener("click", function () {
-                campos.forEach(function (campo) {
-                    campo.disabled = false;
-                });
-                submitButtons.forEach(function (botao) {
-                    botao.style.display = botao.dataset.displayOriginal;
-                });
+                campos.forEach(campo => campo.disabled = false);
+                submitButtons.forEach(botao => botao.style.display = botao.dataset.displayOriginal);
                 editar.style.display = "none";
             });
             acoes.insertBefore(editar, acoes.firstChild);
@@ -105,6 +80,5 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 });
 </script>
-
 </body>
 </html>

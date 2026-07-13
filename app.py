@@ -898,8 +898,8 @@ def iniciar_banco():
             novas_os = {
                 "equipamento_id": "INTEGER",
                 "prazo_texto": "VARCHAR(120)",
-                "pronto_em": "DATETIME",
-                "retirada_agendada_em": "DATETIME",
+                "pronto_em": "TIMESTAMP",
+                "retirada_agendada_em": "TIMESTAMP",
             }
             for coluna, tipo_sql in novas_os.items():
                 if coluna not in colunas_manutencoes:
@@ -1019,60 +1019,36 @@ def acesso_negado(request: Request, usuario: Usuario = Depends(usuario_logado)):
 
 
 @app.get("/organiza", response_class=HTMLResponse)
-def painel(request: Request, responsavel: Optional[str] = None, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    return RedirectResponse("/organiza/os", status_code=303)
-    tarefas = db.query(Tarefa).order_by(Tarefa.ordem.asc(), Tarefa.criado_em.asc(), Tarefa.id.asc()).all()
-    lista_responsaveis = responsaveis_db(db)
-    responsavel_painel = responsavel if responsavel in lista_responsaveis else usuario.nome
+def painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    manutencoes = db.query(Manutencao).order_by(Manutencao.criado_em.desc()).all()
+    vendas = db.query(Venda).order_by(Venda.criado_em.desc()).all()
+    clientes_total = db.query(Cliente).count()
+    equipamentos_total = db.query(Equipamento).count()
 
-    tarefas_do_responsavel = [t for t in tarefas if t.responsavel == responsavel_painel and tarefa_aparece_hoje(t)]
-    tarefas_hoje_usuario = [t for t in tarefas_do_responsavel if t.status == "Pendente"]
-    tarefas_canceladas = [t for t in tarefas_do_responsavel if t.status == "Cancelado"]
-    aguardando_cliente = [t for t in tarefas_do_responsavel if t.status == "Aguardando Cliente"]
-    aguardando_compras = [t for t in tarefas_do_responsavel if t.status == "Compras"]
-    aguardando_financeiro = [t for t in tarefas_do_responsavel if t.status == "Financeiro"]
-    aguardando_externo = [t for t in tarefas_do_responsavel if t.status == "Externo"]
-
-    deps_usuario = departamentos_usuario(usuario)
-    chamados_query = db.query(Chamado).filter(Chamado.status != "Concluído")
-    if not usuario.is_admin:
-        if deps_usuario:
-            chamados_query = chamados_query.filter(Chamado.departamento.in_(deps_usuario))
-        else:
-            chamados_query = chamados_query.filter(Chamado.id == -1)
-    chamados_visiveis = chamados_query.order_by(Chamado.criado_em.desc()).all()
-
-    hoje = date.today()
-    chamados_atrasados = [
-        c for c in chamados_visiveis
-        if (c.departamento == "Compras" and c.previsao_entrega and c.previsao_entrega < hoje and not c.data_recebimento)
-        or (c.departamento == "Externo" and c.data_devolucao and c.data_devolucao < hoje)
-    ]
-
-    resumo = {status: len([t for t in tarefas if t.responsavel == responsavel_painel and t.status == status]) for status in STATUS_VALIDOS}
-    resumo_chamados = {dep: len([c for c in chamados_visiveis if c.departamento == dep]) for dep in DEPARTAMENTOS_CHAMADO}
-    por_responsavel = {nome: len([t for t in tarefas if t.responsavel == nome and tarefa_aparece_hoje(t)]) for nome in lista_responsaveis}
-    projetos = db.query(Projeto).order_by(Projeto.criado_em.desc()).all()
-    percentuais = {p.id: calcular_percentual_projeto(p) for p in projetos}
+    status_abertos = {"Recebida", "Rascunho", "Orçamento", "Orçamento enviado", "Aguardando aprovação", "Aprovado", "Em manutenção", "Pronto"}
+    manutencoes_abertas = [m for m in manutencoes if (m.status or "") not in {"Entregue", "Cancelada", "Finalizada"}]
+    aguardando_aprovacao = [m for m in manutencoes_abertas if "aprova" in (m.status or "").lower() or "orçamento" in (m.status or "").lower()]
+    equipamentos_prontos = [m for m in manutencoes_abertas if m.pronto_em or (m.status or "").lower() in {"pronto", "aguardando cliente buscar"}]
 
     agenda_eventos = (
         db.query(AgendaEvento)
         .filter(AgendaEvento.concluido == 0)
         .order_by(AgendaEvento.data_evento.asc(), AgendaEvento.hora_evento.asc(), AgendaEvento.id.asc())
-        .limit(20)
+        .limit(8)
         .all()
     )
 
     return templates.TemplateResponse("organiza/painel.html", {
-        "request": request, "usuario": usuario, "responsavel_painel": responsavel_painel,
-        "tarefas_hoje_usuario": tarefas_hoje_usuario, "tarefas_canceladas": tarefas_canceladas, "tarefas_do_responsavel": tarefas_do_responsavel,
-        "aguardando_cliente": aguardando_cliente, "aguardando_compras": aguardando_compras,
-        "aguardando_financeiro": aguardando_financeiro, "aguardando_externo": aguardando_externo,
-        "chamados_visiveis": chamados_visiveis, "chamados_atrasados": chamados_atrasados,
-        "resumo_chamados": resumo_chamados, "departamentos_usuario": deps_usuario,
-        "resumo": resumo, "por_responsavel": por_responsavel, "projetos": projetos, "percentuais": percentuais,
-        "agenda_eventos": agenda_eventos, "hoje": date.today(),
-        "status_validos": STATUS_VALIDOS, "responsaveis": lista_responsaveis, "agora": data_hora_atual(),
+        "request": request,
+        "usuario": usuario,
+        "manutencoes": manutencoes[:8],
+        "vendas": vendas[:6],
+        "clientes_total": clientes_total,
+        "equipamentos_total": equipamentos_total,
+        "manutencoes_abertas_total": len(manutencoes_abertas),
+        "aguardando_aprovacao_total": len(aguardando_aprovacao),
+        "equipamentos_prontos_total": len(equipamentos_prontos),
+        "agenda_eventos": agenda_eventos,
     })
 
 @app.get("/organiza/detalhes/{tipo}/{valor}", response_class=HTMLResponse)
