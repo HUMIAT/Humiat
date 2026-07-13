@@ -24,8 +24,11 @@
         <label>Categoria
           <input name="categoria" placeholder="Peça, Serviço, Atualização...">
         </label>
-        <label>Valor padrão
-          <input name="valor_padrao" placeholder="120,00">
+        <label>Preço de custo
+          <input name="preco_custo" placeholder="80,00" inputmode="decimal">
+        </label>
+        <label>Preço normal
+          <input name="preco_normal" placeholder="120,00" inputmode="decimal">
         </label>
       </div>
       <label>Observação
@@ -39,16 +42,17 @@
     <div class="panel-title"><h2>Itens cadastrados</h2></div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Nome</th><th>Tipo</th><th>Categoria</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Nome</th><th>Tipo</th><th>Categoria</th><th>Custo</th><th>Preço normal</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for grupo in itens|groupby('categoria', default='Sem categoria') %}
-          <tr class="linha-categoria"><td colspan="6"><strong>{{ grupo.grouper or 'Sem categoria' }}</strong></td></tr>
+          <tr class="linha-categoria"><td colspan="7"><strong>{{ grupo.grouper or 'Sem categoria' }}</strong></td></tr>
           {% for item in grupo.list %}
           <tr>
             <td><strong>{{ item.nome }}</strong>{% if item.observacao %}<br><small>{{ item.observacao }}</small>{% endif %}</td>
             <td>{{ item.tipo }}</td>
             <td>{{ item.categoria or '-' }}</td>
-            <td>{{ item.valor_padrao or '-' }}</td>
+            <td>{{ item.preco_custo or '-' }}</td>
+            <td>{{ item.preco_normal or item.valor_padrao or '-' }}</td>
             <td><span class="badge">{{ "Ativo" if item.ativo else "Inativo" }}</span></td>
             <td>
               <form method="post" action="/organiza/produtos-servicos/{{ item.id }}/alternar">
@@ -58,7 +62,7 @@
           </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="6">Nenhum produto ou serviço cadastrado.</td></tr>
+          <tr><td colspan="7">Nenhum produto ou serviço cadastrado.</td></tr>
         {% endfor %}
         </tbody>
       </table>

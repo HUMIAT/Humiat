@@ -2416,3 +2416,6 @@ img{max-width:100%;display:block}
   .envio-whatsapp-box{grid-template-columns:1fr}.envio-whatsapp-box small{grid-column:auto}.btn-whatsapp{width:100%}
 }
 .linha-categoria td{background:#eaf2ff!important;color:#1d4ed8!important;padding:9px 12px!important;border-top:1px solid #bfdbfe!important}
+
+.venda-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px}.venda-resumo>div{background:#fff;border:1px solid #e4e8ef;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:5px}.venda-resumo small{color:#657085}.venda-resumo strong{font-size:1.25rem}.alerta-sucesso{padding:14px 16px;border-radius:12px;background:#eaf8ef;border:1px solid #b9e4c7;font-weight:700}
+@media(max-width:700px){.venda-resumo{grid-template-columns:1fr}.data-table th:nth-child(4),.data-table td:nth-child(4){display:none}}

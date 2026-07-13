@@ -17,6 +17,12 @@
         <label>Modelo
             <input name="modelo" placeholder="Modelo do equipamento" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}">
         </label>
+        <label>Preço de custo
+            <input name="preco_custo" inputmode="decimal" value="{{ equipamento.preco_custo if equipamento and equipamento.preco_custo else '' }}">
+        </label>
+        <label>Preço de venda
+            <input name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}">
+        </label>
         <label>Pacote
             <input name="pacote" placeholder="Ex.: 2025.3" value="{{ equipamento.pacote if equipamento and equipamento.pacote else '' }}">
         </label>

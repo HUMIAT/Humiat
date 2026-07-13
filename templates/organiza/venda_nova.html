@@ -1,0 +1,9 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="dashboard"><header class="dash-header"><div><h1>Nova venda</h1><p>Selecione o cliente e identifique o equipamento que será criado.</p></div><a class="btn-secondary" href="/organiza/vendas">Voltar</a></header>
+<article class="form-card"><form method="post" class="formulario"><div class="form-grid">
+<label>Cliente<select name="cliente_id" required><option value="">Selecione</option>{% for c in clientes %}<option value="{{ c.id }}">{{ c.nome }} — {{ c.telefone|formatar_telefone }}</option>{% endfor %}</select></label>
+<label>Tipo do equipamento<input name="equipamento_tipo" required placeholder="Jukebox, Maleta, Fliperama..."></label>
+<label>Modelo<input name="equipamento_modelo" placeholder="Modelo ou descrição"></label>
+</div><label>Observação<textarea name="observacao"></textarea></label><button class="btn-new" type="submit">Criar venda e adicionar itens</button></form></article></section>
+{% endblock %}

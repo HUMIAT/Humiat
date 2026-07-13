@@ -93,6 +93,8 @@ class Equipamento(Base):
     falta_pacote = Column(Integer, nullable=True)
     plano = Column(String(60), nullable=True)
     valor = Column(String(30), nullable=True)
+    preco_custo = Column(String(40), nullable=True)
+    preco_venda = Column(String(40), nullable=True)
     pago = Column(String(30), nullable=True)
     falta = Column(String(30), nullable=True)
     data_compra = Column(Date, nullable=True)
@@ -387,9 +389,45 @@ class ProdutoServico(Base):
     categoria = Column(String(80), nullable=True)
     tipo = Column(String(30), nullable=False, default="Produto")  # Produto ou Serviço
     valor_padrao = Column(String(40), nullable=True)
+    preco_custo = Column(String(40), nullable=True)
+    preco_normal = Column(String(40), nullable=True)
     ativo = Column(Integer, nullable=False, default=1)
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
+
+
+class Venda(Base):
+    __tablename__ = "vendas"
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    equipamento_tipo = Column(String(80), nullable=False)
+    equipamento_modelo = Column(String(180), nullable=True)
+    status = Column(String(30), nullable=False, default="Em montagem")
+    total_custo = Column(String(40), nullable=True)
+    total_venda = Column(String(40), nullable=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    finalizado_em = Column(DateTime, nullable=True)
+    equipamento_id = Column(Integer, ForeignKey("equipamentos.id"), nullable=True)
+    cliente = relationship("Cliente")
+    equipamento_cadastrado = relationship("Equipamento")
+    itens = relationship("VendaItem", back_populates="venda", cascade="all, delete-orphan")
+
+
+class VendaItem(Base):
+    __tablename__ = "venda_itens"
+    id = Column(Integer, primary_key=True)
+    venda_id = Column(Integer, ForeignKey("vendas.id"), nullable=False)
+    produto_servico_id = Column(Integer, ForeignKey("produtos_servicos.id"), nullable=True)
+    nome = Column(String(140), nullable=False)
+    quantidade = Column(Integer, nullable=False, default=1)
+    preco_custo_unitario = Column(String(40), nullable=True)
+    preco_venda_unitario = Column(String(40), nullable=True)
+    total_custo = Column(String(40), nullable=True)
+    total_venda = Column(String(40), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    venda = relationship("Venda", back_populates="itens")
+    produto_servico = relationship("ProdutoServico")
 
 
 class ManutencaoItem(Base):
@@ -743,6 +781,18 @@ def iniciar_banco():
             for coluna, tipo_sql in novas_colunas.items():
                 if coluna not in colunas_usuarios:
                     conn.execute(text(f"ALTER TABLE usuarios ADD COLUMN {coluna} {tipo_sql}"))
+        if "equipamentos" in insp.get_table_names():
+            colunas_equipamentos = [c["name"] for c in insp.get_columns("equipamentos")]
+            if "preco_custo" not in colunas_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN preco_custo VARCHAR(40)"))
+            if "preco_venda" not in colunas_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN preco_venda VARCHAR(40)"))
+        if "produtos_servicos" in insp.get_table_names():
+            colunas_produtos = [c["name"] for c in insp.get_columns("produtos_servicos")]
+            if "preco_custo" not in colunas_produtos:
+                conn.execute(text("ALTER TABLE produtos_servicos ADD COLUMN preco_custo VARCHAR(40)"))
+            if "preco_normal" not in colunas_produtos:
+                conn.execute(text("ALTER TABLE produtos_servicos ADD COLUMN preco_normal VARCHAR(40)"))
         if "clientes" in insp.get_table_names():
             colunas_clientes = [c["name"] for c in insp.get_columns("clientes")]
             novas_colunas_clientes = {
@@ -1609,7 +1659,7 @@ def novo_equipamento(cliente_id: int, request: Request, usuario: Usuario = Depen
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/novo")
-def criar_equipamento(cliente_id: int, tipo: str = Form(""), modelo: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), valor: str = Form(""), pago: str = Form(""), falta: str = Form(""), data_compra: str = Form(""), previsao_entrega: str = Form(""), maquina: str = Form(""), rede_instalada: str = Form(""), anydesk: str = Form(""), status: str = Form("Ativo"), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def criar_equipamento(cliente_id: int, tipo: str = Form(""), modelo: str = Form(""), preco_custo: str = Form(""), preco_venda: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), valor: str = Form(""), pago: str = Form(""), falta: str = Form(""), data_compra: str = Form(""), previsao_entrega: str = Form(""), maquina: str = Form(""), rede_instalada: str = Form(""), anydesk: str = Form(""), status: str = Form("Ativo"), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404)
@@ -1619,7 +1669,7 @@ def criar_equipamento(cliente_id: int, tipo: str = Form(""), modelo: str = Form(
         except Exception:
             return None
     equipamento = Equipamento(
-        cliente_id=cliente.id, tipo=tipo.strip() or None, modelo=modelo.strip() or None,
+        cliente_id=cliente.id, tipo=tipo.strip() or None, modelo=modelo.strip() or None, preco_custo=_valor(preco_custo), preco_venda=_valor(preco_venda),
         pacote=pacote.strip() or None, falta_pacote=int(falta_pacote) if str(falta_pacote).strip().isdigit() else None,
         plano=plano.strip() or None, valor=valor.strip() or None, pago=pago.strip() or None, falta=falta.strip() or None,
         data_compra=parse_data(data_compra), previsao_entrega=parse_data(previsao_entrega),
@@ -1641,7 +1691,7 @@ def editar_equipamento(cliente_id: int, equipamento_id: int, request: Request, u
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar")
-def salvar_equipamento(cliente_id: int, equipamento_id: int, tipo: str = Form(""), modelo: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), valor: str = Form(""), pago: str = Form(""), falta: str = Form(""), data_compra: str = Form(""), previsao_entrega: str = Form(""), maquina: str = Form(""), rede_instalada: str = Form(""), anydesk: str = Form(""), status: str = Form("Ativo"), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def salvar_equipamento(cliente_id: int, equipamento_id: int, tipo: str = Form(""), modelo: str = Form(""), preco_custo: str = Form(""), preco_venda: str = Form(""), pacote: str = Form(""), falta_pacote: str = Form(""), plano: str = Form(""), valor: str = Form(""), pago: str = Form(""), falta: str = Form(""), data_compra: str = Form(""), previsao_entrega: str = Form(""), maquina: str = Form(""), rede_instalada: str = Form(""), anydesk: str = Form(""), status: str = Form("Ativo"), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     equipamento = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not cliente or not equipamento:
@@ -1653,6 +1703,8 @@ def salvar_equipamento(cliente_id: int, equipamento_id: int, tipo: str = Form(""
             return None
     equipamento.tipo = tipo.strip() or None
     equipamento.modelo = modelo.strip() or None
+    equipamento.preco_custo = _valor(preco_custo)
+    equipamento.preco_venda = _valor(preco_venda)
     equipamento.pacote = pacote.strip() or None
     equipamento.falta_pacote = int(falta_pacote) if str(falta_pacote).strip().isdigit() else None
     equipamento.plano = plano.strip() or None
@@ -1945,6 +1997,79 @@ def _criar_lancamento_banco(db: Session, conta: ContaFinanceira):
 
 
 
+def _recalcular_venda(venda: Venda):
+    custo = sum(_numero_decimal(i.total_custo) for i in venda.itens)
+    venda_total = sum(_numero_decimal(i.total_venda) for i in venda.itens)
+    venda.total_custo = _moeda_br(custo)
+    venda.total_venda = _moeda_br(venda_total)
+
+
+@app.get("/organiza/vendas", response_class=HTMLResponse)
+def vendas_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    vendas = db.query(Venda).order_by(Venda.criado_em.desc()).all()
+    return templates.TemplateResponse("organiza/vendas.html", {"request": request, "usuario": usuario, "vendas": vendas, "titulo": "Vendas | Organiza"})
+
+
+@app.get("/organiza/vendas/nova", response_class=HTMLResponse)
+def venda_nova(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
+    return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "titulo": "Nova venda | Organiza"})
+
+
+@app.post("/organiza/vendas/nova")
+def venda_criar(cliente_id: int = Form(...), equipamento_tipo: str = Form(...), equipamento_modelo: str = Form(""), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+    venda = Venda(cliente_id=cliente.id, equipamento_tipo=equipamento_tipo.strip(), equipamento_modelo=_valor(equipamento_modelo), observacao=_valor(observacao))
+    db.add(venda); db.commit(); db.refresh(venda)
+    return RedirectResponse(f"/organiza/vendas/{venda.id}", status_code=303)
+
+
+@app.get("/organiza/vendas/{venda_id}", response_class=HTMLResponse)
+def venda_detalhe(venda_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    venda = db.query(Venda).filter(Venda.id == venda_id).first()
+    if not venda: raise HTTPException(status_code=404)
+    produtos = db.query(ProdutoServico).filter(ProdutoServico.ativo == 1).order_by(ProdutoServico.categoria.asc(), ProdutoServico.nome.asc()).all()
+    return templates.TemplateResponse("organiza/venda_detalhe.html", {"request": request, "usuario": usuario, "venda": venda, "produtos": produtos, "titulo": "Venda | Organiza"})
+
+
+@app.post("/organiza/vendas/{venda_id}/itens")
+def venda_adicionar_item(venda_id: int, produto_id: int = Form(...), quantidade: int = Form(1), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    venda = db.query(Venda).filter(Venda.id == venda_id).first()
+    produto = db.query(ProdutoServico).filter(ProdutoServico.id == produto_id).first()
+    if not venda or not produto: raise HTTPException(status_code=404)
+    if venda.status == "Finalizada": raise HTTPException(status_code=400, detail="Venda já finalizada.")
+    qtd = max(1, quantidade)
+    custo = _numero_decimal(produto.preco_custo)
+    preco = _numero_decimal(produto.preco_normal or produto.valor_padrao)
+    db.add(VendaItem(venda_id=venda.id, produto_servico_id=produto.id, nome=produto.nome, quantidade=qtd, preco_custo_unitario=_moeda_br(custo), preco_venda_unitario=_moeda_br(preco), total_custo=_moeda_br(custo*qtd), total_venda=_moeda_br(preco*qtd)))
+    db.flush(); db.refresh(venda); _recalcular_venda(venda); db.commit()
+    return RedirectResponse(f"/organiza/vendas/{venda.id}", status_code=303)
+
+
+@app.post("/organiza/vendas/{venda_id}/itens/{item_id}/excluir")
+def venda_excluir_item(venda_id: int, item_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    venda = db.query(Venda).filter(Venda.id == venda_id).first()
+    item = db.query(VendaItem).filter(VendaItem.id == item_id, VendaItem.venda_id == venda_id).first()
+    if not venda or not item: raise HTTPException(status_code=404)
+    db.delete(item); db.flush(); db.refresh(venda); _recalcular_venda(venda); db.commit()
+    return RedirectResponse(f"/organiza/vendas/{venda.id}", status_code=303)
+
+
+@app.post("/organiza/vendas/{venda_id}/finalizar")
+def venda_finalizar(venda_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    venda = db.query(Venda).filter(Venda.id == venda_id).first()
+    if not venda: raise HTTPException(status_code=404)
+    if not venda.itens: raise HTTPException(status_code=400, detail="Adicione pelo menos um item.")
+    if venda.status != "Finalizada":
+        equipamento = Equipamento(cliente_id=venda.cliente_id, tipo=venda.equipamento_tipo, modelo=venda.equipamento_modelo, valor=venda.total_venda, preco_custo=venda.total_custo, preco_venda=venda.total_venda, data_compra=date.today(), status="Ativo", observacao=f"Gerado pela venda #{venda.id}. {venda.observacao or ''}".strip())
+        db.add(equipamento); db.flush()
+        venda.equipamento_id = equipamento.id; venda.status = "Finalizada"; venda.finalizado_em = datetime.now()
+        db.commit()
+    return RedirectResponse(f"/organiza/vendas/{venda.id}", status_code=303)
+
+
 @app.get("/organiza/produtos-servicos", response_class=HTMLResponse)
 def produtos_servicos(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_item")
@@ -1955,10 +2080,10 @@ def produtos_servicos(request: Request, usuario: Usuario = Depends(usuario_logad
 
 
 @app.post("/organiza/produtos-servicos/novo")
-def produto_servico_criar(nome: str = Form(...), categoria: str = Form(""), tipo: str = Form("Produto"), valor_padrao: str = Form(""), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def produto_servico_criar(nome: str = Form(...), categoria: str = Form(""), tipo: str = Form("Produto"), valor_padrao: str = Form(""), preco_custo: str = Form(""), preco_normal: str = Form(""), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_item")
     tipo_final = tipo if tipo in {"Produto", "Serviço"} else "Produto"
-    db.add(ProdutoServico(nome=nome.strip(), categoria=_valor(categoria), tipo=tipo_final, valor_padrao=_valor(valor_padrao), observacao=_valor(observacao), ativo=1))
+    db.add(ProdutoServico(nome=nome.strip(), categoria=_valor(categoria), tipo=tipo_final, valor_padrao=_valor(preco_normal or valor_padrao), preco_custo=_valor(preco_custo), preco_normal=_valor(preco_normal or valor_padrao), observacao=_valor(observacao), ativo=1))
     db.commit()
     return RedirectResponse("/organiza/produtos-servicos", status_code=303)
 
