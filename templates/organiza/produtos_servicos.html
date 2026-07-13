@@ -41,7 +41,9 @@
       <table class="data-table">
         <thead><tr><th>Nome</th><th>Tipo</th><th>Categoria</th><th>Valor</th><th>Status</th><th></th></tr></thead>
         <tbody>
-        {% for item in itens %}
+        {% for grupo in itens|groupby('categoria', default='Sem categoria') %}
+          <tr class="linha-categoria"><td colspan="6"><strong>{{ grupo.grouper or 'Sem categoria' }}</strong></td></tr>
+          {% for item in grupo.list %}
           <tr>
             <td><strong>{{ item.nome }}</strong>{% if item.observacao %}<br><small>{{ item.observacao }}</small>{% endif %}</td>
             <td>{{ item.tipo }}</td>
@@ -54,6 +56,7 @@
               </form>
             </td>
           </tr>
+          {% endfor %}
         {% else %}
           <tr><td colspan="6">Nenhum produto ou serviço cadastrado.</td></tr>
         {% endfor %}

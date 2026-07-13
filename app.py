@@ -405,6 +405,7 @@ class ManutencaoItem(Base):
     aprovado = Column(Integer, nullable=False, default=0)
     comprar = Column(Integer, nullable=False, default=0)
     externo = Column(Integer, nullable=False, default=0)
+    opcional = Column(Integer, nullable=False, default=0)
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
 
@@ -797,6 +798,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE manutencao_itens ADD COLUMN comprar INTEGER NOT NULL DEFAULT 0"))
             if "externo" not in colunas_itens_manutencao:
                 conn.execute(text("ALTER TABLE manutencao_itens ADD COLUMN externo INTEGER NOT NULL DEFAULT 0"))
+            if "opcional" not in colunas_itens_manutencao:
+                conn.execute(text("ALTER TABLE manutencao_itens ADD COLUMN opcional INTEGER NOT NULL DEFAULT 0"))
             conn.execute(text("UPDATE manutencao_itens SET aprovado = 0 WHERE aprovado IS NULL"))
     db = SessionLocal()
     try:
@@ -1945,7 +1948,7 @@ def _criar_lancamento_banco(db: Session, conta: ContaFinanceira):
 @app.get("/organiza/produtos-servicos", response_class=HTMLResponse)
 def produtos_servicos(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_permissao(usuario, "pode_cadastrar_item")
-    itens = db.query(ProdutoServico).order_by(ProdutoServico.ativo.desc(), ProdutoServico.nome.asc()).all()
+    itens = db.query(ProdutoServico).order_by(ProdutoServico.categoria.asc(), ProdutoServico.ativo.desc(), ProdutoServico.nome.asc()).all()
     return templates.TemplateResponse("organiza/produtos_servicos.html", {
         "request": request, "usuario": usuario, "itens": itens, "titulo": "Produtos e serviços | Organiza",
     })
@@ -1977,12 +1980,18 @@ def tarefa_manutencao(tarefa_id: int, request: Request, usuario: Usuario = Depen
         raise HTTPException(status_code=404)
     manutencao = obter_ou_criar_manutencao_da_tarefa(db, tarefa, usuario)
     db.commit()
-    produtos = db.query(ProdutoServico).filter(ProdutoServico.ativo == 1).order_by(ProdutoServico.nome.asc()).all()
+    produtos = db.query(ProdutoServico).filter(ProdutoServico.ativo == 1).order_by(ProdutoServico.categoria.asc(), ProdutoServico.nome.asc()).all()
     bancos = db.query(BancoConta).filter(BancoConta.ativo == 1).order_by(BancoConta.nome.asc()).all()
     historicos = db.query(Historico).filter(Historico.tarefa_id == tarefa.id).order_by(Historico.criado_em.desc()).all()
     orcamento_enviado = any(h.titulo in {"Orçamento enviado ao cliente", "Cliente aprovou o orçamento"} for h in historicos)
     mensagens = db.query(Mensagem).filter(Mensagem.tarefa_id == tarefa.id).order_by(Mensagem.criado_em.desc()).all()
     compras_vinculadas = db.query(Compra).filter(Compra.manutencao_id == manutencao.id).order_by(Compra.criado_em.desc()).all()
+    total_obrigatorios = sum(_numero_decimal(i.valor_total) for i in manutencao.itens if not i.opcional)
+    total_opcionais = sum(_numero_decimal(i.valor_total) for i in manutencao.itens if i.opcional)
+    telefone_digitos = "".join(c for c in (manutencao.telefone or "") if c.isdigit())
+    if len(telefone_digitos) == 13 and telefone_digitos.startswith("55"):
+        telefone_digitos = telefone_digitos[2:]
+    telefone_whatsapp_valido = len(telefone_digitos) == 11
     return templates.TemplateResponse("organiza/manutencao_tarefa.html", {
         "request": request,
         "usuario": usuario,
@@ -1996,6 +2005,10 @@ def tarefa_manutencao(tarefa_id: int, request: Request, usuario: Usuario = Depen
         "status_manutencao": STATUS_MANUTENCAO,
         "status_validos": STATUS_VALIDOS,
         "orcamento_enviado": orcamento_enviado,
+        "total_obrigatorios": _moeda_br(total_obrigatorios),
+        "total_opcionais": _moeda_br(total_opcionais),
+        "telefone_whatsapp": telefone_digitos,
+        "telefone_whatsapp_valido": telefone_whatsapp_valido,
         "titulo": "Manutenção da tarefa | Organiza", "hoje": date.today(), "hora_atual": datetime.now().strftime("%H:%M"),
         "copiar": request.query_params.get("copiar", ""),
     })
@@ -2026,7 +2039,7 @@ def tarefa_manutencao_salvar(tarefa_id: int, equipamento: str = Form(""), proble
 
 
 @app.post("/organiza/tarefas/{tarefa_id}/manutencao/itens")
-def tarefa_manutencao_adicionar_item(tarefa_id: int, produto_servico_id: str = Form(""), nome_manual: str = Form(""), quantidade: str = Form("1"), valor_unitario: str = Form(""), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def tarefa_manutencao_adicionar_item(tarefa_id: int, produto_servico_id: str = Form(""), nome_manual: str = Form(""), quantidade: str = Form("1"), valor_unitario: str = Form(""), opcional: str = Form(""), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     tarefa = db.query(Tarefa).filter(Tarefa.id == tarefa_id).first()
     if not tarefa:
         raise HTTPException(status_code=404)
@@ -2048,6 +2061,7 @@ def tarefa_manutencao_adicionar_item(tarefa_id: int, produto_servico_id: str = F
         quantidade=qtd,
         valor_unitario=valor,
         valor_total=total,
+        opcional=1 if opcional == "1" else 0,
         observacao=_valor(observacao),
     )
     db.add(item)
@@ -2073,6 +2087,7 @@ def tarefa_manutencao_adicionar_item_rapido(
     produto_servico_id: str = Form(""),
     quantidade: str = Form("1"),
     valor_unitario: str = Form(""),
+    opcional: str = Form(""),
     observacao: str = Form(""),
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db)
@@ -2107,6 +2122,7 @@ def tarefa_manutencao_adicionar_item_rapido(
         quantidade=qtd,
         valor_unitario=valor,
         valor_total=total,
+        opcional=1 if opcional == "1" else 0,
         observacao=_valor(observacao),
     )
     db.add(item)
@@ -2133,6 +2149,7 @@ def tarefa_manutencao_adicionar_item_rapido(
             "valor_unitario": item.valor_unitario or "",
             "valor_total": item.valor_total or "",
             "aprovado": item.aprovado or 0,
+            "opcional": item.opcional or 0,
         },
         "total_orcamento": manutencao.valor_orcamento or "0,00",
     }
@@ -2154,7 +2171,7 @@ def tarefa_manutencao_excluir_item(item_id: int, usuario: Usuario = Depends(usua
 
 
 @app.post("/organiza/manutencao/itens/{item_id}/atualizar")
-def tarefa_manutencao_atualizar_item(item_id: int, nome: str = Form(""), quantidade: str = Form("1"), valor_unitario: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def tarefa_manutencao_atualizar_item(item_id: int, nome: str = Form(""), quantidade: str = Form("1"), valor_unitario: str = Form(""), opcional: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     item = db.query(ManutencaoItem).filter(ManutencaoItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404)
@@ -2162,6 +2179,7 @@ def tarefa_manutencao_atualizar_item(item_id: int, nome: str = Form(""), quantid
     item.nome = nome.strip() or item.nome
     item.quantidade = _valor(quantidade) or "1"
     item.valor_unitario = _valor(valor_unitario)
+    item.opcional = 1 if opcional == "1" else 0
     item.valor_total = _moeda_br(_numero_decimal(item.quantidade) * _numero_decimal(item.valor_unitario)) if item.valor_unitario else ""
     _recalcular_orcamento_manutencao(item.manutencao)
     # Atualização de item não entra na timeline operacional da OS.

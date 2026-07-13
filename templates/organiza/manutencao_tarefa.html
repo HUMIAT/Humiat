@@ -19,7 +19,7 @@
     </div>
   </header>
 
-  <article class="form-card">
+  <article class="form-card orcamento-mobile">
     <h2>Itens do orçamento</h2>
     <p class="texto-suave">Inclua somente o que vai para o cliente. Depois selecione o item e execute a ação abaixo.</p>
 
@@ -28,8 +28,12 @@
         <label>Produto/serviço
           <select name="produto_servico_id" required>
             <option value="">Selecionar cadastrado...</option>
-            {% for p in produtos %}
-            <option value="{{ p.id }}">{{ p.nome }}{% if p.valor_padrao %} · R$ {{ p.valor_padrao }}{% endif %}</option>
+            {% for grupo in produtos|groupby('categoria', default='Sem categoria') %}
+            <optgroup label="{{ grupo.grouper or 'Sem categoria' }}">
+              {% for p in grupo.list %}
+              <option value="{{ p.id }}">{{ p.nome }}{% if p.valor_padrao %} · R$ {{ p.valor_padrao }}{% endif %}</option>
+              {% endfor %}
+            </optgroup>
             {% endfor %}
           </select>
         </label>
@@ -39,7 +43,11 @@
         </label>
 
         <label>Valor
-          <input name="valor_unitario" placeholder="Ex.: 500,00">
+          <input name="valor_unitario" inputmode="decimal" placeholder="Ex.: 500,00">
+        </label>
+        <label class="opcional-check">
+          <input type="checkbox" name="opcional" value="1">
+          <span><strong>Item opcional</strong><small>Será mostrado separado no WhatsApp.</small></span>
         </label>
       </div>
 
@@ -49,13 +57,13 @@
     <div class="table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th style="width:58px">Selecionar</th><th style="width:120px">Status</th><th>Item</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th></tr>
+          <tr><th style="width:58px">Selecionar</th><th style="width:120px">Status</th><th>Item</th><th>Tipo</th><th>Qtd.</th><th>Valor unit.</th><th>Total</th></tr>
         </thead>
         <tbody id="tabela_itens_orcamento">
         {% for item in manutencao.itens %}
           <tr>
             <td>
-              <input class="selecionar-item" type="checkbox" name="item_ids" value="{{ item.id }}" data-nome="{{ item.nome }}" data-aprovado="{{ item.aprovado }}" data-qtd="{{ item.quantidade or '1' }}" data-valor="{{ item.valor_total or item.valor_unitario or '' }}" {% if tarefa.status == "Pendente" and orcamento_enviado and item.aprovado != 1 %}disabled title="Apenas itens aprovados podem seguir para Compras, Financeiro ou Externo"{% endif %}>
+              <input class="selecionar-item" type="checkbox" name="item_ids" value="{{ item.id }}" data-nome="{{ item.nome }}" data-aprovado="{{ item.aprovado }}" data-qtd="{{ item.quantidade or '1' }}" data-valor="{{ item.valor_total or item.valor_unitario or '' }}" data-opcional="{{ item.opcional or 0 }}" {% if tarefa.status == "Pendente" and orcamento_enviado and item.aprovado != 1 %}disabled title="Apenas itens aprovados podem seguir para Compras, Financeiro ou Externo"{% endif %}>
             </td>
             <td>
               <form method="post" action="/organiza/manutencao/itens/{{ item.id }}/marcar" style="display:inline">
@@ -76,20 +84,34 @@
                 <input class="campo-item" data-item="{{ item.id }}" name="nome" value="{{ item.nome }}">
               </form>
             </td>
+            <td>
+              <label class="switch-opcional">
+                <input type="checkbox" form="editar-item-{{ item.id }}" name="opcional" value="1" {% if item.opcional %}checked{% endif %}>
+                <span>{{ 'Opcional' if item.opcional else 'Obrigatório' }}</span>
+              </label>
+            </td>
             <td><input class="campo-item" data-item="{{ item.id }}" form="editar-item-{{ item.id }}" name="quantidade" value="{{ item.quantidade or '1' }}" style="max-width:70px"></td>
             <td><input class="campo-item" data-item="{{ item.id }}" form="editar-item-{{ item.id }}" name="valor_unitario" value="{{ item.valor_unitario or '' }}" style="max-width:110px"></td>
             <td>{% if item.valor_total %}R$ {{ item.valor_total }}{% else %}-{% endif %}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6">Nenhum item incluído ainda.</td></tr>
+          <tr><td colspan="7">Nenhum item incluído ainda.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
 
-    <div class="total-box">
-      <strong>Total do orçamento:</strong>
-      <span id="total_orcamento_valor">R$ {{ manutencao.valor_orcamento or '0,00' }}</span>
+    <div class="totais-orcamento">
+      <div><small>Obrigatórios</small><strong id="total_obrigatorios_valor">R$ {{ total_obrigatorios }}</strong></div>
+      <div><small>Opcionais</small><strong id="total_opcionais_valor">R$ {{ total_opcionais }}</strong></div>
+      <div class="total-geral"><small>Total geral</small><strong id="total_orcamento_valor">R$ {{ manutencao.valor_orcamento or '0,00' }}</strong></div>
+    </div>
+    <div class="envio-whatsapp-box">
+      <label>Celular do cliente
+        <input id="telefone_whatsapp" value="{{ telefone_whatsapp }}" inputmode="numeric" maxlength="11" placeholder="DDD + número (11 dígitos)">
+      </label>
+      <button class="btn-whatsapp" type="button" onclick="enviarOrcamentoWhatsApp()">Enviar orçamento no WhatsApp</button>
+      <small id="telefone_aviso" class="{{ '' if telefone_whatsapp_valido else 'erro-telefone' }}">Use somente números: DDD + celular, total de 11 dígitos.</small>
     </div>
   </article>
 
@@ -232,9 +254,19 @@
 
 <textarea id="texto_orcamento" style="display:none">Olá {{ manutencao.nome_cliente }}, segue o orçamento da manutenção:
 
-{% for item in manutencao.itens %}- {{ item.quantidade or '1' }}x {{ item.nome }}{% if item.valor_total %}: R$ {{ item.valor_total }}{% elif item.valor_unitario %}: R$ {{ item.valor_unitario }}{% endif %}
-{% endfor %}
-Total: R$ {{ manutencao.valor_orcamento or '0,00' }}
+*ITENS OBRIGATÓRIOS*
+{% for item in manutencao.itens if not item.opcional %}• {{ item.quantidade or '1' }}x {{ item.nome }}{% if item.valor_total %}: R$ {{ item.valor_total }}{% elif item.valor_unitario %}: R$ {{ item.valor_unitario }}{% endif %}
+{% else %}Nenhum item obrigatório.
+{% endfor %}*Total obrigatórios: R$ {{ total_obrigatorios }}*
+
+*ITENS OPCIONAIS*
+{% for item in manutencao.itens if item.opcional %}• {{ item.quantidade or '1' }}x {{ item.nome }}{% if item.valor_total %}: R$ {{ item.valor_total }}{% elif item.valor_unitario %}: R$ {{ item.valor_unitario }}{% endif %}
+{% else %}Nenhum item opcional.
+{% endfor %}*Total opcionais: R$ {{ total_opcionais }}*
+
+*TOTAL GERAL: R$ {{ manutencao.valor_orcamento or '0,00' }}*
+
+Os itens opcionais não fazem parte do valor obrigatório e podem ser escolhidos pelo cliente.
 
 Qualquer dúvida estou à disposição.</textarea>
 
@@ -261,6 +293,32 @@ O equipamento já está disponível para retirada.</textarea>
 </template>
 
 <script>
+function somenteDigitos(valor){ return String(valor || "").replace(/\D/g, ""); }
+function validarTelefoneWhatsApp(){
+  const campo = document.getElementById("telefone_whatsapp");
+  const aviso = document.getElementById("telefone_aviso");
+  if(!campo) return false;
+  const numero = somenteDigitos(campo.value).slice(0, 11);
+  campo.value = numero;
+  const valido = numero.length === 11 && numero.charAt(2) === "9";
+  if(aviso){
+    aviso.classList.toggle("erro-telefone", !valido);
+    aviso.textContent = valido ? "Número válido para envio." : "Informe DDD + celular com 11 dígitos. O celular deve começar com 9.";
+  }
+  return valido;
+}
+function enviarOrcamentoWhatsApp(){
+  if(!validarTelefoneWhatsApp()){
+    alert("Informe um número de celular válido com 11 dígitos.");
+    document.getElementById("telefone_whatsapp")?.focus();
+    return;
+  }
+  const numero = somenteDigitos(document.getElementById("telefone_whatsapp").value);
+  const texto = document.getElementById("texto_orcamento")?.value || "";
+  window.open("https://wa.me/55" + numero + "?text=" + encodeURIComponent(texto), "_blank", "noopener");
+}
+document.addEventListener("input", function(e){ if(e.target?.id === "telefone_whatsapp") validarTelefoneWhatsApp(); });
+
 function copiarMensagemSistema(id, redirecionarPainel){
   const el = document.getElementById(id);
   if(!el) return;
@@ -453,6 +511,9 @@ function confirmarFinanceiroOrcamento(){
         return;
       }
 
+      window.location.reload();
+      return;
+
       const item = retorno.item;
       const linhaVazia = tabela.querySelector("tr td[colspan='6']");
       if(linhaVazia && linhaVazia.closest("tr")) linhaVazia.closest("tr").remove();
@@ -460,7 +521,7 @@ function confirmarFinanceiroOrcamento(){
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>
-          <input class="selecionar-item" type="checkbox" name="item_ids" value="${item.id}" data-nome="${escapeHtml(item.nome)}" data-aprovado="${item.aprovado || 0}" data-qtd="${escapeHtml(item.quantidade || '1')}" data-valor="${escapeHtml(item.valor_total || item.valor_unitario || '')}">
+          <input class="selecionar-item" type="checkbox" name="item_ids" value="${item.id}" data-nome="${escapeHtml(item.nome)}" data-aprovado="${item.aprovado || 0}" data-qtd="${escapeHtml(item.quantidade || '1')}" data-valor="${escapeHtml(item.valor_total || item.valor_unitario || '')}" data-opcional="${item.opcional || 0}">
         </td>
         <td>
           <form method="post" action="/organiza/manutencao/itens/${item.id}/marcar" style="display:inline">
@@ -473,6 +534,7 @@ function confirmarFinanceiroOrcamento(){
             <input class="campo-item" data-item="${item.id}" name="nome" value="${escapeHtml(item.nome)}">
           </form>
         </td>
+        <td><label class="switch-opcional"><input type="checkbox" form="editar-item-${item.id}" name="opcional" value="1" ${item.opcional ? 'checked' : ''}><span>${item.opcional ? 'Opcional' : 'Obrigatório'}</span></label></td>
         <td><input class="campo-item" data-item="${item.id}" form="editar-item-${item.id}" name="quantidade" value="${escapeHtml(item.quantidade || '1')}" style="max-width:70px"></td>
         <td><input class="campo-item" data-item="${item.id}" form="editar-item-${item.id}" name="valor_unitario" value="${escapeHtml(item.valor_unitario || '')}" style="max-width:110px"></td>
         <td>${item.valor_total ? "R$ " + escapeHtml(item.valor_total) : "-"}</td>
@@ -484,9 +546,11 @@ function confirmarFinanceiroOrcamento(){
       const qtd = form.querySelector("input[name='quantidade']");
       const valor = form.querySelector("input[name='valor_unitario']");
       const produto = form.querySelector("select[name='produto_servico_id']");
+      const opcional = form.querySelector("input[name='opcional']");
       if(qtd) qtd.value = "1";
       if(valor) valor.value = "";
       if(produto) produto.selectedIndex = 0;
+      if(opcional) opcional.checked = false;
 
       if(window.atualizarSelecaoOrcamento) window.atualizarSelecaoOrcamento();
     }catch(erro){

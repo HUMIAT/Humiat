@@ -2377,3 +2377,42 @@ img{max-width:100%;display:block}
 .ficha-publica-form .grupo-form h2{font-size:1.12rem;margin:0;color:#061a3b}
 .ficha-publica-form label input:disabled{background:#f1f5f9;color:#64748b}
 @media (max-width:700px){.ficha-publica-form{grid-template-columns:1fr}}
+
+/* Orçamento: categorias, opcionais e versão celular */
+.opcional-check{display:flex!important;align-items:center;gap:10px;min-height:44px;padding:8px 10px;border:1px solid #d8e2ef;border-radius:10px;background:#f8fafc}
+.opcional-check input{width:18px;height:18px;margin:0}
+.opcional-check span{display:flex;flex-direction:column;gap:2px}.opcional-check small{color:#64748b}
+.switch-opcional{display:inline-flex;align-items:center;gap:7px;font-size:.78rem;font-weight:700;white-space:nowrap}
+.switch-opcional input{width:17px;height:17px;margin:0}
+.totais-orcamento{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}
+.totais-orcamento>div{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #dbe4ef;border-radius:12px;background:#f8fafc}
+.totais-orcamento small{color:#64748b;font-weight:700}.totais-orcamento strong{font-size:1.05rem;color:#0f172a}
+.totais-orcamento .total-geral{background:#eff6ff;border-color:#93c5fd}.totais-orcamento .total-geral strong{color:#1d4ed8}
+.envio-whatsapp-box{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end;margin-top:14px;padding:14px;border:1px solid #bbf7d0;border-radius:12px;background:#f0fdf4}
+.envio-whatsapp-box label{display:flex;flex-direction:column;gap:6px;font-weight:700}.envio-whatsapp-box small{grid-column:1/-1;color:#15803d}
+.envio-whatsapp-box .erro-telefone{color:#b91c1c}
+.btn-whatsapp{border:0;border-radius:10px;padding:12px 16px;background:#16a34a;color:#fff;font-weight:800;cursor:pointer;min-height:44px}
+.btn-whatsapp:hover{background:#15803d}
+
+@media (max-width:700px){
+  .orcamento-mobile{padding:14px 10px!important}
+  .orcamento-mobile .form-grid{grid-template-columns:1fr 1fr!important;gap:9px}
+  .orcamento-mobile .form-grid label:first-child,.orcamento-mobile .opcional-check{grid-column:1/-1}
+  .orcamento-mobile .table-wrap{overflow:visible}
+  .orcamento-mobile .data-table,.orcamento-mobile .data-table tbody,.orcamento-mobile .data-table tr,.orcamento-mobile .data-table td{display:block;width:100%}
+  .orcamento-mobile .data-table thead{display:none}
+  .orcamento-mobile .data-table tr{position:relative;margin:12px 0;padding:12px;border:1px solid #dbe4ef;border-radius:12px;background:#fff;box-shadow:0 4px 12px rgba(15,23,42,.05)}
+  .orcamento-mobile .data-table td{border:0!important;padding:5px 0!important;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .orcamento-mobile .data-table td:nth-child(1){position:absolute;right:10px;top:10px;width:auto}
+  .orcamento-mobile .data-table td:nth-child(2){padding-right:42px!important;justify-content:flex-start}
+  .orcamento-mobile .data-table td:nth-child(3){padding-top:8px!important}
+  .orcamento-mobile .data-table td:nth-child(3):before{content:"Item";font-size:.75rem;color:#64748b;font-weight:700}
+  .orcamento-mobile .data-table td:nth-child(4):before{content:"Tipo";font-size:.75rem;color:#64748b;font-weight:700}
+  .orcamento-mobile .data-table td:nth-child(5):before{content:"Quantidade";font-size:.75rem;color:#64748b;font-weight:700}
+  .orcamento-mobile .data-table td:nth-child(6):before{content:"Valor unitário";font-size:.75rem;color:#64748b;font-weight:700}
+  .orcamento-mobile .data-table td:nth-child(7):before{content:"Total";font-size:.75rem;color:#64748b;font-weight:700}
+  .orcamento-mobile .campo-item{max-width:62%!important;text-align:right}
+  .totais-orcamento{grid-template-columns:1fr 1fr}.totais-orcamento .total-geral{grid-column:1/-1}
+  .envio-whatsapp-box{grid-template-columns:1fr}.envio-whatsapp-box small{grid-column:auto}.btn-whatsapp{width:100%}
+}
+.linha-categoria td{background:#eaf2ff!important;color:#1d4ed8!important;padding:9px 12px!important;border-top:1px solid #bfdbfe!important}
