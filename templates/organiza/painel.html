@@ -1,67 +1,19 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="dashboard humiat-home">
-    <header class="dash-header home-header">
-        <div>
-            <p class="tag">HUMIAT</p>
-            <h1>Vendas e manutenção</h1>
-            <p>Um fluxo simples: cliente, equipamento, orçamento, pagamento e retirada.</p>
-        </div>
-        <div class="dash-actions">
-            <a class="btn-secondary" href="/organiza/vendas/nova">＋ Nova venda</a>
-            <a class="btn-new" href="/organiza/os/nova">＋ Nova manutenção</a>
-        </div>
-    </header>
-
-    <section class="simple-kpis">
-        <a href="/organiza/os" class="simple-kpi"><span>🔧</span><div><small>Manutenções abertas</small><strong>{{ manutencoes_abertas_total }}</strong></div></a>
-        <a href="/organiza/os" class="simple-kpi"><span>📄</span><div><small>Aguardando aprovação</small><strong>{{ aguardando_aprovacao_total }}</strong></div></a>
-        <a href="/organiza/os" class="simple-kpi"><span>✅</span><div><small>Prontos para retirada</small><strong>{{ equipamentos_prontos_total }}</strong></div></a>
-        <a href="/organiza/clientes" class="simple-kpi"><span>👥</span><div><small>Clientes / equipamentos</small><strong>{{ clientes_total }} / {{ equipamentos_total }}</strong></div></a>
-    </section>
-
-    <section class="home-grid">
-        <article class="panel-card home-main-card">
-            <div class="card-head"><div><h2>Manutenções recentes</h2><p>Abra a manutenção e resolva tudo na mesma tela.</p></div><a href="/organiza/os">Ver todas</a></div>
-            <div class="cards-lista-os compacta">
-                {% for m in manutencoes %}
-                <a class="card-os" href="/organiza/os/{{ m.id }}">
-                    <div><small>#{{ m.id }} · {{ m.data_entrada|data_br }}</small><h3>{{ m.nome_cliente }}</h3><p>{{ m.equipamento_obj.tipo if m.equipamento_obj else m.equipamento }} {{ m.equipamento_obj.modelo if m.equipamento_obj else '' }}</p></div>
-                    <span class="status-pill">{{ m.status }}</span>
-                </a>
-                {% else %}<div class="empty-state"><strong>Nenhuma manutenção</strong><p>Cadastre a primeira manutenção para iniciar o fluxo.</p></div>{% endfor %}
-            </div>
-        </article>
-
-        <aside class="home-side">
-            <article class="panel-card">
-                <div class="card-head"><div><h2>Próximas retiradas</h2><p>Agenda operacional.</p></div><a href="/organiza/agenda/nova">Abrir</a></div>
-                <div class="compact-list">
-                    {% for evento in agenda_eventos %}
-                    <article class="compact-item"><div><strong>{{ evento.titulo }}</strong><small>{{ evento.data_evento|data_br }} · {{ evento.hora_evento or '--:--' }}</small></div></article>
-                    {% else %}<p class="empty dark">Nenhuma retirada agendada.</p>{% endfor %}
-                </div>
-            </article>
-
-            <article class="panel-card quick-simple">
-                <div class="card-head"><div><h2>Ações rápidas</h2></div></div>
-                <div class="quick-grid-simple">
-                    <a href="/organiza/os/nova">🔧 Nova manutenção</a>
-                    <a href="/organiza/vendas/nova">🧾 Nova venda</a>
-                    <a href="/organiza/clientes/novo">👤 Novo cliente</a>
-                    <a href="/organiza/produtos-servicos">🧰 Tabela de itens</a>
-                </div>
-            </article>
-        </aside>
-    </section>
-
-    <article class="panel-card vendas-resumo">
-        <div class="card-head"><div><h2>Vendas recentes</h2><p>Venda concluída gera o equipamento dentro do cliente.</p></div><a href="/organiza/vendas">Ver vendas</a></div>
-        <div class="simple-table">
-            {% for venda in vendas %}
-            <a href="/organiza/vendas/{{ venda.id }}"><strong>#{{ venda.id }} · {{ venda.cliente.nome }}</strong><span>{{ venda.equipamento_tipo }} {{ venda.equipamento_modelo or '' }}</span><em>{{ venda.status }}</em></a>
-            {% else %}<p class="empty dark">Nenhuma venda cadastrada.</p>{% endfor %}
-        </div>
-    </article>
+<section class="pagina-clean">
+  <div class="titulo-linha"><div><p class="tag">HUMIAT</p><h1>Visão geral</h1><p class="texto-suave">Base limpa para clientes e seus equipamentos.</p></div><a class="botao primario" href="/organiza/clientes/novo">+ Novo cliente</a></div>
+  <div class="grade-metricas clean-metricas">
+    <a class="cartao metrica" href="/organiza/clientes"><span>👥</span><div><small>Clientes</small><strong>{{ total_clientes }}</strong></div></a>
+    <article class="cartao metrica"><span>🎛️</span><div><small>Equipamentos</small><strong>{{ total_equipamentos }}</strong></div></article>
+    <article class="cartao metrica"><span>🔗</span><div><small>Clientes com equipamento</small><strong>{{ clientes_com_equipamento }}</strong></div></article>
+  </div>
+  <section class="cartao tabela-cartao">
+    <div class="titulo-linha compacto"><div><h2>Clientes recentes</h2><p class="texto-suave">Últimos cadastros realizados.</p></div><a class="botao" href="/organiza/clientes">Ver todos</a></div>
+    <div class="lista-cards-mobile">
+      {% for cliente in recentes %}
+      <a class="cliente-card-clean" href="/organiza/clientes/{{ cliente.id }}"><div><strong>{{ cliente.nome }}</strong><small>{{ cliente.telefone|telefone }}{% if cliente.municipio %} · {{ cliente.municipio }}{% endif %}</small></div><span>{{ cliente.equipamentos|length }} equip.</span></a>
+      {% else %}<p class="texto-suave vazio">Nenhum cliente cadastrado.</p>{% endfor %}
+    </div>
+  </section>
 </section>
 {% endblock %}

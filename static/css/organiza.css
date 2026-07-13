@@ -2428,3 +2428,38 @@ img{max-width:100%;display:block}
 .humiat-home{max-width:1500px;margin:0 auto}.home-header{align-items:flex-end}.simple-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:22px 0}.simple-kpi{display:flex;align-items:center;gap:14px;padding:20px;border:1px solid #243653;border-radius:18px;background:linear-gradient(145deg,#101d33,#0c1729);text-decoration:none;color:#fff;transition:.18s}.simple-kpi:hover{transform:translateY(-2px);border-color:#24bff0}.simple-kpi>span{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#172945;font-size:22px}.simple-kpi div{display:flex;flex-direction:column}.simple-kpi small{color:#91a8ca;font-size:12px}.simple-kpi strong{font-size:27px;margin-top:4px}.home-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(320px,.8fr);gap:16px}.home-side{display:grid;gap:16px;align-content:start}.home-main-card,.home-side .panel-card,.vendas-resumo{background:#0d182b;border-color:#223451}.cards-lista-os.compacta{gap:10px}.cards-lista-os.compacta .card-os{background:#101e34}.quick-grid-simple{display:grid;grid-template-columns:1fr 1fr;gap:10px}.quick-grid-simple a{padding:14px;border:1px solid #294264;border-radius:12px;background:#122440;color:#fff;text-decoration:none;font-weight:700;font-size:13px}.quick-grid-simple a:hover{border-color:#22c2ef}.simple-table{display:grid;gap:8px}.simple-table>a{display:grid;grid-template-columns:1.2fr 1fr auto;gap:15px;align-items:center;padding:13px 15px;border:1px solid #223653;border-radius:12px;color:#fff;text-decoration:none;background:#101e34}.simple-table span{color:#9eb1cd}.simple-table em{font-style:normal;color:#64d8a5;font-size:12px;font-weight:700}.empty-state{padding:32px;text-align:center;color:#91a8ca;border:1px dashed #2b405f;border-radius:15px}.empty-state strong{display:block;color:#fff;margin-bottom:5px}
 @media(max-width:1100px){.simple-kpis{grid-template-columns:repeat(2,1fr)}.home-grid{grid-template-columns:1fr}.home-side{grid-template-columns:1fr 1fr}.simple-table>a{grid-template-columns:1fr auto}.simple-table span{grid-column:1/-1}}
 @media(max-width:700px){.home-header{align-items:flex-start}.home-header .dash-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.simple-kpis{grid-template-columns:1fr 1fr;gap:9px}.simple-kpi{padding:14px;gap:9px}.simple-kpi>span{width:38px;height:38px;font-size:18px}.simple-kpi strong{font-size:21px}.home-side{grid-template-columns:1fr}.quick-grid-simple{grid-template-columns:1fr}.simple-table>a{grid-template-columns:1fr}.simple-table em{justify-self:start}}
+
+/* HUMIAT base limpa: clientes e equipamentos */
+.humiat-clean .app-main{max-width:1600px;width:100%;}
+.pagina-clean{display:grid;gap:18px;}
+.clean-metricas{grid-template-columns:repeat(3,minmax(0,1fr));}
+.clean-metricas.duas{grid-template-columns:repeat(2,minmax(0,1fr));max-width:760px;}
+.busca-clean{display:flex;gap:10px;margin-bottom:16px;}
+.busca-clean input{flex:1;min-width:0;}
+.lista-cards-mobile{display:grid;gap:10px;}
+.cliente-card-clean{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px 16px;border:1px solid rgba(148,163,184,.16);border-radius:14px;background:rgba(15,23,42,.45);color:inherit;text-decoration:none;}
+.cliente-card-clean:hover{border-color:rgba(56,189,248,.55);transform:translateY(-1px);}
+.cliente-card-clean div{display:grid;gap:4px;min-width:0;}
+.cliente-card-clean strong{font-size:1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cliente-card-clean small{color:#94a3b8;}
+.cliente-card-clean>span{white-space:nowrap;color:#7dd3fc;font-weight:700;}
+.cliente-card-acoes{display:grid;grid-template-columns:1fr auto;}
+.cliente-main{display:flex;align-items:center;justify-content:space-between;gap:12px;color:inherit;text-decoration:none;min-width:0;}
+.clean-form label small{display:block;margin-top:6px;color:#94a3b8;font-weight:400;}
+.alerta.erro{padding:12px 14px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#fecaca;margin-bottom:14px;}
+.login-clean{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top right,rgba(14,165,233,.14),transparent 35%),#07111f;}
+.login-clean>div,.login-clean>form{width:min(100%,420px);}
+.login-brand{display:flex;align-items:center;gap:12px;margin-bottom:16px;color:white;}
+.login-brand>span{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#38bdf8,#2563eb);font-weight:900;font-size:1.35rem;}
+.login-brand div{display:grid;}.login-brand small{color:#94a3b8;}
+.login-card{display:grid;gap:14px;}.login-card h1{margin:0 0 4px;}.login-card label{display:grid;gap:7px;font-weight:700;}
+.clean-ficha{grid-template-columns:minmax(0,2fr) minmax(220px,1fr);}
+.resumo-unico{display:grid;align-content:center;text-align:center;}.resumo-unico small{color:#94a3b8;}.resumo-unico strong{font-size:3rem;margin-top:8px;}
+.equip-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
+.equip-card{padding:16px;border:1px solid rgba(148,163,184,.16);border-radius:16px;background:rgba(15,23,42,.45);}
+.equip-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}.equip-head h3{margin:8px 0 2px;}.equip-head p{margin:0;color:#94a3b8;}
+.equip-card dl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:16px 0 0;}.equip-card dt{color:#94a3b8;}.equip-card dd{margin:0;text-align:right;font-weight:700;}
+.clean-mobile{grid-template-columns:1fr 74px 1fr;}
+.vazio{padding:20px;text-align:center;}
+@media(max-width:900px){.clean-metricas,.clean-metricas.duas,.clean-ficha,.equip-grid{grid-template-columns:1fr;}.busca-clean{flex-wrap:wrap}.busca-clean input{flex-basis:100%;}.acoes-titulo{display:flex;flex-wrap:wrap}.cliente-card-acoes{grid-template-columns:1fr}.cliente-card-acoes>.botao{width:100%;}.pagina-clean{padding-bottom:82px;}}
+@media(max-width:560px){.app-main{padding:16px 12px 96px!important}.titulo-linha{align-items:flex-start}.titulo-linha>.botao{width:100%}.clean-metricas{gap:10px}.cliente-main{align-items:flex-start;flex-direction:column}.cliente-main>span{font-size:.8rem}.equip-card dl{grid-template-columns:1fr}.equip-card dd{text-align:left;margin-bottom:5px}.login-clean{padding:16px}.formulario-grade{grid-template-columns:1fr!important}.campo-largo{grid-column:auto!important}}

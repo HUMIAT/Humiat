@@ -1,103 +1,23 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
+<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ 'Editar cliente' if cliente and cliente.id else 'Novo cliente' }}</h1><p class="texto-suave">Nome e WhatsApp são obrigatórios.</p></div><a class="botao" href="{{ '/organiza/clientes/' ~ cliente.id if cliente and cliente.id else '/organiza/clientes' }}">Voltar</a></div>
 <section class="cartao formulario-cartao">
-    <div class="titulo-linha">
-        <div>
-            <p class="tag">Cliente</p>
-            <h1>{{ "Editar cliente" if cliente else "Novo cliente" }}</h1>
-            <p class="texto-suave">Cadastro mestre. Equipamentos ficam vinculados dentro da ficha do cliente.</p>
-        </div>
-        <a class="botao" href="{{ voltar or '/organiza/clientes' }}">Voltar</a>
-    </div>
-
-    <form method="post" class="formulario formulario-grade ficha-publica-form">
-        <input type="hidden" name="voltar" value="{{ voltar or '/organiza/clientes' }}">
-
-        <div class="grupo-form campo-largo">
-            <h2>1. Dados do cliente</h2>
-        </div>
-
-        <label>Código WhatsApp
-            <input name="codigo_whatsapp" placeholder="Ex.: BR-001" value="{{ cliente|codigo_whatsapp if cliente else '' }}">
-        </label>
-
-        <label>Nome completo
-            <input name="nome" required placeholder="Ex.: João Silva" value="{{ cliente|nome_cliente_limpo if cliente else '' }}">
-        </label>
-
-        <label>Telefone / WhatsApp
-            <input name="telefone" required inputmode="numeric" placeholder="21999999999" value="{{ telefone or (cliente.telefone if cliente else '') }}">
-        </label>
-
-        <label>CPF/CNPJ
-            <input name="documento" placeholder="Opcional" value="{{ cliente.documento if cliente and cliente.documento else '' }}">
-        </label>
-
-        <label class="campo-largo">E-mail
-            <input type="email" name="email" placeholder="cliente@email.com" value="{{ cliente.email if cliente and cliente.email else '' }}">
-        </label>
-
-        <label class="campo-largo">Empresa
-            <input name="empresa" placeholder="Ex.: Karaokê RJ" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}">
-        </label>
-
-        <div class="grupo-form campo-largo">
-            <h2>2. Endereço</h2>
-        </div>
-
-        <label>CEP
-            <input name="cep" placeholder="Ex.: 22730-000" value="{{ cliente.cep if cliente and cliente.cep else '' }}">
-        </label>
-
-        <label>Município
-            <input name="municipio" placeholder="Ex.: Rio de Janeiro" value="{{ cliente.municipio if cliente and cliente.municipio else (cliente.cidade if cliente and cliente.cidade else '') }}">
-        </label>
-
-        <label>Estado
-            <input name="estado" placeholder="Ex.: RJ" value="{{ cliente.estado if cliente and cliente.estado else '' }}">
-        </label>
-
-        <label class="campo-largo">Rua / endereço
-            <input name="endereco" placeholder="Rua" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}">
-        </label>
-
-        <label>Número
-            <input name="endereco_numero" placeholder="Ex.: 3245" value="{{ cliente.endereco_numero if cliente and cliente.endereco_numero else '' }}">
-        </label>
-
-        <label>Complemento
-            <input name="complemento" placeholder="Casa, bloco, apto" value="{{ cliente.complemento if cliente and cliente.complemento else '' }}">
-        </label>
-
-        <label>Bairro
-            <input name="bairro" placeholder="Ex.: Taquara" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}">
-        </label>
-
-        <div class="grupo-form campo-largo">
-            <h2>3. Pacote / Plano</h2>
-        </div>
-
-        <label>Pacote atual
-            <input name="pacote" placeholder="Ex.: 2025.3" value="{{ cliente.pacote if cliente and cliente.pacote else '' }}">
-        </label>
-
-        <label>Falta pacote
-            <input name="falta_pacote" inputmode="numeric" placeholder="Ex.: 2" value="{{ cliente.falta_pacote if cliente and cliente.falta_pacote is not none else '' }}">
-        </label>
-
-        <label>Plano
-            <input name="plano" placeholder="Ex.: Básico" value="{{ cliente.plano if cliente and cliente.plano else '' }}">
-        </label>
-
-        <div class="grupo-form campo-largo">
-            <h2>4. Observações</h2>
-        </div>
-
-        <label class="campo-largo">Observação
-            <textarea name="observacao" placeholder="Detalhes do cliente">{{ cliente.observacao if cliente and cliente.observacao else '' }}</textarea>
-        </label>
-
-        <button class="botao primario botao-cheio campo-largo" type="submit">Salvar cliente</button>
-    </form>
-</section>
+{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+<form method="post" class="formulario formulario-grade clean-form">
+  <label class="campo-largo">Nome *<input name="nome" required value="{{ cliente.nome if cliente and cliente.nome else '' }}"></label>
+  <label>WhatsApp *<input name="telefone" inputmode="numeric" maxlength="15" required placeholder="21999999999" value="{{ cliente.telefone if cliente and cliente.telefone else '' }}"><small>11 dígitos com DDD.</small></label>
+  <label>Código WhatsApp<input name="codigo_whatsapp" value="{{ cliente.codigo_whatsapp if cliente and cliente.codigo_whatsapp else '' }}"></label>
+  <label>Empresa<input name="empresa" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}"></label>
+  <label>CPF/CNPJ<input name="documento" value="{{ cliente.documento if cliente and cliente.documento else '' }}"></label>
+  <label>E-mail<input type="email" name="email" value="{{ cliente.email if cliente and cliente.email else '' }}"></label>
+  <label>CEP<input name="cep" value="{{ cliente.cep if cliente and cliente.cep else '' }}"></label>
+  <label>Município<input name="municipio" value="{{ cliente.municipio or cliente.cidade if cliente else '' }}"></label>
+  <label>Estado<input name="estado" value="{{ cliente.estado if cliente and cliente.estado else '' }}"></label>
+  <label>Bairro<input name="bairro" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}"></label>
+  <label class="campo-largo">Endereço<input name="endereco" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}"></label>
+  <label>Número<input name="endereco_numero" value="{{ cliente.endereco_numero if cliente and cliente.endereco_numero else '' }}"></label>
+  <label>Complemento<input name="complemento" value="{{ cliente.complemento if cliente and cliente.complemento else '' }}"></label>
+  <label class="campo-largo">Observações<textarea name="observacao">{{ cliente.observacao if cliente and cliente.observacao else '' }}</textarea></label>
+  <button class="botao primario botao-cheio campo-largo" type="submit">Salvar cliente</button>
+</form></section></section>
 {% endblock %}

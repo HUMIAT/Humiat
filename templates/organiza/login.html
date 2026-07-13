@@ -1,22 +1,13 @@
 {% extends "organiza/base.html" %}
-{% block conteudo %}
-<section class="cartao login-cartao">
-    <p class="tag">Área Restrita</p>
-    <h1>Entrar no Organiza</h1>
-    <p class="texto-suave">Acesso interno para Junior, Debora e Luiz.</p>
-
-    {% if erro %}
-    <div class="alerta">{{ erro }}</div>
-    {% endif %}
-
-    <form method="post" class="formulario">
-        <label>Usuário
-            <input name="usuario" placeholder="Junior" required />
-        </label>
-        <label>Senha
-            <input name="senha" type="password" required />
-        </label>
-        <button class="botao primario" type="submit">Entrar</button>
-    </form>
+{% block conteudo_publico %}
+<section class="login-clean">
+  <div class="login-brand"><span>H</span><div><strong>HUMIAT</strong><small>Clientes e equipamentos</small></div></div>
+  <form method="post" class="cartao login-card">
+    <p class="tag">Área restrita</p><h1>Entrar</h1>
+    {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+    <label>Usuário<input name="usuario" autocomplete="username" required autofocus></label>
+    <label>Senha<input type="password" name="senha" autocomplete="current-password" required></label>
+    <button class="botao primario botao-cheio" type="submit">Entrar</button>
+  </form>
 </section>
 {% endblock %}
