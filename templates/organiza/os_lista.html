@@ -1,0 +1,6 @@
+{% extends "organiza/base.html" %}{% block conteudo %}
+<section class="dashboard">
+<header class="dash-header"><div><p class="tag">Fluxo simples</p><h1>Manutenções</h1><p>Cliente, equipamento, orçamento, pagamento e retirada.</p></div><a class="btn-new" href="/organiza/os/nova">+ Nova manutenção</a></header>
+<div class="cards-lista-os">
+{% for m in manutencoes %}<a class="card-os" href="/organiza/os/{{m.id}}"><div><small>#{{m.id}} · {{m.data_entrada|data_br}}</small><h3>{{m.nome_cliente}}</h3><p>{{m.equipamento_obj.tipo if m.equipamento_obj else m.equipamento}} {{m.equipamento_obj.modelo if m.equipamento_obj else ''}}</p></div><span class="status-pill">{{m.status}}</span></a>{% else %}<article class="form-card"><p>Nenhuma manutenção cadastrada.</p></article>{% endfor %}
+</div></section>{% endblock %}

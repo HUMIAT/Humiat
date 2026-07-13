@@ -19,44 +19,13 @@
         </a>
 
         <nav class="side-nav side-nav-simples">
-            <a href="/organiza"><span>⌂</span> Painel</a>
-
-            {% if tem_permissao(usuario, 'pode_criar_tarefa') %}
-            <a class="menu-principal" href="/organiza/tarefas/nova"><span>＋</span> Nova Tarefa</a>
-            {% endif %}
-
-            {% if tem_permissao(usuario, 'pode_acessar_compras') or tem_permissao(usuario, 'pode_cadastrar_item') %}
-            <div class="menu-grupo">
-                <strong>Compras</strong>
-                {% if tem_permissao(usuario, 'pode_acessar_compras') %}
-                <a href="/organiza/compras"><span>🛒</span> Compras</a>
-                {% endif %}
-                {% if tem_permissao(usuario, 'pode_cadastrar_item') %}
-                <a href="/organiza/produtos-servicos"><span>🧰</span> Itens</a>
-                {% endif %}
-            </div>
-            {% endif %}
-
-            {% if tem_permissao(usuario, 'pode_acessar_financeiro') or tem_permissao(usuario, 'pode_cadastrar_banco') %}
-            <div class="menu-grupo">
-                <strong>Financeiro</strong>
-                {% if tem_permissao(usuario, 'pode_acessar_financeiro') %}
-                <a href="/organiza/financeiro"><span>💲</span> Financeiro</a>
-                {% endif %}
-                {% if tem_permissao(usuario, 'pode_cadastrar_banco') %}
-                <a href="/organiza/bancos"><span>🏦</span> Bancos</a>
-                {% endif %}
-            </div>
-            {% endif %}
-
-            {% if tem_permissao(usuario, 'pode_cadastrar_cliente') %}
-            <a href="/organiza/clientes"><span>👥</span> Clientes</a>
+            <a href="/organiza"><span>⌂</span> Início</a>
+            <a class="menu-principal" href="/organiza/os/nova"><span>＋</span> Nova manutenção</a>
+            <a href="/organiza/os"><span>🔧</span> Manutenções</a>
             <a href="/organiza/vendas"><span>🧾</span> Vendas</a>
-            {% endif %}
-
+            <a href="/organiza/clientes"><span>👥</span> Clientes</a>
+            <a href="/organiza/produtos-servicos"><span>🧰</span> Itens</a>
             <a href="/organiza/agenda/nova"><span>📅</span> Agenda</a>
-            <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span> Minhas Tarefas</a>
-            <a class="menu-futuro" href="#"><span>▤</span> Relatórios <small>futuro</small></a>
         </nav>
 
         <div class="side-bottom">
@@ -85,11 +54,11 @@
 
 {% if usuario %}
     <nav class="mobile-nav">
-        <a href="/organiza"><span>⌂</span><small>Painel</small></a>
-        <a href="/organiza/detalhes/responsavel/{{ usuario.nome }}"><span>☑</span><small>Tarefas</small></a>
-        {% if tem_permissao(usuario, 'pode_criar_tarefa') %}<a class="plus" href="/organiza/tarefas/nova">+</a>{% else %}<a class="plus" href="/organiza/acesso-negado">+</a>{% endif %}
-        <a href="/organiza/agenda/nova"><span>📅</span><small>Agenda</small></a>
-        {% if tem_permissao(usuario, 'pode_acessar_financeiro') %}<a href="/organiza/financeiro"><span>💲</span><small>Financeiro</small></a>{% endif %}
+        <a href="/organiza"><span>⌂</span><small>Início</small></a>
+        <a href="/organiza/os"><span>🔧</span><small>Manutenções</small></a>
+        <a class="plus" href="/organiza/os/nova">+</a>
+        <a href="/organiza/vendas"><span>🧾</span><small>Vendas</small></a>
+        <a href="/organiza/clientes"><span>👥</span><small>Clientes</small></a>
     </nav>
 </div>
 {% endif %}

@@ -4,7 +4,7 @@ import secrets
 import hashlib
 import hmac
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
@@ -358,6 +358,7 @@ class Manutencao(Base):
     id = Column(Integer, primary_key=True)
     tarefa_id = Column(Integer, ForeignKey("tarefas.id"), nullable=True, unique=True)
     cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=True)
+    equipamento_id = Column(Integer, ForeignKey("equipamentos.id"), nullable=True)
     nome_cliente = Column(String(140), nullable=False)
     telefone = Column(String(20), nullable=True)
     equipamento = Column(String(140), nullable=True)
@@ -375,9 +376,14 @@ class Manutencao(Base):
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    prazo_texto = Column(String(120), nullable=True)
+    pronto_em = Column(DateTime, nullable=True)
+    retirada_agendada_em = Column(DateTime, nullable=True)
 
     tarefa = relationship("Tarefa", back_populates="manutencao")
     cliente = relationship("Cliente")
+    equipamento_obj = relationship("Equipamento")
+    orcamentos = relationship("Orcamento", back_populates="manutencao", cascade="all, delete-orphan")
     compras = relationship("Compra", back_populates="manutencao")
     itens = relationship("ManutencaoItem", back_populates="manutencao", cascade="all, delete-orphan")
 
@@ -405,6 +411,8 @@ class Venda(Base):
     status = Column(String(30), nullable=False, default="Em montagem")
     total_custo = Column(String(40), nullable=True)
     total_venda = Column(String(40), nullable=True)
+    valor_recebido = Column(String(40), nullable=True)
+    valor_falta = Column(String(40), nullable=True)
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     finalizado_em = Column(DateTime, nullable=True)
@@ -449,6 +457,55 @@ class ManutencaoItem(Base):
 
     manutencao = relationship("Manutencao", back_populates="itens")
     produto_servico = relationship("ProdutoServico")
+class Orcamento(Base):
+    __tablename__ = "orcamentos"
+    id = Column(Integer, primary_key=True)
+    manutencao_id = Column(Integer, ForeignKey("manutencoes.id"), nullable=False)
+    numero = Column(Integer, nullable=False, default=1)
+    token = Column(String(64), nullable=False, unique=True)
+    status = Column(String(40), nullable=False, default="Rascunho")
+    validade_dias = Column(Integer, nullable=False, default=7)
+    observacao = Column(Text, nullable=True)
+    total_obrigatorio = Column(String(40), nullable=True)
+    total_opcional = Column(String(40), nullable=True)
+    total_aprovado = Column(String(40), nullable=True)
+    aprovado_em = Column(DateTime, nullable=True)
+    aprovacao_tipo = Column(String(30), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    manutencao = relationship("Manutencao", back_populates="orcamentos")
+    itens = relationship("OrcamentoItem", back_populates="orcamento", cascade="all, delete-orphan")
+
+
+class OrcamentoItem(Base):
+    __tablename__ = "orcamento_itens"
+    id = Column(Integer, primary_key=True)
+    orcamento_id = Column(Integer, ForeignKey("orcamentos.id"), nullable=False)
+    produto_servico_id = Column(Integer, ForeignKey("produtos_servicos.id"), nullable=True)
+    nome = Column(String(180), nullable=False)
+    quantidade = Column(Integer, nullable=False, default=1)
+    valor_unitario = Column(String(40), nullable=False)
+    valor_total = Column(String(40), nullable=False)
+    opcional = Column(Integer, nullable=False, default=0)
+    aprovado = Column(Integer, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    orcamento = relationship("Orcamento", back_populates="itens")
+    produto_servico = relationship("ProdutoServico")
+
+
+class PagamentoOperacional(Base):
+    __tablename__ = "pagamentos_operacionais"
+    id = Column(Integer, primary_key=True)
+    tipo_origem = Column(String(20), nullable=False)  # venda ou manutencao
+    origem_id = Column(Integer, nullable=False)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    data = Column(Date, nullable=False, default=date.today)
+    valor = Column(String(40), nullable=False)
+    forma = Column(String(60), nullable=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    cliente = relationship("Cliente")
+
+
 class Compra(Base):
     __tablename__ = "compras"
     id = Column(Integer, primary_key=True)
@@ -838,6 +895,21 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE manutencoes ADD COLUMN tarefa_id INTEGER"))
             if "data_orcamento" not in colunas_manutencoes:
                 conn.execute(text("ALTER TABLE manutencoes ADD COLUMN data_orcamento DATE"))
+            novas_os = {
+                "equipamento_id": "INTEGER",
+                "prazo_texto": "VARCHAR(120)",
+                "pronto_em": "DATETIME",
+                "retirada_agendada_em": "DATETIME",
+            }
+            for coluna, tipo_sql in novas_os.items():
+                if coluna not in colunas_manutencoes:
+                    conn.execute(text(f"ALTER TABLE manutencoes ADD COLUMN {coluna} {tipo_sql}"))
+        if "vendas" in insp.get_table_names():
+            colunas_vendas = [c["name"] for c in insp.get_columns("vendas")]
+            if "valor_recebido" not in colunas_vendas:
+                conn.execute(text("ALTER TABLE vendas ADD COLUMN valor_recebido VARCHAR(40)"))
+            if "valor_falta" not in colunas_vendas:
+                conn.execute(text("ALTER TABLE vendas ADD COLUMN valor_falta VARCHAR(40)"))
             if "hora_orcamento" not in colunas_manutencoes:
                 conn.execute(text("ALTER TABLE manutencoes ADD COLUMN hora_orcamento VARCHAR(10)"))
             if "prazo_dias" not in colunas_manutencoes:
@@ -948,6 +1020,7 @@ def acesso_negado(request: Request, usuario: Usuario = Depends(usuario_logado)):
 
 @app.get("/organiza", response_class=HTMLResponse)
 def painel(request: Request, responsavel: Optional[str] = None, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    return RedirectResponse("/organiza/os", status_code=303)
     tarefas = db.query(Tarefa).order_by(Tarefa.ordem.asc(), Tarefa.criado_em.asc(), Tarefa.id.asc()).all()
     lista_responsaveis = responsaveis_db(db)
     responsavel_painel = responsavel if responsavel in lista_responsaveis else usuario.nome
@@ -2031,7 +2104,24 @@ def venda_detalhe(venda_id: int, request: Request, usuario: Usuario = Depends(us
     venda = db.query(Venda).filter(Venda.id == venda_id).first()
     if not venda: raise HTTPException(status_code=404)
     produtos = db.query(ProdutoServico).filter(ProdutoServico.ativo == 1).order_by(ProdutoServico.categoria.asc(), ProdutoServico.nome.asc()).all()
-    return templates.TemplateResponse("organiza/venda_detalhe.html", {"request": request, "usuario": usuario, "venda": venda, "produtos": produtos, "titulo": "Venda | Organiza"})
+    pagamentos = db.query(PagamentoOperacional).filter(PagamentoOperacional.tipo_origem == "venda", PagamentoOperacional.origem_id == venda.id).order_by(PagamentoOperacional.data.desc()).all()
+    recebido = sum(_numero_decimal(p.valor) for p in pagamentos)
+    falta = max(_numero_decimal(venda.total_venda) - recebido, 0)
+    venda.valor_recebido = _moeda_br(recebido)
+    venda.valor_falta = _moeda_br(falta)
+    db.commit()
+    return templates.TemplateResponse("organiza/venda_detalhe.html", {"request": request, "usuario": usuario, "venda": venda, "produtos": produtos, "pagamentos": pagamentos, "titulo": "Venda | Organiza"})
+
+
+@app.post("/organiza/vendas/{venda_id}/pagamento")
+def venda_pagamento(venda_id: int, data_pagamento: str = Form(...), valor: str = Form(...), forma: str = Form(""), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    venda = db.query(Venda).filter(Venda.id == venda_id).first()
+    if not venda:
+        raise HTTPException(status_code=404)
+    pagamento = PagamentoOperacional(tipo_origem="venda", origem_id=venda.id, cliente_id=venda.cliente_id, data=parse_data(data_pagamento) or date.today(), valor=_moeda_br(_numero_decimal(valor)), forma=forma.strip(), observacao=observacao.strip())
+    db.add(pagamento)
+    db.commit()
+    return RedirectResponse(f"/organiza/vendas/{venda.id}", status_code=303)
 
 
 @app.post("/organiza/vendas/{venda_id}/itens")
@@ -3012,6 +3102,156 @@ def financeiro_receber_conta(conta_id: int, usuario: Usuario = Depends(usuario_l
 
     db.commit()
     return RedirectResponse("/organiza/financeiro", status_code=303)
+
+
+
+
+def _numero(valor):
+    try:
+        return float(str(valor or "0").replace("R$", "").replace(".", "").replace(",", ".").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _br(valor):
+    return f"{float(valor or 0):.2f}".replace(".", ",")
+
+
+def _orcamento_recalcular(orcamento):
+    obrigatorio = sum(_numero(i.valor_total) for i in orcamento.itens if not i.opcional)
+    opcional = sum(_numero(i.valor_total) for i in orcamento.itens if i.opcional)
+    aprovado = sum(_numero(i.valor_total) for i in orcamento.itens if (not i.opcional) or i.aprovado)
+    orcamento.total_obrigatorio = _br(obrigatorio)
+    orcamento.total_opcional = _br(opcional)
+    orcamento.total_aprovado = _br(aprovado)
+
+
+def _pagamentos_total(db, tipo, origem_id):
+    pagamentos = db.query(PagamentoOperacional).filter(
+        PagamentoOperacional.tipo_origem == tipo,
+        PagamentoOperacional.origem_id == origem_id,
+    ).all()
+    return pagamentos, sum(_numero(p.valor) for p in pagamentos)
+
+
+@app.get("/organiza/os", response_class=HTMLResponse)
+def os_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    lista = db.query(Manutencao).options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento_obj)).order_by(Manutencao.id.desc()).all()
+    return templates.TemplateResponse("organiza/os_lista.html", {"request": request, "usuario": usuario, "manutencoes": lista, "titulo": "Manutenções | HUMIAT"})
+
+
+@app.get("/organiza/os/nova", response_class=HTMLResponse)
+def os_nova(request: Request, cliente_id: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome).all()
+    return templates.TemplateResponse("organiza/os_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "titulo": "Nova manutenção | HUMIAT"})
+
+
+@app.post("/organiza/os/nova")
+def os_criar(cliente_id: int = Form(...), equipamento_id: int = Form(...), problema: str = Form(...), observacao: str = Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    equipamento = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
+    if not cliente or not equipamento:
+        raise HTTPException(status_code=400, detail="Cliente e equipamento são obrigatórios")
+    m = Manutencao(cliente_id=cliente.id, equipamento_id=equipamento.id, nome_cliente=cliente.nome, telefone=cliente.telefone, equipamento=f"{equipamento.tipo or ''} {equipamento.modelo or ''}".strip(), problema=problema.strip(), observacao=observacao.strip(), status="Recebida", responsavel=usuario.nome, data_entrada=date.today())
+    db.add(m); db.commit(); db.refresh(m)
+    return RedirectResponse(f"/organiza/os/{m.id}", status_code=303)
+
+
+@app.get("/organiza/os/{manutencao_id}", response_class=HTMLResponse)
+def os_detalhe(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento_obj), selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens)).filter(Manutencao.id == manutencao_id).first()
+    if not m: raise HTTPException(status_code=404)
+    orcamento = sorted(m.orcamentos, key=lambda x:x.id)[-1] if m.orcamentos else None
+    pagamentos, recebido = _pagamentos_total(db, "manutencao", m.id)
+    total = _numero(orcamento.total_aprovado if orcamento and orcamento.status in ("Aprovado", "Aprovado parcialmente") else (orcamento.total_obrigatorio if orcamento else 0))
+    produtos = db.query(ProdutoServico).filter(ProdutoServico.ativo == 1).order_by(ProdutoServico.categoria, ProdutoServico.nome).all()
+    return templates.TemplateResponse("organiza/os_detalhe.html", {"request":request,"usuario":usuario,"m":m,"orcamento":orcamento,"produtos":produtos,"pagamentos":pagamentos,"recebido":_br(recebido),"falta":_br(max(total-recebido,0)),"titulo":f"Manutenção #{m.id} | HUMIAT"})
+
+
+@app.post("/organiza/os/{manutencao_id}/orcamento/novo")
+def orcamento_novo(manutencao_id:int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first()
+    if not m: raise HTTPException(404)
+    numero=db.query(Orcamento).filter(Orcamento.manutencao_id==m.id).count()+1
+    o=Orcamento(manutencao_id=m.id, numero=numero, token=secrets.token_urlsafe(24), status="Rascunho")
+    db.add(o); db.commit()
+    return RedirectResponse(f"/organiza/os/{m.id}",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/orcamento/{orcamento_id}/item")
+def orcamento_item(manutencao_id:int, orcamento_id:int, produto_id:str=Form(""), nome_manual:str=Form(""), quantidade:int=Form(1), valor_unitario:str=Form(...), opcional:str=Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.itens)).filter(Orcamento.id==orcamento_id,Orcamento.manutencao_id==manutencao_id).first()
+    if not o or o.status!="Rascunho": raise HTTPException(400,"Orçamento não pode ser alterado")
+    produto=db.query(ProdutoServico).filter(ProdutoServico.id==int(produto_id)).first() if produto_id else None
+    nome=(produto.nome if produto else nome_manual).strip()
+    if not nome: raise HTTPException(400,"Informe o item")
+    unit=_numero(valor_unitario); qtd=max(1,quantidade)
+    i=OrcamentoItem(orcamento_id=o.id, produto_servico_id=produto.id if produto else None, nome=nome, quantidade=qtd, valor_unitario=_br(unit), valor_total=_br(unit*qtd), opcional=1 if opcional else 0)
+    db.add(i); db.flush(); o.itens.append(i) if i not in o.itens else None; _orcamento_recalcular(o); db.commit()
+    return RedirectResponse(f"/organiza/os/{manutencao_id}",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/orcamento/{orcamento_id}/enviar")
+def orcamento_enviar(manutencao_id:int, orcamento_id:int, observacao:str=Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.itens)).filter(Orcamento.id==orcamento_id).first()
+    if not o or not o.itens: raise HTTPException(400,"Inclua pelo menos um item")
+    o.status="Enviado"; o.observacao=observacao.strip(); o.manutencao.status="Orçamento enviado"; _orcamento_recalcular(o); db.commit()
+    return RedirectResponse(f"/organiza/os/{manutencao_id}",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/orcamento/{orcamento_id}/aprovar-manual")
+def orcamento_aprovar_manual(manutencao_id:int, orcamento_id:int, decisao:str=Form(...), opcionais:Optional[List[int]]=Form(None), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.itens)).filter(Orcamento.id==orcamento_id).first()
+    if not o: raise HTTPException(404)
+    ids=set(opcionais or [])
+    for i in o.itens: i.aprovado=1 if (not i.opcional or i.id in ids) else 0
+    o.status={"aprovar":"Aprovado","parcial":"Aprovado parcialmente","cancelar":"Cancelado"}.get(decisao,"Aprovado")
+    o.aprovacao_tipo="Manual"; o.aprovado_em=datetime.now(); _orcamento_recalcular(o); o.manutencao.status=o.status; db.commit()
+    return RedirectResponse(f"/organiza/os/{manutencao_id}",303)
+
+
+@app.get("/orcamento/{token}", response_class=HTMLResponse)
+def orcamento_publico(token:str, request:Request, db:Session=Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.itens),selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento_obj)).filter(Orcamento.token==token).first()
+    if not o: raise HTTPException(404)
+    return templates.TemplateResponse("organiza/orcamento_publico.html", {"request":request,"o":o,"titulo":"Orçamento HUMIAT"})
+
+
+@app.post("/orcamento/{token}/responder")
+def orcamento_responder(token:str, decisao:str=Form(...), opcionais:Optional[List[int]]=Form(None), observacao:str=Form(""), db:Session=Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.itens)).filter(Orcamento.token==token).first()
+    if not o or o.status not in ("Enviado","Visualizado"): raise HTTPException(400,"Orçamento já respondido")
+    ids=set(opcionais or [])
+    for i in o.itens: i.aprovado=1 if (not i.opcional or i.id in ids) else 0
+    o.status={"aprovar":"Aprovado","parcial":"Aprovado parcialmente","cancelar":"Cancelado"}.get(decisao,"Cancelado")
+    o.aprovacao_tipo="Cliente"; o.aprovado_em=datetime.now(); o.observacao=((o.observacao or "")+"\nCliente: "+observacao).strip(); _orcamento_recalcular(o); o.manutencao.status=o.status; db.commit()
+    return RedirectResponse(f"/orcamento/{token}?respondido=1",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/pagamento")
+def os_pagamento(manutencao_id:int, data_pagamento:str=Form(...), valor:str=Form(...), forma:str=Form(""), observacao:str=Form(""), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first()
+    if not m: raise HTTPException(404)
+    p=PagamentoOperacional(tipo_origem="manutencao",origem_id=m.id,cliente_id=m.cliente_id,data=parse_data(data_pagamento) or date.today(),valor=_br(_numero(valor)),forma=forma,observacao=observacao)
+    db.add(p); db.commit(); return RedirectResponse(f"/organiza/os/{m.id}",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/prazo")
+def os_prazo(manutencao_id:int, prazo_texto:str=Form(...), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first(); m.prazo_texto=prazo_texto.strip(); m.status="Em manutenção"; db.commit(); return RedirectResponse(f"/organiza/os/{m.id}",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/pronto")
+def os_pronto(manutencao_id:int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first(); m.pronto_em=datetime.now(); m.status="Pronto para retirada"; db.commit(); return RedirectResponse(f"/organiza/os/{m.id}",303)
+
+
+@app.post("/organiza/os/{manutencao_id}/retirada")
+def os_retirada(manutencao_id:int, data_retirada:str=Form(...), hora_retirada:str=Form(...), usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first()
+    dt=datetime.strptime(data_retirada+" "+hora_retirada,"%Y-%m-%d %H:%M"); m.retirada_agendada_em=dt; m.status="Retirada agendada"
+    titulo=f"Retirada - {m.nome_cliente} - {m.equipamento or 'Equipamento'}"
+    db.add(AgendaEvento(titulo=titulo,data_evento=dt.date(),hora_evento=dt.strftime("%H:%M"),observacao=f"Manutenção #{m.id}")); db.commit(); return RedirectResponse(f"/organiza/os/{m.id}",303)
 
 
 @app.get("/organiza/bancos", response_class=HTMLResponse)

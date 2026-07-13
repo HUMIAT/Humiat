@@ -1,0 +1,9 @@
+{% extends "organiza/base.html" %}{% block conteudo %}
+<section class="dashboard"><header class="dash-header"><div><p class="tag">Nova ordem</p><h1>Nova manutenção</h1></div><a class="btn-secondary" href="/organiza/os">Voltar</a></header>
+<article class="form-card"><form method="post" class="form-grid">
+<label>Cliente *<select id="cliente" name="cliente_id" required><option value="">Selecione...</option>{% for c in clientes %}<option value="{{c.id}}" data-equipamentos='[{% for e in c.equipamentos %}{"id":{{e.id}},"nome":"{{(e.tipo or '')|e}} {{(e.modelo or '')|e}}"}{% if not loop.last %},{% endif %}{% endfor %}]' {% if cliente_id|string==c.id|string %}selected{% endif %}>{{c.nome}} · {{c.telefone|telefone}}</option>{% endfor %}</select></label>
+<label>Equipamento *<select id="equipamento" name="equipamento_id" required><option value="">Selecione primeiro o cliente</option></select></label>
+<label class="span-2">Defeito informado *<textarea name="problema" required></textarea></label><label class="span-2">Observação interna<textarea name="observacao"></textarea></label><div class="span-2"><button class="btn-new">Criar manutenção</button></div>
+</form></article></section>
+<script>function carregar(){const o=document.querySelector('#cliente option:checked'),s=document.getElementById('equipamento');s.innerHTML='<option value="">Selecione...</option>';if(!o?.dataset.equipamentos)return;JSON.parse(o.dataset.equipamentos).forEach(e=>s.insertAdjacentHTML('beforeend',`<option value="${e.id}">${e.nome}</option>`));}document.getElementById('cliente').addEventListener('change',carregar);carregar();</script>
+{% endblock %}
