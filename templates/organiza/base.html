@@ -16,7 +16,9 @@
     <nav class="side-nav">
       <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Início</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>
-      <a class="menu-principal" href="/organiza/clientes/novo"><span>＋</span> Novo cliente</a>
+      <a class="{% if request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/manutencoes"><span>🛠</span> Manutenções</a>
+      <a class="{% if request.url.path.startswith('/organiza/itens') %}ativo{% endif %}" href="/organiza/itens"><span>▦</span> Itens</a>
+      <a class="menu-principal" href="/organiza/manutencoes/nova"><span>＋</span> Nova manutenção</a>
     </nav>
     <div class="side-bottom">
       {% if usuario.is_admin %}<a href="/organiza/usuarios"><span>👤</span> Usuários</a>{% endif %}
@@ -27,8 +29,8 @@
   <main class="app-main">{% block conteudo %}{% endblock %}</main>
   <nav class="mobile-nav clean-mobile">
     <a href="/organiza"><span>⌂</span><small>Início</small></a>
-    <a class="plus" href="/organiza/clientes/novo">+</a>
-    <a href="/organiza/clientes"><span>👥</span><small>Clientes</small></a>
+    <a class="plus" href="/organiza/manutencoes/nova">+</a>
+    <a href="/organiza/manutencoes"><span>🛠</span><small>Manutenções</small></a>
   </nav>
 </div>
 {% else %}

@@ -1,11 +1,13 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean">
-  <div class="titulo-linha"><div><p class="tag">HUMIAT</p><h1>Visão geral</h1><p class="texto-suave">Base limpa para clientes e seus equipamentos.</p></div><a class="botao primario" href="/organiza/clientes/novo">+ Novo cliente</a></div>
+  <div class="titulo-linha"><div><p class="tag">HUMIAT</p><h1>Visão geral</h1><p class="texto-suave">Vendas e manutenções com orçamento, pagamento e WhatsApp.</p></div><a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a></div>
   <div class="grade-metricas clean-metricas">
     <a class="cartao metrica" href="/organiza/clientes"><span>👥</span><div><small>Clientes</small><strong>{{ total_clientes }}</strong></div></a>
     <article class="cartao metrica"><span>🎛️</span><div><small>Equipamentos</small><strong>{{ total_equipamentos }}</strong></div></article>
     <article class="cartao metrica"><span>🔗</span><div><small>Clientes com equipamento</small><strong>{{ clientes_com_equipamento }}</strong></div></article>
+      <a class="cartao metrica" href="/organiza/manutencoes"><span>🛠</span><div><small>Manutenções</small><strong>{{ total_manutencoes }}</strong></div></a>
+    <article class="cartao metrica"><span>⏳</span><div><small>Aguardando aprovação</small><strong>{{ aguardando_aprovacao }}</strong></div></article>
   </div>
   <section class="cartao tabela-cartao">
     <div class="titulo-linha compacto"><div><h2>Clientes recentes</h2><p class="texto-suave">Últimos cadastros realizados.</p></div><a class="botao" href="/organiza/clientes">Ver todos</a></div>

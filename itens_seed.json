@@ -1,0 +1,404 @@
+[
+  {
+    "codigo": "1",
+    "nome": "AMPLIFICADOR MONO C/ BLUETOOTH",
+    "preco_custo": 580.0,
+    "preco_venda": 900.0
+  },
+  {
+    "codigo": "2",
+    "nome": "AMPLIFICADOR STEREO",
+    "preco_custo": 730.0,
+    "preco_venda": 1100.0
+  },
+  {
+    "codigo": "3",
+    "nome": "BLUETTOTH",
+    "preco_custo": 50.0,
+    "preco_venda": 150.0
+  },
+  {
+    "codigo": "4",
+    "nome": "BOTOES",
+    "preco_custo": 6.0,
+    "preco_venda": 10.0
+  },
+  {
+    "codigo": "5",
+    "nome": "CABO BIPOLAR",
+    "preco_custo": 3.0,
+    "preco_venda": 5.0
+  },
+  {
+    "codigo": "6",
+    "nome": "CABO DE FORÇA",
+    "preco_custo": 6.0,
+    "preco_venda": 15.0
+  },
+  {
+    "codigo": "7",
+    "nome": "CABO GPIO OU JAMA",
+    "preco_custo": 70.0,
+    "preco_venda": 120.0
+  },
+  {
+    "codigo": "8",
+    "nome": "CABO HDMI",
+    "preco_custo": 6.0,
+    "preco_venda": 15.0
+  },
+  {
+    "codigo": "9",
+    "nome": "CABO LIGAR PLACA",
+    "preco_custo": 2.0,
+    "preco_venda": 10.0
+  },
+  {
+    "codigo": "10",
+    "nome": "CABO P2 X P2",
+    "preco_custo": 6.0,
+    "preco_venda": 15.0
+  },
+  {
+    "codigo": "11",
+    "nome": "CABO P2 X RCA",
+    "preco_custo": 6.0,
+    "preco_venda": 15.0
+  },
+  {
+    "codigo": "12",
+    "nome": "CABO SATA",
+    "preco_custo": 5.0,
+    "preco_venda": 15.0
+  },
+  {
+    "codigo": "13",
+    "nome": "CABO USB X PS2",
+    "preco_custo": 25.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "14",
+    "nome": "CABO VGA",
+    "preco_custo": 15.0,
+    "preco_venda": 25.0
+  },
+  {
+    "codigo": "15",
+    "nome": "CAIXA DE SOM C3TECK",
+    "preco_custo": 30.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "16",
+    "nome": "CAPA CORNETA",
+    "preco_custo": 5.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "17",
+    "nome": "CARTA SD 64",
+    "preco_custo": 70.0,
+    "preco_venda": 120.0
+  },
+  {
+    "codigo": "18",
+    "nome": "CATALOGO ENCARDENADO",
+    "preco_custo": 50.0,
+    "preco_venda": 250.0
+  },
+  {
+    "codigo": "20",
+    "nome": "COMANDOS",
+    "preco_custo": 30.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "21",
+    "nome": "CONECTOR 2 PINOS",
+    "preco_custo": 2.0,
+    "preco_venda": 10.0
+  },
+  {
+    "codigo": "22",
+    "nome": "CONECTOR FORÇA",
+    "preco_custo": 12.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "23",
+    "nome": "CONECTOR P10 FEMEA",
+    "preco_custo": 5.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "24",
+    "nome": "CONECTOR P10 MACHO",
+    "preco_custo": 5.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "25",
+    "nome": "CONECTOR P2 FEMEA",
+    "preco_custo": 2.0,
+    "preco_venda": 10.0
+  },
+  {
+    "codigo": "26",
+    "nome": "CONECTOR P2 MACHO",
+    "preco_custo": 5.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "27",
+    "nome": "COOLER 12 MM",
+    "preco_custo": 25.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "28",
+    "nome": "COOLER 8 MM",
+    "preco_custo": 15.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "29",
+    "nome": "DRIVER JBL",
+    "preco_custo": 130.0,
+    "preco_venda": 150.0
+  },
+  {
+    "codigo": "30",
+    "nome": "DRIVER PREMIUM",
+    "preco_custo": 55.0,
+    "preco_venda": 100.0
+  },
+  {
+    "codigo": "31",
+    "nome": "ESPELHO MIC MALETA",
+    "preco_custo": 16.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "32",
+    "nome": "ESPELHO TRASEIRO MALETA",
+    "preco_custo": 16.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "33",
+    "nome": "ESPELHO MIC MAQUINA",
+    "preco_custo": 16.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "34",
+    "nome": "ESPELHO TRASEIRO MAQUINA",
+    "preco_custo": 16.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "35",
+    "nome": "ESPELHO FLIPERAMA",
+    "preco_custo": 15.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "36",
+    "nome": "EXTENSAO",
+    "preco_custo": 15.0,
+    "preco_venda": 30.0
+  },
+  {
+    "codigo": "37",
+    "nome": "EXTENSOR HDMI",
+    "preco_custo": 25.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "38",
+    "nome": "FALANTE 10 JBL",
+    "preco_custo": 300.0,
+    "preco_venda": 400.0
+  },
+  {
+    "codigo": "39",
+    "nome": "FALANTE 12 JBL",
+    "preco_custo": 380.0,
+    "preco_venda": 480.0
+  },
+  {
+    "codigo": "40",
+    "nome": "FALANTE 12 STURDY",
+    "preco_custo": 140.0,
+    "preco_venda": 200.0
+  },
+  {
+    "codigo": "41",
+    "nome": "FITA LED",
+    "preco_custo": 5.0,
+    "preco_venda": 10.0
+  },
+  {
+    "codigo": "42",
+    "nome": "FONTE 12 V",
+    "preco_custo": 25.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "43",
+    "nome": "FONTE C3TECK",
+    "preco_custo": 50.0,
+    "preco_venda": 150.0
+  },
+  {
+    "codigo": "44",
+    "nome": "GABINETE FLIPER GOLD",
+    "preco_custo": 950.0,
+    "preco_venda": 1300.0
+  },
+  {
+    "codigo": "45",
+    "nome": "GABINETE FLIPER PORT",
+    "preco_custo": 230.0,
+    "preco_venda": 350.0
+  },
+  {
+    "codigo": "46",
+    "nome": "GABINETE IPHONE OU HEINEKEN EM LED",
+    "preco_custo": 1600.0,
+    "preco_venda": 2000.0
+  },
+  {
+    "codigo": "47",
+    "nome": "GABINETE JUKEBOX 17",
+    "preco_custo": 785.0,
+    "preco_venda": 1200.0
+  },
+  {
+    "codigo": "48",
+    "nome": "GABINETE MALETA",
+    "preco_custo": 250.0,
+    "preco_venda": 400.0
+  },
+  {
+    "codigo": "49",
+    "nome": "GABINETE MALETA C/ TELA",
+    "preco_custo": 300.0,
+    "preco_venda": 600.0
+  },
+  {
+    "codigo": "50",
+    "nome": "GABINETE MINI IPHONE OU HEINEKEN",
+    "preco_custo": 1000.0,
+    "preco_venda": 1400.0
+  },
+  {
+    "codigo": "51",
+    "nome": "GRADE 12 FALANTE",
+    "preco_custo": 20.0,
+    "preco_venda": 40.0
+  },
+  {
+    "codigo": "52",
+    "nome": "GRADE COOLER 12MM",
+    "preco_custo": 7.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "53",
+    "nome": "GRADE COOLER 8MM",
+    "preco_custo": 7.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "54",
+    "nome": "HD",
+    "preco_custo": 200.0,
+    "preco_venda": 250.0
+  },
+  {
+    "codigo": "55",
+    "nome": "INTERFACE",
+    "preco_custo": 85.0,
+    "preco_venda": 120.0
+  },
+  {
+    "codigo": "56",
+    "nome": "MEMORIA 2GB",
+    "preco_custo": 20.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "57",
+    "nome": "MICROFONE",
+    "preco_custo": 55.0,
+    "preco_venda": 100.0
+  },
+  {
+    "codigo": "58",
+    "nome": "MONITO19",
+    "preco_custo": 300.0,
+    "preco_venda": 400.0
+  },
+  {
+    "codigo": "59",
+    "nome": "MONITOR 15",
+    "preco_custo": 200.0,
+    "preco_venda": 400.0
+  },
+  {
+    "codigo": "60",
+    "nome": "MONITOR 17",
+    "preco_custo": 250.0,
+    "preco_venda": 400.0
+  },
+  {
+    "codigo": "61",
+    "nome": "MONITOR 22",
+    "preco_custo": 350.0,
+    "preco_venda": 450.0
+  },
+  {
+    "codigo": "62",
+    "nome": "TV 32",
+    "preco_custo": 1000.0,
+    "preco_venda": 1200.0
+  },
+  {
+    "codigo": "62",
+    "nome": "PLACA DE MICROFONE",
+    "preco_custo": 90.0,
+    "preco_venda": 250.0
+  },
+  {
+    "codigo": "63",
+    "nome": "PLACA MAE",
+    "preco_custo": 200.0,
+    "preco_venda": 700.0
+  },
+  {
+    "codigo": "68",
+    "nome": "SUPORTE DE MIC",
+    "preco_custo": 7.0,
+    "preco_venda": 20.0
+  },
+  {
+    "codigo": "64",
+    "nome": "RASPBERRY ou PANDORA",
+    "preco_custo": 400.0,
+    "preco_venda": 550.0
+  },
+  {
+    "codigo": "65",
+    "nome": "TECLADO",
+    "preco_custo": 60.0,
+    "preco_venda": 100.0
+  },
+  {
+    "codigo": "66",
+    "nome": "TWEETER JBL",
+    "preco_custo": 130.0,
+    "preco_venda": 200.0
+  }
+]

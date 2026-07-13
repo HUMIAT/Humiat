@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import os
 import re
+import json
+import secrets
 from datetime import date, datetime
 from typing import Optional
 
@@ -9,7 +11,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, func, or_
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_
 from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO
@@ -82,6 +84,77 @@ class Equipamento(Base):
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
+
+
+class Item(Base):
+    __tablename__ = "catalogo_itens"
+    id = Column(Integer, primary_key=True)
+    codigo = Column(String(30), nullable=True)
+    nome = Column(String(180), unique=True, nullable=False)
+    categoria = Column(String(80), nullable=False, default="Geral")
+    preco_custo = Column(Float, nullable=False, default=0)
+    preco_venda = Column(Float, nullable=False, default=0)
+    ativo = Column(Integer, nullable=False, default=1)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
+class Manutencao(Base):
+    __tablename__ = "assistencias"
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    equipamento_id = Column(Integer, ForeignKey("equipamentos.id"), nullable=False)
+    defeito = Column(Text, nullable=False)
+    diagnostico = Column(Text, nullable=True)
+    status = Column(String(40), nullable=False, default="Recebida")
+    prazo = Column(String(120), nullable=True)
+    pronto_em = Column(DateTime, nullable=True)
+    retirada_em = Column(DateTime, nullable=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    cliente = relationship("Cliente")
+    equipamento = relationship("Equipamento")
+    orcamentos = relationship("Orcamento", back_populates="manutencao", cascade="all, delete-orphan")
+
+
+class Orcamento(Base):
+    __tablename__ = "assistencia_orcamentos"
+    id = Column(Integer, primary_key=True)
+    manutencao_id = Column(Integer, ForeignKey("assistencias.id"), nullable=False)
+    versao = Column(Integer, nullable=False, default=1)
+    token = Column(String(64), unique=True, nullable=False)
+    status = Column(String(40), nullable=False, default="Rascunho")
+    observacao = Column(Text, nullable=True)
+    aprovado_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    manutencao = relationship("Manutencao", back_populates="orcamentos")
+    itens = relationship("OrcamentoItem", back_populates="orcamento", cascade="all, delete-orphan")
+    pagamentos = relationship("Pagamento", back_populates="orcamento", cascade="all, delete-orphan")
+
+
+class OrcamentoItem(Base):
+    __tablename__ = "assistencia_orcamento_itens"
+    id = Column(Integer, primary_key=True)
+    orcamento_id = Column(Integer, ForeignKey("assistencia_orcamentos.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=True)
+    descricao = Column(String(220), nullable=False)
+    quantidade = Column(Integer, nullable=False, default=1)
+    preco_custo = Column(Float, nullable=False, default=0)
+    preco_venda = Column(Float, nullable=False, default=0)
+    opcional = Column(Integer, nullable=False, default=0)
+    aprovado = Column(Integer, nullable=False, default=1)
+    orcamento = relationship("Orcamento", back_populates="itens")
+
+
+class Pagamento(Base):
+    __tablename__ = "assistencia_pagamentos"
+    id = Column(Integer, primary_key=True)
+    orcamento_id = Column(Integer, ForeignKey("assistencia_orcamentos.id"), nullable=False)
+    data = Column(Date, nullable=False, default=date.today)
+    valor = Column(Float, nullable=False)
+    forma = Column(String(40), nullable=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    orcamento = relationship("Orcamento", back_populates="pagamentos")
 
 
 def limpar_telefone(valor: str) -> str:
@@ -178,6 +251,13 @@ def iniciar_banco():
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
             db.add(Usuario(nome=ADMIN_NOME, senha_hash=gerar_hash_senha(ADMIN_SENHA), is_admin=1, ativo=1, cargo="Administrador"))
             db.commit()
+        if db.query(Item).count() == 0:
+            caminho = os.path.join(os.path.dirname(__file__), "itens_seed.json")
+            if os.path.exists(caminho):
+                with open(caminho, "r", encoding="utf-8") as arquivo:
+                    for dado in json.load(arquivo):
+                        db.add(Item(**dado, categoria="Geral", ativo=1))
+                db.commit()
     finally:
         db.close()
 
@@ -219,11 +299,13 @@ def painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     total_clientes = db.query(Cliente).count()
     total_equipamentos = db.query(Equipamento).count()
     clientes_com_equipamento = db.query(Cliente).join(Equipamento).distinct().count()
+    total_manutencoes = db.query(Manutencao).count()
+    aguardando_aprovacao = db.query(Orcamento).filter(Orcamento.status.in_(["Enviado", "Aguardando aprovação"])).count()
     recentes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.criado_em.desc()).limit(8).all()
     return templates.TemplateResponse("organiza/painel.html", {
         "request": request, "usuario": usuario, "total_clientes": total_clientes,
         "total_equipamentos": total_equipamentos, "clientes_com_equipamento": clientes_com_equipamento,
-        "recentes": recentes,
+        "recentes": recentes, "total_manutencoes": total_manutencoes, "aguardando_aprovacao": aguardando_aprovacao,
     })
 
 
@@ -289,7 +371,8 @@ async def cliente_criar(request: Request, usuario: Usuario = Depends(usuario_log
 def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).options(selectinload(Cliente.equipamentos)).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
-    return templates.TemplateResponse("organiza/cliente_detalhe.html", {"request": request, "usuario": usuario, "cliente": cliente})
+    manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).all()
+    return templates.TemplateResponse("organiza/cliente_detalhe.html", {"request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes})
 
 
 @app.get("/organiza/clientes/{cliente_id}/editar", response_class=HTMLResponse)
@@ -378,3 +461,164 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
 def usuarios(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     exigir_admin(usuario)
     return templates.TemplateResponse("organiza/usuarios.html", {"request": request, "usuario": usuario, "usuarios": db.query(Usuario).order_by(Usuario.nome).all()})
+
+
+def moeda_num(valor: str) -> float:
+    texto = (valor or "0").replace("R$", "").strip().replace(".", "").replace(",", ".")
+    try:
+        return round(float(texto), 2)
+    except ValueError:
+        return 0.0
+
+
+def totais_orcamento(orcamento: Orcamento):
+    obrigatorio = sum(i.preco_venda * i.quantidade for i in orcamento.itens if not i.opcional)
+    opcionais = sum(i.preco_venda * i.quantidade for i in orcamento.itens if i.opcional)
+    aprovado = sum(i.preco_venda * i.quantidade for i in orcamento.itens if (not i.opcional) or i.aprovado)
+    recebido = sum(p.valor for p in orcamento.pagamentos)
+    return {"obrigatorio": obrigatorio, "opcionais": opcionais, "geral": obrigatorio + opcionais, "aprovado": aprovado, "recebido": recebido, "falta": max(aprovado - recebido, 0)}
+
+
+def carregar_manutencao(db: Session, manutencao_id: int):
+    return db.query(Manutencao).options(
+        selectinload(Manutencao.cliente),
+        selectinload(Manutencao.equipamento),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
+    ).filter(Manutencao.id == manutencao_id).first()
+
+
+@app.get("/organiza/itens", response_class=HTMLResponse)
+def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    q = db.query(Item)
+    if busca.strip(): q = q.filter(Item.nome.ilike(f"%{busca.strip()}%"))
+    return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": q.order_by(Item.nome).all(), "busca": busca})
+
+
+@app.post("/organiza/itens/novo")
+async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    if nome and not db.query(Item).filter(func.lower(Item.nome) == nome.lower()).first():
+        db.add(Item(nome=nome, codigo=(form.get("codigo") or "").strip() or None, categoria=(form.get("categoria") or "Geral").strip(), preco_custo=moeda_num(form.get("preco_custo")), preco_venda=moeda_num(form.get("preco_venda")), ativo=1))
+        db.commit()
+    return RedirectResponse("/organiza/itens", status_code=303)
+
+
+@app.get("/organiza/manutencoes", response_class=HTMLResponse)
+def manutencoes_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    lista = db.query(Manutencao).options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento)).order_by(Manutencao.criado_em.desc()).all()
+    return templates.TemplateResponse("organiza/manutencoes.html", {"request": request, "usuario": usuario, "manutencoes": lista})
+
+
+@app.get("/organiza/manutencoes/nova", response_class=HTMLResponse)
+def manutencao_nova(request: Request, cliente_id: int = 0, equipamento_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome).all()
+    return templates.TemplateResponse("organiza/manutencao_form.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "equipamento_id": equipamento_id, "erro": ""})
+
+
+@app.post("/organiza/manutencoes/nova")
+async def manutencao_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    cliente_id = int(form.get("cliente_id") or 0); equipamento_id = int(form.get("equipamento_id") or 0)
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
+    if not eq or not (form.get("defeito") or "").strip():
+        return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}", status_code=303)
+    m = Manutencao(cliente_id=cliente_id, equipamento_id=equipamento_id, defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None)
+    db.add(m); db.commit(); db.refresh(m)
+    o = Orcamento(manutencao_id=m.id, versao=1, token=secrets.token_urlsafe(24), status="Rascunho")
+    db.add(o); db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{m.id}", status_code=303)
+
+
+@app.get("/organiza/manutencoes/{manutencao_id}", response_class=HTMLResponse)
+def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m: raise HTTPException(404)
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome).all()
+    orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    totais = totais_orcamento(orcamento) if orcamento else {}
+    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais})
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item")
+async def orcamento_adicionar_item(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id); form = dict(await request.form())
+    if not m: raise HTTPException(404)
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    item = db.query(Item).filter(Item.id == int(form.get("item_id") or 0)).first()
+    descricao = item.nome if item else (form.get("descricao") or "").strip()
+    if descricao:
+        db.add(OrcamentoItem(orcamento_id=o.id, item_id=item.id if item else None, descricao=descricao, quantidade=max(int(form.get("quantidade") or 1),1), preco_custo=item.preco_custo if item else moeda_num(form.get("preco_custo")), preco_venda=moeda_num(form.get("preco_venda")) or (item.preco_venda if item else 0), opcional=1 if form.get("opcional") else 0, aprovado=0 if form.get("opcional") else 1))
+        db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/enviar")
+def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    o.status = "Enviado"; m.status = "Aguardando aprovação"; db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/aprovar-manual")
+def aprovar_manual(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    for i in o.itens: i.aprovado = 1
+    o.status = "Aprovado manualmente"; o.aprovado_em = datetime.now(); m.status = "Aprovado"; db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pagamento")
+async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id); form = dict(await request.form()); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    valor = moeda_num(form.get("valor"))
+    if valor > 0:
+        db.add(Pagamento(orcamento_id=o.id, data=data_form(form.get("data") or "") or date.today(), valor=valor, forma=(form.get("forma") or "PIX").strip(), observacao=(form.get("observacao") or "").strip() or None))
+        m.status = "Em manutenção"; db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/prazo")
+async def prazo_salvar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first(); form = dict(await request.form())
+    m.prazo = (form.get("prazo") or "").strip() or None; db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pronto")
+def manutencao_pronto(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first(); m.status = "Pronto para retirada"; m.pronto_em = datetime.now(); db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/retirada")
+async def retirada_agendar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first(); form = dict(await request.form())
+    try: m.retirada_em = datetime.strptime(form.get("retirada_em"), "%Y-%m-%dT%H:%M")
+    except Exception: m.retirada_em = None
+    if m.retirada_em: m.status = "Retirada agendada"
+    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.get("/orcamento/{token}", response_class=HTMLResponse)
+def orcamento_publico(token: str, request: Request, db: Session = Depends(get_db)):
+    o = db.query(Orcamento).options(selectinload(Orcamento.itens), selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente), selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento)).filter(Orcamento.token == token).first()
+    if not o: raise HTTPException(404)
+    return templates.TemplateResponse("organiza/orcamento_publico.html", {"request": request, "orcamento": o, "m": o.manutencao, "totais": totais_orcamento(o)})
+
+
+@app.post("/orcamento/{token}/responder")
+async def orcamento_responder(token: str, request: Request, db: Session = Depends(get_db)):
+    o = db.query(Orcamento).options(selectinload(Orcamento.itens), selectinload(Orcamento.manutencao)).filter(Orcamento.token == token).first(); form = dict(await request.form())
+    if not o: raise HTTPException(404)
+    acao = form.get("acao")
+    if acao == "cancelar":
+        o.status = "Cancelado"; o.manutencao.status = "Cancelado"
+    else:
+        selecionados = {int(v) for k,v in form.items() if k.startswith("opcional_") and str(v).isdigit()}
+        for i in o.itens:
+            i.aprovado = 1 if (not i.opcional or acao == "aprovar" or i.id in selecionados) else 0
+        o.status = "Aprovado" if acao == "aprovar" else "Aprovado parcialmente"
+        o.aprovado_em = datetime.now(); o.manutencao.status = "Aprovado"
+    db.commit(); return RedirectResponse(f"/orcamento/{token}?ok=1", status_code=303)
