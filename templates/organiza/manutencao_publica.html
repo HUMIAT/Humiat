@@ -117,8 +117,8 @@
                 <input type="checkbox" name="equipamento_id" value="{{ eq.id }}" {% if form_anterior and (eq.id|string) in form_anterior.get('equipamento_id', []) %}checked{% endif %}>
               {% endif %}
               <div class="equipamento-info">
-                <strong>{{ eq.tipo or 'Equipamento' }}</strong>
-                <span>{{ eq.modelo or 'Sem modelo informado' }}{% if eq.maquina %} · {{ eq.maquina }}{% endif %}</span>
+                <strong>Máquina {{ eq.numero_maquina_cliente or '?' }}</strong>
+                <span>{% if eq.maquina %}{{ eq.maquina }}{% if eq.numero_maquina_cliente %} - {{ eq.numero_maquina_cliente }}{% endif %} · {% endif %}{{ eq.tipo or 'Equipamento' }}{% if eq.modelo %} · {{ eq.modelo }}{% endif %}</span>
                 {% if linha.manutencao_aberta %}
                   <span class="status-bloqueado">Já possui manutenção em aberto #{{ linha.manutencao_aberta.id }}</span>
                 {% else %}
@@ -169,7 +169,7 @@
         <p>{% if tipo_atendimento == "online" %}Atendimento via WhatsApp/online agendado{% else %}Entrega agendada{% endif %} para <strong>{{ data_entrega|datahora }}</strong>.</p>
         <ul class="lista-ok">
           {% for m in criadas %}
-          <li><span class="protocolo">#{{ m.id }}</span> · {{ m.equipamento.tipo or 'Equipamento' }}{% if m.equipamento.modelo %} — {{ m.equipamento.modelo }}{% endif %}</li>
+          <li><span class="protocolo">#{{ m.id }}</span> · Máquina {{ m.equipamento.numero_maquina_cliente or '?' }}{% if m.equipamento.maquina %} · {{ m.equipamento.maquina }}{% if m.equipamento.numero_maquina_cliente %} - {{ m.equipamento.numero_maquina_cliente }}{% endif %}{% endif %} · {{ m.equipamento.tipo or 'Equipamento' }}{% if m.equipamento.modelo %} — {{ m.equipamento.modelo }}{% endif %}</li>
           {% endfor %}
         </ul>
         <p style="color:#64748b;line-height:1.5">Esse horário foi reservado exclusivamente para o seu atendimento por 30 minutos. {% if tipo_atendimento == "online" %}Nossa equipe entrará em contato pelo WhatsApp no horário agendado.{% else %}Leve o equipamento no dia e horário informados. Após o recebimento, o orçamento seguirá pelo WhatsApp.{% endif %}</p>

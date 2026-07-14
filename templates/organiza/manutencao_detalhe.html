@@ -65,7 +65,7 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
           <select name="equipamento_id" required>
             {% for equipamento in equipamentos_cliente %}
             <option value="{{ equipamento.id }}" {% if equipamento.id == m.equipamento_id %}selected{% endif %}>
-              {{ equipamento.maquina or ('Equipamento #' ~ equipamento.id) }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %}
+              {{ equipamento.maquina or ('Equipamento #' ~ equipamento.id) }}{% if equipamento.numero_maquina_cliente %} - {{ equipamento.numero_maquina_cliente }}{% endif %} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %}
             </option>
             {% endfor %}
           </select>
