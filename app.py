@@ -4,14 +4,14 @@ import os
 import re
 import json
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_, inspect, text
 from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO
@@ -106,9 +106,12 @@ class Manutencao(Base):
     defeito = Column(Text, nullable=False)
     diagnostico = Column(Text, nullable=True)
     status = Column(String(40), nullable=False, default="Recebida")
+    entrega_prevista_em = Column(DateTime, nullable=True)
+    recebido_em = Column(DateTime, nullable=True)
     prazo = Column(String(120), nullable=True)
     pronto_em = Column(DateTime, nullable=True)
     retirada_em = Column(DateTime, nullable=True)
+    entregue_em = Column(DateTime, nullable=True)
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente")
@@ -243,9 +246,39 @@ def data_form(valor: str):
         return None
 
 
+def datetime_form(valor: str):
+    try:
+        return datetime.strptime(valor, "%Y-%m-%dT%H:%M") if valor else None
+    except ValueError:
+        return None
+
+
+def etapa_manutencao(m):
+    if m.status == "Encerrada" or m.entregue_em: return 7
+    if m.retirada_em: return 6
+    if m.pronto_em: return 5
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    if o and o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente"):
+        recebido = sum(p.valor for p in o.pagamentos)
+        return 4 if recebido > 0 else 4
+    if o and o.status in ("Enviado", "Aguardando aprovação"): return 3
+    if o and o.itens: return 2
+    if m.recebido_em: return 2
+    return 1
+
+
 @app.on_event("startup")
 def iniciar_banco():
     Base.metadata.create_all(bind=engine)
+    # Migração leve para bancos já existentes (SQLite e PostgreSQL)
+    insp = inspect(engine)
+    if "assistencias" in insp.get_table_names():
+        existentes = {c["name"] for c in insp.get_columns("assistencias")}
+        tipo_dt = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+        with engine.begin() as conn:
+            for coluna in ("entrega_prevista_em", "recebido_em", "entregue_em"):
+                if coluna not in existentes:
+                    conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} {tipo_dt}"))
     db = SessionLocal()
     try:
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
@@ -569,7 +602,7 @@ async def manutencao_criar(request: Request, usuario: Usuario = Depends(usuario_
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not eq or not (form.get("defeito") or "").strip():
         return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}", status_code=303)
-    m = Manutencao(cliente_id=cliente_id, equipamento_id=equipamento_id, defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None)
+    m = Manutencao(cliente_id=cliente_id, equipamento_id=equipamento_id, defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None, entrega_prevista_em=datetime_form(form.get("entrega_prevista_em") or ""), status="Aguardando equipamento")
     db.add(m); db.commit(); db.refresh(m)
     o = Orcamento(manutencao_id=m.id, versao=1, token=secrets.token_urlsafe(24), status="Rascunho")
     db.add(o); db.commit()
@@ -583,7 +616,7 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome).all()
     orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     totais = totais_orcamento(orcamento) if orcamento else {}
-    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais})
+    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais, "etapa_atual": etapa_manutencao(m)})
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item")
@@ -615,6 +648,7 @@ def orcamento_excluir_item(manutencao_id: int, orcamento_item_id: int, usuario: 
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/enviar")
 def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    if not o.itens: return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Inclua pelo menos um item", status_code=303)
     o.status = "Enviado"; m.status = "Aguardando aprovação"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
@@ -653,11 +687,84 @@ def manutencao_pronto(manutencao_id: int, usuario: Usuario = Depends(usuario_log
 @app.post("/organiza/manutencoes/{manutencao_id}/retirada")
 async def retirada_agendar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first(); form = dict(await request.form())
-    try: m.retirada_em = datetime.strptime(form.get("retirada_em"), "%Y-%m-%dT%H:%M")
-    except Exception: m.retirada_em = None
-    if m.retirada_em: m.status = "Retirada agendada"
+    m.retirada_em = datetime_form(form.get("retirada_em") or "")
+    if m.retirada_em and m.retirada_em.weekday() < 5 and time(14,0) <= m.retirada_em.time() <= time(17,0): m.status = "Retirada agendada"
+    else: m.retirada_em = None
     db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/editar")
+async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    if not m: raise HTTPException(404)
+    form = dict(await request.form())
+    m.defeito = (form.get("defeito") or "").strip()
+    m.observacao = (form.get("observacao") or "").strip() or None
+    m.diagnostico = (form.get("diagnostico") or "").strip() or None
+    m.entrega_prevista_em = datetime_form(form.get("entrega_prevista_em") or "")
+    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.post("/organiza/manutencoes/{manutencao_id}/receber")
+def manutencao_receber(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    if not m: raise HTTPException(404)
+    m.recebido_em = datetime.now(); m.status = "Orçamento em elaboração"; db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item/{orcamento_item_id}/editar")
+async def orcamento_item_editar(manutencao_id: int, orcamento_item_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    item = db.query(OrcamentoItem).filter(OrcamentoItem.id == orcamento_item_id).first()
+    if not item: raise HTTPException(404)
+    item.descricao = (form.get("descricao") or item.descricao).strip()
+    item.quantidade = max(int(form.get("quantidade") or 1), 1)
+    item.preco_venda = moeda_num(form.get("preco_venda"))
+    item.opcional = 1 if form.get("opcional") else 0
+    if not item.opcional: item.aprovado = 1
+    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pagamento/{pagamento_id}/editar")
+async def pagamento_editar(manutencao_id: int, pagamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    p = db.query(Pagamento).filter(Pagamento.id == pagamento_id).first()
+    if not p: raise HTTPException(404)
+    form = dict(await request.form()); p.data = data_form(form.get("data") or "") or p.data; p.valor = moeda_num(form.get("valor")); p.forma=(form.get("forma") or "PIX").strip(); p.observacao=(form.get("observacao") or "").strip() or None
+    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pagamento/{pagamento_id}/excluir")
+def pagamento_excluir(manutencao_id: int, pagamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    p=db.query(Pagamento).filter(Pagamento.id==pagamento_id).first()
+    if p: db.delete(p); db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.post("/organiza/manutencoes/{manutencao_id}/encerrar")
+def manutencao_encerrar(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first()
+    if not m or not m.retirada_em: raise HTTPException(400, "Agende a retirada antes de encerrar")
+    m.entregue_em=datetime.now(); m.status="Encerrada"; db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.get("/organiza/agenda", response_class=HTMLResponse)
+def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    lista=db.query(Manutencao).options(selectinload(Manutencao.cliente),selectinload(Manutencao.equipamento)).filter(or_(Manutencao.entrega_prevista_em.isnot(None),Manutencao.retirada_em.isnot(None))).order_by(Manutencao.entrega_prevista_em.asc(),Manutencao.retirada_em.asc()).all()
+    return templates.TemplateResponse("organiza/agenda.html", {"request":request,"usuario":usuario,"manutencoes":lista})
+
+@app.get("/retirada/{token}", response_class=HTMLResponse)
+def retirada_publica(token: str, request: Request, db: Session = Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento)).filter(Orcamento.token==token).first()
+    if not o or not o.manutencao.pronto_em: raise HTTPException(404)
+    return templates.TemplateResponse("organiza/retirada_publica.html", {"request":request,"orcamento":o,"m":o.manutencao,"erro":""})
+
+@app.post("/retirada/{token}")
+async def retirada_publica_salvar(token: str, request: Request, db: Session = Depends(get_db)):
+    o=db.query(Orcamento).options(selectinload(Orcamento.manutencao)).filter(Orcamento.token==token).first()
+    if not o: raise HTTPException(404)
+    form=dict(await request.form()); dt=datetime_form(form.get("retirada_em") or "")
+    erro="Escolha uma data e horário válidos."
+    if dt and dt.weekday() < 5 and time(14,0) <= dt.time() <= time(17,0):
+        o.manutencao.retirada_em=dt; o.manutencao.status="Retirada agendada"; db.commit()
+        return RedirectResponse(f"/retirada/{token}?ok=1", status_code=303)
+    return templates.TemplateResponse("organiza/retirada_publica.html", {"request":request,"orcamento":o,"m":o.manutencao,"erro":erro}, status_code=400)
 
 @app.get("/orcamento/{token}", response_class=HTMLResponse)
 def orcamento_publico(token: str, request: Request, db: Session = Depends(get_db)):
