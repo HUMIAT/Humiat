@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.requests import ClientDisconnect
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_, inspect, text
 from sqlalchemy.orm import Session, relationship, selectinload
 
@@ -127,6 +128,7 @@ class Orcamento(Base):
     token = Column(String(64), unique=True, nullable=False)
     status = Column(String(40), nullable=False, default="Rascunho")
     observacao = Column(Text, nullable=True)
+    desconto = Column(Float, nullable=False, default=0)
     aprovado_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     manutencao = relationship("Manutencao", back_populates="orcamentos")
@@ -181,6 +183,10 @@ def formatar_data(valor):
     return valor.strftime("%d/%m/%Y") if valor else "-"
 
 
+def formatar_datahora(valor):
+    return valor.strftime("%d/%m/%Y às %H:%M") if valor else "-"
+
+
 def formatar_moeda(valor):
     if valor in (None, ""):
         return "R$ 0,00"
@@ -196,6 +202,7 @@ def formatar_moeda(valor):
 
 templates.env.filters["telefone"] = formatar_telefone
 templates.env.filters["data_br"] = formatar_data
+templates.env.filters["datahora"] = formatar_datahora
 templates.env.filters["moeda"] = formatar_moeda
 
 
@@ -279,6 +286,11 @@ def iniciar_banco():
             for coluna in ("entrega_prevista_em", "recebido_em", "entregue_em"):
                 if coluna not in existentes:
                     conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} {tipo_dt}"))
+    if "assistencia_orcamentos" in insp.get_table_names():
+        existentes_orcamento = {c["name"] for c in insp.get_columns("assistencia_orcamentos")}
+        if "desconto" not in existentes_orcamento:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN desconto FLOAT NOT NULL DEFAULT 0"))
     db = SessionLocal()
     try:
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
@@ -540,9 +552,27 @@ def moeda_num(valor: str) -> float:
 def totais_orcamento(orcamento: Orcamento):
     obrigatorio = sum(i.preco_venda * i.quantidade for i in orcamento.itens if not i.opcional)
     opcionais = sum(i.preco_venda * i.quantidade for i in orcamento.itens if i.opcional)
-    aprovado = sum(i.preco_venda * i.quantidade for i in orcamento.itens if (not i.opcional) or i.aprovado)
+    subtotal_aprovado = sum(i.preco_venda * i.quantidade for i in orcamento.itens if (not i.opcional) or i.aprovado)
+    desconto_informado = max(float(orcamento.desconto or 0), 0)
+    desconto_aplicado = min(desconto_informado, subtotal_aprovado)
+    aprovado = max(subtotal_aprovado - desconto_aplicado, 0)
+    geral_bruto = obrigatorio + opcionais
+    geral = max(geral_bruto - min(desconto_informado, geral_bruto), 0)
+    obrigatorio_final = max(obrigatorio - min(desconto_informado, obrigatorio), 0)
     recebido = sum(p.valor for p in orcamento.pagamentos)
-    return {"obrigatorio": obrigatorio, "opcionais": opcionais, "geral": obrigatorio + opcionais, "aprovado": aprovado, "recebido": recebido, "falta": max(aprovado - recebido, 0)}
+    return {
+        "obrigatorio": obrigatorio,
+        "obrigatorio_final": obrigatorio_final,
+        "opcionais": opcionais,
+        "geral_bruto": geral_bruto,
+        "geral": geral,
+        "subtotal_aprovado": subtotal_aprovado,
+        "desconto": desconto_aplicado,
+        "desconto_informado": desconto_informado,
+        "aprovado": aprovado,
+        "recebido": recebido,
+        "falta": max(aprovado - recebido, 0),
+    }
 
 
 def carregar_manutencao(db: Session, manutencao_id: int):
@@ -688,6 +718,19 @@ def orcamento_excluir_item(manutencao_id: int, orcamento_item_id: int, usuario: 
     if item:
         db.delete(item)
         db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/desconto")
+async def orcamento_salvar_desconto(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.orcamentos:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    subtotal = sum(i.preco_venda * i.quantidade for i in o.itens)
+    o.desconto = min(max(moeda_num(form.get("desconto")), 0), subtotal)
+    db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
@@ -907,22 +950,17 @@ async def manutencao_publica_pesquisar(request: Request, db: Session = Depends(g
 
 @app.post("/solicitar-manutencao/criar", response_class=HTMLResponse)
 async def manutencao_publica_criar(request: Request, db: Session = Depends(get_db)):
-    form = dict(await request.form())
+    try:
+        raw_form = await request.form()
+    except ClientDisconnect:
+        return RedirectResponse("/solicitar-manutencao?erro=Conexão interrompida. Tente novamente.", status_code=303)
+    form = dict(raw_form)
     telefone = limpar_telefone(form.get("telefone") or "")
     cliente = cliente_por_whatsapp(db, telefone)
     if not cliente:
         return RedirectResponse("/solicitar-manutencao", status_code=303)
 
-    selecionados = []
-    for chave, valor in form.items():
-        if chave == "equipamento_id":
-            valores = form.getlist(chave) if hasattr(form, "getlist") else []
-            selecionados.extend([int(v) for v in valores if str(v).isdigit()])
-    # dict(await request.form()) perde campos repetidos; refazemos a leitura quando necessário.
-    if not selecionados:
-        raw_form = await request.form()
-        selecionados = [int(v) for v in raw_form.getlist("equipamento_id") if str(v).isdigit()]
-        form = dict(raw_form)
+    selecionados = [int(v) for v in raw_form.getlist("equipamento_id") if str(v).isdigit()]
 
     data_texto = (form.get("data_entrega") or "").strip()
     hora_texto = (form.get("hora_entrega") or "").strip()

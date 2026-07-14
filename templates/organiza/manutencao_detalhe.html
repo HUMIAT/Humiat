@@ -98,6 +98,19 @@
       </section>
       {% endfor %}
     </div>
+
+    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/desconto">
+      <h3>Desconto do orçamento</h3>
+      <div class="manutencao-grid dois">
+        <label>Valor do desconto<input name="desconto" value="{{ '%.2f'|format(orcamento.desconto or 0) }}" placeholder="0,00"></label>
+        <div class="resumo-financeiro">
+          <div><small>Subtotal</small><strong>{{ totais.geral_bruto|moeda }}</strong></div>
+          <div><small>Desconto</small><strong>- {{ totais.desconto_informado|moeda }}</strong></div>
+          <div><small>Total com desconto</small><strong>{{ totais.geral|moeda }}</strong></div>
+        </div>
+      </div>
+      <button class="botao" type="submit">Salvar desconto</button>
+    </form>
   </article>
 
   <article class="cartao manutencao-card {% if etapa_atual == 3 %}destaque-etapa{% endif %} {% if not orcamento.itens %}etapa-desabilitada{% endif %}">
@@ -130,6 +143,8 @@
     </div>
 
     <div class="resumo-financeiro">
+      <div><small>Subtotal aprovado</small><strong>{{ totais.subtotal_aprovado|moeda }}</strong></div>
+      {% if totais.desconto > 0 %}<div><small>Desconto</small><strong>- {{ totais.desconto|moeda }}</strong></div>{% endif %}
       <div><small>Total aprovado</small><strong>{{ totais.aprovado|moeda }}</strong></div>
       <div><small>Recebido</small><strong>{{ totais.recebido|moeda }}</strong></div>
       <div><small>Falta</small><strong>{{ totais.falta|moeda }}</strong></div>
