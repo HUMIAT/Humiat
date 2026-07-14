@@ -1151,6 +1151,7 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     m = carregar_manutencao(db, manutencao_id)
     if not m: raise HTTPException(404)
     itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome).all()
+    equipamentos_cliente = db.query(Equipamento).filter(Equipamento.cliente_id == m.cliente_id).order_by(Equipamento.tipo, Equipamento.modelo, Equipamento.id).all()
     orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     totais = totais_orcamento(orcamento) if orcamento else {}
     prontas_cliente = (
@@ -1178,7 +1179,7 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
         + "\n\nRetiradas de segunda a sexta-feira, somente das 14:00 às 17:00."
         + "\n\nKaraokê RJ"
     ) if orcamento and prontas_cliente else ""
-    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
+    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item")
@@ -1311,6 +1312,14 @@ async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuar
     m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
     if not m: raise HTTPException(404)
     form = dict(await request.form())
+    equipamento_id = int(form.get("equipamento_id") or 0)
+    equipamento = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.cliente_id == m.cliente_id,
+    ).first()
+    if not equipamento:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_equipamento=1", status_code=303)
+    m.equipamento_id = equipamento.id
     m.defeito = (form.get("defeito") or "").strip()
     m.observacao = (form.get("observacao") or "").strip() or None
     m.diagnostico = (form.get("diagnostico") or "").strip() or None
