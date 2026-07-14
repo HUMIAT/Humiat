@@ -2705,3 +2705,223 @@ img{max-width:100%;display:block}
         text-align:left;
     }
 }
+
+/* =========================================================
+   HUMIAT 14 — TEMA CLARO GLOBAL E CONTRASTE DEFINITIVO
+   ========================================================= */
+:root{
+  --org-bg:#f4f7fb;
+  --org-card:#ffffff;
+  --org-text:#111827;
+  --org-muted:#64748b;
+  --org-line:#dbe3ee;
+}
+
+body.organiza-corpo,
+.app-shell,
+.app-main,
+.pagina-clean,
+.humiat-home{
+  background:#f4f7fb !important;
+  color:#111827 !important;
+}
+
+.app-shell{
+  background:linear-gradient(90deg,#071326 0 270px,#f4f7fb 270px) !important;
+}
+
+/* Cartões e painéis gerais */
+.cartao,
+.panel-card,
+.tabela-cartao,
+.home-main-card,
+.home-side .panel-card,
+.vendas-resumo,
+.card-os,
+.manutencao-card,
+.manutencao-subcard,
+.agenda-evento,
+.registro-card,
+.linha-editavel,
+.orcamento-grupos>div,
+.publico-card,
+.metric,
+.metrica,
+.clean-card,
+.equip-card{
+  background:#ffffff !important;
+  color:#111827 !important;
+  border:1px solid #dbe3ee !important;
+  box-shadow:0 8px 24px rgba(15,23,42,.06) !important;
+}
+
+/* Lista de clientes — elimina o fundo cinza translúcido */
+.cliente-card-clean,
+.simple-table>a,
+.cards-lista-os.compacta .card-os,
+.lista-simples a{
+  background:#ffffff !important;
+  color:#111827 !important;
+  border:1px solid #dbe3ee !important;
+  box-shadow:0 4px 14px rgba(15,23,42,.05) !important;
+}
+
+.cliente-card-clean:hover,
+.simple-table>a:hover,
+.card-os:hover{
+  background:#f8fbff !important;
+  border-color:#93c5fd !important;
+  box-shadow:0 8px 22px rgba(37,99,235,.10) !important;
+}
+
+.cliente-card-clean strong,
+.cliente-main strong,
+.simple-table strong,
+.card-os h3,
+.cartao h1,.cartao h2,.cartao h3,
+.panel-card h1,.panel-card h2,.panel-card h3,
+.equip-card h3{
+  color:#111827 !important;
+}
+
+.cliente-card-clean small,
+.cliente-main small,
+.simple-table span,
+.texto-suave,
+.cartao small,
+.panel-card small,
+.equip-card p,
+.equip-card dt,
+.lista-dados dt{
+  color:#64748b !important;
+}
+
+.cliente-card-clean>span,
+.cliente-main>span,
+.simple-table em{
+  color:#2563eb !important;
+  font-weight:800 !important;
+}
+
+/* Métricas claras */
+.simple-kpi,
+.clean-metricas .metrica,
+.grade-metricas .metrica{
+  background:#ffffff !important;
+  color:#111827 !important;
+  border:1px solid #dbe3ee !important;
+  box-shadow:0 6px 20px rgba(15,23,42,.05) !important;
+}
+
+.simple-kpi>span,
+.metrica>span{
+  background:#eff6ff !important;
+  color:#2563eb !important;
+}
+
+.simple-kpi small,
+.metrica small{
+  color:#64748b !important;
+}
+
+.simple-kpi strong,
+.metrica strong{
+  color:#111827 !important;
+}
+
+/* Ações rápidas */
+.quick-grid-simple a{
+  background:#ffffff !important;
+  color:#1d4ed8 !important;
+  border:1px solid #bfdbfe !important;
+}
+.quick-grid-simple a:hover{background:#eff6ff !important;border-color:#60a5fa !important}
+
+/* Campos e formulários */
+input,
+select,
+textarea,
+.formulario input,
+.formulario select,
+.formulario textarea,
+.manutencao-page input,
+.manutencao-page select,
+.manutencao-page textarea{
+  background:#ffffff !important;
+  color:#111827 !important;
+  border-color:#cbd5e1 !important;
+}
+input::placeholder,textarea::placeholder{color:#94a3b8 !important}
+label,.formulario label,.manutencao-page label{color:#334155 !important}
+
+/* Resumos financeiros e blocos auxiliares */
+.resumo-financeiro>div,
+.resumo-valores div,
+.totais-orcamento>div,
+.observacao,
+.resumo-ficha div,
+.bloco-adicionar-item,
+.manutencao-cadastro-rapido{
+  background:#f8fafc !important;
+  color:#111827 !important;
+  border:1px solid #e2e8f0 !important;
+}
+.resumo-financeiro small,.resumo-valores small,.totais-orcamento small{color:#64748b !important}
+.resumo-financeiro strong,.resumo-valores strong,.totais-orcamento strong{color:#111827 !important}
+
+/* Agenda */
+.agenda-evento span{color:#2563eb !important}
+.agenda-evento.retirada span{color:#15803d !important}
+
+/* Tabelas */
+.data-table,
+.tabela-organiza,
+.tabela-responsiva table{
+  background:#ffffff !important;
+  color:#111827 !important;
+}
+.data-table th,.tabela-organiza th,.tabela-responsiva th{
+  background:#f1f5f9 !important;
+  color:#334155 !important;
+}
+.data-table td,.tabela-organiza td,.tabela-responsiva td{color:#111827 !important;border-color:#e2e8f0 !important}
+
+/* Estados desabilitados: sem apagar o texto */
+.etapa-desabilitada,
+.manutencao-page .etapa-desabilitada{
+  opacity:1 !important;
+  filter:none !important;
+  background:#f8fafc !important;
+  border-color:#e2e8f0 !important;
+}
+.manutencao-etapa.bloqueada,
+.etapa.bloqueada{opacity:.72 !important}
+
+/* Equipamentos */
+.cliente-detalhe .equip-card{
+  background:#ffffff !important;
+  color:#111827 !important;
+}
+.cliente-detalhe .equip-card dt{color:#64748b !important}
+.cliente-detalhe .equip-card dd{color:#111827 !important}
+.cliente-detalhe .equip-card p{color:#64748b !important}
+
+/* Estado vazio */
+.empty-state,.vazio{
+  color:#64748b !important;
+  background:#ffffff !important;
+  border-color:#cbd5e1 !important;
+}
+.empty-state strong{color:#111827 !important}
+
+/* Mobile */
+@media(max-width:700px){
+  .cliente-card-clean,
+  .cliente-card-acoes,
+  .simple-table>a,
+  .card-os{
+    background:#ffffff !important;
+    color:#111827 !important;
+  }
+  .cartao,.panel-card,.tabela-cartao,.manutencao-card{box-shadow:0 4px 14px rgba(15,23,42,.05) !important}
+}
