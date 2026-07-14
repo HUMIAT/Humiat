@@ -128,6 +128,7 @@ class Manutencao(Base):
     diagnostico = Column(Text, nullable=True)
     status = Column(String(40), nullable=False, default="Recebida")
     entrega_prevista_em = Column(DateTime, nullable=True)
+    tipo_atendimento = Column(String(20), nullable=False, default="loja")
     recebido_em = Column(DateTime, nullable=True)
     prazo = Column(String(120), nullable=True)
     pronto_em = Column(DateTime, nullable=True)
@@ -309,6 +310,8 @@ def iniciar_banco():
             for coluna in ("entrega_prevista_em", "recebido_em", "entregue_em"):
                 if coluna not in existentes:
                     conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} {tipo_dt}"))
+            if "tipo_atendimento" not in existentes:
+                conn.execute(text("ALTER TABLE assistencias ADD COLUMN tipo_atendimento VARCHAR(20) NOT NULL DEFAULT 'loja'"))
     if "assistencia_orcamentos" in insp.get_table_names():
         existentes_orcamento = {c["name"] for c in insp.get_columns("assistencia_orcamentos")}
         with engine.begin() as conn:
@@ -1115,9 +1118,9 @@ def manutencoes_lista(request: Request, status: str = "", usuario: Usuario = Dep
 
 
 @app.get("/organiza/manutencoes/nova", response_class=HTMLResponse)
-def manutencao_nova(request: Request, cliente_id: int = 0, equipamento_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def manutencao_nova(request: Request, cliente_id: int = 0, equipamento_id: int = 0, erro: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome).all()
-    return templates.TemplateResponse("organiza/manutencao_form.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "equipamento_id": equipamento_id, "erro": ""})
+    return templates.TemplateResponse("organiza/manutencao_form.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "equipamento_id": equipamento_id, "erro": erro})
 
 
 @app.post("/organiza/manutencoes/nova")
@@ -1127,7 +1130,16 @@ async def manutencao_criar(request: Request, usuario: Usuario = Depends(usuario_
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not eq or not (form.get("defeito") or "").strip():
         return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}", status_code=303)
-    m = Manutencao(cliente_id=cliente_id, equipamento_id=equipamento_id, defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None, entrega_prevista_em=datetime_form(form.get("entrega_prevista_em") or ""), status="Aguardando equipamento")
+    tipo_atendimento = (form.get("tipo_atendimento") or "loja").strip().lower()
+    if tipo_atendimento not in ("loja", "online"):
+        tipo_atendimento = "loja"
+    agendamento = datetime_form(form.get("entrega_prevista_em") or "")
+    if not horario_atendimento_valido(tipo_atendimento, agendamento):
+        return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}&erro=horario", status_code=303)
+    if horario_atendimento_ocupado(db, agendamento):
+        return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}&erro=ocupado", status_code=303)
+    status_inicial = "Aguardando equipamento"
+    m = Manutencao(cliente_id=cliente_id, equipamento_id=equipamento_id, defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None, entrega_prevista_em=agendamento, tipo_atendimento=tipo_atendimento, status=status_inicial)
     db.add(m); db.commit(); db.refresh(m)
     o = Orcamento(manutencao_id=m.id, versao=1, token=secrets.token_urlsafe(24), status="Rascunho")
     db.add(o); db.commit()
@@ -1302,7 +1314,12 @@ async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuar
     m.defeito = (form.get("defeito") or "").strip()
     m.observacao = (form.get("observacao") or "").strip() or None
     m.diagnostico = (form.get("diagnostico") or "").strip() or None
-    m.entrega_prevista_em = datetime_form(form.get("entrega_prevista_em") or "")
+    tipo_atendimento = (form.get("tipo_atendimento") or m.tipo_atendimento or "loja").strip().lower()
+    agendamento = datetime_form(form.get("entrega_prevista_em") or "")
+    if tipo_atendimento not in ("loja", "online") or not horario_atendimento_valido(tipo_atendimento, agendamento) or horario_atendimento_ocupado(db, agendamento, m.id):
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_agendamento=1", status_code=303)
+    m.tipo_atendimento = tipo_atendimento
+    m.entrega_prevista_em = agendamento
     db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 @app.post("/organiza/manutencoes/{manutencao_id}/receber")
@@ -1496,7 +1513,21 @@ async def orcamento_responder(token: str, request: Request, db: Session = Depend
 # -----------------------------------------------------------------------------
 # Portal público simplificado para solicitação de manutenção
 # -----------------------------------------------------------------------------
-HORARIOS_ENTREGA_PUBLICA = ["14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00"]
+HORARIOS_LOJA = ["14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00"]
+HORARIOS_ONLINE = ["11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00"]
+HORARIOS_ENTREGA_PUBLICA = HORARIOS_LOJA
+
+def horarios_atendimento(tipo: str):
+    return HORARIOS_ONLINE if tipo == "online" else HORARIOS_LOJA
+
+def horario_atendimento_valido(tipo: str, momento):
+    return bool(momento and momento.weekday() < 5 and momento.strftime("%H:%M") in horarios_atendimento(tipo))
+
+def horario_atendimento_ocupado(db: Session, momento, ignorar_id: int = 0):
+    q = db.query(Manutencao).filter(Manutencao.entrega_prevista_em == momento, Manutencao.status != "Encerrada")
+    if ignorar_id:
+        q = q.filter(Manutencao.id != ignorar_id)
+    return q.first() is not None
 STATUS_MANUTENCAO_ENCERRADOS = ["Encerrada", "Cancelada"]
 
 
@@ -1546,7 +1577,9 @@ def renderizar_equipamentos_publicos(request: Request, db: Session, cliente: Cli
         "telefone": telefone,
         "cliente": cliente,
         "equipamentos": equipamentos_portal(db, cliente),
-        "horarios": HORARIOS_ENTREGA_PUBLICA,
+        "horarios": HORARIOS_LOJA,
+        "horarios_loja": HORARIOS_LOJA,
+        "horarios_online": HORARIOS_ONLINE,
         "data_minima": date.today().isoformat(),
         "form_anterior": form_anterior,
     }, status_code=status_code)
@@ -1674,6 +1707,9 @@ async def manutencao_publica_criar(request: Request, db: Session = Depends(get_d
 
     selecionados = [int(v) for v in raw_form.getlist("equipamento_id") if str(v).isdigit()]
 
+    tipo_atendimento = (form.get("tipo_atendimento") or "loja").strip().lower()
+    if tipo_atendimento not in ("loja", "online"):
+        tipo_atendimento = "loja"
     data_texto = (form.get("data_entrega") or "").strip()
     hora_texto = (form.get("hora_entrega") or "").strip()
     erro = ""
@@ -1686,8 +1722,8 @@ async def manutencao_publica_criar(request: Request, db: Session = Depends(get_d
 
     if not erro and (data_entrega < date.today() or data_entrega.weekday() > 4):
         erro = "A entrega deve ser agendada de segunda a sexta-feira."
-    if not erro and hora_texto not in HORARIOS_ENTREGA_PUBLICA:
-        erro = "Escolha um horário entre 14:00 e 17:00."
+    if not erro and hora_texto not in horarios_atendimento(tipo_atendimento):
+        erro = "Escolha um horário válido: loja das 14:00 às 17:00 ou WhatsApp/online das 11:00 às 17:00."
     if not erro and not selecionados:
         erro = "Selecione pelo menos um equipamento."
 
@@ -1712,6 +1748,8 @@ async def manutencao_publica_criar(request: Request, db: Session = Depends(get_d
         return renderizar_equipamentos_publicos(request, db, cliente, telefone, erro, form, 400)
 
     entrega_em = datetime.combine(data_entrega, datetime.strptime(hora_texto, "%H:%M").time())
+    if horario_atendimento_ocupado(db, entrega_em):
+        return renderizar_equipamentos_publicos(request, db, cliente, telefone, "Este horário já está reservado. Escolha outro horário disponível.", form, 409)
     criadas = []
     for equipamento in equipamentos_validos:
         manutencao = Manutencao(
@@ -1719,6 +1757,7 @@ async def manutencao_publica_criar(request: Request, db: Session = Depends(get_d
             equipamento_id=equipamento.id,
             defeito=(form.get(f"descricao_{equipamento.id}") or "").strip(),
             entrega_prevista_em=entrega_em,
+            tipo_atendimento=tipo_atendimento,
             status="Aguardando equipamento",
             observacao="Solicitação criada pelo link público.",
         )
@@ -1741,5 +1780,6 @@ async def manutencao_publica_criar(request: Request, db: Session = Depends(get_d
         "cliente": cliente,
         "criadas": criadas,
         "data_entrega": entrega_em,
-        "horarios": HORARIOS_ENTREGA_PUBLICA,
+        "tipo_atendimento": tipo_atendimento,
+        "horarios": horarios_atendimento(tipo_atendimento),
     })

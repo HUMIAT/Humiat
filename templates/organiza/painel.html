@@ -17,7 +17,7 @@
   </div>
 
   {% set grupos = [
-    ('entrada', '1', 'Equipamento para receber', 'Cliente informou o problema e ainda vai levar o equipamento.', '📥'),
+    ('entrada', '1', 'Atendimentos agendados', 'Equipamentos para receber e atendimentos via WhatsApp/online.', '📥'),
     ('orcamento', '2', 'Orçamento pendente', 'Equipamento recebido e orçamento ainda precisa ser montado.', '🧾'),
     ('aceite', '3', 'Aguardando aceite', 'Orçamento enviado e aguardando a resposta do cliente.', '✅'),
     ('pagamento', '4', 'Pagamento ou prazo', 'Orçamento aprovado; registre pagamento e prazo de entrega.', '💳'),
@@ -46,7 +46,7 @@
           <div>
             <strong>#{{ m.id }} · {{ m.cliente.nome }}</strong>
             <span>{{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</span>
-            {% if chave == 'entrada' and m.entrega_prevista_em %}<small>Previsto: {{ m.entrega_prevista_em|datahora }}</small>{% endif %}
+            {% if chave == 'entrada' %}<small>{{ 'WhatsApp/online' if m.tipo_atendimento == 'online' else 'Na loja' }}{% if m.entrega_prevista_em %} · {{ m.entrega_prevista_em|datahora }}{% endif %}</small>{% endif %}
             {% if chave == 'pagamento' and m.painel_saldo %}<small>Falta receber: {{ m.painel_saldo|moeda }}</small>{% endif %}
             {% if chave == 'retirada' and m.retirada_em %}<small>Retirada: {{ m.retirada_em|datahora }}</small>{% endif %}
           </div>

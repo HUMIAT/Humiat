@@ -53,14 +53,15 @@ Ordem de serviço: #'~m.id~'
 
 Agora faremos a análise e enviaremos o orçamento para sua aprovação.
 
-Karaokê RJ')|urlencode }}">WhatsApp: equipamento recebido</a>{% endif %}
+Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: atendimento iniciado{% else %}WhatsApp: equipamento recebido{% endif %}</a>{% endif %}
     </div>
     <form class="formulario manutencao-form" method="post" action="/organiza/manutencoes/{{ m.id }}/editar">
       <div class="manutencao-grid dois">
         <label>Cliente<input value="{{ m.cliente.nome }}" disabled></label>
         <label>WhatsApp<input value="{{ m.cliente.telefone|telefone }}" disabled></label>
         <label>Equipamento<input value="{{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}" disabled></label>
-        <label>Previsão para trazer<input type="datetime-local" name="entrega_prevista_em" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
+        <label>Tipo de atendimento<select name="tipo_atendimento" id="tipo-atendimento-editar"><option value="loja" {% if m.tipo_atendimento != 'online' %}selected{% endif %}>Atendimento na loja</option><option value="online" {% if m.tipo_atendimento == 'online' %}selected{% endif %}>Atendimento via WhatsApp / online</option></select></label>
+        <label>{% if m.tipo_atendimento == 'online' %}Data e horário do atendimento{% else %}Previsão para trazer{% endif %}<input type="datetime-local" name="entrega_prevista_em" step="1800" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
       </div>
       <label>Problema informado<textarea name="defeito" required>{{ m.defeito }}</textarea></label>
       <label>Diagnóstico<textarea name="diagnostico">{{ m.diagnostico or '' }}</textarea></label>

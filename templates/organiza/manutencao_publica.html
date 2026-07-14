@@ -102,7 +102,7 @@
 
     {% elif etapa == 'equipamentos' %}
       <div class="cliente"><strong>{{ cliente.nome }}</strong><span>{{ cliente.telefone|telefone }}</span></div>
-      <div class="aviso-horario"><strong>Entrega na loja:</strong><br>segunda a sexta-feira, exclusivamente das <strong>14:00 às 17:00</strong>.</div>
+      <div class="aviso-horario" id="aviso-horario"><strong>Atendimento na loja:</strong><br>segunda a sexta-feira, das <strong>14:00 às 17:00</strong>. Cada horário é reservado por 30 minutos.</div>
 
       <form method="post" action="/solicitar-manutencao/criar" id="form-manutencao">
         <input type="hidden" name="telefone" value="{{ telefone }}">
@@ -138,16 +138,23 @@
           {% endfor %}
         </div>
 
+        <div class="campo">
+            <label for="tipo_atendimento">Tipo de atendimento</label>
+            <select id="tipo_atendimento" name="tipo_atendimento" required>
+              <option value="loja" {% if not form_anterior or form_anterior.get('tipo_atendimento','loja') == 'loja' %}selected{% endif %}>Atendimento na loja</option>
+              <option value="online" {% if form_anterior and form_anterior.get('tipo_atendimento') == 'online' %}selected{% endif %}>Atendimento via WhatsApp / online</option>
+            </select>
+          </div>
         <div class="grade-data">
           <div class="campo">
-            <label for="data_entrega">Data da entrega</label>
+            <label for="data_entrega" id="label-data">Data da entrega</label>
             <input type="date" id="data_entrega" name="data_entrega" min="{{ data_minima }}" value="{{ form_anterior.get('data_entrega','') if form_anterior else '' }}" required>
           </div>
           <div class="campo">
             <label for="hora_entrega">Horário</label>
             <select id="hora_entrega" name="hora_entrega" required>
               <option value="">Selecione</option>
-              {% for horario in horarios %}<option value="{{ horario }}" {% if form_anterior and form_anterior.get('hora_entrega') == horario %}selected{% endif %}>{{ horario }}</option>{% endfor %}
+              {% for horario in horarios_online %}<option value="{{ horario }}" data-online="1" data-loja="{{ '1' if horario in horarios_loja else '0' }}" {% if form_anterior and form_anterior.get('hora_entrega') == horario %}selected{% endif %}>{{ horario }}</option>{% endfor %}
             </select>
           </div>
         </div>
@@ -159,19 +166,31 @@
       <div class="concluido">
         <div class="icone-ok">✓</div>
         <h2>Solicitação registrada</h2>
-        <p>Entrega agendada para <strong>{{ data_entrega|datahora }}</strong>.</p>
+        <p>{% if tipo_atendimento == "online" %}Atendimento via WhatsApp/online agendado{% else %}Entrega agendada{% endif %} para <strong>{{ data_entrega|datahora }}</strong>.</p>
         <ul class="lista-ok">
           {% for m in criadas %}
           <li><span class="protocolo">#{{ m.id }}</span> · {{ m.equipamento.tipo or 'Equipamento' }}{% if m.equipamento.modelo %} — {{ m.equipamento.modelo }}{% endif %}</li>
           {% endfor %}
         </ul>
-        <p style="color:#64748b;line-height:1.5">Leve o equipamento no dia e horário informados. Após o recebimento, o orçamento seguirá pelo WhatsApp.</p>
+        <p style="color:#64748b;line-height:1.5">Esse horário foi reservado exclusivamente para o seu atendimento por 30 minutos. {% if tipo_atendimento == "online" %}Nossa equipe entrará em contato pelo WhatsApp no horário agendado.{% else %}Leve o equipamento no dia e horário informados. Após o recebimento, o orçamento seguirá pelo WhatsApp.{% endif %}</p>
         <a class="botao" href="/solicitar-manutencao">Nova solicitação</a>
       </div>
     {% endif %}
   </section>
 </main>
 <script>
+  const tipoAtendimento=document.querySelector('#tipo_atendimento');
+  function atualizarHorarios(){
+    if(!tipoAtendimento) return;
+    const online=tipoAtendimento.value==='online';
+    const aviso=document.querySelector('#aviso-horario');
+    const label=document.querySelector('#label-data');
+    const select=document.querySelector('#hora_entrega');
+    if(aviso) aviso.innerHTML=online?'<strong>Atendimento via WhatsApp / online:</strong><br>segunda a sexta-feira, das <strong>11:00 às 17:00</strong>. Cada horário é reservado por 30 minutos.':'<strong>Atendimento na loja:</strong><br>segunda a sexta-feira, das <strong>14:00 às 17:00</strong>. Cada horário é reservado por 30 minutos.';
+    if(label) label.textContent=online?'Data do atendimento':'Data da entrega';
+    if(select){[...select.options].forEach((o,i)=>{if(i)o.hidden=!online&&o.dataset.loja!=='1';});if(select.selectedOptions[0]?.hidden)select.value='';}
+  }
+  if(tipoAtendimento){tipoAtendimento.addEventListener('change',atualizarHorarios);atualizarHorarios();}
   function atualizarCard(card){
     const checkbox = card.querySelector('input[type="checkbox"]');
     if(!checkbox || checkbox.disabled) return;

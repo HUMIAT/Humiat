@@ -1,16 +1,25 @@
 {% extends "organiza/base.html" %}{% block conteudo %}
-<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Etapa 1</p><h1>Nova manutenção</h1><p class="texto-suave">Localize o cliente, selecione o equipamento e registre o problema e a previsão de entrega.</p></div><a class="botao" href="/organiza/manutencoes">Voltar</a></div>
+<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Etapa 1</p><h1>Nova manutenção</h1><p class="texto-suave">Localize o cliente, selecione o equipamento e agende o atendimento.</p></div><a class="botao" href="/organiza/manutencoes">Voltar</a></div>
+{% if erro == 'ocupado' %}<div class="alerta erro">Este horário já está reservado. Escolha outro horário disponível.</div>{% elif erro == 'horario' %}<div class="alerta erro">Escolha um dia útil e um horário válido para o tipo de atendimento.</div>{% endif %}
 <form class="cartao formulario" method="post">
 <label>Pesquisar cliente<input id="busca-cliente" type="search" placeholder="Nome ou telefone"></label>
 <label>Cliente<select name="cliente_id" id="cliente" required><option value="">Selecione</option>{% for c in clientes %}<option value="{{ c.id }}" data-busca="{{ (c.nome ~ ' ' ~ c.telefone)|lower }}" {% if c.id == cliente_id %}selected{% endif %}>{{ c.nome }} · {{ c.telefone|telefone }}</option>{% endfor %}</select></label>
 <label>Equipamento<select name="equipamento_id" id="equipamento" required><option value="">Selecione o cliente</option>{% for c in clientes %}{% for e in c.equipamentos %}<option data-cliente="{{ c.id }}" value="{{ e.id }}" {% if e.id == equipamento_id %}selected{% endif %}>{{ e.tipo }}{% if e.modelo %} · {{ e.modelo }}{% endif %}</option>{% endfor %}{% endfor %}</select></label>
 <label>Problema informado<textarea name="defeito" required placeholder="Descreva exatamente o que o cliente informou"></textarea></label>
-<label>Quando o cliente pretende trazer?<input type="datetime-local" name="entrega_prevista_em" required></label>
+<label>Tipo de atendimento<select name="tipo_atendimento" id="tipo-atendimento" required><option value="loja">Atendimento na loja</option><option value="online">Atendimento via WhatsApp / online</option></select></label>
+<div class="aviso-horario" id="aviso-horario"><strong>Atendimento na loja:</strong> segunda a sexta-feira, das <strong>14:00 às 17:00</strong>. Cada horário fica reservado por 30 minutos.</div>
+<label id="rotulo-agendamento">Quando o cliente pretende trazer o equipamento?<input type="datetime-local" name="entrega_prevista_em" id="agendamento" required step="1800"></label>
 <label>Observação interna<textarea name="observacao"></textarea></label>
 <button class="botao primario">Criar manutenção</button></form></section>
 <script>
 const busca=document.querySelector('#busca-cliente'),c=document.querySelector('#cliente'),e=document.querySelector('#equipamento');
 function filtrarClientes(){const t=busca.value.toLowerCase().trim();[...c.options].forEach((o,i)=>{if(i)o.hidden=t&&!o.dataset.busca.includes(t)});}
 function filtrarEquip(){[...e.options].forEach((o,i)=>{if(i)o.hidden=o.dataset.cliente!==c.value});if(e.selectedOptions[0]?.hidden)e.value='';}
-busca.addEventListener('input',filtrarClientes);c.addEventListener('change',filtrarEquip);filtrarEquip();
+const tipo=document.querySelector('#tipo-atendimento'), aviso=document.querySelector('#aviso-horario'), rotulo=document.querySelector('#rotulo-agendamento'), agendamento=document.querySelector('#agendamento');
+function atualizarTipo(){
+ const online=tipo.value==='online';
+ aviso.innerHTML=online?'<strong>Atendimento via WhatsApp / online:</strong> segunda a sexta-feira, das <strong>11:00 às 17:00</strong>. Cada horário fica reservado por 30 minutos.':'<strong>Atendimento na loja:</strong> segunda a sexta-feira, das <strong>14:00 às 17:00</strong>. Cada horário fica reservado por 30 minutos.';
+ rotulo.childNodes[0].nodeValue=online?'Quando o cliente deseja receber o atendimento?':'Quando o cliente pretende trazer o equipamento?';
+}
+busca.addEventListener('input',filtrarClientes);c.addEventListener('change',filtrarEquip);tipo.addEventListener('change',atualizarTipo);filtrarEquip();atualizarTipo();
 </script>{% endblock %}
