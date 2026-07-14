@@ -3030,3 +3030,23 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .secao-form{padding:16px}.form-grid-organizada.duas-colunas,.form-grid-organizada.tres-colunas,.form-grid-organizada.quatro-colunas{grid-template-columns:1fr}
   .campo-duplo,.campo-triplo,.campo-largo{grid-column:1}.venda-card-dados{grid-template-columns:repeat(2,minmax(0,1fr))}.venda-card-topo{display:grid}
 }
+
+/* Agenda operacional: manutenção azul e venda verde */
+.agenda-evento:not(.venda){
+  border-left:5px solid #2563eb !important;
+  background:#eff6ff !important;
+  border-color:#bfdbfe !important;
+}
+.agenda-evento:not(.venda) span{color:#1d4ed8 !important}
+.agenda-evento.venda{
+  border-left:5px solid #16a34a !important;
+  background:#f0fdf4 !important;
+  border-color:#bbf7d0 !important;
+}
+.agenda-evento.venda span{color:#15803d !important}
+.agenda-evento.retirada{
+  border-left-color:#7c3aed !important;
+  background:#f5f3ff !important;
+  border-color:#ddd6fe !important;
+}
+.agenda-evento.retirada span{color:#6d28d9 !important}

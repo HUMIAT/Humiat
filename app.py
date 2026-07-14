@@ -915,10 +915,36 @@ def manutencao_encerrar(manutencao_id: int, usuario: Usuario = Depends(usuario_l
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)
 def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    lista=db.query(Manutencao).options(selectinload(Manutencao.cliente),selectinload(Manutencao.equipamento)).filter(or_(Manutencao.entrega_prevista_em.isnot(None),Manutencao.retirada_em.isnot(None))).order_by(Manutencao.entrega_prevista_em.asc(),Manutencao.retirada_em.asc()).all()
-    vendas=db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.previsao_entrega.isnot(None)).order_by(Equipamento.previsao_entrega.asc()).all()
-    vendas=[eq for eq in vendas if equipamento_eh_venda(eq)]
-    return templates.TemplateResponse("organiza/agenda.html", {"request":request,"usuario":usuario,"manutencoes":lista,"vendas":vendas})
+    # A agenda é operacional: nunca exibe manutenção encerrada/cancelada
+    # nem equipamento de venda já entregue ou apenas cadastrado como "Ativo".
+    lista = (
+        db.query(Manutencao)
+        .options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
+        .filter(
+            or_(Manutencao.entrega_prevista_em.isnot(None), Manutencao.retirada_em.isnot(None)),
+            Manutencao.entregue_em.is_(None),
+            ~Manutencao.status.in_(("Encerrada", "Cancelada")),
+        )
+        .order_by(Manutencao.entrega_prevista_em.asc(), Manutencao.retirada_em.asc())
+        .all()
+    )
+
+    status_venda_pendentes = ("Solicitar gabinete", "Montagem", "Pronto para entrega")
+    vendas = (
+        db.query(Equipamento)
+        .options(selectinload(Equipamento.cliente))
+        .filter(
+            Equipamento.previsao_entrega.isnot(None),
+            Equipamento.status.in_(status_venda_pendentes),
+        )
+        .order_by(Equipamento.previsao_entrega.asc())
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        "organiza/agenda.html",
+        {"request": request, "usuario": usuario, "manutencoes": lista, "vendas": vendas},
+    )
 
 @app.get("/retirada/{token}", response_class=HTMLResponse)
 def retirada_publica(token: str, request: Request, db: Session = Depends(get_db)):
