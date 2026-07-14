@@ -373,27 +373,8 @@ def iniciar_banco():
                 for item in itens_manutencao:
                     db.delete(item)
 
-        # Padroniza todos os equipamentos existentes.
-        equipamentos_existentes = db.query(Equipamento).order_by(Equipamento.id.asc()).all()
-        codigos_usados = set()
-        maior_codigo = 0
-        for equipamento in equipamentos_existentes:
-            codigo = (equipamento.maquina or "").strip().upper()
-            encontrado = re.fullmatch(r"KRJ(\d+)", codigo)
-            if encontrado and codigo not in codigos_usados:
-                equipamento.maquina = codigo
-                codigos_usados.add(codigo)
-                maior_codigo = max(maior_codigo, int(encontrado.group(1)))
-            else:
-                maior_codigo += 1
-                while f"KRJ{maior_codigo:04d}" in codigos_usados:
-                    maior_codigo += 1
-                equipamento.maquina = f"KRJ{maior_codigo:04d}"
-                codigos_usados.add(equipamento.maquina)
-            equipamento.fabricante = equipamento.fabricante or "KARAOKERJ"
-            equipamento.numero_serie = None
-        for (cliente_id,) in db.query(Equipamento.cliente_id).distinct().all():
-            reordenar_series_cliente(db, cliente_id)
+        # A identificação é automática: ordem da data de entrega, iniciando em KRJ00040.
+        normalizar_identificacoes_equipamentos(db)
         db.commit()
     finally:
         db.close()
@@ -616,15 +597,9 @@ def preencher_equipamento(eq: Equipamento, form: dict):
     eq.falta = f"{max(total - recebido, 0):.2f}" if (eq.valor or eq.pago) else None
     eq.data_compra = data_form(form.get("data_compra") or "")
     eq.previsao_entrega = data_form(form.get("previsao_entrega") or "")
-    # O número da máquina KRJ e o código do HD são os dados reais usados pelo monitor.
-    maquina = re.sub(r"[^A-Z0-9]", "", (form.get("maquina") or "").strip().upper())
-    eq.maquina = maquina or eq.maquina
+    # NR máquina e número da máquina no cliente são automáticos e apenas para consulta.
+    # O único identificador digitado manualmente é o NR HD usado para gerar a licença.
     eq.numero_hd = re.sub(r"[^A-Z0-9]", "", (form.get("numero_hd") or "").strip().upper()) or None
-    try:
-        numero_cliente = int(form.get("numero_maquina_cliente") or 0)
-        eq.numero_maquina_cliente = numero_cliente if numero_cliente > 0 else None
-    except (TypeError, ValueError):
-        eq.numero_maquina_cliente = None
     eq.numero_serie = None
     eq.status = (form.get("status") or "Ativo").strip()
     eq.observacao = (form.get("observacao") or "").strip() or None
@@ -636,28 +611,50 @@ def preencher_equipamento(eq: Equipamento, form: dict):
         eq.garantia_meses = 3
 
 
+def _chave_ordenacao_equipamento(equipamento: Equipamento):
+    """Ordena pela entrega; registros sem entrega ficam depois, mantendo ordem estável."""
+    data_referencia = equipamento.previsao_entrega or equipamento.data_compra
+    data_ordem = data_referencia.toordinal() if data_referencia else 9999999
+    criado_ordem = equipamento.criado_em.timestamp() if equipamento.criado_em else 0
+    return data_ordem, criado_ordem, equipamento.id or 0
+
+
+def normalizar_identificacoes_equipamentos(db: Session):
+    """
+    Gera a sequência global KRJ00040, KRJ00041... pela data de entrega.
+    Para cada cliente, gera 1, 2, 3... usando a mesma ordem.
+    """
+    equipamentos = db.query(Equipamento).all()
+    equipamentos.sort(key=_chave_ordenacao_equipamento)
+
+    por_cliente = {}
+    for indice, equipamento in enumerate(equipamentos, start=40):
+        equipamento.maquina = f"KRJ{indice:05d}"
+        equipamento.fabricante = equipamento.fabricante or "KARAOKERJ"
+        equipamento.numero_serie = None
+
+        proximo_cliente = por_cliente.get(equipamento.cliente_id, 0) + 1
+        por_cliente[equipamento.cliente_id] = proximo_cliente
+        equipamento.numero_maquina_cliente = proximo_cliente
+
+
 def proximo_codigo_maquina(db: Session) -> str:
-    maior = 0
-    for (codigo,) in db.query(Equipamento.maquina).filter(Equipamento.maquina.isnot(None)).all():
-        encontrado = re.fullmatch(r"KRJ(\d+)", (codigo or "").strip().upper())
-        if encontrado:
-            maior = max(maior, int(encontrado.group(1)))
-    # A numeração operacional passou a iniciar em KRJ00040.
-    proximo = max(maior + 1, 40)
-    return f"KRJ{proximo:05d}"
+    total = db.query(Equipamento).count()
+    return f"KRJ{40 + total:05d}"
+
+
+def proximo_numero_cliente(db: Session, cliente_id: int) -> int:
+    return db.query(Equipamento).filter(Equipamento.cliente_id == cliente_id).count() + 1
 
 
 def reordenar_series_cliente(db: Session, cliente_id: int):
-    """Compatibilidade: a identificação do cliente agora é preenchida manualmente."""
-    return
+    # A numeração depende da ordem global por data de entrega.
+    normalizar_identificacoes_equipamentos(db)
 
 
 def garantir_identificacao_equipamento(db: Session, equipamento: Equipamento):
-    if not equipamento.maquina:
-        equipamento.maquina = proximo_codigo_maquina(db)
     if not equipamento.fabricante:
         equipamento.fabricante = "KARAOKERJ"
-
 
 def opcoes_equipamentos(db: Session):
     tipos_bd = [x[0] for x in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None), Equipamento.tipo != "").distinct().order_by(Equipamento.tipo).all()]
@@ -672,7 +669,12 @@ def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depen
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
     tipos, pacotes = opcoes_equipamentos(db)
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": None, "erro": "", "tipos": tipos, "pacotes": pacotes})
+    return templates.TemplateResponse("organiza/equipamento_form.html", {
+        "request": request, "usuario": usuario, "cliente": cliente, "equipamento": None,
+        "erro": "", "tipos": tipos, "pacotes": pacotes,
+        "proxima_maquina": proximo_codigo_maquina(db),
+        "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
+    })
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/novo")
@@ -683,11 +685,16 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
     if not (form.get("tipo") or "").strip():
         eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
         tipos, pacotes = opcoes_equipamentos(db)
-        return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes}, status_code=400)
+        return templates.TemplateResponse("organiza/equipamento_form.html", {
+            "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
+            "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes,
+            "proxima_maquina": proximo_codigo_maquina(db),
+            "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
+        }, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
     garantir_identificacao_equipamento(db, eq)
     db.add(eq); db.flush()
-    reordenar_series_cliente(db, cliente_id)
+    normalizar_identificacoes_equipamentos(db)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
@@ -710,7 +717,7 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     form = dict(await request.form())
     preencher_equipamento(eq, form)
     garantir_identificacao_equipamento(db, eq)
-    reordenar_series_cliente(db, cliente_id)
+    normalizar_identificacoes_equipamentos(db)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
