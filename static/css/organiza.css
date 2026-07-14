@@ -2474,3 +2474,117 @@ img{max-width:100%;display:block}
 .etapas-processo{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.etapa{display:flex;align-items:center;gap:8px;padding:10px;border-radius:12px;border:1px solid rgba(148,163,184,.2);font-size:.78rem}.etapa b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#334155}.etapa.concluida{border-color:#22c55e;background:rgba(34,197,94,.08)}.etapa.concluida b{background:#16a34a}.etapa.atual{border-color:#38bdf8;background:rgba(56,189,248,.12)}.etapa.atual b{background:#0284c7}.etapa.bloqueada{opacity:.48}.etapa-card{display:grid;gap:16px}.destaque-etapa{box-shadow:0 0 0 2px rgba(56,189,248,.45)}.etapa-desabilitada{opacity:.58}.input-busca{width:100%}.linha-editavel,.registro-card{border:1px solid rgba(148,163,184,.18);border-radius:12px;padding:10px;margin:8px 0}.linha-editavel summary,.registro-card summary{display:flex;justify-content:space-between;gap:12px;cursor:pointer}.resumo-financeiro{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.resumo-financeiro>div{padding:14px;border-radius:12px;background:rgba(15,23,42,.45);display:grid;gap:4px}.resumo-financeiro small{color:#94a3b8}.resumo-financeiro strong{font-size:1.3rem}.registros-lista{display:grid;gap:8px}.agenda-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.agenda-evento{display:grid;gap:5px;padding:16px;border:1px solid rgba(148,163,184,.2);border-radius:14px;color:inherit;text-decoration:none}.agenda-evento span{font-size:.72rem;color:#38bdf8;font-weight:800}.agenda-evento.retirada span{color:#4ade80}
 @media(max-width:900px){.etapas-processo{display:flex;overflow:auto}.etapa{min-width:130px}.agenda-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:620px){.agenda-grid,.resumo-financeiro{grid-template-columns:1fr}.etapa-card{padding:14px}.linha-editavel summary,.registro-card summary{align-items:flex-start}.etapa-desabilitada{opacity:.72}}
+
+/* =========================================================
+   MANUTENÇÃO — layout isolado e responsivo
+   ========================================================= */
+.manutencao-page{display:grid;gap:18px;width:100%;min-width:0;max-width:1500px;margin:0 auto}
+.manutencao-page *{box-sizing:border-box}
+.manutencao-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;min-width:0}
+.manutencao-header-info{min-width:0}
+.manutencao-header h1{margin:2px 0 6px;overflow-wrap:anywhere}
+.manutencao-header-acoes{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.manutencao-header-acoes .botao{white-space:nowrap}
+.manutencao-etapas{display:grid;grid-template-columns:repeat(7,minmax(115px,1fr));gap:8px;overflow-x:auto;padding:1px 1px 6px;scrollbar-width:thin}
+.manutencao-etapa{display:flex;align-items:center;gap:8px;min-width:0;padding:10px 11px;border-radius:12px;border:1px solid #dbe3ee;background:#fff;color:#334155;font-size:.79rem;white-space:nowrap}
+.manutencao-etapa b{flex:0 0 24px;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#94a3b8;color:#fff}
+.manutencao-etapa span{overflow:hidden;text-overflow:ellipsis}
+.manutencao-etapa.concluida{border-color:#22c55e;background:#f0fdf4;color:#166534}
+.manutencao-etapa.concluida b{background:#16a34a}
+.manutencao-etapa.atual{border-color:#38bdf8;background:#f0f9ff;color:#075985;box-shadow:0 0 0 1px rgba(56,189,248,.18)}
+.manutencao-etapa.atual b{background:#0284c7}
+.manutencao-etapa.bloqueada{opacity:.58}
+.manutencao-card{display:grid;gap:18px;min-width:0;padding:20px;background:#fff!important;color:#0f172a!important}
+.manutencao-card h2,.manutencao-card h3{color:#0f172a;margin-top:0}
+.manutencao-card .texto-suave{color:#64748b}
+.manutencao-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;min-width:0}
+.manutencao-card-header>div{min-width:0}
+.manutencao-card-header h2{margin:2px 0 0;overflow-wrap:anywhere}
+.manutencao-card-header form{flex:0 0 auto;margin:0}
+.manutencao-form{display:grid;gap:14px;min-width:0}
+.manutencao-grid{display:grid;gap:14px;min-width:0;align-items:end}
+.manutencao-grid.dois{grid-template-columns:repeat(2,minmax(0,1fr))}
+.manutencao-grid.tres{grid-template-columns:repeat(3,minmax(0,1fr))}
+.manutencao-grid label,.manutencao-form label{min-width:0}
+.manutencao-form-acoes{display:flex;justify-content:flex-end}
+.manutencao-form-acoes .botao{min-width:210px}
+.manutencao-item-toolbar{display:grid;gap:12px;min-width:0}
+.manutencao-busca{display:grid;gap:7px;font-weight:800;color:#0f172a;min-width:0}
+.manutencao-busca input{width:100%;min-width:0;border:1px solid #cbd5e1;border-radius:12px;padding:12px 14px;background:#fff;color:#0f172a}
+.manutencao-adicionar-item{display:grid;grid-template-columns:minmax(260px,1fr) 120px auto auto;gap:12px;align-items:end;min-width:0}
+.manutencao-adicionar-item label{display:grid;gap:7px;font-weight:800;color:#0f172a;min-width:0}
+.manutencao-adicionar-item select,.manutencao-adicionar-item input{width:100%;min-width:0;border:1px solid #cbd5e1;border-radius:12px;padding:12px 14px;background:#fff;color:#0f172a}
+.manutencao-adicionar-item .check{display:flex;align-items:center;gap:8px;padding-bottom:12px}
+.manutencao-adicionar-item .check input{width:auto}
+.manutencao-adicionar-item .item-botao{min-height:45px}
+.manutencao-cadastro-rapido{border:1px dashed #cbd5e1;border-radius:14px;padding:12px 14px;background:#f8fafc}
+.manutencao-cadastro-rapido summary{cursor:pointer;font-weight:800;color:#1d4ed8}
+.cadastro-item-grid{grid-template-columns:minmax(220px,2fr) repeat(4,minmax(110px,1fr)) auto;margin-top:14px}
+.cadastro-item-grid .campo-descricao{min-width:0}
+.manutencao-orcamento-grupos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;min-width:0}
+.manutencao-grupo-itens{min-width:0;border:1px solid #e2e8f0;border-radius:16px;padding:16px;background:#fff}
+.manutencao-grupo-itens h3{margin-bottom:12px}
+.linha-editavel,.registro-card{background:#fff;border-color:#e2e8f0!important;color:#0f172a}
+.linha-editavel summary,.registro-card summary{min-width:0}
+.linha-editavel summary span,.registro-card summary span{min-width:0;overflow-wrap:anywhere}
+.linha-editavel summary strong,.registro-card summary strong{white-space:nowrap}
+.edicao-item{margin-top:14px}
+.manutencao-acoes{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.manutencao-acoes form{margin:0}
+.manutencao-pagamento-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:16px;min-width:0}
+.manutencao-subcard{display:grid;gap:14px;min-width:0;padding:16px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc}
+.manutencao-subcard h3{margin-bottom:0}
+.manutencao-registros{display:grid;gap:8px;min-width:0}
+.manutencao-whatsapp-largo{justify-self:start}
+.manutencao-retirada{display:grid;grid-template-columns:minmax(240px,420px) auto;gap:12px;align-items:end}
+.manutencao-retirada .botao{min-height:45px}
+.manutencao-page .etapa-desabilitada{opacity:.62;filter:saturate(.72)}
+.manutencao-page .destaque-etapa{box-shadow:0 0 0 2px rgba(14,165,233,.35),0 12px 32px rgba(15,23,42,.08)}
+
+@media (max-width:1100px){
+  .manutencao-etapas{grid-template-columns:repeat(7,140px)}
+  .cadastro-item-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cadastro-item-grid .campo-descricao{grid-column:1/-1}
+  .cadastro-item-grid .botao{width:100%}
+  .manutencao-pagamento-grid{grid-template-columns:1fr}
+}
+
+@media (max-width:760px){
+  .manutencao-page{gap:14px;padding-bottom:76px}
+  .manutencao-header{display:grid;gap:12px}
+  .manutencao-header-acoes{justify-content:flex-start;width:100%}
+  .manutencao-header-acoes .botao{flex:1 1 130px;text-align:center}
+  .manutencao-card{padding:15px;border-radius:15px}
+  .manutencao-card-header{display:grid;gap:12px}
+  .manutencao-card-header form,.manutencao-card-header .botao{width:100%}
+  .manutencao-grid.dois,.manutencao-grid.tres{grid-template-columns:1fr}
+  .manutencao-form-acoes .botao{width:100%;min-width:0}
+  .manutencao-adicionar-item{grid-template-columns:1fr 110px}
+  .manutencao-adicionar-item .item-select{grid-column:1/-1}
+  .manutencao-adicionar-item .item-opcional{align-self:end}
+  .manutencao-adicionar-item .item-botao{grid-column:1/-1;width:100%}
+  .manutencao-orcamento-grupos{grid-template-columns:1fr}
+  .manutencao-acoes{display:grid;grid-template-columns:1fr}
+  .manutencao-acoes form,.manutencao-acoes .botao{width:100%;text-align:center}
+  .resumo-financeiro{grid-template-columns:1fr!important}
+  .manutencao-whatsapp-largo{width:100%;text-align:center}
+  .manutencao-retirada{grid-template-columns:1fr}
+}
+
+@media (max-width:480px){
+  .app-main{padding:14px 10px 92px!important}
+  .manutencao-header h1{font-size:1.55rem;line-height:1.15}
+  .manutencao-header-acoes{display:grid;grid-template-columns:1fr 1fr}
+  .manutencao-header-acoes .pill{grid-column:1/-1;justify-self:start}
+  .manutencao-etapas{margin-inline:-2px}
+  .manutencao-etapa{min-width:128px}
+  .manutencao-card{padding:14px}
+  .manutencao-card h2{font-size:1.2rem;line-height:1.25}
+  .manutencao-adicionar-item{grid-template-columns:1fr}
+  .manutencao-adicionar-item .item-select,.manutencao-adicionar-item .item-botao{grid-column:auto}
+  .manutencao-adicionar-item .check{padding:4px 0}
+  .cadastro-item-grid{grid-template-columns:1fr}
+  .cadastro-item-grid .campo-descricao{grid-column:auto}
+  .linha-editavel summary,.registro-card summary{align-items:flex-start;gap:8px}
+  .linha-editavel summary strong,.registro-card summary strong{font-size:.9rem}
+}
