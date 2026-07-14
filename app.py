@@ -19,10 +19,10 @@ from starlette.requests import ClientDisconnect
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_, inspect, text
 from sqlalchemy.orm import Session, relationship, selectinload
 
-from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO
+from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL
 from database import Base, SessionLocal, engine, get_db
 
-app = FastAPI(title="HUMIAT", version=ORGANIZA_VERSAO)
+app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -1156,8 +1156,9 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     mensagem_retirada = (
         f"Olá, {m.cliente.nome}. Os equipamentos abaixo estão prontos para retirada:\n"
         + "\n".join(linhas_prontas)
-        + f"\n\nEscolha a data e o horário neste link: {request.url.scheme}://{request.url.netloc}/retirada/{orcamento.token}"
+        + f"\n\nEscolha a data e o horário neste link: {PUBLIC_BASE_URL}/retirada/{orcamento.token}"
         + "\n\nRetiradas de segunda a sexta-feira, somente das 14:00 às 17:00."
+        + "\n\nKaraokê RJ"
     ) if orcamento and prontas_cliente else ""
     return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
 

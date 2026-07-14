@@ -51,7 +51,9 @@
 Equipamento: '~m.equipamento.tipo~' '~(m.equipamento.modelo or '')~'
 Ordem de serviço: #'~m.id~'
 
-Agora faremos a análise e enviaremos o orçamento para sua aprovação.')|urlencode }}">WhatsApp: equipamento recebido</a>{% endif %}
+Agora faremos a análise e enviaremos o orçamento para sua aprovação.
+
+Karaokê RJ')|urlencode }}">WhatsApp: equipamento recebido</a>{% endif %}
     </div>
     <form class="formulario manutencao-form" method="post" action="/organiza/manutencoes/{{ m.id }}/editar">
       <div class="manutencao-grid dois">
@@ -230,7 +232,9 @@ Saldo: '~(totais.falta|moeda)~'
 🗓️ *Prazo*
 '~(m.prazo or 'A confirmar')~'
 
-Avisaremos assim que o equipamento estiver pronto.')|urlencode }}">Enviar confirmação no WhatsApp</a>
+Avisaremos assim que o equipamento estiver pronto.
+
+Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
   </article>
 
   <article class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}">
