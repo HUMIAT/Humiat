@@ -491,17 +491,62 @@ def carregar_manutencao(db: Session, manutencao_id: int):
 @app.get("/organiza/itens", response_class=HTMLResponse)
 def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     q = db.query(Item)
-    if busca.strip(): q = q.filter(Item.nome.ilike(f"%{busca.strip()}%"))
-    return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": q.order_by(Item.nome).all(), "busca": busca})
+    termo = busca.strip()
+    if termo:
+        filtro = f"%{termo}%"
+        q = q.filter(or_(Item.nome.ilike(filtro), Item.codigo.ilike(filtro), Item.categoria.ilike(filtro)))
+    itens = q.order_by(Item.ativo.desc(), Item.categoria, Item.nome).all()
+    categorias = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
+    return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca})
 
 
 @app.post("/organiza/itens/novo")
 async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
     nome = (form.get("nome") or "").strip()
-    if nome and not db.query(Item).filter(func.lower(Item.nome) == nome.lower()).first():
-        db.add(Item(nome=nome, codigo=(form.get("codigo") or "").strip() or None, categoria=(form.get("categoria") or "Geral").strip(), preco_custo=moeda_num(form.get("preco_custo")), preco_venda=moeda_num(form.get("preco_venda")), ativo=1))
+    destino = (form.get("next") or "/organiza/itens").strip()
+    if not destino.startswith("/"):
+        destino = "/organiza/itens"
+    if nome:
+        existente = db.query(Item).filter(func.lower(Item.nome) == nome.lower()).first()
+        if not existente:
+            db.add(Item(
+                nome=nome,
+                codigo=(form.get("codigo") or "").strip() or None,
+                categoria=(form.get("categoria") or "Geral").strip() or "Geral",
+                preco_custo=moeda_num(form.get("preco_custo")),
+                preco_venda=moeda_num(form.get("preco_venda")),
+                ativo=1,
+            ))
+            db.commit()
+    return RedirectResponse(destino, status_code=303)
+
+
+@app.post("/organiza/itens/{item_id}/editar")
+async def item_editar(item_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    repetido = db.query(Item).filter(func.lower(Item.nome) == nome.lower(), Item.id != item_id).first() if nome else None
+    if nome and not repetido:
+        item.nome = nome
+        item.codigo = (form.get("codigo") or "").strip() or None
+        item.categoria = (form.get("categoria") or "Geral").strip() or "Geral"
+        item.preco_custo = moeda_num(form.get("preco_custo"))
+        item.preco_venda = moeda_num(form.get("preco_venda"))
         db.commit()
+    return RedirectResponse("/organiza/itens", status_code=303)
+
+
+@app.post("/organiza/itens/{item_id}/status")
+def item_status(item_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(404)
+    item.ativo = 0 if item.ativo else 1
+    db.commit()
     return RedirectResponse("/organiza/itens", status_code=303)
 
 
@@ -550,6 +595,19 @@ async def orcamento_adicionar_item(manutencao_id: int, request: Request, usuario
     descricao = item.nome if item else (form.get("descricao") or "").strip()
     if descricao:
         db.add(OrcamentoItem(orcamento_id=o.id, item_id=item.id if item else None, descricao=descricao, quantidade=max(int(form.get("quantidade") or 1),1), preco_custo=item.preco_custo if item else moeda_num(form.get("preco_custo")), preco_venda=moeda_num(form.get("preco_venda")) or (item.preco_venda if item else 0), opcional=1 if form.get("opcional") else 0, aprovado=0 if form.get("opcional") else 1))
+        db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item/{orcamento_item_id}/excluir")
+def orcamento_excluir_item(manutencao_id: int, orcamento_item_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    orcamento_ids = [o.id for o in m.orcamentos]
+    item = db.query(OrcamentoItem).filter(OrcamentoItem.id == orcamento_item_id, OrcamentoItem.orcamento_id.in_(orcamento_ids)).first()
+    if item:
+        db.delete(item)
         db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 

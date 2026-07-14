@@ -1,5 +1,43 @@
 {% extends "organiza/base.html" %}{% block conteudo %}
-<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cadastro</p><h1>Itens</h1><p class="texto-suave">Tabela de custo e preço normal. O orçamento copia o preço do momento.</p></div></div>
-<div class="grade-ficha"><form class="cartao formulario" method="post" action="/organiza/itens/novo"><h2>Novo item</h2><label>Descrição<input name="nome" required></label><div class="form-grid"><label>Código<input name="codigo"></label><label>Categoria<input name="categoria" value="Geral"></label><label>Preço de custo<input name="preco_custo" inputmode="decimal"></label><label>Preço normal<input name="preco_venda" inputmode="decimal" required></label></div><button class="botao primario">Salvar item</button></form>
-<section class="cartao tabela-cartao"><form class="busca-linha"><input name="busca" value="{{ busca }}" placeholder="Buscar item"><button class="botao">Buscar</button></form><div class="tabela-responsiva"><table><thead><tr><th>Item</th><th>Categoria</th><th>Custo</th><th>Preço normal</th></tr></thead><tbody>{% for item in itens %}<tr><td><strong>{{ item.nome }}</strong><small>{{ item.codigo or '' }}</small></td><td>{{ item.categoria }}</td><td>{{ item.preco_custo|moeda }}</td><td>{{ item.preco_venda|moeda }}</td></tr>{% endfor %}</tbody></table></div></section></div></section>
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">Cadastro</p><h1>Itens</h1><p class="texto-suave">Tabela usada nos novos orçamentos. Alterações não mudam orçamentos antigos.</p></div>
+    <button class="botao primario" type="button" onclick="document.getElementById('novo-item').showModal()">＋ Novo item</button>
+  </div>
+
+  <section class="cartao tabela-cartao">
+    <form class="busca-linha" method="get">
+      <input name="busca" value="{{ busca }}" placeholder="Buscar por código, descrição ou categoria">
+      <button class="botao">Buscar</button>
+      {% if busca %}<a class="botao" href="/organiza/itens">Limpar</a>{% endif %}
+    </form>
+    <div class="tabela-responsiva">
+      <table><thead><tr><th>Item</th><th>Categoria</th><th>Custo</th><th>Preço normal</th><th>Status</th><th>Ações</th></tr></thead>
+      <tbody>{% for item in itens %}
+        <tr class="{% if not item.ativo %}linha-inativa{% endif %}">
+          <td><strong>{{ item.nome }}</strong><small>{{ item.codigo or 'Sem código' }}</small></td>
+          <td>{{ item.categoria }}</td><td>{{ item.preco_custo|moeda }}</td><td>{{ item.preco_venda|moeda }}</td>
+          <td><span class="pill">{{ 'Ativo' if item.ativo else 'Inativo' }}</span></td>
+          <td><div class="acoes-tabela">
+            <button class="botao pequeno" type="button" onclick="document.getElementById('editar-{{ item.id }}').showModal()">Editar</button>
+            <form method="post" action="/organiza/itens/{{ item.id }}/status"><button class="botao pequeno">{{ 'Inativar' if item.ativo else 'Ativar' }}</button></form>
+          </div></td>
+        </tr>
+        <dialog id="editar-{{ item.id }}" class="modal-item"><form method="post" action="/organiza/itens/{{ item.id }}/editar" class="cartao formulario modal-conteudo">
+          <div class="titulo-linha compacto"><h2>Editar item</h2><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
+          <label>Descrição<input name="nome" value="{{ item.nome }}" required></label>
+          <div class="form-grid"><label>Código<input name="codigo" value="{{ item.codigo or '' }}"></label><label>Categoria<input name="categoria" value="{{ item.categoria }}" list="categorias"></label><label>Preço de custo<input name="preco_custo" value="{{ '%.2f'|format(item.preco_custo) }}" inputmode="decimal"></label><label>Preço normal<input name="preco_venda" value="{{ '%.2f'|format(item.preco_venda) }}" inputmode="decimal" required></label></div>
+          <button class="botao primario">Salvar alterações</button>
+        </form></dialog>
+      {% else %}<tr><td colspan="6">Nenhum item encontrado.</td></tr>{% endfor %}</tbody></table>
+    </div>
+  </section>
+</section>
+<dialog id="novo-item" class="modal-item"><form class="cartao formulario modal-conteudo" method="post" action="/organiza/itens/novo">
+  <div class="titulo-linha compacto"><div><p class="tag">Cadastro rápido</p><h2>Novo item</h2></div><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
+  <label>Descrição<input name="nome" required autofocus></label>
+  <div class="form-grid"><label>Código<input name="codigo"></label><label>Categoria<input name="categoria" value="Geral" list="categorias"></label><label>Preço de custo<input name="preco_custo" inputmode="decimal" value="0,00"></label><label>Preço normal<input name="preco_venda" inputmode="decimal" required></label></div>
+  <button class="botao primario">Salvar item</button>
+</form></dialog>
+<datalist id="categorias">{% for c in categorias %}<option value="{{ c }}">{% endfor %}</datalist>
 {% endblock %}
