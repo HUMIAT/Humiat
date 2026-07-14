@@ -132,6 +132,24 @@ Karaokê RJ')|urlencode }}">WhatsApp: equipamento recebido</a>{% endif %}
       {% endfor %}
     </div>
 
+    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/condicoes">
+      <h3>Condições do orçamento</h3>
+      <p class="texto-suave">Essas informações serão exibidas ao cliente junto com os valores.</p>
+      <div class="manutencao-grid dois">
+        <label>Forma de pagamento
+          <select name="forma_pagamento_orcamento" required>
+            <option value="">Selecione</option>
+            <option value="À vista" {% if orcamento.forma_pagamento_orcamento == 'À vista' %}selected{% endif %}>À vista</option>
+            <option value="50% de sinal + 50% na entrega" {% if orcamento.forma_pagamento_orcamento == '50% de sinal + 50% na entrega' %}selected{% endif %}>50% de sinal + 50% na entrega</option>
+          </select>
+        </label>
+        <label>Prazo após o pagamento
+          <span class="campo-com-sufixo"><input type="number" min="1" name="prazo_dias_uteis" required value="{{ orcamento.prazo_dias_uteis or '' }}" placeholder="5"><small>dias úteis</small></span>
+        </label>
+      </div>
+      <button class="botao" type="submit">Salvar condições</button>
+    </form>
+
     <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/desconto">
       <h3>Desconto do orçamento</h3>
       <div class="manutencao-grid dois">
@@ -152,20 +170,38 @@ Karaokê RJ')|urlencode }}">WhatsApp: equipamento recebido</a>{% endif %}
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/enviar"><button class="botao primario" type="submit">Marcar como enviado</button></form>
       <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
 
-🧾 *Seu orçamento Karaokê RJ está pronto*
+🛠 *Orçamento de manutenção*
 
-Equipamento: '~m.equipamento.tipo~' '~(m.equipamento.modelo or '')~'
-Total obrigatório: '~(totais.obrigatorio_final|moeda)~'
-Opcionais disponíveis: '~(totais.opcionais|moeda)~'
+*Problema informado*
+'~(m.defeito or '-')~'
+
+*Solução do técnico*
+'~(m.diagnostico or '-')~'
+
+*Itens a serem trocados*
+• Serviço de manutenção
+• '~(orcamento.itens|selectattr('opcional','equalto',0)|map(attribute='descricao')|join('
+• '))~'
+
+*Valores*
+• Desconto: '~(totais.desconto_informado|moeda)~'
+• Total obrigatório: '~(totais.obrigatorio_final|moeda)~'
+• Total com opcionais: '~(totais.geral|moeda)~'
+
+*Forma de pagamento*
+'~(orcamento.forma_pagamento_orcamento or '-')~'
+
+*Prazo*
+'~((orcamento.prazo_dias_uteis|string)~' dias úteis após a confirmação do pagamento' if orcamento.prazo_dias_uteis else '-')~'
 
 Pelo link abaixo você pode:
+• Aprovar obrigatório
 • Aprovar tudo
-• Aprovar parcialmente
-• Cancelar
+• Cancelar orçamento
 
 '~request.url.scheme~'://'~request.url.netloc~'/orcamento/'~orcamento.token~'
 
-Qualquer dúvida, estamos à disposição.')|urlencode }}">Enviar orçamento no WhatsApp</a>
+Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/aprovar-manual"><button class="botao" type="submit">Aprovação manual</button></form>
     </div>
   </article>

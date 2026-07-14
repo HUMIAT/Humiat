@@ -150,6 +150,8 @@ class Orcamento(Base):
     observacao = Column(Text, nullable=True)
     desconto = Column(Float, nullable=False, default=0)
     valor_manutencao = Column(Float, nullable=False, default=0)
+    forma_pagamento_orcamento = Column(String(80), nullable=True)
+    prazo_dias_uteis = Column(Integer, nullable=True)
     aprovado_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     manutencao = relationship("Manutencao", back_populates="orcamentos")
@@ -314,6 +316,10 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN desconto FLOAT NOT NULL DEFAULT 0"))
             if "valor_manutencao" not in existentes_orcamento:
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN valor_manutencao FLOAT NOT NULL DEFAULT 0"))
+            if "forma_pagamento_orcamento" not in existentes_orcamento:
+                conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN forma_pagamento_orcamento VARCHAR(80)"))
+            if "prazo_dias_uteis" not in existentes_orcamento:
+                conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN prazo_dias_uteis INTEGER"))
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
@@ -1217,10 +1223,32 @@ async def orcamento_salvar_desconto(manutencao_id: int, request: Request, usuari
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/condicoes")
+async def orcamento_salvar_condicoes(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.orcamentos:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    forma = (form.get("forma_pagamento_orcamento") or "").strip()
+    if forma not in ("À vista", "50% de sinal + 50% na entrega"):
+        forma = ""
+    try:
+        prazo = int(form.get("prazo_dias_uteis") or 0)
+    except (TypeError, ValueError):
+        prazo = 0
+    o.forma_pagamento_orcamento = forma or None
+    o.prazo_dias_uteis = prazo if prazo > 0 else None
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/enviar")
 def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     if float(o.valor_manutencao or 0) <= 0: return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Informe o valor obrigatório da manutenção", status_code=303)
+    if not o.forma_pagamento_orcamento: return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Informe a forma de pagamento do orçamento", status_code=303)
+    if not o.prazo_dias_uteis or o.prazo_dias_uteis <= 0: return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Informe o prazo em dias úteis após o pagamento", status_code=303)
     o.status = "Enviado"; m.status = "Aguardando aprovação"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
@@ -1461,7 +1489,7 @@ async def orcamento_responder(token: str, request: Request, db: Session = Depend
         selecionados = {int(v) for k,v in form.items() if k.startswith("opcional_") and str(v).isdigit()}
         for i in o.itens:
             i.aprovado = 1 if (not i.opcional or acao == "aprovar" or i.id in selecionados) else 0
-        o.status = "Aprovado" if acao == "aprovar" else "Aprovado parcialmente"
+        o.status = "Aprovado" if acao == "aprovar" else "Aprovado obrigatório"
         o.aprovado_em = datetime.now(); o.manutencao.status = "Aprovado"
     db.commit(); return RedirectResponse(f"/orcamento/{token}?ok=1", status_code=303)
 
