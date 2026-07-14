@@ -7,6 +7,7 @@ import secrets
 import csv
 import io
 import xml.etree.ElementTree as ET
+import unicodedata
 from datetime import date, datetime, time
 from typing import Optional
 
@@ -135,6 +136,7 @@ class Orcamento(Base):
     status = Column(String(40), nullable=False, default="Rascunho")
     observacao = Column(Text, nullable=True)
     desconto = Column(Float, nullable=False, default=0)
+    valor_manutencao = Column(Float, nullable=False, default=0)
     aprovado_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     manutencao = relationship("Manutencao", back_populates="orcamentos")
@@ -294,9 +296,11 @@ def iniciar_banco():
                     conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} {tipo_dt}"))
     if "assistencia_orcamentos" in insp.get_table_names():
         existentes_orcamento = {c["name"] for c in insp.get_columns("assistencia_orcamentos")}
-        if "desconto" not in existentes_orcamento:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "desconto" not in existentes_orcamento:
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN desconto FLOAT NOT NULL DEFAULT 0"))
+            if "valor_manutencao" not in existentes_orcamento:
+                conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN valor_manutencao FLOAT NOT NULL DEFAULT 0"))
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
@@ -326,6 +330,18 @@ def iniciar_banco():
         # Remove prefixos antigos usados no código do WhatsApp e mantém somente o nome real.
         for cliente_existente in db.query(Cliente).all():
             cliente_existente.nome = limpar_nome_cliente(cliente_existente.nome)
+
+        # Migra o antigo item "Manutenção" para o campo fixo do orçamento.
+        for orcamento_existente in db.query(Orcamento).options(selectinload(Orcamento.itens)).all():
+            itens_manutencao = [
+                item for item in orcamento_existente.itens
+                if re.sub(r"[^a-z]", "", unicodedata.normalize("NFKD", item.descricao or "").encode("ascii", "ignore").decode("ascii").lower()) == "manutencao"
+            ]
+            if itens_manutencao:
+                if not orcamento_existente.valor_manutencao:
+                    orcamento_existente.valor_manutencao = sum(item.preco_venda * item.quantidade for item in itens_manutencao)
+                for item in itens_manutencao:
+                    db.delete(item)
 
         # Padroniza todos os equipamentos existentes.
         equipamentos_existentes = db.query(Equipamento).order_by(Equipamento.id.asc()).all()
@@ -777,23 +793,108 @@ def garantia_pdf(equipamento_id: int, usuario: Usuario = Depends(usuario_logado)
     eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
     if not eq:
         raise HTTPException(404)
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
     from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    fonte_regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    fonte_negrito = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    nome_fonte = "DejaVu"
+    nome_fonte_bold = "DejaVu-Bold"
+    if os.path.exists(fonte_regular) and os.path.exists(fonte_negrito):
+        if nome_fonte not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(nome_fonte, fonte_regular))
+            pdfmetrics.registerFont(TTFont(nome_fonte_bold, fonte_negrito))
+    else:
+        nome_fonte, nome_fonte_bold = "Helvetica", "Helvetica-Bold"
+
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=42, leftMargin=42, topMargin=42, bottomMargin=42)
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
+        topMargin=12 * mm, bottomMargin=14 * mm, title="Venda de Equipamentos - Termo de Garantia"
+    )
     styles = getSampleStyleSheet()
-    compra = eq.data_compra.strftime("%d/%m/%Y") if eq.data_compra else "Nao informada"
+    corpo = ParagraphStyle("ContratoCorpo", parent=styles["BodyText"], fontName=nome_fonte, fontSize=9.2, leading=13, alignment=TA_JUSTIFY, spaceAfter=7)
+    titulo = ParagraphStyle("ContratoTitulo", parent=styles["Title"], fontName=nome_fonte_bold, fontSize=13, leading=16, alignment=TA_CENTER, spaceAfter=12)
+    cabecalho = ParagraphStyle("ContratoCabecalho", parent=corpo, fontSize=8.5, leading=11)
+
+    cliente = eq.cliente
+    data_entrega = eq.previsao_entrega
+    data_texto = data_entrega.strftime("%d de %B de %Y") if data_entrega else "data de entrega não informada"
+    meses_pt = {1:"janeiro",2:"fevereiro",3:"março",4:"abril",5:"maio",6:"junho",7:"julho",8:"agosto",9:"setembro",10:"outubro",11:"novembro",12:"dezembro"}
+    if data_entrega:
+        data_texto = f"{data_entrega.day:02d} de {meses_pt[data_entrega.month]} de {data_entrega.year}"
+
+    endereco_partes = [cliente.endereco, cliente.endereco_numero]
+    endereco = ", ".join(str(x).strip() for x in endereco_partes if x)
+    if cliente.complemento:
+        endereco += (", " if endereco else "") + cliente.complemento
+    if cliente.bairro:
+        endereco += (" - " if endereco else "") + cliente.bairro
+    cidade_uf = " - ".join(x for x in [cliente.municipio or cliente.cidade, cliente.estado] if x)
+    if cidade_uf:
+        endereco += (", " if endereco else "") + cidade_uf
+    endereco = endereco or "endereço não informado"
+
+    equipamento = " ".join(x for x in [eq.tipo, eq.modelo] if x).strip() or "equipamento de karaokê"
+    pacote = f", atualizado até o pacote {eq.pacote}" if eq.pacote else ""
+    valor = formatar_moeda(eq.valor)
     meses = eq.garantia_meses if eq.garantia_meses is not None else 3
-    dados = [["Cliente", eq.cliente.nome], ["CPF/CNPJ", eq.cliente.documento or "Nao informado"], ["Equipamento", f"{eq.tipo or ''} {eq.modelo or ''}".strip()], ["Maquina / codigo", eq.maquina or "Nao informado"], ["Numero de serie", eq.numero_serie or "Nao informado"], ["Data da compra", compra], ["Prazo de garantia", f"{meses} meses"], ["Valor", formatar_moeda(eq.valor)]]
-    story = [Paragraph("HUMIAT - CERTIFICADO DE GARANTIA", styles["Title"]), Spacer(1, 16), Paragraph("Este certificado registra os dados da venda e do equipamento abaixo.", styles["BodyText"]), Spacer(1, 14)]
-    tabela = Table(dados, colWidths=[130, 350])
-    tabela.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.5,colors.grey),("BACKGROUND",(0,0),(0,-1),colors.whitesmoke),("VALIGN",(0,0),(-1,-1),"TOP"),("PADDING",(0,0),(-1,-1),7)]))
-    story += [tabela, Spacer(1,18), Paragraph("A garantia cobre defeitos de fabricacao durante o prazo informado, mediante apresentacao deste certificado. Danos por mau uso, liquidos, quedas, surtos eletricos, violacao ou intervencao de terceiros nao estao incluidos.", styles["BodyText"])]
+
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "karaoke-rj-garantia.jpeg")
+    logo = Image(logo_path, width=25 * mm, height=25 * mm) if os.path.exists(logo_path) else Spacer(25 * mm, 25 * mm)
+    dados_empresa = Paragraph(
+        "<b>EMPRESA KARAOKE &amp; GAMES RJ.</b><br/>"
+        "CNPJ: 35.458.112/0001-75 &nbsp;&nbsp;&nbsp; IM: 1213508-4<br/>"
+        "Rua João Romariz, 313 - Ramos - Rio de Janeiro/RJ - CEP: 21031-700<br/>"
+        "WhatsApp: (21) 99507-9690 / (21) 99650-4516<br/>"
+        "www.karaokerj.com.br &nbsp;&nbsp; contato@karaokerj.com.br", cabecalho
+    )
+    header = Table([[logo, dados_empresa]], colWidths=[30 * mm, 145 * mm])
+    header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"), ("LINEBELOW", (0,0), (-1,-1), 0.7, colors.HexColor("#555555")), ("LEFTPADDING", (0,0), (-1,-1), 0), ("RIGHTPADDING", (0,0), (-1,-1), 0), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+
+    story = [header, Spacer(1, 8), Paragraph("VENDA DE EQUIPAMENTOS - TERMO DE GARANTIA", titulo)]
+    story.append(Paragraph(
+        f"Pelo presente instrumento particular, de um lado <b>KARAOKE &amp; GAMES RJ</b>, inscrita no CNPJ "
+        f"35.458.112/0001-75, estabelecida à Rua João Romariz, 313, Fundos, Ramos, Rio de Janeiro/RJ, "
+        f"doravante denominada <b>VENDEDORA</b>, e de outro lado <b>{cliente.nome}</b>, CPF/CNPJ "
+        f"<b>{cliente.documento or 'não informado'}</b>, residente e domiciliado(a) em <b>{endereco}</b>, "
+        f"doravante denominado(a) <b>COMPRADOR(A)</b>, firmam o presente contrato de venda e garantia.", corpo
+    ))
+    clausulas = [
+        f"<b>Cláusula 1ª.</b> O presente contrato tem como objeto a venda do equipamento <b>{equipamento}</b>{pacote}, máquina/código <b>{eq.maquina or 'não informado'}</b> e número de série <b>{eq.numero_serie or 'não informado'}</b>.",
+        f"<b>Cláusula 2ª.</b> O equipamento será entregue pela VENDEDORA em <b>{data_texto}</b>. Esta é a data de referência para o início da garantia.",
+        f"<b>Cláusula 3ª.</b> O endereço de instalação informado pelo(a) COMPRADOR(A) é <b>{endereco}</b>.",
+        f"<b>Cláusula 4ª.</b> O valor total da venda é <b>{valor}</b>.",
+        f"<b>Cláusula 5ª.</b> A garantia do equipamento é de <b>{meses} meses a partir da data de entrega</b>. Para atendimento em garantia, o equipamento deverá ser levado à loja, salvo acordo diferente registrado por escrito.",
+        "<b>Cláusula 6ª.</b> A garantia não cobre cabos, acessórios consumíveis, mau uso, quedas, líquidos, violação, intervenção de terceiros ou danos causados por falha e surto elétrico.",
+        "<b>Cláusula 7ª.</b> Máquinas Premium, portáteis ou fliperamas devem utilizar estabilizador TS Shara 9101. Máquinas JBL e fliperamas de maior potência devem utilizar estabilizador TS Shara 9116, conforme orientação técnica da VENDEDORA.",
+        "<b>Cláusula 8ª.</b> Recomenda-se a utilização de cabos de microfone Santo Ângelo XLR x P10 ou equivalentes de qualidade técnica compatível.",
+        "<b>Cláusula 9ª.</b> Este contrato obriga as partes, seus herdeiros e sucessores.",
+    ]
+    for texto_clausula in clausulas:
+        story.append(Paragraph(texto_clausula, corpo))
+    story += [
+        Spacer(1, 9),
+        Paragraph("Por estarem justos e contratados, firmam o presente instrumento em duas vias de igual teor.", corpo),
+        Spacer(1, 12),
+        Paragraph(f"Rio de Janeiro, {data_texto}.", corpo),
+        Spacer(1, 26),
+        KeepTogether(Table([
+            ["________________________________________", "________________________________________"],
+            ["KARAOKE & GAMES RJ", cliente.nome],
+            ["VENDEDORA", "COMPRADOR(A)"],
+        ], colWidths=[85 * mm, 85 * mm], style=TableStyle([("ALIGN", (0,0), (-1,-1), "CENTER"), ("FONTNAME", (0,0), (-1,-1), nome_fonte), ("FONTSIZE", (0,0), (-1,-1), 8.5), ("TOPPADDING", (0,0), (-1,-1), 2), ("BOTTOMPADDING", (0,0), (-1,-1), 2)])))
+    ]
     doc.build(story)
-    nome = _nome_arquivo(eq.cliente.nome)
-    return Response(buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="garantia_{nome}_{eq.id}.pdf"'})
+    nome = _nome_arquivo(cliente.nome)
+    return Response(buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="contrato_garantia_{nome}_{eq.id}.pdf"'})
 
 
 @app.get("/organiza/equipamentos/{equipamento_id}/nota.xml")
@@ -844,9 +945,11 @@ def moeda_num(valor: str) -> float:
 
 
 def totais_orcamento(orcamento: Orcamento):
-    obrigatorio = sum(i.preco_venda * i.quantidade for i in orcamento.itens if not i.opcional)
+    manutencao = max(float(orcamento.valor_manutencao or 0), 0)
+    itens_obrigatorios = sum(i.preco_venda * i.quantidade for i in orcamento.itens if not i.opcional)
+    obrigatorio = manutencao + itens_obrigatorios
     opcionais = sum(i.preco_venda * i.quantidade for i in orcamento.itens if i.opcional)
-    subtotal_aprovado = sum(i.preco_venda * i.quantidade for i in orcamento.itens if (not i.opcional) or i.aprovado)
+    subtotal_aprovado = manutencao + sum(i.preco_venda * i.quantidade for i in orcamento.itens if (not i.opcional) or i.aprovado)
     desconto_informado = max(float(orcamento.desconto or 0), 0)
     desconto_aplicado = min(desconto_informado, subtotal_aprovado)
     aprovado = max(subtotal_aprovado - desconto_aplicado, 0)
@@ -855,6 +958,8 @@ def totais_orcamento(orcamento: Orcamento):
     obrigatorio_final = max(obrigatorio - min(desconto_informado, obrigatorio), 0)
     recebido = sum(p.valor for p in orcamento.pagamentos)
     return {
+        "manutencao": manutencao,
+        "itens_obrigatorios": itens_obrigatorios,
         "obrigatorio": obrigatorio,
         "obrigatorio_final": obrigatorio_final,
         "opcionais": opcionais,
@@ -1020,6 +1125,9 @@ async def orcamento_adicionar_item(manutencao_id: int, request: Request, usuario
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     item = db.query(Item).filter(Item.id == int(form.get("item_id") or 0)).first()
     descricao = item.nome if item else (form.get("descricao") or "").strip()
+    descricao_normalizada = unicodedata.normalize("NFKD", descricao).encode("ascii", "ignore").decode("ascii").strip().lower()
+    if descricao_normalizada == "manutencao":
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Use o campo Valor obrigatório da manutenção", status_code=303)
     if descricao:
         db.add(OrcamentoItem(orcamento_id=o.id, item_id=item.id if item else None, descricao=descricao, quantidade=max(int(form.get("quantidade") or 1),1), preco_custo=item.preco_custo if item else moeda_num(form.get("preco_custo")), preco_venda=moeda_num(form.get("preco_venda")) or (item.preco_venda if item else 0), opcional=1 if form.get("opcional") else 0, aprovado=0 if form.get("opcional") else 1))
         db.commit()
@@ -1039,6 +1147,18 @@ def orcamento_excluir_item(manutencao_id: int, orcamento_item_id: int, usuario: 
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/manutencao")
+async def orcamento_salvar_manutencao(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.orcamentos:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    o.valor_manutencao = max(moeda_num(form.get("valor_manutencao")), 0)
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/desconto")
 async def orcamento_salvar_desconto(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id)
@@ -1046,7 +1166,7 @@ async def orcamento_salvar_desconto(manutencao_id: int, request: Request, usuari
         raise HTTPException(404)
     form = dict(await request.form())
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
-    subtotal = sum(i.preco_venda * i.quantidade for i in o.itens)
+    subtotal = max(float(o.valor_manutencao or 0), 0) + sum(i.preco_venda * i.quantidade for i in o.itens)
     o.desconto = min(max(moeda_num(form.get("desconto")), 0), subtotal)
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
@@ -1055,7 +1175,7 @@ async def orcamento_salvar_desconto(manutencao_id: int, request: Request, usuari
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/enviar")
 def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
-    if not o.itens: return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Inclua pelo menos um item", status_code=303)
+    if float(o.valor_manutencao or 0) <= 0: return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Informe o valor obrigatório da manutenção", status_code=303)
     o.status = "Enviado"; m.status = "Aguardando aprovação"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
