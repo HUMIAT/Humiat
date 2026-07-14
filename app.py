@@ -89,6 +89,7 @@ class Equipamento(Base):
     observacao = Column(Text, nullable=True)
     garantia_meses = Column(Integer, nullable=True, default=3)
     numero_serie = Column(String(120), nullable=True)
+    fabricante = Column(String(80), nullable=False, default="KARAOKERJ")
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
 
@@ -309,6 +310,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN garantia_meses INTEGER DEFAULT 3"))
             if "numero_serie" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_serie VARCHAR(120)"))
+            if "fabricante" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN fabricante VARCHAR(80) DEFAULT 'KARAOKERJ'"))
     db = SessionLocal()
     try:
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
@@ -321,6 +324,27 @@ def iniciar_banco():
                     for dado in json.load(arquivo):
                         db.add(Item(**dado, categoria="Geral", ativo=1))
                 db.commit()
+        # Padroniza todos os equipamentos existentes.
+        equipamentos_existentes = db.query(Equipamento).order_by(Equipamento.id.asc()).all()
+        codigos_usados = set()
+        maior_codigo = 0
+        for equipamento in equipamentos_existentes:
+            codigo = (equipamento.maquina or "").strip().upper()
+            encontrado = re.fullmatch(r"KRJ(\d+)", codigo)
+            if encontrado and codigo not in codigos_usados:
+                equipamento.maquina = codigo
+                codigos_usados.add(codigo)
+                maior_codigo = max(maior_codigo, int(encontrado.group(1)))
+            else:
+                maior_codigo += 1
+                while f"KRJ{maior_codigo:04d}" in codigos_usados:
+                    maior_codigo += 1
+                equipamento.maquina = f"KRJ{maior_codigo:04d}"
+                codigos_usados.add(equipamento.maquina)
+            equipamento.fabricante = equipamento.fabricante or "KARAOKERJ"
+        for (cliente_id,) in db.query(Equipamento.cliente_id).distinct().all():
+            reordenar_series_cliente(db, cliente_id)
+        db.commit()
     finally:
         db.close()
 
@@ -516,14 +540,40 @@ def preencher_equipamento(eq: Equipamento, form: dict):
     eq.falta = f"{max(total - recebido, 0):.2f}" if (eq.valor or eq.pago) else None
     eq.data_compra = data_form(form.get("data_compra") or "")
     eq.previsao_entrega = data_form(form.get("previsao_entrega") or "")
-    eq.maquina = (form.get("maquina") or "").strip() or None
+    # Máquina e número de série são gerados pelo sistema e não podem ser alterados no formulário.
     eq.status = (form.get("status") or "Ativo").strip()
     eq.observacao = (form.get("observacao") or "").strip() or None
-    eq.numero_serie = (form.get("numero_serie") or "").strip() or None
+    fabricante = (form.get("fabricante") or "KARAOKERJ").strip().upper()
+    eq.fabricante = fabricante if fabricante in ("KARAOKERJ", "OUTROS") else "KARAOKERJ"
     try:
         eq.garantia_meses = max(int(form.get("garantia_meses") or 3), 0)
     except ValueError:
         eq.garantia_meses = 3
+
+
+def proximo_codigo_maquina(db: Session) -> str:
+    maior = 0
+    for (codigo,) in db.query(Equipamento.maquina).filter(Equipamento.maquina.isnot(None)).all():
+        encontrado = re.fullmatch(r"KRJ(\d+)", (codigo or "").strip().upper())
+        if encontrado:
+            maior = max(maior, int(encontrado.group(1)))
+    return f"KRJ{maior + 1:04d}"
+
+
+def reordenar_series_cliente(db: Session, cliente_id: int):
+    equipamentos = db.query(Equipamento).filter(Equipamento.cliente_id == cliente_id).order_by(
+        Equipamento.data_compra.is_(None), Equipamento.data_compra.asc(), Equipamento.criado_em.asc(), Equipamento.id.asc()
+    ).all()
+    for ordem, equipamento in enumerate(equipamentos, start=1):
+        if equipamento.maquina:
+            equipamento.numero_serie = f"{equipamento.maquina}-{ordem}"
+
+
+def garantir_identificacao_equipamento(db: Session, equipamento: Equipamento):
+    if not equipamento.maquina:
+        equipamento.maquina = proximo_codigo_maquina(db)
+    if not equipamento.fabricante:
+        equipamento.fabricante = "KARAOKERJ"
 
 
 def opcoes_equipamentos(db: Session):
@@ -552,7 +602,10 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
         tipos, pacotes = opcoes_equipamentos(db)
         return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes}, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
-    db.add(eq); db.commit()
+    garantir_identificacao_equipamento(db, eq)
+    db.add(eq); db.flush()
+    reordenar_series_cliente(db, cliente_id)
+    db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
 
@@ -570,7 +623,10 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not eq: raise HTTPException(404)
     form = dict(await request.form())
-    preencher_equipamento(eq, form); db.commit()
+    preencher_equipamento(eq, form)
+    garantir_identificacao_equipamento(db, eq)
+    reordenar_series_cliente(db, cliente_id)
+    db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
 
@@ -647,7 +703,10 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     preencher_equipamento(eq, form)
     if eq.status not in STATUS_VENDA:
         eq.status = "Solicitar gabinete"
+    garantir_identificacao_equipamento(db, eq)
     db.add(eq)
+    db.flush()
+    reordenar_series_cliente(db, cliente.id)
     db.commit()
     db.refresh(eq)
     return RedirectResponse(f"/organiza/clientes/{cliente.id}/equipamentos/{eq.id}/editar?criado=1", status_code=303)
