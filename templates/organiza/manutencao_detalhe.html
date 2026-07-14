@@ -9,10 +9,23 @@
     </div>
     <div class="manutencao-header-acoes">
       <span class="pill">{{ m.status }}</span>
+      <a class="botao" href="/organiza/clientes/{{ m.cliente.id }}">Cadastro do cliente</a>
       <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}">WhatsApp</a>
       <a class="botao" href="/organiza/manutencoes">Voltar</a>
     </div>
   </header>
+
+  <details class="cartao manutencao-cliente-resumo">
+    <summary><strong>Dados do cliente</strong><span>Consultar cadastro completo</span></summary>
+    <div class="manutencao-grid tres">
+      <div><small>Nome</small><strong>{{ m.cliente.nome }}</strong></div>
+      <div><small>CPF/CNPJ</small><strong>{{ m.cliente.documento or '-' }}</strong></div>
+      <div><small>WhatsApp</small><strong>{{ m.cliente.telefone|telefone }}</strong></div>
+      <div><small>E-mail</small><strong>{{ m.cliente.email or '-' }}</strong></div>
+      <div><small>Endereço</small><strong>{{ m.cliente.endereco or '-' }}{% if m.cliente.endereco_numero %}, {{ m.cliente.endereco_numero }}{% endif %}</strong></div>
+      <div><small>Município</small><strong>{{ m.cliente.municipio or m.cliente.cidade or '-' }}</strong></div>
+    </div>
+  </details>
 
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
     {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Pronto','Retirada','Encerrado'] %}
@@ -137,7 +150,7 @@ Agora faremos a análise e enviaremos o orçamento para sua aprovação.')|urlen
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/enviar"><button class="botao primario" type="submit">Marcar como enviado</button></form>
       <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
 
-🧾 *Seu orçamento HUMIAT está pronto*
+🧾 *Seu orçamento Karaokê RJ está pronto*
 
 Equipamento: '~m.equipamento.tipo~' '~(m.equipamento.modelo or '')~'
 Total obrigatório: '~(totais.obrigatorio_final|moeda)~'

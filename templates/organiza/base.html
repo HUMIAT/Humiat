@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ titulo or 'HUMIAT' }}</title>
+  <title>{{ titulo or 'Organiza | Karaokê RJ' }}</title>
   <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/css/estilo.css">
   <link rel="stylesheet" href="/static/css/organiza.css">
@@ -12,7 +12,7 @@
 {% if usuario %}
 <div class="app-shell humiat-clean">
   <aside class="app-sidebar">
-    <a class="side-logo" href="/organiza"><span class="logo-check">H</span><div><strong>HUMIAT</strong><small>Clientes e equipamentos</small></div></a>
+    <a class="side-logo" href="/organiza"><span class="logo-check">O</span><div><strong>ORGANIZA</strong><small>Karaokê RJ</small></div></a>
     <nav class="side-nav">
       <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Início</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>

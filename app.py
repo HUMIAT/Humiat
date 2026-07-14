@@ -94,6 +94,19 @@ class Equipamento(Base):
     cliente = relationship("Cliente", back_populates="equipamentos")
 
 
+class TransferenciaEquipamento(Base):
+    __tablename__ = "equipamento_transferencias"
+    id = Column(Integer, primary_key=True)
+    equipamento_id = Column(Integer, ForeignKey("equipamentos.id"), nullable=False)
+    cliente_origem_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    cliente_destino_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    equipamento = relationship("Equipamento")
+    cliente_origem = relationship("Cliente", foreign_keys=[cliente_origem_id])
+    cliente_destino = relationship("Cliente", foreign_keys=[cliente_destino_id])
+
+
 class Item(Base):
     __tablename__ = "catalogo_itens"
     id = Column(Integer, primary_key=True)
@@ -660,7 +673,9 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not cliente or not eq: raise HTTPException(404)
     tipos, pacotes = opcoes_equipamentos(db)
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes})
+    clientes_transferencia = db.query(Cliente).filter(Cliente.id != cliente_id).order_by(Cliente.nome.asc()).all()
+    transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "clientes_transferencia": clientes_transferencia, "transferencias": transferencias})
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar")
@@ -673,6 +688,35 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     reordenar_series_cliente(db, cliente_id)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
+
+
+@app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/transferir")
+async def equipamento_transferir(cliente_id: int, equipamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
+    if not eq:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    destino_id = int(form.get("cliente_destino_id") or 0)
+    destino = db.query(Cliente).filter(Cliente.id == destino_id).first()
+    if not destino or destino_id == cliente_id:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar?erro_transferencia=Selecione outro cliente", status_code=303)
+    manutencao_aberta = db.query(Manutencao).filter(
+        Manutencao.equipamento_id == equipamento_id,
+        Manutencao.entregue_em.is_(None),
+        Manutencao.status.notin_(("Encerrada", "Cancelada", "Entregue")),
+    ).first()
+    if manutencao_aberta:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar?erro_transferencia=Existe manutenção aberta para este equipamento", status_code=303)
+    db.add(TransferenciaEquipamento(
+        equipamento_id=eq.id, cliente_origem_id=cliente_id, cliente_destino_id=destino_id,
+        observacao=(form.get("observacao_transferencia") or "").strip() or None,
+    ))
+    eq.cliente_id = destino_id
+    db.flush()
+    reordenar_series_cliente(db, cliente_id)
+    reordenar_series_cliente(db, destino_id)
+    db.commit()
+    return RedirectResponse(f"/organiza/clientes/{destino_id}/equipamentos/{equipamento_id}/editar?transferido=1", status_code=303)
 
 
 # ---------------------------------------------------------
