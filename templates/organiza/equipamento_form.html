@@ -37,27 +37,24 @@
 
     {% if equipamento and equipamento.id %}
     <section class="cartao secao-form">
-      <div class="secao-form-titulo"><span>3</span><div><h2>Licença e QR Code</h2><p>Use os dados reais salvos neste equipamento.</p></div></div>
-      <div class="form-grid-organizada dois-colunas">
-        <label>Equipamento<input value="{{ equipamento.maquina }}{% if equipamento.numero_maquina_cliente %} - {{ equipamento.numero_maquina_cliente }}{% endif %}" disabled></label>
-        <label>Plano<input value="{{ equipamento.plano or 'PLUS' }}" disabled></label>
+      <div class="secao-form-titulo">
+        <span>3</span>
+        <div>
+          <h2>Licença e QR Code</h2>
+          <p>Gere os arquivos usando o NR máquina, NR HD e plano informados acima.</p>
+        </div>
       </div>
+
       {% if equipamento.numero_hd %}
-      <div class="gerador-equipamento-acoes">
-        <button class="botao primario" type="submit"
-                formaction="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/gerar-licenca"
-                formmethod="post">
-          Salvar e gerar pasta da licença
-        </button>
-        <button class="botao" type="button" onclick="navigator.clipboard.writeText('{{ equipamento.numero_hd }}')">Copiar NR HD</button>
-      </div>
-      <p class="texto-suave">Gera a pasta <strong>{{ equipamento.maquina }}</strong> com os dois arquivos TXT e a imagem QR no mesmo padrão do gerador AU3.</p>
-      <div class="manutencao-grid dois">
-        <div><small>Arquivo MAQUINA_KRJ.txt</small><strong>{{ equipamento.maquina }}</strong></div>
-        <div><small>Arquivo LICENCA_HD_KRJ.txt</small><strong>{{ equipamento.numero_hd }}</strong></div>
-      </div>
+      <button class="botao primario botao-cheio" type="submit"
+              formaction="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/gerar-licenca"
+              formmethod="post">
+        Gerar licença e QR Code
+      </button>
       {% else %}
-      <div class="alerta">Salve primeiro o número do HD para liberar o gerador.</div>
+      <button class="botao botao-cheio" type="button" disabled>
+        Informe o NR HD para gerar a licença
+      </button>
       {% endif %}
     </section>
     {% endif %}
