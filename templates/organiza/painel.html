@@ -1,21 +1,67 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean">
-  <div class="titulo-linha"><div><p class="tag">HUMIAT</p><h1>Visão geral</h1><p class="texto-suave">Vendas e manutenções com orçamento, pagamento e WhatsApp.</p></div><a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a></div>
-  <div class="grade-metricas clean-metricas">
-    <a class="cartao metrica" href="/organiza/clientes"><span>👥</span><div><small>Clientes</small><strong>{{ total_clientes }}</strong></div></a>
-    <article class="cartao metrica"><span>🎛️</span><div><small>Equipamentos</small><strong>{{ total_equipamentos }}</strong></div></article>
-    <article class="cartao metrica"><span>🔗</span><div><small>Clientes com equipamento</small><strong>{{ clientes_com_equipamento }}</strong></div></article>
-      <a class="cartao metrica" href="/organiza/manutencoes"><span>🛠</span><div><small>Manutenções</small><strong>{{ total_manutencoes }}</strong></div></a>
-    <article class="cartao metrica"><span>⏳</span><div><small>Aguardando aprovação</small><strong>{{ aguardando_aprovacao }}</strong></div></article>
-  </div>
-  <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Clientes recentes</h2><p class="texto-suave">Últimos cadastros realizados.</p></div><a class="botao" href="/organiza/clientes">Ver todos</a></div>
-    <div class="lista-cards-mobile">
-      {% for cliente in recentes %}
-      <a class="cliente-card-clean" href="/organiza/clientes/{{ cliente.id }}"><div><strong>{{ cliente.nome }}</strong><small>{{ cliente.telefone|telefone }}{% if cliente.municipio %} · {{ cliente.municipio }}{% endif %}</small></div><span>{{ cliente.equipamentos|length }} equip.</span></a>
-      {% else %}<p class="texto-suave vazio">Nenhum cliente cadastrado.</p>{% endfor %}
+<section class="pagina-clean dashboard-pendencias">
+  <div class="titulo-linha dashboard-topo">
+    <div>
+      <p class="tag">HUMIAT</p>
+      <h1>Pendências</h1>
+      <p class="texto-suave">Tudo o que precisa de ação nas vendas e manutenções.</p>
     </div>
-  </section>
+    <a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a>
+  </div>
+
+  <div class="resumo-pendencias">
+    <article class="resumo-card destaque"><small>Total de pendências</small><strong>{{ total_pendencias }}</strong></article>
+    <article class="resumo-card"><small>Manutenções cadastradas</small><strong>{{ total_manutencoes }}</strong></article>
+    <a class="resumo-card acao" href="/organiza/manutencoes"><small>Consulta geral</small><strong>Ver todas →</strong></a>
+  </div>
+
+  {% set grupos = [
+    ('entrada', '1', 'Equipamento para receber', 'Cliente informou o problema e ainda vai levar o equipamento.', '📥'),
+    ('orcamento', '2', 'Orçamento pendente', 'Equipamento recebido e orçamento ainda precisa ser montado.', '🧾'),
+    ('aceite', '3', 'Aguardando aceite', 'Orçamento enviado e aguardando a resposta do cliente.', '✅'),
+    ('pagamento', '4', 'Pagamento ou prazo', 'Orçamento aprovado; registre pagamento e prazo de entrega.', '💳'),
+    ('producao', '5', 'Em manutenção', 'Serviços aprovados que ainda precisam ser concluídos.', '🔧'),
+    ('agenda', '6', 'Agendamento pendente', 'Equipamento pronto aguardando o cliente escolher a retirada.', '📅'),
+    ('retirada', '7', 'Retiradas agendadas', 'Equipamentos com dia e horário definidos para retirada.', '📦')
+  ] %}
+
+  <div class="grade-pendencias">
+    {% for chave, numero, titulo, descricao, icone in grupos %}
+    {% set lista = pendencias[chave] %}
+    <section class="pendencia-card pendencia-{{ chave }}">
+      <div class="pendencia-cabecalho">
+        <span class="pendencia-icone">{{ icone }}</span>
+        <div class="pendencia-titulo">
+          <small>ETAPA {{ numero }}</small>
+          <h2>{{ titulo }}</h2>
+          <p>{{ descricao }}</p>
+        </div>
+        <strong class="pendencia-contador">{{ lista|length }}</strong>
+      </div>
+
+      <div class="pendencia-lista">
+        {% for m in lista[:4] %}
+        <a href="/organiza/manutencoes/{{ m.id }}" class="pendencia-item">
+          <div>
+            <strong>#{{ m.id }} · {{ m.cliente.nome }}</strong>
+            <span>{{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</span>
+            {% if chave == 'entrada' and m.entrega_prevista_em %}<small>Previsto: {{ m.entrega_prevista_em|datahora }}</small>{% endif %}
+            {% if chave == 'pagamento' and m.painel_saldo %}<small>Falta receber: {{ m.painel_saldo|moeda }}</small>{% endif %}
+            {% if chave == 'retirada' and m.retirada_em %}<small>Retirada: {{ m.retirada_em|datahora }}</small>{% endif %}
+          </div>
+          <span class="seta">›</span>
+        </a>
+        {% else %}
+        <div class="pendencia-vazia">Nenhuma pendência nesta etapa.</div>
+        {% endfor %}
+      </div>
+
+      {% if lista|length > 0 %}
+      <a class="pendencia-ver-todos" href="/organiza/manutencoes?status={{ chave }}">Ver {{ lista|length }} pendência{% if lista|length != 1 %}s{% endif %}</a>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
 </section>
 {% endblock %}

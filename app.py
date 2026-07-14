@@ -329,16 +329,49 @@ def sair():
 
 @app.get("/organiza", response_class=HTMLResponse)
 def painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    total_clientes = db.query(Cliente).count()
-    total_equipamentos = db.query(Equipamento).count()
-    clientes_com_equipamento = db.query(Cliente).join(Equipamento).distinct().count()
-    total_manutencoes = db.query(Manutencao).count()
-    aguardando_aprovacao = db.query(Orcamento).filter(Orcamento.status.in_(["Enviado", "Aguardando aprovação"])).count()
-    recentes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.criado_em.desc()).limit(8).all()
+    manutencoes = db.query(Manutencao).options(
+        selectinload(Manutencao.cliente),
+        selectinload(Manutencao.equipamento),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
+    ).order_by(Manutencao.criado_em.desc()).all()
+
+    pendencias = {
+        "entrada": [],
+        "orcamento": [],
+        "aceite": [],
+        "pagamento": [],
+        "producao": [],
+        "agenda": [],
+        "retirada": [],
+    }
+
+    for m in manutencoes:
+        orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+        totais = totais_orcamento(orcamento) if orcamento else {"falta": 0}
+        m.painel_saldo = totais.get("falta", 0)
+
+        if m.status == "Aguardando equipamento":
+            pendencias["entrada"].append(m)
+        elif m.status in ("Recebida", "Orçamento em elaboração") or (orcamento and orcamento.status == "Rascunho"):
+            pendencias["orcamento"].append(m)
+        elif m.status == "Aguardando aprovação" or (orcamento and orcamento.status in ("Enviado", "Aguardando aprovação")):
+            pendencias["aceite"].append(m)
+        elif m.status == "Aprovado" or (orcamento and orcamento.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente") and (totais.get("falta", 0) > 0 or not m.prazo)):
+            pendencias["pagamento"].append(m)
+        elif m.status == "Em manutenção":
+            pendencias["producao"].append(m)
+        elif m.status == "Pronto para retirada" and not m.retirada_em:
+            pendencias["agenda"].append(m)
+        elif m.status == "Retirada agendada":
+            pendencias["retirada"].append(m)
+
     return templates.TemplateResponse("organiza/painel.html", {
-        "request": request, "usuario": usuario, "total_clientes": total_clientes,
-        "total_equipamentos": total_equipamentos, "clientes_com_equipamento": clientes_com_equipamento,
-        "recentes": recentes, "total_manutencoes": total_manutencoes, "aguardando_aprovacao": aguardando_aprovacao,
+        "request": request,
+        "usuario": usuario,
+        "total_manutencoes": len(manutencoes),
+        "pendencias": pendencias,
+        "total_pendencias": sum(len(lista) for lista in pendencias.values()),
     })
 
 
@@ -584,9 +617,22 @@ def item_status(item_id: int, usuario: Usuario = Depends(usuario_logado), db: Se
 
 
 @app.get("/organiza/manutencoes", response_class=HTMLResponse)
-def manutencoes_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    lista = db.query(Manutencao).options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento)).order_by(Manutencao.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/manutencoes.html", {"request": request, "usuario": usuario, "manutencoes": lista})
+def manutencoes_lista(request: Request, status: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    query = db.query(Manutencao).options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
+    filtros = {
+        "entrada": ["Aguardando equipamento"],
+        "orcamento": ["Recebida", "Orçamento em elaboração"],
+        "aceite": ["Aguardando aprovação"],
+        "pagamento": ["Aprovado"],
+        "producao": ["Em manutenção"],
+        "agenda": ["Pronto para retirada"],
+        "retirada": ["Retirada agendada"],
+        "encerradas": ["Encerrada"],
+    }
+    if status in filtros:
+        query = query.filter(Manutencao.status.in_(filtros[status]))
+    lista = query.order_by(Manutencao.criado_em.desc()).all()
+    return templates.TemplateResponse("organiza/manutencoes.html", {"request": request, "usuario": usuario, "manutencoes": lista, "filtro_status": status})
 
 
 @app.get("/organiza/manutencoes/nova", response_class=HTMLResponse)

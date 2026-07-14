@@ -2925,3 +2925,64 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   }
   .cartao,.panel-card,.tabela-cartao,.manutencao-card{box-shadow:0 4px 14px rgba(15,23,42,.05) !important}
 }
+
+/* Dashboard operacional de pendências */
+.dashboard-pendencias{max-width:1450px;margin:0 auto}
+.dashboard-topo{align-items:flex-start;margin-bottom:22px}
+.resumo-pendencias{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.resumo-card{display:flex;flex-direction:column;justify-content:center;min-height:94px;padding:18px 20px;background:#fff;border:1px solid #dbe3ee;border-radius:16px;text-decoration:none;box-shadow:0 5px 18px rgba(15,23,42,.05)}
+.resumo-card small{color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.resumo-card strong{font-size:1.75rem;color:#0f172a;margin-top:5px}
+.resumo-card.destaque{border-left:5px solid #2563eb}
+.resumo-card.acao strong{font-size:1.05rem;color:#2563eb}
+.grade-pendencias{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.pendencia-card{background:#fff;border:1px solid #dbe3ee;border-radius:18px;overflow:hidden;box-shadow:0 6px 22px rgba(15,23,42,.055)}
+.pendencia-cabecalho{display:grid;grid-template-columns:auto 1fr auto;gap:13px;align-items:start;padding:18px;border-bottom:1px solid #e7edf5}
+.pendencia-icone{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;background:#eff6ff;font-size:1.25rem}
+.pendencia-titulo small{display:block;color:#2563eb;font-size:.7rem;font-weight:900;letter-spacing:.08em;margin-bottom:3px}
+.pendencia-titulo h2{margin:0;color:#0f172a;font-size:1.05rem;line-height:1.25}
+.pendencia-titulo p{margin:5px 0 0;color:#64748b;font-size:.84rem;line-height:1.35}
+.pendencia-contador{display:grid;place-items:center;min-width:38px;height:38px;padding:0 9px;border-radius:999px;background:#f1f5f9;color:#0f172a;font-size:1rem}
+.pendencia-lista{padding:8px 12px}
+.pendencia-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 8px;border-bottom:1px solid #edf1f6;text-decoration:none;border-radius:10px}
+.pendencia-item:last-child{border-bottom:0}
+.pendencia-item:hover{background:#f8fafc}
+.pendencia-item div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.pendencia-item strong{color:#111827;font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pendencia-item span:not(.seta){color:#475569;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pendencia-item small{color:#2563eb;font-weight:700;font-size:.78rem}
+.pendencia-item .seta{font-size:1.65rem;color:#94a3b8;line-height:1}
+.pendencia-vazia{padding:18px 8px;color:#64748b;text-align:center;font-size:.88rem}
+.pendencia-ver-todos{display:block;padding:12px 18px;background:#f8fafc;border-top:1px solid #e7edf5;text-decoration:none;color:#2563eb;font-weight:800;font-size:.84rem;text-align:center}
+.pendencia-entrada{border-top:4px solid #64748b}
+.pendencia-orcamento{border-top:4px solid #f59e0b}
+.pendencia-aceite{border-top:4px solid #8b5cf6}
+.pendencia-pagamento{border-top:4px solid #2563eb}
+.pendencia-producao{border-top:4px solid #06b6d4}
+.pendencia-agenda{border-top:4px solid #ec4899}
+.pendencia-retirada{border-top:4px solid #16a34a}
+
+@media(max-width:900px){
+  .grade-pendencias{grid-template-columns:1fr}
+  .resumo-pendencias{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .resumo-card.acao{grid-column:1/-1}
+}
+@media(max-width:700px){
+  .dashboard-pendencias{padding-bottom:92px}
+  .dashboard-topo{display:block}
+  .dashboard-topo .botao{display:block;width:100%;margin-top:14px;text-align:center}
+  .resumo-pendencias{grid-template-columns:1fr 1fr;gap:10px}
+  .resumo-card{min-height:78px;padding:13px 14px;border-radius:14px}
+  .resumo-card strong{font-size:1.35rem}
+  .resumo-card.acao{grid-column:1/-1;min-height:62px}
+  .grade-pendencias{gap:12px}
+  .pendencia-card{border-radius:15px}
+  .pendencia-cabecalho{grid-template-columns:auto 1fr auto;padding:14px 12px;gap:10px}
+  .pendencia-icone{width:38px;height:38px;border-radius:11px;font-size:1.05rem}
+  .pendencia-titulo h2{font-size:.98rem}
+  .pendencia-titulo p{font-size:.78rem}
+  .pendencia-contador{min-width:34px;height:34px;font-size:.9rem}
+  .pendencia-lista{padding:5px 8px}
+  .pendencia-item{padding:11px 6px}
+  .pendencia-item strong{font-size:.88rem}
+}
