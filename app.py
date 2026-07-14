@@ -7,12 +7,14 @@ import secrets
 import csv
 import io
 import xml.etree.ElementTree as ET
+import zipfile
+from pathlib import Path
 import unicodedata
 from datetime import date, datetime, time
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import ClientDisconnect
@@ -88,7 +90,9 @@ class Equipamento(Base):
     status = Column(String(30), nullable=False, default="Ativo")
     observacao = Column(Text, nullable=True)
     garantia_meses = Column(Integer, nullable=True, default=3)
-    numero_serie = Column(String(120), nullable=True)
+    numero_serie = Column(String(120), nullable=True)  # legado; mantido vazio
+    numero_hd = Column(String(160), nullable=True)
+    numero_maquina_cliente = Column(Integer, nullable=True)
     fabricante = Column(String(80), nullable=False, default="KARAOKERJ")
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
@@ -337,6 +341,10 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_serie VARCHAR(120)"))
             if "fabricante" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN fabricante VARCHAR(80) DEFAULT 'KARAOKERJ'"))
+            if "numero_hd" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_hd VARCHAR(160)"))
+            if "numero_maquina_cliente" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_maquina_cliente INTEGER"))
     db = SessionLocal()
     try:
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
@@ -383,6 +391,7 @@ def iniciar_banco():
                 equipamento.maquina = f"KRJ{maior_codigo:04d}"
                 codigos_usados.add(equipamento.maquina)
             equipamento.fabricante = equipamento.fabricante or "KARAOKERJ"
+            equipamento.numero_serie = None
         for (cliente_id,) in db.query(Equipamento.cliente_id).distinct().all():
             reordenar_series_cliente(db, cliente_id)
         db.commit()
@@ -607,7 +616,16 @@ def preencher_equipamento(eq: Equipamento, form: dict):
     eq.falta = f"{max(total - recebido, 0):.2f}" if (eq.valor or eq.pago) else None
     eq.data_compra = data_form(form.get("data_compra") or "")
     eq.previsao_entrega = data_form(form.get("previsao_entrega") or "")
-    # Máquina e número de série são gerados pelo sistema e não podem ser alterados no formulário.
+    # O número da máquina KRJ e o código do HD são os dados reais usados pelo monitor.
+    maquina = re.sub(r"[^A-Z0-9]", "", (form.get("maquina") or "").strip().upper())
+    eq.maquina = maquina or eq.maquina
+    eq.numero_hd = re.sub(r"[^A-Z0-9]", "", (form.get("numero_hd") or "").strip().upper()) or None
+    try:
+        numero_cliente = int(form.get("numero_maquina_cliente") or 0)
+        eq.numero_maquina_cliente = numero_cliente if numero_cliente > 0 else None
+    except (TypeError, ValueError):
+        eq.numero_maquina_cliente = None
+    eq.numero_serie = None
     eq.status = (form.get("status") or "Ativo").strip()
     eq.observacao = (form.get("observacao") or "").strip() or None
     fabricante = (form.get("fabricante") or "KARAOKERJ").strip().upper()
@@ -624,16 +642,14 @@ def proximo_codigo_maquina(db: Session) -> str:
         encontrado = re.fullmatch(r"KRJ(\d+)", (codigo or "").strip().upper())
         if encontrado:
             maior = max(maior, int(encontrado.group(1)))
-    return f"KRJ{maior + 1:04d}"
+    # A numeração operacional passou a iniciar em KRJ00040.
+    proximo = max(maior + 1, 40)
+    return f"KRJ{proximo:05d}"
 
 
 def reordenar_series_cliente(db: Session, cliente_id: int):
-    equipamentos = db.query(Equipamento).filter(Equipamento.cliente_id == cliente_id).order_by(
-        Equipamento.data_compra.is_(None), Equipamento.data_compra.asc(), Equipamento.criado_em.asc(), Equipamento.id.asc()
-    ).all()
-    for ordem, equipamento in enumerate(equipamentos, start=1):
-        if equipamento.maquina:
-            equipamento.numero_serie = f"{equipamento.maquina}-{ordem}"
+    """Compatibilidade: a identificação do cliente agora é preenchida manualmente."""
+    return
 
 
 def garantir_identificacao_equipamento(db: Session, equipamento: Equipamento):
@@ -697,6 +713,110 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     reordenar_series_cliente(db, cliente_id)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
+
+
+
+PASTA_LICENCAS = Path(os.getenv("PASTA_LICENCAS", Path(__file__).resolve().parent / "licencas_geradas"))
+
+
+def normalizar_plano_qr(plano: Optional[str]) -> str:
+    valor = unicodedata.normalize("NFKD", (plano or "PLUS").upper()).encode("ascii", "ignore").decode()
+    return "BASICO" if valor == "BASICO" else "PLUS"
+
+
+def validar_dados_licenca(equipamento: Equipamento):
+    maquina = re.sub(r"[^A-Z0-9]", "", (equipamento.maquina or "").upper())
+    numero_hd = re.sub(r"[^A-Z0-9]", "", (equipamento.numero_hd or "").upper())
+    if not re.fullmatch(r"KRJ\d{5}", maquina):
+        raise HTTPException(400, "O número da máquina deve seguir o padrão KRJ00040.")
+    if not numero_hd.startswith("KRJHD"):
+        raise HTTPException(400, "O campo NR HD deve conter o código completo iniciado por KRJHD.")
+    return maquina, numero_hd, normalizar_plano_qr(equipamento.plano)
+
+
+def criar_arte_qr(maquina: str, plano: str, destino: Path):
+    """Reproduz a arte do gerador AU3: 900x1100, textos e QR centralizado."""
+    try:
+        import qrcode
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError as exc:
+        raise HTTPException(
+            500,
+            "Dependências do QR ausentes. Execute: pip install qrcode[pil] Pillow"
+        ) from exc
+
+    url = f"https://www.karaokerj.com.br/catalogo?m={maquina}&plano={plano.lower()}"
+    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=12, border=4)
+    qr.add_data(url)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB").resize((620, 620))
+
+    arte = Image.new("RGB", (900, 1100), "white")
+    arte.paste(qr_img, (140, 410))
+    desenho = ImageDraw.Draw(arte)
+
+    def fonte(tamanho: int, negrito: bool = False):
+        candidatos = [
+            "C:/Windows/Fonts/arialbd.ttf" if negrito else "C:/Windows/Fonts/arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if negrito else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        for caminho in candidatos:
+            if Path(caminho).exists():
+                return ImageFont.truetype(caminho, tamanho)
+        return ImageFont.load_default()
+
+    def central(texto: str, y: int, tamanho: int, negrito: bool = True):
+        f = fonte(tamanho, negrito)
+        caixa = desenho.textbbox((0, 0), texto, font=f)
+        x = (900 - (caixa[2] - caixa[0])) // 2
+        desenho.text((x, y), texto, fill="black", font=f)
+
+    central("Escaneie para enviar musicas", 70, 42)
+    central("Equipamento:", 190, 34)
+    central(maquina, 255, 50)
+    central(f"Catalogo: {plano}", 335, 30)
+    arte.save(destino, "PNG")
+
+
+def gerar_pasta_licenca(equipamento: Equipamento) -> tuple[Path, Path]:
+    maquina, numero_hd, plano = validar_dados_licenca(equipamento)
+    pasta = PASTA_LICENCAS / maquina
+    pasta.mkdir(parents=True, exist_ok=True)
+
+    (pasta / "MAQUINA_KRJ.txt").write_text(maquina, encoding="utf-8")
+    (pasta / "LICENCA_HD_KRJ.txt").write_text(numero_hd, encoding="utf-8")
+    png = pasta / f"QR_{maquina}_{plano}.png"
+    criar_arte_qr(maquina, plano, png)
+
+    zip_path = PASTA_LICENCAS / f"{maquina}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as pacote:
+        for arquivo in [pasta / "MAQUINA_KRJ.txt", pasta / "LICENCA_HD_KRJ.txt", png]:
+            pacote.write(arquivo, arcname=f"{maquina}/{arquivo.name}")
+    return pasta, zip_path
+
+
+@app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/gerar-licenca")
+async def equipamento_gerar_licenca(cliente_id: int, equipamento_id: int, request: Request,
+                                    usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.cliente_id == cliente_id
+    ).first()
+    if not eq:
+        raise HTTPException(404)
+
+    # O mesmo botão salva as correções feitas nos campos antes de gerar.
+    form = dict(await request.form())
+    preencher_equipamento(eq, form)
+    garantir_identificacao_equipamento(db, eq)
+    db.commit()
+    _, zip_path = gerar_pasta_licenca(eq)
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=zip_path.name,
+        headers={"X-Pasta-Gerada": str(PASTA_LICENCAS / (eq.maquina or ""))}
+    )
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/transferir")

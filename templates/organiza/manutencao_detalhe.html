@@ -5,7 +5,7 @@
     <div class="manutencao-header-info">
       <p class="tag">Manutenção #{{ m.id }}</p>
       <h1>{{ m.cliente.nome }}</h1>
-      <p class="texto-suave">{{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</p>
+      <p class="texto-suave"><strong>{{ m.equipamento.maquina or ('Equipamento #' ~ m.equipamento.id) }}{% if m.equipamento.numero_maquina_cliente %} - {{ m.equipamento.numero_maquina_cliente }}{% endif %}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</p>
     </div>
     <div class="manutencao-header-acoes">
       <span class="pill">{{ m.status }}</span>
@@ -30,13 +30,14 @@
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
     {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Pronto','Retirada','Encerrado'] %}
     {% for nome in nomes %}
-    <div class="manutencao-etapa {% if loop.index < etapa_atual %}concluida{% elif loop.index == etapa_atual %}atual{% else %}bloqueada{% endif %}">
+    <a href="#etapa-{{ loop.index }}" class="manutencao-etapa {% if loop.index < etapa_atual %}concluida{% elif loop.index == etapa_atual %}atual{% else %}bloqueada{% endif %}">
       <b>{{ loop.index }}</b><span>{{ nome }}</span>
-    </div>
+    </a>
     {% endfor %}
   </nav>
 
-  <article class="cartao manutencao-card {% if etapa_atual == 1 %}destaque-etapa{% endif %}">
+  <details id="etapa-1" class="cartao manutencao-card {% if etapa_atual == 1 %}destaque-etapa{% endif %}" data-etapa="1" {% if etapa_atual == 1 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 1</b> · Cliente, equipamento e entrada</span><small>{% if etapa_atual == 1 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header">
       <div><p class="tag">Etapa 1</p><h2>Cliente, equipamento e entrada</h2></div>
       {% if not m.recebido_em %}
@@ -78,9 +79,10 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
       <label>Observação interna<textarea name="observacao">{{ m.observacao or '' }}</textarea></label>
       <div class="manutencao-form-acoes"><button class="botao primario" type="submit">Salvar alterações</button></div>
     </form>
-  </article>
+  </details>
 
-  <article class="cartao manutencao-card {% if etapa_atual == 2 %}destaque-etapa{% endif %} {% if etapa_atual < 2 %}etapa-desabilitada{% endif %}">
+  <details id="etapa-2" class="cartao manutencao-card {% if etapa_atual == 2 %}destaque-etapa{% endif %} {% if etapa_atual < 2 %}etapa-desabilitada{% endif %}" data-etapa="2" {% if etapa_atual == 2 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 2</b> · Montar orçamento</span><small>{% if etapa_atual == 2 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header">
       <div><p class="tag">Etapa 2</p><h2>Montar orçamento</h2><p class="texto-suave">Pesquise itens por nome, código ou categoria.</p></div>
       <span class="pill">{{ orcamento.status }}</span>
@@ -173,9 +175,10 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
       </div>
       <button class="botao" type="submit">Salvar desconto</button>
     </form>
-  </article>
+  </details>
 
-  <article class="cartao manutencao-card {% if etapa_atual == 3 %}destaque-etapa{% endif %} {% if not orcamento.valor_manutencao or orcamento.valor_manutencao <= 0 %}etapa-desabilitada{% endif %}">
+  <details id="etapa-3" class="cartao manutencao-card {% if etapa_atual == 3 %}destaque-etapa{% endif %} {% if not orcamento.valor_manutencao or orcamento.valor_manutencao <= 0 %}etapa-desabilitada{% endif %}" data-etapa="3" {% if etapa_atual == 3 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 3</b> · Aceite do cliente</span><small>{% if etapa_atual == 3 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header"><div><p class="tag">Etapa 3</p><h2>Comunicar e aguardar aceite</h2></div></div>
     <div class="manutencao-acoes">
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/enviar"><button class="botao primario" type="submit">Marcar como enviado</button></form>
@@ -217,9 +220,10 @@ Pelo link abaixo você pode:
 Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/aprovar-manual"><button class="botao" type="submit">Aprovação manual</button></form>
     </div>
-  </article>
+  </details>
 
-  <article class="cartao manutencao-card {% if etapa_atual == 4 %}destaque-etapa{% endif %} {% if orcamento.status not in ['Aprovado','Aprovado parcialmente','Aprovado manualmente'] %}etapa-desabilitada{% endif %}">
+  <details id="etapa-4" class="cartao manutencao-card {% if etapa_atual == 4 %}destaque-etapa{% endif %} {% if orcamento.status not in ['Aprovado','Aprovado parcialmente','Aprovado manualmente'] %}etapa-desabilitada{% endif %}" data-etapa="4" {% if etapa_atual == 4 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 4</b> · Pagamento e prazo</span><small>{% if etapa_atual == 4 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header"><div><p class="tag">Etapa 4</p><h2>Pagamento e prazo</h2></div></div>
     <div class="manutencao-pagamento-grid">
       <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento">
@@ -284,17 +288,19 @@ Saldo: '~(totais.falta|moeda)~'
 Avisaremos assim que o equipamento estiver pronto.
 
 Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
-  </article>
+  </details>
 
-  <article class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}">
+  <details id="etapa-5" class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}" data-etapa="5" {% if etapa_atual == 5 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 5</b> · Equipamento pronto</span><small>{% if etapa_atual == 5 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Equipamento pronto</h2></div></div>
     <div class="manutencao-acoes">
       {% if not m.pronto_em %}<form method="post" action="/organiza/manutencoes/{{ m.id }}/pronto"><button class="botao primario" type="submit">Marcar como pronto</button></form>{% endif %}
       {% if m.pronto_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ mensagem_retirada|urlencode }}">Avisar cliente e enviar agendamento</a>{% endif %}
     </div>
-  </article>
+  </details>
 
-  <article class="cartao manutencao-card {% if etapa_atual == 6 %}destaque-etapa{% endif %} {% if not m.pronto_em %}etapa-desabilitada{% endif %}">
+  <details id="etapa-6" class="cartao manutencao-card {% if etapa_atual == 6 %}destaque-etapa{% endif %} {% if not m.pronto_em %}etapa-desabilitada{% endif %}" data-etapa="6" {% if etapa_atual == 6 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 6</b> · Retirada e encerramento</span><small>{% if etapa_atual == 6 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Retirada</h2><p class="texto-suave">Somente segunda a sexta, entre 14:00 e 17:00.</p></div></div>
     <form class="formulario manutencao-retirada" method="post" action="/organiza/manutencoes/{{ m.id }}/retirada">
       <label>Data e hora<input type="datetime-local" name="retirada_em" value="{% if m.retirada_em %}{{ m.retirada_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
@@ -304,7 +310,7 @@ Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
       <p><strong>Agendado:</strong> {{ m.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</p>
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar"><button class="botao primario" type="submit">Equipamento entregue — encerrar</button></form>
     {% endif %}
-  </article>
+  </details>
 </section>
 <script>
 (() => {
@@ -320,5 +326,20 @@ Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
     if (seletor.selectedOptions[0]?.hidden) seletor.value = '';
   });
 })();
+</script>
+<style>
+.manutencao-etapa-summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:18px 20px;font-weight:700}
+.manutencao-etapa-summary small{font-weight:500}
+details.manutencao-card:not([open]){padding:0}
+details.manutencao-card[open]>.manutencao-etapa-summary{border-bottom:1px solid var(--borda,#ddd)}
+.manutencao-etapas a{text-decoration:none}
+</style>
+<script>
+document.querySelectorAll('.manutencao-etapas a').forEach(link=>{
+  link.addEventListener('click',()=>{
+    const alvo=document.querySelector(link.getAttribute('href'));
+    if(alvo){ alvo.open=true; }
+  });
+});
 </script>
 {% endblock %}

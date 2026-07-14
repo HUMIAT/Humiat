@@ -10,7 +10,10 @@
       <div class="form-grid-organizada tres-colunas">
         <label>Tipo *<select name="tipo" required><option value="">Selecione</option>{% for tipo in tipos %}<option value="{{ tipo }}" {% if equipamento and equipamento.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
         <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}"></label>
-        <label>Máquina / código<input value="{{ equipamento.maquina if equipamento and equipamento.maquina else 'Gerado ao salvar' }}" disabled></label><label>Número de série<input value="{{ equipamento.numero_serie if equipamento and equipamento.numero_serie else 'Gerado ao salvar' }}" disabled></label>
+        <label>NR máquina *<input name="maquina" pattern="KRJ[0-9]{5}" value="{{ equipamento.maquina if equipamento and equipamento.maquina else '' }}" placeholder="KRJ00040" title="Use o padrão KRJ00040"></label>
+        <label>Número da máquina no cliente<input type="number" min="1" name="numero_maquina_cliente" value="{{ equipamento.numero_maquina_cliente if equipamento and equipamento.numero_maquina_cliente else '' }}" placeholder="Ex.: 1"></label>
+        <label class="campo-duplo">Identificação exibida<input value="{% if equipamento and equipamento.maquina %}{{ equipamento.maquina }}{% if equipamento.numero_maquina_cliente %} - {{ equipamento.numero_maquina_cliente }}{% endif %}{% else %}Gerada ao salvar{% endif %}" disabled></label>
+        <label class="campo-duplo">Número / código do HD<input name="numero_hd" value="{{ equipamento.numero_hd if equipamento and equipamento.numero_hd else '' }}" placeholder="Cole o código gerado pelo monitor"></label>
         <label>Fabricante<select name="fabricante"><option value="KARAOKERJ" {% if not equipamento or not equipamento.fabricante or equipamento.fabricante|upper == 'KARAOKERJ' %}selected{% endif %}>KARAOKERJ</option><option value="OUTROS" {% if equipamento and equipamento.fabricante|upper == 'OUTROS' %}selected{% endif %}>OUTROS</option></select></label>
         <label>Status<select name="status">{% for s in ['Ativo','Solicitar gabinete','Montagem','Pronto para entrega','Entregue','Em manutenção','Vendido','Inativo'] %}<option {% if equipamento and equipamento.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
         <label>Pacote<select name="pacote"><option value="">Sem pacote</option>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if equipamento and equipamento.pacote == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select></label>
@@ -32,8 +35,35 @@
       </div>
     </section>
 
+    {% if equipamento and equipamento.id %}
     <section class="cartao secao-form">
-      <div class="secao-form-titulo"><span>3</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
+      <div class="secao-form-titulo"><span>3</span><div><h2>Licença e QR Code</h2><p>Use os dados reais salvos neste equipamento.</p></div></div>
+      <div class="form-grid-organizada dois-colunas">
+        <label>Equipamento<input value="{{ equipamento.maquina }}{% if equipamento.numero_maquina_cliente %} - {{ equipamento.numero_maquina_cliente }}{% endif %}" disabled></label>
+        <label>Plano<input value="{{ equipamento.plano or 'PLUS' }}" disabled></label>
+      </div>
+      {% if equipamento.numero_hd %}
+      <div class="gerador-equipamento-acoes">
+        <button class="botao primario" type="submit"
+                formaction="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/gerar-licenca"
+                formmethod="post">
+          Salvar e gerar pasta da licença
+        </button>
+        <button class="botao" type="button" onclick="navigator.clipboard.writeText('{{ equipamento.numero_hd }}')">Copiar NR HD</button>
+      </div>
+      <p class="texto-suave">Gera a pasta <strong>{{ equipamento.maquina }}</strong> com os dois arquivos TXT e a imagem QR no mesmo padrão do gerador AU3.</p>
+      <div class="manutencao-grid dois">
+        <div><small>Arquivo MAQUINA_KRJ.txt</small><strong>{{ equipamento.maquina }}</strong></div>
+        <div><small>Arquivo LICENCA_HD_KRJ.txt</small><strong>{{ equipamento.numero_hd }}</strong></div>
+      </div>
+      {% else %}
+      <div class="alerta">Salve primeiro o número do HD para liberar o gerador.</div>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}4{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
       <label class="campo-largo"><textarea name="observacao">{{ equipamento.observacao if equipamento and equipamento.observacao else '' }}</textarea></label>
     </section>
     <button class="botao primario botao-cheio" type="submit">Salvar equipamento</button>
@@ -41,7 +71,7 @@
 
   {% if equipamento and equipamento.id %}
   <section class="cartao secao-form transferencia-equipamento">
-    <div class="secao-form-titulo"><span>4</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
+    <div class="secao-form-titulo"><span>5</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/transferir" onsubmit="return confirm('Confirma a transferência deste equipamento para outro cliente?')">
       <div class="form-grid-organizada dois-colunas">
         <label>Novo cliente *<select name="cliente_destino_id" required><option value="">Selecione...</option>{% for c in clientes_transferencia %}<option value="{{ c.id }}">{{ c.nome }} · {{ c.telefone|telefone }}</option>{% endfor %}</select></label>
