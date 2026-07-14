@@ -10,7 +10,7 @@
 {% if m.diagnostico %}<h2>Solução do técnico</h2><p>{{ m.diagnostico }}</p>{% endif %}
 
 <form method="post" action="/orcamento/{{ orcamento.token }}/responder">
-<h2>Itens a serem trocados</h2>
+<h2>Itens obrigatórios</h2>
 <div class="linha-item cliente"><span>✓ Serviço de manutenção</span></div>
 {% for i in orcamento.itens if not i.opcional %}<div class="linha-item cliente"><span>✓ {{ i.descricao }}{% if i.quantidade > 1 %} ({{ i.quantidade }}){% endif %}</span></div>{% else %}<p class="texto-suave">Nenhum outro item obrigatório.</p>{% endfor %}
 
