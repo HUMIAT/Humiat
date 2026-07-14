@@ -10,7 +10,7 @@
         <label class="campo-duplo">Nome *<input name="nome" required value="{{ cliente.nome if cliente and cliente.nome else '' }}"></label>
         <label>WhatsApp *<input name="telefone" inputmode="numeric" maxlength="15" required placeholder="21999999999" value="{{ cliente.telefone if cliente and cliente.telefone else '' }}"></label>
         <label>Empresa<input name="empresa" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}"></label>
-        <label>CPF/CNPJ<input name="documento" value="{{ cliente.documento if cliente and cliente.documento else '' }}"></label>
+        <label>CPF/CNPJ<input name="documento" value="{{ cliente.documento if cliente and cliente.documento else '' }}"></label><label>Inscrição estadual<input name="inscricao_estadual" value="{{ cliente.inscricao_estadual if cliente and cliente.inscricao_estadual else '' }}"></label>
         <label>E-mail<input type="email" name="email" value="{{ cliente.email if cliente and cliente.email else '' }}"></label>
         <label>Código WhatsApp<input name="codigo_whatsapp" value="{{ cliente.codigo_whatsapp if cliente and cliente.codigo_whatsapp else '' }}"></label>
       </div>
@@ -18,12 +18,12 @@
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>2</span><div><h2>Endereço</h2><p>Localização organizada por linha.</p></div></div>
       <div class="form-grid-organizada quatro-colunas">
-        <label>CEP<input name="cep" value="{{ cliente.cep if cliente and cliente.cep else '' }}"></label>
-        <label class="campo-duplo">Endereço<input name="endereco" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}"></label>
+        <label>Buscar CEP<input id="cep" name="cep" inputmode="numeric" maxlength="9" placeholder="00000-000" value="{{ cliente.cep if cliente and cliente.cep else '' }}"></label>
+        <label class="campo-duplo">Endereço<input id="endereco" name="endereco" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}"></label>
         <label>Número<input name="endereco_numero" value="{{ cliente.endereco_numero if cliente and cliente.endereco_numero else '' }}"></label>
-        <label>Bairro<input name="bairro" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}"></label>
-        <label>Município<input name="municipio" value="{{ cliente.municipio or cliente.cidade if cliente else '' }}"></label>
-        <label>Estado<input name="estado" value="{{ cliente.estado if cliente and cliente.estado else '' }}"></label>
+        <label>Bairro<input id="bairro" name="bairro" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}"></label>
+        <label>Município<input id="municipio" name="municipio" value="{{ cliente.municipio or cliente.cidade if cliente else '' }}"></label>
+        <label>Estado<input id="estado" name="estado" value="{{ cliente.estado if cliente and cliente.estado else '' }}"></label>
         <label>Complemento<input name="complemento" value="{{ cliente.complemento if cliente and cliente.complemento else '' }}"></label>
       </div>
     </section>
@@ -31,4 +31,8 @@
     <button class="botao primario botao-cheio" type="submit">Salvar cliente</button>
   </form>
 </section>
+<script>
+async function buscarCep(){const cep=document.getElementById('cep'); if(!cep)return; const n=cep.value.replace(/\D/g,''); if(n.length!==8)return; try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'); const d=await r.json(); if(d.erro)return; document.getElementById('endereco').value=d.logradouro||''; document.getElementById('bairro').value=d.bairro||''; document.getElementById('municipio').value=d.localidade||''; document.getElementById('estado').value=d.uf||'';}catch(e){}}
+const cepEl=document.getElementById('cep'); if(cepEl){cepEl.addEventListener('blur',buscarCep);cepEl.addEventListener('input',()=>{let n=cepEl.value.replace(/\D/g,'').slice(0,8);cepEl.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;});}
+</script>
 {% endblock %}

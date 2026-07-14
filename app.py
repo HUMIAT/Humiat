@@ -4,11 +4,14 @@ import os
 import re
 import json
 import secrets
+import csv
+import io
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, time
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import ClientDisconnect
@@ -58,6 +61,7 @@ class Cliente(Base):
     plano = Column(String(60), nullable=True)
     observacao = Column(Text, nullable=True)
     token_ficha = Column(String(64), nullable=True, unique=True)
+    inscricao_estadual = Column(String(30), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     equipamentos = relationship("Equipamento", back_populates="cliente", cascade="all, delete-orphan")
 
@@ -83,6 +87,8 @@ class Equipamento(Base):
     anydesk = Column(String(120), nullable=True)
     status = Column(String(30), nullable=False, default="Ativo")
     observacao = Column(Text, nullable=True)
+    garantia_meses = Column(Integer, nullable=True, default=3)
+    numero_serie = Column(String(120), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
 
@@ -291,6 +297,18 @@ def iniciar_banco():
         if "desconto" not in existentes_orcamento:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN desconto FLOAT NOT NULL DEFAULT 0"))
+    if "clientes" in insp.get_table_names():
+        existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
+        with engine.begin() as conn:
+            if "inscricao_estadual" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN inscricao_estadual VARCHAR(30)"))
+    if "equipamentos" in insp.get_table_names():
+        existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
+        with engine.begin() as conn:
+            if "garantia_meses" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN garantia_meses INTEGER DEFAULT 3"))
+            if "numero_serie" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_serie VARCHAR(120)"))
     db = SessionLocal()
     try:
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
@@ -407,6 +425,7 @@ def preencher_cliente(cliente: Cliente, form: dict):
     cliente.telefone = limpar_telefone(form.get("telefone") or "")
     cliente.empresa = (form.get("empresa") or "").strip() or None
     cliente.documento = (form.get("documento") or "").strip() or None
+    cliente.inscricao_estadual = (form.get("inscricao_estadual") or "").strip() or None
     cliente.cep = (form.get("cep") or "").strip() or None
     cliente.municipio = (form.get("municipio") or "").strip() or None
     cliente.cidade = cliente.municipio
@@ -449,6 +468,9 @@ async def cliente_criar(request: Request, usuario: Usuario = Depends(usuario_log
 def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).options(selectinload(Cliente.equipamentos)).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
     manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).all()
     return templates.TemplateResponse("organiza/cliente_detalhe.html", {"request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes})
 
@@ -495,17 +517,29 @@ def preencher_equipamento(eq: Equipamento, form: dict):
     eq.data_compra = data_form(form.get("data_compra") or "")
     eq.previsao_entrega = data_form(form.get("previsao_entrega") or "")
     eq.maquina = (form.get("maquina") or "").strip() or None
-    eq.rede_instalada = (form.get("rede_instalada") or "").strip() or None
-    eq.anydesk = (form.get("anydesk") or "").strip() or None
     eq.status = (form.get("status") or "Ativo").strip()
     eq.observacao = (form.get("observacao") or "").strip() or None
+    eq.numero_serie = (form.get("numero_serie") or "").strip() or None
+    try:
+        eq.garantia_meses = max(int(form.get("garantia_meses") or 3), 0)
+    except ValueError:
+        eq.garantia_meses = 3
+
+
+def opcoes_equipamentos(db: Session):
+    tipos_bd = [x[0] for x in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None), Equipamento.tipo != "").distinct().order_by(Equipamento.tipo).all()]
+    pacotes_bd = [x[0] for x in db.query(Equipamento.pacote).filter(Equipamento.pacote.isnot(None), Equipamento.pacote != "").distinct().order_by(Equipamento.pacote.desc()).all()]
+    tipos = list(dict.fromkeys(["JUKEBOX", "MALETA", "FLIPERAMA", "COMPUTADOR", "SISTEMA"] + tipos_bd))
+    pacotes = list(dict.fromkeys(["2026.2", "2026.1"] + pacotes_bd))
+    return tipos, pacotes
 
 
 @app.get("/organiza/clientes/{cliente_id}/equipamentos/novo", response_class=HTMLResponse)
 def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": None, "erro": ""})
+    tipos, pacotes = opcoes_equipamentos(db)
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": None, "erro": "", "tipos": tipos, "pacotes": pacotes})
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/novo")
@@ -515,7 +549,8 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
     form = dict(await request.form())
     if not (form.get("tipo") or "").strip():
         eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
-        return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "Informe o tipo do equipamento."}, status_code=400)
+        tipos, pacotes = opcoes_equipamentos(db)
+        return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes}, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
     db.add(eq); db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
@@ -526,7 +561,8 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not cliente or not eq: raise HTTPException(404)
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": ""})
+    tipos, pacotes = opcoes_equipamentos(db)
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes})
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar")
@@ -564,15 +600,17 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
 @app.get("/organiza/vendas/nova", response_class=HTMLResponse)
 def venda_nova(request: Request, cliente_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
+    tipos, pacotes = opcoes_equipamentos(db)
     return templates.TemplateResponse("organiza/venda_nova.html", {
         "request": request, "usuario": usuario, "clientes": clientes,
-        "cliente_id": cliente_id, "erro": "", "dados": {}, "status_venda": STATUS_VENDA
+        "cliente_id": cliente_id, "erro": "", "dados": {}, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes
     })
 
 
 @app.post("/organiza/vendas/nova")
 async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
+    tipos, pacotes = opcoes_equipamentos(db)
     clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
     cliente = None
     cliente_id = int(form.get("cliente_id") or 0)
@@ -586,10 +624,10 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
         if not cliente:
             if not nome:
                 erro = "Informe o nome para cadastrar o novo cliente."
-                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
             if not telefone_valido(telefone):
                 erro = "Informe um WhatsApp válido com 11 dígitos, incluindo DDD."
-                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
             cliente = Cliente(nome=nome, telefone=telefone)
             cliente.email = (form.get("email") or "").strip() or None
             cliente.municipio = (form.get("municipio") or "").strip() or None
@@ -600,10 +638,10 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
 
     if not cliente:
         erro = "Selecione um cliente existente ou informe nome e WhatsApp para criar um novo."
-        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
     if not (form.get("tipo") or "").strip():
         erro = "Informe o tipo do equipamento."
-        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente.id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente.id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
 
     eq = Equipamento(cliente_id=cliente.id)
     preencher_equipamento(eq, form)
@@ -613,6 +651,94 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     db.commit()
     db.refresh(eq)
     return RedirectResponse(f"/organiza/clientes/{cliente.id}/equipamentos/{eq.id}/editar?criado=1", status_code=303)
+
+
+@app.get("/cadastro/{token}", response_class=HTMLResponse)
+def cadastro_publico(token: str, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    return templates.TemplateResponse("organiza/cadastro_publico.html", {"request": request, "cliente": cliente, "erro": "", "salvo": request.query_params.get("salvo")})
+
+
+@app.post("/cadastro/{token}")
+async def cadastro_publico_salvar(token: str, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    telefone_original = cliente.telefone
+    preencher_cliente(cliente, form)
+    if not cliente.nome or not telefone_valido(cliente.telefone):
+        cliente.telefone = telefone_original
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {"request": request, "cliente": cliente, "erro": "Informe nome e WhatsApp válidos.", "salvo": False}, status_code=400)
+    duplicado = db.query(Cliente).filter(Cliente.telefone == cliente.telefone, Cliente.id != cliente.id).first()
+    if duplicado:
+        cliente.telefone = telefone_original
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {"request": request, "cliente": cliente, "erro": "Este WhatsApp já pertence a outro cadastro.", "salvo": False}, status_code=400)
+    db.commit()
+    return RedirectResponse(f"/cadastro/{token}?salvo=1", status_code=303)
+
+
+def _nome_arquivo(texto: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", texto or "cliente").strip("_") or "cliente"
+
+
+@app.get("/organiza/equipamentos/{equipamento_id}/garantia.pdf")
+def garantia_pdf(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib import colors
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=42, leftMargin=42, topMargin=42, bottomMargin=42)
+    styles = getSampleStyleSheet()
+    compra = eq.data_compra.strftime("%d/%m/%Y") if eq.data_compra else "Nao informada"
+    meses = eq.garantia_meses if eq.garantia_meses is not None else 3
+    dados = [["Cliente", eq.cliente.nome], ["CPF/CNPJ", eq.cliente.documento or "Nao informado"], ["Equipamento", f"{eq.tipo or ''} {eq.modelo or ''}".strip()], ["Maquina / codigo", eq.maquina or "Nao informado"], ["Numero de serie", eq.numero_serie or "Nao informado"], ["Data da compra", compra], ["Prazo de garantia", f"{meses} meses"], ["Valor", formatar_moeda(eq.valor)]]
+    story = [Paragraph("HUMIAT - CERTIFICADO DE GARANTIA", styles["Title"]), Spacer(1, 16), Paragraph("Este certificado registra os dados da venda e do equipamento abaixo.", styles["BodyText"]), Spacer(1, 14)]
+    tabela = Table(dados, colWidths=[130, 350])
+    tabela.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.5,colors.grey),("BACKGROUND",(0,0),(0,-1),colors.whitesmoke),("VALIGN",(0,0),(-1,-1),"TOP"),("PADDING",(0,0),(-1,-1),7)]))
+    story += [tabela, Spacer(1,18), Paragraph("A garantia cobre defeitos de fabricacao durante o prazo informado, mediante apresentacao deste certificado. Danos por mau uso, liquidos, quedas, surtos eletricos, violacao ou intervencao de terceiros nao estao incluidos.", styles["BodyText"])]
+    doc.build(story)
+    nome = _nome_arquivo(eq.cliente.nome)
+    return Response(buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="garantia_{nome}_{eq.id}.pdf"'})
+
+
+@app.get("/organiza/equipamentos/{equipamento_id}/nota.xml")
+def dados_nota_xml(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    c = eq.cliente
+    raiz = ET.Element("dados_para_emissao")
+    ET.SubElement(raiz, "aviso").text = "Arquivo de apoio para importacao. Nao e uma NF-e autorizada pela SEFAZ."
+    dest = ET.SubElement(raiz, "destinatario")
+    for chave, valor in {"nome":c.nome,"cpf_cnpj":c.documento,"inscricao_estadual":c.inscricao_estadual,"email":c.email,"telefone":c.telefone,"cep":c.cep,"logradouro":c.endereco,"numero":c.endereco_numero,"complemento":c.complemento,"bairro":c.bairro,"municipio":c.municipio or c.cidade,"uf":c.estado}.items():
+        ET.SubElement(dest,chave).text = valor or ""
+    item = ET.SubElement(raiz, "item")
+    for chave, valor in {"descricao":f"{eq.tipo or ''} {eq.modelo or ''}".strip(),"codigo":eq.maquina,"numero_serie":eq.numero_serie,"valor_total":str(moeda_num(eq.valor or eq.preco_venda or '0')),"data_compra":eq.data_compra.isoformat() if eq.data_compra else ""}.items():
+        ET.SubElement(item,chave).text = valor or ""
+    conteudo = ET.tostring(raiz, encoding="utf-8", xml_declaration=True)
+    return Response(conteudo, media_type="application/xml", headers={"Content-Disposition": f'attachment; filename="dados_nota_{eq.id}.xml"'})
+
+
+@app.get("/organiza/equipamentos/{equipamento_id}/nota.csv")
+def dados_nota_csv(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    c = eq.cliente
+    out = io.StringIO()
+    campos = ["nome","cpf_cnpj","inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","uf","descricao","codigo","numero_serie","valor_total","data_compra"]
+    w = csv.DictWriter(out, fieldnames=campos, delimiter=';')
+    w.writeheader()
+    w.writerow({"nome":c.nome,"cpf_cnpj":c.documento or "","inscricao_estadual":c.inscricao_estadual or "","email":c.email or "","telefone":c.telefone,"cep":c.cep or "","logradouro":c.endereco or "","numero":c.endereco_numero or "","complemento":c.complemento or "","bairro":c.bairro or "","municipio":c.municipio or c.cidade or "","uf":c.estado or "","descricao":f"{eq.tipo or ''} {eq.modelo or ''}".strip(),"codigo":eq.maquina or "","numero_serie":eq.numero_serie or "","valor_total":str(moeda_num(eq.valor or eq.preco_venda or '0')).replace('.',','),"data_compra":eq.data_compra.strftime('%d/%m/%Y') if eq.data_compra else ""})
+    conteudo = '\ufeff' + out.getvalue()
+    return Response(conteudo.encode('utf-8'), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="dados_nota_{eq.id}.csv"'})
 
 
 @app.get("/organiza/usuarios", response_class=HTMLResponse)
@@ -772,7 +898,31 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome).all()
     orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     totais = totais_orcamento(orcamento) if orcamento else {}
-    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais, "etapa_atual": etapa_manutencao(m)})
+    prontas_cliente = (
+        db.query(Manutencao)
+        .options(selectinload(Manutencao.equipamento))
+        .filter(
+            Manutencao.cliente_id == m.cliente_id,
+            Manutencao.pronto_em.isnot(None),
+            Manutencao.entregue_em.is_(None),
+            Manutencao.status.in_(("Pronto para retirada", "Retirada agendada")),
+        )
+        .order_by(Manutencao.pronto_em.asc(), Manutencao.id.asc())
+        .all()
+    )
+    linhas_prontas = []
+    for pronta in prontas_cliente:
+        equipamento = pronta.equipamento
+        identificacao = equipamento.maquina or f"Equipamento #{equipamento.id}"
+        descricao = f"{equipamento.tipo} {equipamento.modelo or ''}".strip()
+        linhas_prontas.append(f"• {identificacao} — {descricao}")
+    mensagem_retirada = (
+        f"Olá, {m.cliente.nome}. Os equipamentos abaixo estão prontos para retirada:\n"
+        + "\n".join(linhas_prontas)
+        + f"\n\nEscolha a data e o horário neste link: {request.url.scheme}://{request.url.netloc}/retirada/{orcamento.token}"
+        + "\n\nRetiradas de segunda a sexta-feira, somente das 14:00 às 17:00."
+    ) if orcamento and prontas_cliente else ""
+    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item")
@@ -946,22 +1096,99 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         {"request": request, "usuario": usuario, "manutencoes": lista, "vendas": vendas},
     )
 
+def manutencoes_prontas_cliente(db: Session, cliente_id: int):
+    return (
+        db.query(Manutencao)
+        .options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
+        .filter(
+            Manutencao.cliente_id == cliente_id,
+            Manutencao.pronto_em.isnot(None),
+            Manutencao.entregue_em.is_(None),
+            Manutencao.status.in_(("Pronto para retirada", "Retirada agendada")),
+        )
+        .order_by(Manutencao.pronto_em.asc(), Manutencao.id.asc())
+        .all()
+    )
+
+
+def contexto_retirada_publica(request: Request, o: Orcamento, prontas, erro: str = ""):
+    return {
+        "request": request,
+        "orcamento": o,
+        "m": o.manutencao,
+        "manutencoes_prontas": prontas,
+        "erro": erro,
+        "hoje": date.today().isoformat(),
+    }
+
+
 @app.get("/retirada/{token}", response_class=HTMLResponse)
 def retirada_publica(token: str, request: Request, db: Session = Depends(get_db)):
-    o=db.query(Orcamento).options(selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento)).filter(Orcamento.token==token).first()
-    if not o or not o.manutencao.pronto_em: raise HTTPException(404)
-    return templates.TemplateResponse("organiza/retirada_publica.html", {"request":request,"orcamento":o,"m":o.manutencao,"erro":""})
+    o = (
+        db.query(Orcamento)
+        .options(
+            selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),
+            selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento),
+        )
+        .filter(Orcamento.token == token)
+        .first()
+    )
+    if not o or not o.manutencao.pronto_em:
+        raise HTTPException(404)
+    prontas = manutencoes_prontas_cliente(db, o.manutencao.cliente_id)
+    if not prontas:
+        raise HTTPException(404)
+    return templates.TemplateResponse(
+        "organiza/retirada_publica.html",
+        contexto_retirada_publica(request, o, prontas),
+    )
+
 
 @app.post("/retirada/{token}")
 async def retirada_publica_salvar(token: str, request: Request, db: Session = Depends(get_db)):
-    o=db.query(Orcamento).options(selectinload(Orcamento.manutencao)).filter(Orcamento.token==token).first()
-    if not o: raise HTTPException(404)
-    form=dict(await request.form()); dt=datetime_form(form.get("retirada_em") or "")
-    erro="Escolha uma data e horário válidos."
-    if dt and dt.weekday() < 5 and time(14,0) <= dt.time() <= time(17,0):
-        o.manutencao.retirada_em=dt; o.manutencao.status="Retirada agendada"; db.commit()
+    o = (
+        db.query(Orcamento)
+        .options(selectinload(Orcamento.manutencao))
+        .filter(Orcamento.token == token)
+        .first()
+    )
+    if not o or not o.manutencao.pronto_em:
+        raise HTTPException(404)
+
+    prontas = manutencoes_prontas_cliente(db, o.manutencao.cliente_id)
+    if not prontas:
+        raise HTTPException(404)
+
+    form = dict(await request.form())
+    data_retirada = data_form(form.get("data_retirada") or "")
+    hora_texto = (form.get("hora_retirada") or "").strip()
+    dt = None
+    try:
+        hora_retirada = datetime.strptime(hora_texto, "%H:%M").time()
+        if data_retirada:
+            dt = datetime.combine(data_retirada, hora_retirada)
+    except ValueError:
+        pass
+
+    erro = "Escolha uma data e um horário válidos, de segunda a sexta, entre 14:00 e 17:00."
+    agora = datetime.now()
+    if (
+        dt
+        and dt >= agora
+        and dt.weekday() < 5
+        and time(14, 0) <= dt.time() <= time(17, 0)
+    ):
+        for manutencao in prontas:
+            manutencao.retirada_em = dt
+            manutencao.status = "Retirada agendada"
+        db.commit()
         return RedirectResponse(f"/retirada/{token}?ok=1", status_code=303)
-    return templates.TemplateResponse("organiza/retirada_publica.html", {"request":request,"orcamento":o,"m":o.manutencao,"erro":erro}, status_code=400)
+
+    return templates.TemplateResponse(
+        "organiza/retirada_publica.html",
+        contexto_retirada_publica(request, o, prontas, erro),
+        status_code=400,
+    )
 
 @app.get("/orcamento/{token}", response_class=HTMLResponse)
 def orcamento_publico(token: str, request: Request, db: Session = Depends(get_db)):
@@ -1111,6 +1338,7 @@ async def manutencao_publica_revisar_dados(request: Request, db: Session = Depen
 
     cliente.nome = nome
     cliente.documento = (form.get("documento") or "").strip() or None
+    cliente.inscricao_estadual = (form.get("inscricao_estadual") or "").strip() or None
     cliente.email = (form.get("email") or "").strip() or None
     cliente.empresa = (form.get("empresa") or "").strip() or None
     cliente.cep = (form.get("cep") or "").strip() or None

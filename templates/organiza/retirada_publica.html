@@ -1,1 +1,75 @@
-{% extends "organiza/base.html" %}{% block conteudo_publico %}<section class="orcamento-publico"><article class="publico-card"><p class="tag">Equipamento pronto</p><h1>Agende sua retirada</h1><p><strong>{{m.cliente.nome}}</strong>, seu {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}} está pronto.</p><p class="texto-suave">Retiradas disponíveis de segunda a sexta, das 14:00 às 17:00.</p>{% if request.query_params.get('ok') %}<div class="alerta sucesso">Retirada agendada para {{m.retirada_em.strftime('%d/%m/%Y às %H:%M')}}.</div>{% else %}{% if erro %}<div class="alerta erro">{{erro}}</div>{% endif %}<form class="formulario" method="post"><label>Data e horário<input type="datetime-local" name="retirada_em" required min="{{ now if now else '' }}"></label><button class="botao primario">Confirmar retirada</button></form>{% endif %}</article></section>{% endblock %}
+{% extends "organiza/base.html" %}
+{% block conteudo_publico %}
+<section class="orcamento-publico retirada-publica">
+  <article class="publico-card">
+    <p class="tag">Equipamento pronto</p>
+    <h1>Agende sua retirada</h1>
+    <p><strong>{{ m.cliente.nome }}</strong>, os equipamentos abaixo estão prontos para retirada:</p>
+
+    <div class="retirada-equipamentos">
+      {% for manutencao in manutencoes_prontas %}
+      <div class="retirada-equipamento">
+        <strong>{{ manutencao.equipamento.maquina or ('Equipamento #' ~ manutencao.equipamento.id) }}</strong>
+        <span>{{ manutencao.equipamento.tipo }}{% if manutencao.equipamento.modelo %} · {{ manutencao.equipamento.modelo }}{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="alerta informacao retirada-regra">
+      <strong>Horário de retirada</strong>
+      <span>De segunda a sexta-feira, somente das 14:00 às 17:00.</span>
+    </div>
+
+    {% if request.query_params.get('ok') %}
+      <div class="alerta sucesso">
+        Retirada agendada para {{ manutencoes_prontas[0].retirada_em.strftime('%d/%m/%Y às %H:%M') }}.
+        {% if manutencoes_prontas|length > 1 %}Os {{ manutencoes_prontas|length }} equipamentos foram incluídos no mesmo agendamento.{% endif %}
+      </div>
+    {% else %}
+      {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+      <form class="formulario retirada-form" method="post" id="form-retirada">
+        <label>Data
+          <input type="date" name="data_retirada" id="data-retirada" required min="{{ hoje }}">
+        </label>
+        <label>Horário
+          <input type="time" name="hora_retirada" id="hora-retirada" required min="14:00" max="17:00" step="900">
+        </label>
+        <p class="texto-suave retirada-aviso" id="aviso-retirada" aria-live="polite"></p>
+        <button class="botao primario" type="submit">Confirmar retirada</button>
+      </form>
+    {% endif %}
+  </article>
+</section>
+<script>
+(() => {
+  const form = document.querySelector('#form-retirada');
+  if (!form) return;
+  const data = document.querySelector('#data-retirada');
+  const hora = document.querySelector('#hora-retirada');
+  const aviso = document.querySelector('#aviso-retirada');
+
+  function validar() {
+    aviso.textContent = '';
+    if (data.value) {
+      const partes = data.value.split('-').map(Number);
+      const dia = new Date(partes[0], partes[1] - 1, partes[2]).getDay();
+      if (dia === 0 || dia === 6) {
+        aviso.textContent = 'Escolha um dia de segunda a sexta-feira.';
+        return false;
+      }
+    }
+    if (hora.value && (hora.value < '14:00' || hora.value > '17:00')) {
+      aviso.textContent = 'O horário permitido é das 14:00 às 17:00.';
+      return false;
+    }
+    return true;
+  }
+
+  data.addEventListener('change', validar);
+  hora.addEventListener('change', validar);
+  form.addEventListener('submit', (event) => {
+    if (!validar()) event.preventDefault();
+  });
+})();
+</script>
+{% endblock %}

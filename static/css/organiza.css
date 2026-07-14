@@ -3050,3 +3050,16 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   border-color:#ddd6fe !important;
 }
 .agenda-evento.retirada span{color:#6d28d9 !important}
+
+/* Agendamento público de retirada */
+.retirada-publica .publico-card { max-width: 680px; }
+.retirada-equipamentos { display: grid; gap: 10px; margin: 18px 0; }
+.retirada-equipamento { display: grid; gap: 3px; padding: 13px 15px; border: 1px solid #dbe5f1; border-radius: 12px; background: #f8fbff; }
+.retirada-equipamento strong { color: #0f2f57; }
+.retirada-equipamento span { color: #526274; font-size: .92rem; }
+.retirada-regra { display: grid; gap: 4px; margin: 18px 0; }
+.retirada-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.retirada-form .retirada-aviso, .retirada-form button { grid-column: 1 / -1; }
+.retirada-aviso { min-height: 22px; color: #b42318; font-weight: 700; }
+@media (max-width: 640px) { .retirada-form { grid-template-columns: 1fr; } }
+.acoes-documentos{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.cadastro-publico-card{max-width:850px}.cadastro-publico-card h2{margin-top:22px}.venda-pagina #buscar_cliente{background:#f8fbff}

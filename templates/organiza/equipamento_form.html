@@ -8,13 +8,13 @@
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Identificação</h2><p>Dados principais da máquina.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
-        <label>Tipo *<input name="tipo" required placeholder="Jukebox, computador..." value="{{ equipamento.tipo if equipamento and equipamento.tipo else '' }}"></label>
+        <label>Tipo *<select name="tipo" required><option value="">Selecione</option>{% for tipo in tipos %}<option value="{{ tipo }}" {% if equipamento and equipamento.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
         <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}"></label>
-        <label>Máquina / código<input name="maquina" value="{{ equipamento.maquina if equipamento and equipamento.maquina else '' }}"></label>
+        <label>Máquina / código<input name="maquina" value="{{ equipamento.maquina if equipamento and equipamento.maquina else '' }}"></label><label>Número de série<input name="numero_serie" value="{{ equipamento.numero_serie if equipamento and equipamento.numero_serie else '' }}"></label>
         <label>Status<select name="status">{% for s in ['Ativo','Solicitar gabinete','Montagem','Pronto para entrega','Entregue','Em manutenção','Vendido','Inativo'] %}<option {% if equipamento and equipamento.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
-        <label>Pacote<input name="pacote" value="{{ equipamento.pacote if equipamento and equipamento.pacote else '' }}"></label>
+        <label>Pacote<select name="pacote"><option value="">Sem pacote</option>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if equipamento and equipamento.pacote == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select></label>
         <label>Falta pacote<input name="falta_pacote" inputmode="numeric" value="{{ equipamento.falta_pacote if equipamento and equipamento.falta_pacote is not none else '' }}"></label>
-        <label>Plano<input name="plano" value="{{ equipamento.plano if equipamento and equipamento.plano else '' }}"></label>
+        <label>Plano<select name="plano"><option value="">Sem plano</option><option value="PLUS" {% if equipamento and equipamento.plano|upper == 'PLUS' %}selected{% endif %}>PLUS</option><option value="BÁSICO" {% if equipamento and equipamento.plano|upper in ['BÁSICO','BASICO'] %}selected{% endif %}>BÁSICO</option></select></label>
       </div>
     </section>
 
@@ -27,7 +27,7 @@
         <label>Preço de venda unitário<input name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}"></label>
         <label>Valor total<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}"></label>
         <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" value="{{ equipamento.pago if equipamento and equipamento.pago else '' }}"></label>
-        <label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="{{ equipamento.falta|moeda if equipamento else 'R$ 0,00' }}"></label>
+        <label>Garantia (meses)<input type="number" min="0" name="garantia_meses" value="{{ equipamento.garantia_meses if equipamento and equipamento.garantia_meses is not none else 3 }}"></label><label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="{{ equipamento.falta|moeda if equipamento else 'R$ 0,00' }}"></label>
       </div>
     </section>
 

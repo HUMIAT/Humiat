@@ -10,7 +10,7 @@
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Cliente</h2><p>Use um cliente existente ou crie um novo pelo WhatsApp.</p></div></div>
       <div class="form-grid-organizada duas-colunas">
-        <label class="campo-largo">Cliente existente
+        <label class="campo-largo">Pesquisar cliente<input type="search" id="buscar_cliente" placeholder="Digite nome, telefone ou CPF"></label><label class="campo-largo">Cliente existente
           <select name="cliente_id" id="cliente_id">
             <option value="">Cadastrar novo cliente</option>
             {% for c in clientes %}<option value="{{ c.id }}" {% if cliente_id == c.id %}selected{% endif %}>{{ c.nome }} — {{ c.telefone|telefone }}</option>{% endfor %}
@@ -26,11 +26,11 @@
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>2</span><div><h2>Equipamento</h2><p>Identificação e etapa atual da venda.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
-        <label>Tipo *<input name="tipo" required placeholder="Jukebox, maleta, fliperama..." value="{{ dados.get('tipo','') }}"></label>
+        <label>Tipo *<select name="tipo" required><option value="">Selecione</option>{% for tipo in tipos %}<option value="{{ tipo }}" {% if dados.get('tipo') == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
         <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" placeholder="Ex.: Jukebox Azul 27.000 JBL" value="{{ dados.get('modelo','') }}"></label>
-        <label>Máquina / código<input name="maquina" value="{{ dados.get('maquina','') }}"></label>
-        <label>Pacote<input name="pacote" value="{{ dados.get('pacote','') }}"></label>
-        <label>Plano<input name="plano" value="{{ dados.get('plano','') }}"></label>
+        <label>Máquina / código<input name="maquina" value="{{ dados.get('maquina','') }}"></label><label>Número de série<input name="numero_serie" value="{{ dados.get('numero_serie','') }}"></label>
+        <label>Pacote<select name="pacote"><option value="">Sem pacote</option>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if dados.get('pacote') == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select></label>
+        <label>Plano<select name="plano"><option value="">Sem plano</option><option value="PLUS" {% if dados.get('plano')|upper == 'PLUS' %}selected{% endif %}>PLUS</option><option value="BÁSICO" {% if dados.get('plano')|upper in ['BÁSICO','BASICO'] %}selected{% endif %}>BÁSICO</option></select></label>
         <label>Status da venda<select name="status">{% for s in status_venda %}<option {% if dados.get('status','Solicitar gabinete') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
       </div>
     </section>
@@ -42,7 +42,7 @@
         <label>Data prevista de entrega<input type="date" name="previsao_entrega" value="{{ dados.get('previsao_entrega','') }}"></label>
         <label>Valor total<input id="valor_total" name="valor" inputmode="decimal" placeholder="0,00" value="{{ dados.get('valor','') }}"></label>
         <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" placeholder="0,00" value="{{ dados.get('pago','') }}"></label>
-        <label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="R$ 0,00"></label>
+        <label>Garantia (meses)<input type="number" min="0" name="garantia_meses" value="{{ dados.get('garantia_meses',3) }}"></label><label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="R$ 0,00"></label>
         <label class="campo-triplo">Observações<textarea name="observacao" placeholder="Detalhes da montagem, gabinete ou entrega...">{{ dados.get('observacao','') }}</textarea></label>
       </div>
     </section>
@@ -54,6 +54,8 @@
   const total=document.getElementById('valor_total'), recebido=document.getElementById('valor_recebido'), falta=document.getElementById('valor_restante');
   const numero=v=>{v=(v||'').toString().replace(/R\$/g,'').trim(); if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.'); return Number(v)||0};
   const atualizar=()=>{const saldo=Math.max(numero(total.value)-numero(recebido.value),0); falta.value=saldo.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});};
+  const busca=document.getElementById('buscar_cliente'), select=document.getElementById('cliente_id');
+  if(busca&&select){busca.addEventListener('input',()=>{const t=busca.value.toLowerCase().replace(/\D/g,''); const txt=busca.value.toLowerCase(); Array.from(select.options).forEach((o,i)=>{if(i===0)return; const hay=o.textContent.toLowerCase(); const digits=hay.replace(/\D/g,''); o.hidden=txt && !hay.includes(txt) && !(t && digits.includes(t));});});}
   total.addEventListener('input',atualizar); recebido.addEventListener('input',atualizar); atualizar();
 })();
 </script>

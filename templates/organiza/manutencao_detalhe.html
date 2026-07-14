@@ -31,6 +31,14 @@
         <button class="botao primario" type="submit">Confirmar equipamento recebido</button>
       </form>
       {% endif %}
+      {% if m.recebido_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
+
+✅ Recebemos seu equipamento.
+
+Equipamento: '~m.equipamento.tipo~' '~(m.equipamento.modelo or '')~'
+Ordem de serviço: #'~m.id~'
+
+Agora faremos a análise e enviaremos o orçamento para sua aprovação.')|urlencode }}">WhatsApp: equipamento recebido</a>{% endif %}
     </div>
     <form class="formulario manutencao-form" method="post" action="/organiza/manutencoes/{{ m.id }}/editar">
       <div class="manutencao-grid dois">
@@ -117,7 +125,22 @@
     <div class="manutencao-card-header"><div><p class="tag">Etapa 3</p><h2>Comunicar e aguardar aceite</h2></div></div>
     <div class="manutencao-acoes">
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/enviar"><button class="botao primario" type="submit">Marcar como enviado</button></form>
-      <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'. Segue o orçamento do seu equipamento. Você pode aprovar, aprovar parcialmente ou cancelar pelo link: '~request.url.scheme~'://'~request.url.netloc~'/orcamento/'~orcamento.token)|urlencode }}">Enviar orçamento no WhatsApp</a>
+      <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
+
+🧾 *Seu orçamento HUMIAT está pronto*
+
+Equipamento: '~m.equipamento.tipo~' '~(m.equipamento.modelo or '')~'
+Total obrigatório: '~(totais.obrigatorio_final|moeda)~'
+Opcionais disponíveis: '~(totais.opcionais|moeda)~'
+
+Pelo link abaixo você pode:
+• Aprovar tudo
+• Aprovar parcialmente
+• Cancelar
+
+'~request.url.scheme~'://'~request.url.netloc~'/orcamento/'~orcamento.token~'
+
+Qualquer dúvida, estamos à disposição.')|urlencode }}">Enviar orçamento no WhatsApp</a>
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/aprovar-manual"><button class="botao" type="submit">Aprovação manual</button></form>
     </div>
   </article>
@@ -168,14 +191,29 @@
     </section>
 
     {% set aprovados = orcamento.itens|selectattr('aprovado')|map(attribute='descricao')|join(', ') %}
-    <a class="botao whatsapp manutencao-whatsapp-largo" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'. Os itens aprovados foram: '~aprovados~'. Total aprovado: '~(totais.aprovado|moeda)~'. Recebido: '~(totais.recebido|moeda)~'. Falta: '~(totais.falta|moeda)~'. Prazo de entrega: '~(m.prazo or 'a confirmar')~'. Aguarde nossa comunicação quando o equipamento estiver pronto.')|urlencode }}">Enviar confirmação no WhatsApp</a>
+    <a class="botao whatsapp manutencao-whatsapp-largo" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
+
+✅ *Orçamento aprovado e registrado*
+
+Itens aprovados:
+• '~(aprovados|replace(', ', '\n• '))~'
+
+💰 *Financeiro*
+Total aprovado: '~(totais.aprovado|moeda)~'
+Recebido: '~(totais.recebido|moeda)~'
+Saldo: '~(totais.falta|moeda)~'
+
+🗓️ *Prazo*
+'~(m.prazo or 'A confirmar')~'
+
+Avisaremos assim que o equipamento estiver pronto.')|urlencode }}">Enviar confirmação no WhatsApp</a>
   </article>
 
   <article class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}">
     <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Equipamento pronto</h2></div></div>
     <div class="manutencao-acoes">
       {% if not m.pronto_em %}<form method="post" action="/organiza/manutencoes/{{ m.id }}/pronto"><button class="botao primario" type="submit">Marcar como pronto</button></form>{% endif %}
-      {% if m.pronto_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'. Seu equipamento está pronto e disponível para retirada. Clique para agendar data e horário: '~request.url.scheme~'://'~request.url.netloc~'/retirada/'~orcamento.token~'. Retiradas de segunda a sexta, das 14:00 às 17:00.')|urlencode }}">Avisar cliente e enviar agendamento</a>{% endif %}
+      {% if m.pronto_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ mensagem_retirada|urlencode }}">Avisar cliente e enviar agendamento</a>{% endif %}
     </div>
   </article>
 
