@@ -488,7 +488,10 @@ def preencher_equipamento(eq: Equipamento, form: dict):
     eq.preco_custo = (form.get("preco_custo") or "").strip() or None
     eq.preco_venda = (form.get("preco_venda") or "").strip() or None
     eq.pago = (form.get("pago") or "").strip() or None
-    eq.falta = (form.get("falta") or "").strip() or None
+    # O saldo é sempre calculado no servidor para não depender do navegador.
+    total = moeda_num(eq.valor)
+    recebido = moeda_num(eq.pago)
+    eq.falta = f"{max(total - recebido, 0):.2f}" if (eq.valor or eq.pago) else None
     eq.data_compra = data_form(form.get("data_compra") or "")
     eq.previsao_entrega = data_form(form.get("previsao_entrega") or "")
     eq.maquina = (form.get("maquina") or "").strip() or None
@@ -533,6 +536,83 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     form = dict(await request.form())
     preencher_equipamento(eq, form); db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
+
+
+# ---------------------------------------------------------
+# VENDAS SIMPLES
+# Uma venda cria (ou reutiliza) o cliente e já cadastra o equipamento.
+# ---------------------------------------------------------
+
+STATUS_VENDA = ("Solicitar gabinete", "Montagem", "Pronto para entrega", "Entregue")
+
+
+def equipamento_eh_venda(eq: Equipamento) -> bool:
+    return bool(eq.data_compra or eq.previsao_entrega or eq.valor or eq.pago or eq.status in STATUS_VENDA)
+
+
+@app.get("/organiza/vendas", response_class=HTMLResponse)
+def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    equipamentos = db.query(Equipamento).options(selectinload(Equipamento.cliente)).order_by(
+        Equipamento.previsao_entrega.asc(), Equipamento.criado_em.desc()
+    ).all()
+    equipamentos = [eq for eq in equipamentos if equipamento_eh_venda(eq)]
+    return templates.TemplateResponse("organiza/vendas.html", {
+        "request": request, "usuario": usuario, "vendas": equipamentos
+    })
+
+
+@app.get("/organiza/vendas/nova", response_class=HTMLResponse)
+def venda_nova(request: Request, cliente_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
+    return templates.TemplateResponse("organiza/venda_nova.html", {
+        "request": request, "usuario": usuario, "clientes": clientes,
+        "cliente_id": cliente_id, "erro": "", "dados": {}, "status_venda": STATUS_VENDA
+    })
+
+
+@app.post("/organiza/vendas/nova")
+async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
+    cliente = None
+    cliente_id = int(form.get("cliente_id") or 0)
+    telefone = limpar_telefone(form.get("telefone") or "")
+    nome = (form.get("nome") or "").strip()
+
+    if cliente_id:
+        cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    elif telefone:
+        cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
+        if not cliente:
+            if not nome:
+                erro = "Informe o nome para cadastrar o novo cliente."
+                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+            if not telefone_valido(telefone):
+                erro = "Informe um WhatsApp válido com 11 dígitos, incluindo DDD."
+                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+            cliente = Cliente(nome=nome, telefone=telefone)
+            cliente.email = (form.get("email") or "").strip() or None
+            cliente.municipio = (form.get("municipio") or "").strip() or None
+            cliente.cidade = cliente.municipio
+            cliente.observacao = (form.get("cliente_observacao") or "").strip() or None
+            db.add(cliente)
+            db.flush()
+
+    if not cliente:
+        erro = "Selecione um cliente existente ou informe nome e WhatsApp para criar um novo."
+        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+    if not (form.get("tipo") or "").strip():
+        erro = "Informe o tipo do equipamento."
+        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente.id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA}, status_code=400)
+
+    eq = Equipamento(cliente_id=cliente.id)
+    preencher_equipamento(eq, form)
+    if eq.status not in STATUS_VENDA:
+        eq.status = "Solicitar gabinete"
+    db.add(eq)
+    db.commit()
+    db.refresh(eq)
+    return RedirectResponse(f"/organiza/clientes/{cliente.id}/equipamentos/{eq.id}/editar?criado=1", status_code=303)
 
 
 @app.get("/organiza/usuarios", response_class=HTMLResponse)
@@ -836,7 +916,9 @@ def manutencao_encerrar(manutencao_id: int, usuario: Usuario = Depends(usuario_l
 @app.get("/organiza/agenda", response_class=HTMLResponse)
 def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     lista=db.query(Manutencao).options(selectinload(Manutencao.cliente),selectinload(Manutencao.equipamento)).filter(or_(Manutencao.entrega_prevista_em.isnot(None),Manutencao.retirada_em.isnot(None))).order_by(Manutencao.entrega_prevista_em.asc(),Manutencao.retirada_em.asc()).all()
-    return templates.TemplateResponse("organiza/agenda.html", {"request":request,"usuario":usuario,"manutencoes":lista})
+    vendas=db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.previsao_entrega.isnot(None)).order_by(Equipamento.previsao_entrega.asc()).all()
+    vendas=[eq for eq in vendas if equipamento_eh_venda(eq)]
+    return templates.TemplateResponse("organiza/agenda.html", {"request":request,"usuario":usuario,"manutencoes":lista,"vendas":vendas})
 
 @app.get("/retirada/{token}", response_class=HTMLResponse)
 def retirada_publica(token: str, request: Request, db: Session = Depends(get_db)):
@@ -922,9 +1004,26 @@ def manutencao_publica_inicio(request: Request):
     })
 
 
+def renderizar_equipamentos_publicos(request: Request, db: Session, cliente: Cliente, telefone: str, erro: str = "", form_anterior=None, status_code: int = 200):
+    return templates.TemplateResponse("organiza/manutencao_publica.html", {
+        "request": request,
+        "etapa": "equipamentos",
+        "erro": erro,
+        "telefone": telefone,
+        "cliente": cliente,
+        "equipamentos": equipamentos_portal(db, cliente),
+        "horarios": HORARIOS_ENTREGA_PUBLICA,
+        "data_minima": date.today().isoformat(),
+        "form_anterior": form_anterior,
+    }, status_code=status_code)
+
+
 @app.post("/solicitar-manutencao/pesquisar", response_class=HTMLResponse)
 async def manutencao_publica_pesquisar(request: Request, db: Session = Depends(get_db)):
-    form = dict(await request.form())
+    try:
+        form = dict(await request.form())
+    except ClientDisconnect:
+        return RedirectResponse("/solicitar-manutencao", status_code=303)
     telefone = limpar_telefone(form.get("telefone") or "")
     cliente = cliente_por_whatsapp(db, telefone)
     if not cliente:
@@ -938,14 +1037,68 @@ async def manutencao_publica_pesquisar(request: Request, db: Session = Depends(g
 
     return templates.TemplateResponse("organiza/manutencao_publica.html", {
         "request": request,
-        "etapa": "equipamentos",
+        "etapa": "revisar_dados",
         "erro": "",
         "telefone": telefone,
         "cliente": cliente,
-        "equipamentos": equipamentos_portal(db, cliente),
+        "ano_atual": date.today().year,
         "horarios": HORARIOS_ENTREGA_PUBLICA,
-        "data_minima": date.today().isoformat(),
     })
+
+
+@app.post("/solicitar-manutencao/continuar", response_class=HTMLResponse)
+async def manutencao_publica_continuar(request: Request, db: Session = Depends(get_db)):
+    try:
+        form = dict(await request.form())
+    except ClientDisconnect:
+        return RedirectResponse("/solicitar-manutencao", status_code=303)
+    telefone = limpar_telefone(form.get("telefone") or "")
+    cliente = cliente_por_whatsapp(db, telefone)
+    if not cliente:
+        return RedirectResponse("/solicitar-manutencao", status_code=303)
+    return renderizar_equipamentos_publicos(request, db, cliente, telefone)
+
+
+@app.post("/solicitar-manutencao/revisar-dados", response_class=HTMLResponse)
+async def manutencao_publica_revisar_dados(request: Request, db: Session = Depends(get_db)):
+    try:
+        form = dict(await request.form())
+    except ClientDisconnect:
+        return RedirectResponse("/solicitar-manutencao", status_code=303)
+
+    telefone = limpar_telefone(form.get("telefone") or "")
+    cliente = cliente_por_whatsapp(db, telefone)
+    if not cliente:
+        return RedirectResponse("/solicitar-manutencao", status_code=303)
+
+    nome = (form.get("nome") or "").strip()
+    if not nome:
+        return templates.TemplateResponse("organiza/manutencao_publica.html", {
+            "request": request,
+            "etapa": "revisar_dados",
+            "erro": "Informe o nome do cliente.",
+            "telefone": telefone,
+            "cliente": cliente,
+            "ano_atual": date.today().year,
+            "horarios": HORARIOS_ENTREGA_PUBLICA,
+        }, status_code=400)
+
+    cliente.nome = nome
+    cliente.documento = (form.get("documento") or "").strip() or None
+    cliente.email = (form.get("email") or "").strip() or None
+    cliente.empresa = (form.get("empresa") or "").strip() or None
+    cliente.cep = (form.get("cep") or "").strip() or None
+    cliente.municipio = (form.get("municipio") or "").strip() or None
+    cliente.cidade = cliente.municipio
+    cliente.estado = (form.get("estado") or "").strip() or None
+    cliente.endereco = (form.get("endereco") or "").strip() or None
+    cliente.endereco_numero = (form.get("endereco_numero") or "").strip() or None
+    cliente.complemento = (form.get("complemento") or "").strip() or None
+    cliente.bairro = (form.get("bairro") or "").strip() or None
+    db.commit()
+    db.refresh(cliente)
+
+    return renderizar_equipamentos_publicos(request, db, cliente, telefone)
 
 
 @app.post("/solicitar-manutencao/criar", response_class=HTMLResponse)
@@ -997,17 +1150,7 @@ async def manutencao_publica_criar(request: Request, db: Session = Depends(get_d
                 break
 
     if erro:
-        return templates.TemplateResponse("organiza/manutencao_publica.html", {
-            "request": request,
-            "etapa": "equipamentos",
-            "erro": erro,
-            "telefone": telefone,
-            "cliente": cliente,
-            "equipamentos": equipamentos_portal(db, cliente),
-            "horarios": HORARIOS_ENTREGA_PUBLICA,
-            "data_minima": date.today().isoformat(),
-            "form_anterior": form,
-        }, status_code=400)
+        return renderizar_equipamentos_publicos(request, db, cliente, telefone, erro, form, 400)
 
     entrega_em = datetime.combine(data_entrega, datetime.strptime(hora_texto, "%H:%M").time())
     criadas = []

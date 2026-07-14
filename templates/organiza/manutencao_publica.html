@@ -14,8 +14,8 @@
     .campo+.campo{margin-top:16px}.botao{display:inline-flex;align-items:center;justify-content:center;width:100%;border:0;border-radius:12px;padding:14px 18px;background:var(--azul);color:#fff;font-weight:900;font-size:1rem;cursor:pointer;text-decoration:none;margin-top:18px}.botao:hover{background:var(--azul-escuro)}.botao.secundario{background:#e2e8f0;color:#0f172a}.erro{padding:13px 14px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:var(--vermelho);font-weight:700;margin-bottom:16px}
     .cliente{padding:14px 16px;border-radius:14px;background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:18px}.cliente strong{display:block;font-size:1.05rem}.cliente span{color:#475569;font-size:.92rem}
     .aviso-horario{padding:14px 16px;border-radius:14px;background:#fffbeb;border:1px solid #fde68a;color:#854d0e;line-height:1.45;margin:18px 0}.equipamentos{display:grid;gap:14px}.equipamento{border:1px solid var(--borda);border-radius:16px;padding:16px;background:#fff}.equipamento.clicavel{cursor:pointer}.equipamento-topo{display:flex;align-items:flex-start;gap:12px}.equipamento-topo input{width:22px;height:22px;margin-top:2px;accent-color:var(--azul)}.equipamento-info{flex:1}.equipamento-info strong{display:block;font-size:1rem}.equipamento-info span{display:block;color:var(--suave);font-size:.88rem;margin-top:3px}.status-bloqueado{display:inline-block;margin-top:9px;padding:6px 9px;border-radius:999px;background:#fef2f2;color:var(--vermelho);font-size:.78rem;font-weight:800}.status-livre{display:inline-block;margin-top:9px;padding:6px 9px;border-radius:999px;background:#f0fdf4;color:var(--verde);font-size:.78rem;font-weight:800}.descricao{display:none;margin-top:14px;padding-top:14px;border-top:1px solid #e2e8f0}.equipamento.selecionado .descricao{display:block}
-    .grade-data{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.concluido{text-align:center}.icone-ok{display:grid;place-items:center;width:68px;height:68px;margin:0 auto 14px;border-radius:50%;background:#dcfce7;color:#15803d;font-size:2rem;font-weight:900}.lista-ok{text-align:left;margin:18px 0 0;padding:0;list-style:none}.lista-ok li{padding:12px 0;border-bottom:1px solid #e2e8f0}.lista-ok li:last-child{border-bottom:0}.protocolo{color:var(--azul);font-weight:900}
-    @media(max-width:600px){.pagina{padding:18px 12px 34px}.card{padding:17px;border-radius:16px}.grade-data{grid-template-columns:1fr}.topo{margin-bottom:14px}.equipamento{padding:14px}}
+    .grade-data{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.grade-revisao{display:grid;grid-template-columns:1fr 1fr;gap:14px}.campo-largo{grid-column:1/-1}.telefone-revisao{padding:13px 14px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;color:#475569}.opcao-anual{display:flex;align-items:flex-start;gap:10px;margin-top:18px;padding:13px 14px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe}.opcao-anual input{width:20px;height:20px;margin:1px 0 0;accent-color:var(--azul)}.opcao-anual label{margin:0;font-weight:700;line-height:1.4}.concluido{text-align:center}.icone-ok{display:grid;place-items:center;width:68px;height:68px;margin:0 auto 14px;border-radius:50%;background:#dcfce7;color:#15803d;font-size:2rem;font-weight:900}.lista-ok{text-align:left;margin:18px 0 0;padding:0;list-style:none}.lista-ok li{padding:12px 0;border-bottom:1px solid #e2e8f0}.lista-ok li:last-child{border-bottom:0}.protocolo{color:var(--azul);font-weight:900}
+    @media(max-width:600px){.pagina{padding:18px 12px 34px}.card{padding:17px;border-radius:16px}.grade-data,.grade-revisao{grid-template-columns:1fr}.campo-largo{grid-column:auto}.topo{margin-bottom:14px}.equipamento{padding:14px}}
   </style>
 </head>
 <body>
@@ -36,6 +36,74 @@
           <input id="telefone" name="telefone" inputmode="numeric" autocomplete="tel" maxlength="16" value="{{ telefone or '' }}" placeholder="(21) 99999-9999" required>
         </div>
         <button class="botao" type="submit">Pesquisar meus equipamentos</button>
+      </form>
+
+    {% elif etapa == 'revisar_dados' %}
+      <div class="cliente"><strong>Revise seus dados</strong><span>Confirme ou corrija seu cadastro antes de solicitar a manutenção.</span></div>
+
+      <form method="post" action="/solicitar-manutencao/revisar-dados" id="form-revisao">
+        <input type="hidden" name="telefone" value="{{ telefone }}">
+        <div class="grade-revisao">
+          <div class="campo campo-largo">
+            <label for="nome">Nome completo</label>
+            <input id="nome" name="nome" value="{{ cliente.nome or '' }}" required>
+          </div>
+          <div class="campo">
+            <label>WhatsApp</label>
+            <div class="telefone-revisao">{{ cliente.telefone|telefone }}</div>
+          </div>
+          <div class="campo">
+            <label for="documento">CPF/CNPJ</label>
+            <input id="documento" name="documento" value="{{ cliente.documento or '' }}">
+          </div>
+          <div class="campo">
+            <label for="email">E-mail</label>
+            <input type="email" id="email" name="email" value="{{ cliente.email or '' }}">
+          </div>
+          <div class="campo">
+            <label for="empresa">Empresa</label>
+            <input id="empresa" name="empresa" value="{{ cliente.empresa or '' }}">
+          </div>
+          <div class="campo">
+            <label for="cep">CEP</label>
+            <input id="cep" name="cep" inputmode="numeric" value="{{ cliente.cep or '' }}">
+          </div>
+          <div class="campo">
+            <label for="municipio">Município</label>
+            <input id="municipio" name="municipio" value="{{ cliente.municipio or cliente.cidade or '' }}">
+          </div>
+          <div class="campo">
+            <label for="estado">Estado</label>
+            <input id="estado" name="estado" value="{{ cliente.estado or '' }}">
+          </div>
+          <div class="campo campo-largo">
+            <label for="endereco">Rua / endereço</label>
+            <input id="endereco" name="endereco" value="{{ cliente.endereco or '' }}">
+          </div>
+          <div class="campo">
+            <label for="endereco_numero">Número</label>
+            <input id="endereco_numero" name="endereco_numero" value="{{ cliente.endereco_numero or '' }}">
+          </div>
+          <div class="campo">
+            <label for="complemento">Complemento</label>
+            <input id="complemento" name="complemento" value="{{ cliente.complemento or '' }}">
+          </div>
+          <div class="campo campo-largo">
+            <label for="bairro">Bairro</label>
+            <input id="bairro" name="bairro" value="{{ cliente.bairro or '' }}">
+          </div>
+        </div>
+
+        <div class="opcao-anual">
+          <input type="checkbox" id="nao_mostrar_ano" name="nao_mostrar_ano" value="1">
+          <label for="nao_mostrar_ano">Não mostrar novamente esta tela em {{ ano_atual }} neste aparelho.</label>
+        </div>
+        <button class="botao" type="submit">Confirmar dados e continuar</button>
+        <a class="botao secundario" href="/solicitar-manutencao">Trocar WhatsApp</a>
+      </form>
+
+      <form method="post" action="/solicitar-manutencao/continuar" id="form-pular-revisao" style="display:none">
+        <input type="hidden" name="telefone" value="{{ telefone }}">
       </form>
 
     {% elif etapa == 'equipamentos' %}
@@ -127,6 +195,22 @@
     });
     checkbox.addEventListener('change', () => atualizarCard(card));
   });
+  const formRevisao = document.getElementById('form-revisao');
+  if(formRevisao){
+    const chaveRevisao = 'humiat_revisao_{{ cliente.id if cliente else "" }}_{{ ano_atual if ano_atual else "" }}';
+    try{
+      if(localStorage.getItem(chaveRevisao) === '1'){
+        document.getElementById('form-pular-revisao').submit();
+      }
+    }catch(e){}
+    formRevisao.addEventListener('submit', () => {
+      const naoMostrar = document.getElementById('nao_mostrar_ano');
+      if(naoMostrar && naoMostrar.checked){
+        try{ localStorage.setItem(chaveRevisao, '1'); }catch(e){}
+      }
+    });
+  }
+
   const data = document.getElementById('data_entrega');
   if(data){
     data.addEventListener('change', () => {

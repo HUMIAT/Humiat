@@ -1,10 +1,20 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="dashboard">
-  <header class="dash-header"><div><h1>Vendas</h1><p>Os preços ficam gravados conforme a tabela na data da venda.</p></div><a class="btn-new" href="/organiza/vendas/nova">＋ Nova venda</a></header>
-  <article class="panel-card"><div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Venda</th><th>Cliente</th><th>Equipamento</th><th>Custo</th><th>Venda</th><th>Status</th><th></th></tr></thead>
-    <tbody>{% for venda in vendas %}<tr><td>#{{ venda.id }}</td><td><strong>{{ venda.cliente.nome }}</strong></td><td>{{ venda.equipamento_tipo }} {{ venda.equipamento_modelo or '' }}</td><td>R$ {{ venda.total_custo or '0,00' }}</td><td>R$ {{ venda.total_venda or '0,00' }}</td><td><span class="badge">{{ venda.status }}</span></td><td><a class="btn-small" href="/organiza/vendas/{{ venda.id }}">Abrir</a></td></tr>{% else %}<tr><td colspan="7">Nenhuma venda cadastrada.</td></tr>{% endfor %}</tbody>
-  </table></div></article>
+<section class="pagina-clean">
+  <div class="titulo-linha"><div><p class="tag">Vendas</p><h1>Vendas de equipamentos</h1><p class="texto-suave">Acompanhe gabinete, montagem e entrega em um único lugar.</p></div><a class="botao primario" href="/organiza/vendas/nova">+ Nova venda</a></div>
+  <div class="vendas-grid">
+    {% for venda in vendas %}
+    <article class="cartao venda-card">
+      <div class="venda-card-topo"><div><span class="pill status-venda">{{ venda.status }}</span><h3>{{ venda.cliente.nome }}</h3><p>{{ venda.tipo or 'Equipamento' }} · {{ venda.modelo or 'Sem modelo' }}</p></div><a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}/equipamentos/{{ venda.id }}/editar">Abrir</a></div>
+      <div class="venda-card-dados">
+        <div><small>Compra</small><strong>{{ venda.data_compra|data_br }}</strong></div>
+        <div><small>Entrega</small><strong>{{ venda.previsao_entrega|data_br }}</strong></div>
+        <div><small>Total</small><strong>{{ venda.valor|moeda }}</strong></div>
+        <div><small>Recebido</small><strong>{{ venda.pago|moeda }}</strong></div>
+        <div class="saldo"><small>Falta</small><strong>{{ venda.falta|moeda }}</strong></div>
+      </div>
+    </article>
+    {% else %}<div class="cartao vazio">Nenhuma venda cadastrada.</div>{% endfor %}
+  </div>
 </section>
 {% endblock %}

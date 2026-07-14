@@ -1,9 +1,60 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="dashboard"><header class="dash-header"><div><h1>Nova venda</h1><p>Selecione o cliente e identifique o equipamento que será criado.</p></div><a class="btn-secondary" href="/organiza/vendas">Voltar</a></header>
-<article class="form-card"><form method="post" class="formulario"><div class="form-grid">
-<label>Cliente<select name="cliente_id" required><option value="">Selecione</option>{% for c in clientes %}<option value="{{ c.id }}">{{ c.nome }} — {{ c.telefone|formatar_telefone }}</option>{% endfor %}</select></label>
-<label>Tipo do equipamento<input name="equipamento_tipo" required placeholder="Jukebox, Maleta, Fliperama..."></label>
-<label>Modelo<input name="equipamento_modelo" placeholder="Modelo ou descrição"></label>
-</div><label>Observação<textarea name="observacao"></textarea></label><button class="btn-new" type="submit">Criar venda e adicionar itens</button></form></article></section>
+<section class="pagina-clean venda-pagina">
+  <div class="titulo-linha">
+    <div><p class="tag">Venda</p><h1>Nova venda</h1><p class="texto-suave">Selecione o cliente ou cadastre um novo e informe o equipamento vendido.</p></div>
+    <a class="botao" href="/organiza/vendas">Voltar</a>
+  </div>
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  <form method="post" class="venda-form" id="vendaForm">
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>1</span><div><h2>Cliente</h2><p>Use um cliente existente ou crie um novo pelo WhatsApp.</p></div></div>
+      <div class="form-grid-organizada duas-colunas">
+        <label class="campo-largo">Cliente existente
+          <select name="cliente_id" id="cliente_id">
+            <option value="">Cadastrar novo cliente</option>
+            {% for c in clientes %}<option value="{{ c.id }}" {% if cliente_id == c.id %}selected{% endif %}>{{ c.nome }} — {{ c.telefone|telefone }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Nome do novo cliente<input name="nome" value="{{ dados.get('nome','') }}"></label>
+        <label>WhatsApp<input name="telefone" inputmode="numeric" maxlength="15" placeholder="21999999999" value="{{ dados.get('telefone','') }}"></label>
+        <label>E-mail<input type="email" name="email" value="{{ dados.get('email','') }}"></label>
+        <label>Município<input name="municipio" value="{{ dados.get('municipio','') }}"></label>
+      </div>
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>2</span><div><h2>Equipamento</h2><p>Identificação e etapa atual da venda.</p></div></div>
+      <div class="form-grid-organizada tres-colunas">
+        <label>Tipo *<input name="tipo" required placeholder="Jukebox, maleta, fliperama..." value="{{ dados.get('tipo','') }}"></label>
+        <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" placeholder="Ex.: Jukebox Azul 27.000 JBL" value="{{ dados.get('modelo','') }}"></label>
+        <label>Máquina / código<input name="maquina" value="{{ dados.get('maquina','') }}"></label>
+        <label>Pacote<input name="pacote" value="{{ dados.get('pacote','') }}"></label>
+        <label>Plano<input name="plano" value="{{ dados.get('plano','') }}"></label>
+        <label>Status da venda<select name="status">{% for s in status_venda %}<option {% if dados.get('status','Solicitar gabinete') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+      </div>
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>3</span><div><h2>Valores e datas</h2><p>O saldo restante é calculado automaticamente.</p></div></div>
+      <div class="form-grid-organizada quatro-colunas">
+        <label>Data da compra<input type="date" name="data_compra" value="{{ dados.get('data_compra','') }}"></label>
+        <label>Data prevista de entrega<input type="date" name="previsao_entrega" value="{{ dados.get('previsao_entrega','') }}"></label>
+        <label>Valor total<input id="valor_total" name="valor" inputmode="decimal" placeholder="0,00" value="{{ dados.get('valor','') }}"></label>
+        <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" placeholder="0,00" value="{{ dados.get('pago','') }}"></label>
+        <label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="R$ 0,00"></label>
+        <label class="campo-triplo">Observações<textarea name="observacao" placeholder="Detalhes da montagem, gabinete ou entrega...">{{ dados.get('observacao','') }}</textarea></label>
+      </div>
+    </section>
+    <button class="botao primario botao-cheio salvar-venda" type="submit">Criar venda e equipamento</button>
+  </form>
+</section>
+<script>
+(function(){
+  const total=document.getElementById('valor_total'), recebido=document.getElementById('valor_recebido'), falta=document.getElementById('valor_restante');
+  const numero=v=>{v=(v||'').toString().replace(/R\$/g,'').trim(); if(v.includes(',')) v=v.replace(/\./g,'').replace(',','.'); return Number(v)||0};
+  const atualizar=()=>{const saldo=Math.max(numero(total.value)-numero(recebido.value),0); falta.value=saldo.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});};
+  total.addEventListener('input',atualizar); recebido.addEventListener('input',atualizar); atualizar();
+})();
+</script>
 {% endblock %}

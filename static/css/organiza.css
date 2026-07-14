@@ -2986,3 +2986,47 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .pendencia-item{padding:11px 6px}
   .pendencia-item strong{font-size:.88rem}
 }
+
+/* =========================================================
+   FORMULÁRIOS ORGANIZADOS | CLIENTES, EQUIPAMENTOS E VENDAS
+   ========================================================= */
+.pagina-clean{max-width:1220px;margin:0 auto;display:grid;gap:20px}
+.venda-form,.equipamento-form,.cliente-form-organizado{display:grid;gap:18px}
+.secao-form{padding:22px}
+.secao-form-titulo{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.secao-form-titulo>span{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:#dbeafe;color:#1d4ed8;font-weight:900}
+.secao-form-titulo h2{margin:0;font-size:1.12rem}
+.secao-form-titulo p{margin:4px 0 0;color:var(--org-muted);font-size:.9rem}
+.form-grid-organizada{display:grid;gap:16px;align-items:start}
+.form-grid-organizada.duas-colunas{grid-template-columns:repeat(2,minmax(0,1fr))}
+.form-grid-organizada.tres-colunas{grid-template-columns:repeat(3,minmax(0,1fr))}
+.form-grid-organizada.quatro-colunas{grid-template-columns:repeat(4,minmax(0,1fr))}
+.form-grid-organizada label,.secao-form>label{display:grid;gap:7px;font-weight:800;font-size:.88rem;color:#25324a}
+.form-grid-organizada input,.form-grid-organizada select,.form-grid-organizada textarea,.secao-form textarea{
+  width:100%;min-height:46px;border:1px solid #cbd5e1;border-radius:11px;background:#fff;padding:11px 12px;font:inherit;color:var(--org-text);outline:none
+}
+.form-grid-organizada textarea,.secao-form textarea{min-height:95px;resize:vertical}
+.form-grid-organizada input:focus,.form-grid-organizada select:focus,.form-grid-organizada textarea:focus,.secao-form textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.10)}
+.campo-largo{grid-column:1/-1}.campo-duplo{grid-column:span 2}.campo-triplo{grid-column:span 3}
+.saldo-destaque input{background:#eff6ff!important;border-color:#93c5fd!important;color:#1d4ed8!important;font-weight:900}
+.salvar-venda{min-height:52px}
+.alerta.sucesso{padding:13px 15px;border-radius:12px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:800}
+.vendas-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.venda-card{display:grid;gap:18px}
+.venda-card-topo{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.venda-card-topo h3{margin:10px 0 4px;font-size:1.15rem}.venda-card-topo p{margin:0;color:var(--org-muted)}
+.status-venda{background:#dbeafe;color:#1d4ed8}
+.venda-card-dados{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.venda-card-dados div{padding:11px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0}
+.venda-card-dados small,.venda-card-dados strong{display:block}.venda-card-dados small{color:var(--org-muted);margin-bottom:5px}.venda-card-dados strong{font-size:.9rem}
+.venda-card-dados .saldo{background:#fff7ed;border-color:#fed7aa}.venda-card-dados .saldo strong{color:#c2410c}
+.agenda-secao{display:grid;gap:12px}.agenda-secao h2{margin:0;font-size:1.05rem}.agenda-evento.venda{border-left:5px solid #2563eb}.agenda-evento em{font-style:normal;font-size:.82rem;color:#475569}
+
+@media(max-width:980px){
+  .form-grid-organizada.quatro-colunas,.form-grid-organizada.tres-colunas{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .campo-triplo{grid-column:span 2}.vendas-grid{grid-template-columns:1fr}.venda-card-dados{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:680px){
+  .secao-form{padding:16px}.form-grid-organizada.duas-colunas,.form-grid-organizada.tres-colunas,.form-grid-organizada.quatro-colunas{grid-template-columns:1fr}
+  .campo-duplo,.campo-triplo,.campo-largo{grid-column:1}.venda-card-dados{grid-template-columns:repeat(2,minmax(0,1fr))}.venda-card-topo{display:grid}
+}

@@ -17,9 +17,11 @@
       <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Início</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>
       <a class="{% if request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/manutencoes"><span>🛠</span> Manutenções</a>
+      <a class="{% if request.url.path.startswith('/organiza/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span>▤</span> Vendas</a>
       <a class="{% if request.url.path.startswith('/organiza/itens') %}ativo{% endif %}" href="/organiza/itens"><span>▦</span> Itens</a>
       <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda"><span>▣</span> Agenda</a>
       <a class="menu-principal" href="/organiza/manutencoes/nova"><span>＋</span> Nova manutenção</a>
+      <a class="menu-principal" href="/organiza/vendas/nova"><span>＋</span> Nova venda</a>
     </nav>
     <div class="side-bottom">
       {% if usuario.is_admin %}<a href="/organiza/usuarios"><span>👤</span> Usuários</a>{% endif %}

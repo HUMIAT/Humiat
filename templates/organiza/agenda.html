@@ -1,1 +1,12 @@
-{% extends "organiza/base.html" %}{% block conteudo %}<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Agenda</p><h1>Entregas e retiradas</h1><p class="texto-suave">Compromissos gerados pelas manutenções.</p></div></div><div class="agenda-grid">{% for m in manutencoes %}{% if m.entrega_prevista_em %}<a class="agenda-evento" href="/organiza/manutencoes/{{m.id}}"><span>ENTREGA</span><strong>{{m.entrega_prevista_em.strftime('%d/%m/%Y %H:%M')}}</strong><b>{{m.cliente.nome}}</b><small>{{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small></a>{% endif %}{% if m.retirada_em %}<a class="agenda-evento retirada" href="/organiza/manutencoes/{{m.id}}"><span>RETIRADA</span><strong>{{m.retirada_em.strftime('%d/%m/%Y %H:%M')}}</strong><b>{{m.cliente.nome}}</b><small>{{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small></a>{% endif %}{% else %}<p class="vazio">Nenhum compromisso agendado.</p>{% endfor %}</div></section>{% endblock %}
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha"><div><p class="tag">Agenda</p><h1>Entregas e retiradas</h1><p class="texto-suave">Manutenções e vendas reunidas por data.</p></div></div>
+  <div class="agenda-secao"><h2>Vendas</h2><div class="agenda-grid">
+    {% for v in vendas %}<a class="agenda-evento venda" href="/organiza/clientes/{{v.cliente_id}}/equipamentos/{{v.id}}/editar"><span>{{ v.status|upper }}</span><strong>{{v.previsao_entrega.strftime('%d/%m/%Y')}}</strong><b>{{v.cliente.nome}}</b><small>{{v.tipo}} {{v.modelo or ''}}</small><em>Falta: {{v.falta|moeda}}</em></a>{% else %}<p class="vazio">Nenhuma entrega de venda agendada.</p>{% endfor %}
+  </div></div>
+  <div class="agenda-secao"><h2>Manutenções</h2><div class="agenda-grid">
+    {% for m in manutencoes %}{% if m.entrega_prevista_em %}<a class="agenda-evento" href="/organiza/manutencoes/{{m.id}}"><span>ENTREGA</span><strong>{{m.entrega_prevista_em.strftime('%d/%m/%Y %H:%M')}}</strong><b>{{m.cliente.nome}}</b><small>{{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small></a>{% endif %}{% if m.retirada_em %}<a class="agenda-evento retirada" href="/organiza/manutencoes/{{m.id}}"><span>RETIRADA</span><strong>{{m.retirada_em.strftime('%d/%m/%Y %H:%M')}}</strong><b>{{m.cliente.nome}}</b><small>{{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small></a>{% endif %}{% else %}<p class="vazio">Nenhum compromisso de manutenção.</p>{% endfor %}
+  </div></div>
+</section>
+{% endblock %}
