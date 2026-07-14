@@ -2588,3 +2588,120 @@ img{max-width:100%;display:block}
   .linha-editavel summary,.registro-card summary{align-items:flex-start;gap:8px}
   .linha-editavel summary strong,.registro-card summary strong{font-size:.9rem}
 }
+
+/* HUMIAT 13 | Equipamentos com contraste claro no padrão Conect */
+.cliente-detalhe .equip-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:16px;
+}
+.cliente-detalhe .equip-card{
+    position:relative;
+    overflow:hidden;
+    padding:20px;
+    border:1px solid #dbe3ee;
+    border-radius:18px;
+    background:#ffffff !important;
+    color:#111827 !important;
+    box-shadow:0 8px 24px rgba(15,23,42,.06);
+}
+.cliente-detalhe .equip-card::before{
+    content:"";
+    position:absolute;
+    inset:0 auto 0 0;
+    width:4px;
+    background:#2563eb;
+}
+.cliente-detalhe .equip-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    padding-bottom:15px;
+    border-bottom:1px solid #edf1f6;
+}
+.cliente-detalhe .equip-head > div{min-width:0;}
+.cliente-detalhe .equip-head h3{
+    margin:10px 0 4px;
+    color:#111827 !important;
+    font-size:1.12rem;
+    line-height:1.25;
+    overflow-wrap:anywhere;
+}
+.cliente-detalhe .equip-head p{
+    margin:0;
+    color:#475569 !important;
+    line-height:1.45;
+    overflow-wrap:anywhere;
+}
+.cliente-detalhe .equip-card .pill{
+    display:inline-flex;
+    align-items:center;
+    min-height:26px;
+    padding:5px 10px;
+    border:1px solid #bbf7d0;
+    border-radius:999px;
+    background:#dcfce7 !important;
+    color:#166534 !important;
+    font-size:.74rem;
+    font-weight:800;
+}
+.cliente-detalhe .equip-card .botao.pequeno{
+    flex:0 0 auto;
+    min-width:96px;
+    border-color:#2563eb !important;
+    background:#2563eb !important;
+    color:#fff !important;
+    box-shadow:none;
+}
+.cliente-detalhe .equip-card dl{
+    display:grid;
+    grid-template-columns:minmax(110px,.8fr) minmax(0,1.2fr);
+    gap:0;
+    margin:16px 0 0;
+}
+.cliente-detalhe .equip-card dt,
+.cliente-detalhe .equip-card dd{
+    padding:9px 0;
+    border-bottom:1px solid #f0f3f7;
+}
+.cliente-detalhe .equip-card dt{
+    color:#64748b !important;
+    font-size:.86rem;
+    font-weight:650;
+}
+.cliente-detalhe .equip-card dd{
+    margin:0;
+    color:#0f172a !important;
+    text-align:right;
+    font-weight:800;
+    overflow-wrap:anywhere;
+}
+.cliente-detalhe .equip-card dt:nth-last-of-type(-n+3),
+.cliente-detalhe .equip-card dd:nth-last-of-type(-n+3){font-variant-numeric:tabular-nums;}
+.cliente-detalhe .equip-card .observacao{
+    margin:14px 0 0;
+    padding:12px 14px;
+    border:1px solid #e2e8f0;
+    border-radius:12px;
+    background:#f8fafc !important;
+    color:#334155 !important;
+}
+
+@media(max-width:900px){
+    .cliente-detalhe .equip-grid{grid-template-columns:1fr;}
+}
+@media(max-width:560px){
+    .cliente-detalhe .equip-card{padding:16px 15px 17px;}
+    .cliente-detalhe .equip-head{gap:10px;}
+    .cliente-detalhe .equip-card .botao.pequeno{min-width:92px;padding:10px 13px;}
+    .cliente-detalhe .equip-card dl{grid-template-columns:1fr;}
+    .cliente-detalhe .equip-card dt{
+        padding:10px 0 2px;
+        border-bottom:0;
+    }
+    .cliente-detalhe .equip-card dd{
+        padding:0 0 10px;
+        text-align:left;
+    }
+}
