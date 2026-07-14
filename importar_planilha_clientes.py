@@ -27,7 +27,7 @@ import re
 from openpyxl import load_workbook
 
 from database import SessionLocal, engine, Base
-from app import Cliente, Equipamento, limpar_telefone, separar_codigo_nome_whatsapp
+from app import Cliente, Equipamento, limpar_telefone
 from sqlalchemy import inspect, text as sql_text
 
 
@@ -169,7 +169,6 @@ def garantir_colunas_novas():
         if "clientes" in tabelas:
             colunas = [c["name"] for c in insp.get_columns("clientes")]
             novas = {
-                "codigo_whatsapp": "VARCHAR(40)",
                 "documento": "VARCHAR(30)",
                 "cep": "VARCHAR(20)",
                 "cidade": "VARCHAR(120)",
@@ -218,7 +217,7 @@ def importar(caminho=ARQUIVO_PADRAO):
 
         for linha in ws.iter_rows(min_row=2, values_only=True):
             nome_original = texto(valor_linha(linha, cab, "Nome no WhatsApp"))
-            codigo_whatsapp, nome_limpo = separar_codigo_nome_whatsapp(nome_original or "")
+            nome_limpo = re.split(r"_+", nome_original or "")[-1].strip()
             nome = nome_limpo or nome_original
             telefone = limpar_telefone(texto(valor_linha(linha, cab, "Telefone")) or "")
             if not nome or not telefone:
@@ -235,7 +234,6 @@ def importar(caminho=ARQUIVO_PADRAO):
                 atualizados += 1
 
             cliente.nome = nome
-            cliente.codigo_whatsapp = codigo_whatsapp or None
             cliente.empresa = texto(valor_linha(linha, cab, "Empresa"))
             cliente.documento = texto(valor_linha(linha, cab, "Documento") or valor_linha(linha, cab, "CPF/CNPJ"))
             cliente.cep = texto(valor_linha(linha, cab, "CEP"))

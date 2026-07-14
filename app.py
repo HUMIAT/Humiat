@@ -43,7 +43,6 @@ class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(Integer, primary_key=True)
     nome = Column(String(140), nullable=False)
-    codigo_whatsapp = Column(String(40), nullable=True)
     telefone = Column(String(20), unique=True, nullable=False)
     empresa = Column(String(140), nullable=True)
     documento = Column(String(30), nullable=True)
@@ -324,6 +323,10 @@ def iniciar_banco():
                     for dado in json.load(arquivo):
                         db.add(Item(**dado, categoria="Geral", ativo=1))
                 db.commit()
+        # Remove prefixos antigos usados no código do WhatsApp e mantém somente o nome real.
+        for cliente_existente in db.query(Cliente).all():
+            cliente_existente.nome = limpar_nome_cliente(cliente_existente.nome)
+
         # Padroniza todos os equipamentos existentes.
         equipamentos_existentes = db.query(Equipamento).order_by(Equipamento.id.asc()).all()
         codigos_usados = set()
@@ -443,9 +446,35 @@ def clientes(request: Request, busca: str = "", usuario: Usuario = Depends(usuar
     })
 
 
+def limpar_nome_cliente(nome: str) -> str:
+    nome = (nome or "").strip()
+    if "_" in nome:
+        parte = re.split(r"_+", nome)[-1].strip()
+        if parte:
+            nome = parte
+    return re.sub(r"\s+", " ", nome).strip()
+
+
+def limpar_documento(documento: str) -> str:
+    return re.sub(r"\D", "", documento or "")
+
+
+def cpf_valido(documento: str) -> bool:
+    cpf = limpar_documento(documento)
+    if len(cpf) != 11 or cpf == cpf[0] * 11:
+        return False
+    for tamanho in (9, 10):
+        soma = sum(int(cpf[i]) * (tamanho + 1 - i) for i in range(tamanho))
+        digito = (soma * 10) % 11
+        if digito == 10:
+            digito = 0
+        if digito != int(cpf[tamanho]):
+            return False
+    return True
+
+
 def preencher_cliente(cliente: Cliente, form: dict):
-    cliente.nome = (form.get("nome") or "").strip()
-    cliente.codigo_whatsapp = (form.get("codigo_whatsapp") or "").strip() or None
+    cliente.nome = limpar_nome_cliente(form.get("nome") or "")
     cliente.telefone = limpar_telefone(form.get("telefone") or "")
     cliente.empresa = (form.get("empresa") or "").strip() or None
     cliente.documento = (form.get("documento") or "").strip() or None
@@ -1378,40 +1407,64 @@ async def manutencao_publica_revisar_dados(request: Request, db: Session = Depen
     except ClientDisconnect:
         return RedirectResponse("/solicitar-manutencao", status_code=303)
 
-    telefone = limpar_telefone(form.get("telefone") or "")
-    cliente = cliente_por_whatsapp(db, telefone)
+    telefone_original = limpar_telefone(form.get("telefone_original") or form.get("telefone") or "")
+    cliente = cliente_por_whatsapp(db, telefone_original)
     if not cliente:
         return RedirectResponse("/solicitar-manutencao", status_code=303)
 
-    nome = (form.get("nome") or "").strip()
-    if not nome:
+    nome = limpar_nome_cliente(form.get("nome") or "")
+    documento = limpar_documento(form.get("documento") or "")
+    telefone_novo = limpar_telefone(form.get("telefone") or "")
+    email = (form.get("email") or "").strip()
+    obrigatorios = {
+        "nome completo": nome, "CPF": documento, "WhatsApp": telefone_novo, "e-mail": email,
+        "CEP": (form.get("cep") or "").strip(), "endereço": (form.get("endereco") or "").strip(),
+        "número": (form.get("endereco_numero") or "").strip(), "bairro": (form.get("bairro") or "").strip(),
+        "município": (form.get("municipio") or "").strip(), "estado": (form.get("estado") or "").strip(),
+    }
+    faltantes = [rotulo for rotulo, valor in obrigatorios.items() if not valor]
+    erro = ""
+    if faltantes:
+        erro = "Preencha os campos obrigatórios: " + ", ".join(faltantes) + "."
+    elif not cpf_valido(documento):
+        erro = "Informe um CPF válido."
+    elif not telefone_valido(telefone_novo):
+        erro = "Informe um WhatsApp válido com 11 dígitos, incluindo DDD."
+    elif db.query(Cliente).filter(Cliente.documento == documento, Cliente.id != cliente.id).first():
+        erro = "Este CPF já pertence a outro cadastro."
+    elif db.query(Cliente).filter(Cliente.telefone == telefone_novo, Cliente.id != cliente.id).first():
+        erro = "Este WhatsApp já pertence a outro cadastro."
+
+    if erro:
+        for campo, valor in form.items():
+            if hasattr(cliente, campo) and campo not in ("id",):
+                setattr(cliente, campo, valor)
+        cliente.nome = nome
+        cliente.documento = documento
+        cliente.telefone = telefone_novo
         return templates.TemplateResponse("organiza/manutencao_publica.html", {
-            "request": request,
-            "etapa": "revisar_dados",
-            "erro": "Informe o nome do cliente.",
-            "telefone": telefone,
-            "cliente": cliente,
-            "ano_atual": date.today().year,
+            "request": request, "etapa": "revisar_dados", "erro": erro,
+            "telefone": telefone_original, "cliente": cliente, "ano_atual": date.today().year,
             "horarios": HORARIOS_ENTREGA_PUBLICA,
         }, status_code=400)
 
     cliente.nome = nome
-    cliente.documento = (form.get("documento") or "").strip() or None
-    cliente.inscricao_estadual = (form.get("inscricao_estadual") or "").strip() or None
-    cliente.email = (form.get("email") or "").strip() or None
+    cliente.documento = documento
+    cliente.telefone = telefone_novo
+    cliente.email = email
     cliente.empresa = (form.get("empresa") or "").strip() or None
-    cliente.cep = (form.get("cep") or "").strip() or None
-    cliente.municipio = (form.get("municipio") or "").strip() or None
+    cliente.cep = (form.get("cep") or "").strip()
+    cliente.municipio = (form.get("municipio") or "").strip()
     cliente.cidade = cliente.municipio
-    cliente.estado = (form.get("estado") or "").strip() or None
-    cliente.endereco = (form.get("endereco") or "").strip() or None
-    cliente.endereco_numero = (form.get("endereco_numero") or "").strip() or None
+    cliente.estado = (form.get("estado") or "").strip().upper()
+    cliente.endereco = (form.get("endereco") or "").strip()
+    cliente.endereco_numero = (form.get("endereco_numero") or "").strip()
     cliente.complemento = (form.get("complemento") or "").strip() or None
-    cliente.bairro = (form.get("bairro") or "").strip() or None
+    cliente.bairro = (form.get("bairro") or "").strip()
     db.commit()
     db.refresh(cliente)
 
-    return renderizar_equipamentos_publicos(request, db, cliente, telefone)
+    return renderizar_equipamentos_publicos(request, db, cliente, telefone_novo)
 
 
 @app.post("/solicitar-manutencao/criar", response_class=HTMLResponse)

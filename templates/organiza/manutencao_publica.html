@@ -42,69 +42,63 @@
       <div class="cliente"><strong>Revise seus dados</strong><span>Confirme ou corrija seu cadastro antes de solicitar a manutenção.</span></div>
 
       <form method="post" action="/solicitar-manutencao/revisar-dados" id="form-revisao">
-        <input type="hidden" name="telefone" value="{{ telefone }}">
+        <input type="hidden" name="telefone_original" value="{{ telefone }}">
         <div class="grade-revisao">
           <div class="campo campo-largo">
-            <label for="nome">Nome completo</label>
+            <label for="nome">Nome completo *</label>
             <input id="nome" name="nome" value="{{ cliente.nome or '' }}" required>
           </div>
           <div class="campo">
-            <label>WhatsApp</label>
-            <div class="telefone-revisao">{{ cliente.telefone|telefone }}</div>
+            <label for="telefone_revisao">WhatsApp *</label>
+            <input id="telefone_revisao" name="telefone" inputmode="numeric" maxlength="16" value="{{ cliente.telefone or '' }}" required>
           </div>
           <div class="campo">
-            <label for="documento">CPF/CNPJ</label>
-            <input id="documento" name="documento" value="{{ cliente.documento or '' }}">
+            <label for="documento">CPF *</label>
+            <input id="documento" name="documento" inputmode="numeric" maxlength="14" value="{{ cliente.documento or '' }}" required>
           </div>
           <div class="campo">
-            <label for="email">E-mail</label>
-            <input type="email" id="email" name="email" value="{{ cliente.email or '' }}">
+            <label for="email">E-mail *</label>
+            <input type="email" id="email" name="email" value="{{ cliente.email or '' }}" required>
           </div>
           <div class="campo">
             <label for="empresa">Empresa</label>
             <input id="empresa" name="empresa" value="{{ cliente.empresa or '' }}">
           </div>
           <div class="campo">
-            <label for="cep">CEP</label>
-            <input id="cep" name="cep" inputmode="numeric" value="{{ cliente.cep or '' }}">
+            <label for="cep">CEP *</label>
+            <input id="cep" name="cep" inputmode="numeric" maxlength="9" value="{{ cliente.cep or '' }}" required>
           </div>
           <div class="campo">
-            <label for="municipio">Município</label>
-            <input id="municipio" name="municipio" value="{{ cliente.municipio or cliente.cidade or '' }}">
+            <label for="municipio">Município *</label>
+            <input id="municipio" name="municipio" value="{{ cliente.municipio or cliente.cidade or '' }}" required>
           </div>
           <div class="campo">
-            <label for="estado">Estado</label>
-            <input id="estado" name="estado" value="{{ cliente.estado or '' }}">
+            <label for="estado">Estado *</label>
+            <input id="estado" name="estado" maxlength="2" value="{{ cliente.estado or '' }}" required>
           </div>
           <div class="campo campo-largo">
-            <label for="endereco">Rua / endereço</label>
-            <input id="endereco" name="endereco" value="{{ cliente.endereco or '' }}">
+            <label for="endereco">Rua / endereço *</label>
+            <input id="endereco" name="endereco" value="{{ cliente.endereco or '' }}" required>
           </div>
           <div class="campo">
-            <label for="endereco_numero">Número</label>
-            <input id="endereco_numero" name="endereco_numero" value="{{ cliente.endereco_numero or '' }}">
+            <label for="endereco_numero">Número *</label>
+            <input id="endereco_numero" name="endereco_numero" value="{{ cliente.endereco_numero or '' }}" required>
           </div>
           <div class="campo">
             <label for="complemento">Complemento</label>
             <input id="complemento" name="complemento" value="{{ cliente.complemento or '' }}">
           </div>
           <div class="campo campo-largo">
-            <label for="bairro">Bairro</label>
-            <input id="bairro" name="bairro" value="{{ cliente.bairro or '' }}">
+            <label for="bairro">Bairro *</label>
+            <input id="bairro" name="bairro" value="{{ cliente.bairro or '' }}" required>
           </div>
         </div>
 
-        <div class="opcao-anual">
-          <input type="checkbox" id="nao_mostrar_ano" name="nao_mostrar_ano" value="1">
-          <label for="nao_mostrar_ano">Não mostrar novamente esta tela em {{ ano_atual }} neste aparelho.</label>
-        </div>
         <button class="botao" type="submit">Confirmar dados e continuar</button>
         <a class="botao secundario" href="/solicitar-manutencao">Trocar WhatsApp</a>
       </form>
 
-      <form method="post" action="/solicitar-manutencao/continuar" id="form-pular-revisao" style="display:none">
-        <input type="hidden" name="telefone" value="{{ telefone }}">
-      </form>
+
 
     {% elif etapa == 'equipamentos' %}
       <div class="cliente"><strong>{{ cliente.nome }}</strong><span>{{ cliente.telefone|telefone }}</span></div>
@@ -195,21 +189,7 @@
     });
     checkbox.addEventListener('change', () => atualizarCard(card));
   });
-  const formRevisao = document.getElementById('form-revisao');
-  if(formRevisao){
-    const chaveRevisao = 'humiat_revisao_{{ cliente.id if cliente else "" }}_{{ ano_atual if ano_atual else "" }}';
-    try{
-      if(localStorage.getItem(chaveRevisao) === '1'){
-        document.getElementById('form-pular-revisao').submit();
-      }
-    }catch(e){}
-    formRevisao.addEventListener('submit', () => {
-      const naoMostrar = document.getElementById('nao_mostrar_ano');
-      if(naoMostrar && naoMostrar.checked){
-        try{ localStorage.setItem(chaveRevisao, '1'); }catch(e){}
-      }
-    });
-  }
+
 
   const data = document.getElementById('data_entrega');
   if(data){

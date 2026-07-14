@@ -20,7 +20,7 @@
 <label>Bairro *<input id="bairro" name="bairro" required value="{{ cliente.bairro or '' }}"></label>
 <label>Município *<input id="municipio" name="municipio" required value="{{ cliente.municipio or cliente.cidade or '' }}"></label>
 <label>Estado *<input id="estado" name="estado" required maxlength="2" value="{{ cliente.estado or '' }}"></label>
-</div><input type="hidden" name="codigo_whatsapp" value="{{ cliente.codigo_whatsapp or '' }}"><input type="hidden" name="observacao" value="{{ cliente.observacao or '' }}"><button class="botao primario botao-cheio">Salvar meus dados</button>
+</div><input type="hidden" name="observacao" value="{{ cliente.observacao or '' }}"><button class="botao primario botao-cheio">Salvar meus dados</button>
 </form></div></section>
 <script>async function buscarCep(){const e=document.getElementById('cep'),n=e.value.replace(/\D/g,'');if(n.length!==8)return;try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'),d=await r.json();if(d.erro)return;endereco.value=d.logradouro||'';bairro.value=d.bairro||'';municipio.value=d.localidade||'';estado.value=d.uf||'';}catch(x){}}const c=document.getElementById('cep');c.addEventListener('blur',buscarCep);c.addEventListener('input',()=>{let n=c.value.replace(/\D/g,'').slice(0,8);c.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;});</script>
 {% endblock %}
