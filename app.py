@@ -833,3 +833,173 @@ async def orcamento_responder(token: str, request: Request, db: Session = Depend
         o.status = "Aprovado" if acao == "aprovar" else "Aprovado parcialmente"
         o.aprovado_em = datetime.now(); o.manutencao.status = "Aprovado"
     db.commit(); return RedirectResponse(f"/orcamento/{token}?ok=1", status_code=303)
+
+# -----------------------------------------------------------------------------
+# Portal público simplificado para solicitação de manutenção
+# -----------------------------------------------------------------------------
+HORARIOS_ENTREGA_PUBLICA = ["14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00"]
+STATUS_MANUTENCAO_ENCERRADOS = ["Encerrada", "Cancelada"]
+
+
+def cliente_por_whatsapp(db: Session, telefone: str):
+    numero = limpar_telefone(telefone)
+    if not telefone_valido(numero):
+        return None
+    # Os telefones antigos podem estar formatados de maneiras diferentes.
+    # A comparação normalizada preserva compatibilidade com os cadastros atuais.
+    for cliente in db.query(Cliente).options(selectinload(Cliente.equipamentos)).all():
+        if limpar_telefone(cliente.telefone) == numero:
+            return cliente
+    return None
+
+
+def equipamento_com_manutencao_aberta(db: Session, equipamento_id: int):
+    return db.query(Manutencao).filter(
+        Manutencao.equipamento_id == equipamento_id,
+        Manutencao.status.notin_(STATUS_MANUTENCAO_ENCERRADOS),
+    ).order_by(Manutencao.criado_em.desc()).first()
+
+
+def equipamentos_portal(db: Session, cliente: Cliente):
+    resultado = []
+    for equipamento in sorted(cliente.equipamentos, key=lambda e: ((e.tipo or ""), (e.modelo or ""))):
+        aberta = equipamento_com_manutencao_aberta(db, equipamento.id)
+        resultado.append({"equipamento": equipamento, "manutencao_aberta": aberta})
+    return resultado
+
+
+@app.get("/solicitar-manutencao", response_class=HTMLResponse)
+def manutencao_publica_inicio(request: Request):
+    return templates.TemplateResponse("organiza/manutencao_publica.html", {
+        "request": request,
+        "etapa": "telefone",
+        "erro": "",
+        "telefone": "",
+        "horarios": HORARIOS_ENTREGA_PUBLICA,
+    })
+
+
+@app.post("/solicitar-manutencao/pesquisar", response_class=HTMLResponse)
+async def manutencao_publica_pesquisar(request: Request, db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    telefone = limpar_telefone(form.get("telefone") or "")
+    cliente = cliente_por_whatsapp(db, telefone)
+    if not cliente:
+        return templates.TemplateResponse("organiza/manutencao_publica.html", {
+            "request": request,
+            "etapa": "telefone",
+            "erro": "WhatsApp não encontrado. Informe o mesmo número utilizado no cadastro, com DDD.",
+            "telefone": telefone,
+            "horarios": HORARIOS_ENTREGA_PUBLICA,
+        }, status_code=400)
+
+    return templates.TemplateResponse("organiza/manutencao_publica.html", {
+        "request": request,
+        "etapa": "equipamentos",
+        "erro": "",
+        "telefone": telefone,
+        "cliente": cliente,
+        "equipamentos": equipamentos_portal(db, cliente),
+        "horarios": HORARIOS_ENTREGA_PUBLICA,
+        "data_minima": date.today().isoformat(),
+    })
+
+
+@app.post("/solicitar-manutencao/criar", response_class=HTMLResponse)
+async def manutencao_publica_criar(request: Request, db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    telefone = limpar_telefone(form.get("telefone") or "")
+    cliente = cliente_por_whatsapp(db, telefone)
+    if not cliente:
+        return RedirectResponse("/solicitar-manutencao", status_code=303)
+
+    selecionados = []
+    for chave, valor in form.items():
+        if chave == "equipamento_id":
+            valores = form.getlist(chave) if hasattr(form, "getlist") else []
+            selecionados.extend([int(v) for v in valores if str(v).isdigit()])
+    # dict(await request.form()) perde campos repetidos; refazemos a leitura quando necessário.
+    if not selecionados:
+        raw_form = await request.form()
+        selecionados = [int(v) for v in raw_form.getlist("equipamento_id") if str(v).isdigit()]
+        form = dict(raw_form)
+
+    data_texto = (form.get("data_entrega") or "").strip()
+    hora_texto = (form.get("hora_entrega") or "").strip()
+    erro = ""
+    data_entrega = None
+
+    try:
+        data_entrega = datetime.strptime(data_texto, "%Y-%m-%d").date()
+    except ValueError:
+        erro = "Informe uma data válida para a entrega."
+
+    if not erro and (data_entrega < date.today() or data_entrega.weekday() > 4):
+        erro = "A entrega deve ser agendada de segunda a sexta-feira."
+    if not erro and hora_texto not in HORARIOS_ENTREGA_PUBLICA:
+        erro = "Escolha um horário entre 14:00 e 17:00."
+    if not erro and not selecionados:
+        erro = "Selecione pelo menos um equipamento."
+
+    equipamentos_validos = db.query(Equipamento).filter(
+        Equipamento.cliente_id == cliente.id,
+        Equipamento.id.in_(selecionados or [-1]),
+    ).all()
+    if not erro and len(equipamentos_validos) != len(set(selecionados)):
+        erro = "Um dos equipamentos selecionados não pertence ao cadastro informado."
+
+    if not erro:
+        for equipamento in equipamentos_validos:
+            if equipamento_com_manutencao_aberta(db, equipamento.id):
+                erro = f"O equipamento {equipamento.tipo or 'Equipamento'} {equipamento.modelo or ''} já possui uma manutenção em aberto."
+                break
+            descricao = (form.get(f"descricao_{equipamento.id}") or "").strip()
+            if not descricao:
+                erro = f"Descreva o problema do equipamento {equipamento.tipo or ''} {equipamento.modelo or ''}."
+                break
+
+    if erro:
+        return templates.TemplateResponse("organiza/manutencao_publica.html", {
+            "request": request,
+            "etapa": "equipamentos",
+            "erro": erro,
+            "telefone": telefone,
+            "cliente": cliente,
+            "equipamentos": equipamentos_portal(db, cliente),
+            "horarios": HORARIOS_ENTREGA_PUBLICA,
+            "data_minima": date.today().isoformat(),
+            "form_anterior": form,
+        }, status_code=400)
+
+    entrega_em = datetime.combine(data_entrega, datetime.strptime(hora_texto, "%H:%M").time())
+    criadas = []
+    for equipamento in equipamentos_validos:
+        manutencao = Manutencao(
+            cliente_id=cliente.id,
+            equipamento_id=equipamento.id,
+            defeito=(form.get(f"descricao_{equipamento.id}") or "").strip(),
+            entrega_prevista_em=entrega_em,
+            status="Aguardando equipamento",
+            observacao="Solicitação criada pelo link público.",
+        )
+        db.add(manutencao)
+        db.flush()
+        db.add(Orcamento(
+            manutencao_id=manutencao.id,
+            versao=1,
+            token=secrets.token_urlsafe(24),
+            status="Rascunho",
+        ))
+        criadas.append(manutencao)
+    db.commit()
+
+    return templates.TemplateResponse("organiza/manutencao_publica.html", {
+        "request": request,
+        "etapa": "concluido",
+        "erro": "",
+        "telefone": telefone,
+        "cliente": cliente,
+        "criadas": criadas,
+        "data_entrega": entrega_em,
+        "horarios": HORARIOS_ENTREGA_PUBLICA,
+    })
