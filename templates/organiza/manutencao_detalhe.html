@@ -455,27 +455,6 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
   </details>
 </section>
 
-    {% set aprovados = orcamento.itens|selectattr('aprovado')|map(attribute='descricao')|join(', ') %}
-    <a class="botao whatsapp manutencao-whatsapp-largo" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
-
-✅ *Orçamento aprovado e registrado*
-
-Manutenção: '~(totais.manutencao|moeda)~'
-{% if aprovados %}Itens aprovados:
-• '~(aprovados|replace(', ', '\n• '))~'{% endif %}
-
-💰 *Financeiro*
-Total aprovado: '~(totais.aprovado|moeda)~'
-Recebido: '~(totais.recebido|moeda)~'
-Saldo: '~(totais.falta|moeda)~'
-
-🗓️ *Prazo*
-'~(m.prazo or 'A confirmar')~'
-
-Avisaremos assim que o equipamento estiver pronto.
-
-Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
-  </details>
 
   </section>
 <script>

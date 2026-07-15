@@ -1674,8 +1674,9 @@ def registrar_aprovacao_orcamento(o: Orcamento, modalidade: str, origem: str) ->
     for item in o.itens:
         item.aprovado = 1 if (not item.opcional or aprovar_tudo) else 0
 
-    descricao_modalidade = "todos os itens" if aprovar_tudo else "somente itens obrigatórios"
-    o.status = f"Aprovado: {descricao_modalidade} ({origem})"
+    # O campo status possui limite de 40 caracteres no PostgreSQL.
+    # A origem da aprovação não deve ser concatenada aqui para evitar erro 500.
+    o.status = "Aprovado: todos" if aprovar_tudo else "Aprovado: obrigatórios"
     o.aprovado_em = datetime.now()
     o.manutencao.status = "Aprovado"
 
@@ -1745,7 +1746,7 @@ def confirmar_prazo_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
         f"Prazo previsto: {m.prazo}\n\n"
         "Agora iniciaremos a execução do serviço.\n\nKaraokê RJ"
     )
-    return RedirectResponse(f"https://wa.me/55{m.cliente.telefone}?text={quote(mensagem)}", status_code=303)
+    return RedirectResponse(f"https://wa.me/55{limpar_telefone(m.cliente.telefone)}?text={quote(mensagem)}", status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pausar-servico")
@@ -1792,7 +1793,7 @@ def comunicar_pausa_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
         + (f"Previsão: {m.compra_previsao}\n" if m.compra_previsao else "")
         + "\nO serviço ficará pausado até a chegada do item. Manteremos você informado.\n\nKaraokê RJ"
     )
-    return RedirectResponse(f"https://wa.me/55{m.cliente.telefone}?text={quote(mensagem)}", status_code=303)
+    return RedirectResponse(f"https://wa.me/55{limpar_telefone(m.cliente.telefone)}?text={quote(mensagem)}", status_code=303)
 
 
 @app.get("/organiza/manutencoes/{manutencao_id}/concluir-whatsapp")
@@ -1819,7 +1820,7 @@ def concluir_servico_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usu
         f"📅 Agende a retirada: {PUBLIC_BASE_URL}/retirada/{o.token}\n\n"
         "Karaokê RJ"
     )
-    return RedirectResponse(f"https://wa.me/55{m.cliente.telefone}?text={quote(mensagem)}", status_code=303)
+    return RedirectResponse(f"https://wa.me/55{limpar_telefone(m.cliente.telefone)}?text={quote(mensagem)}", status_code=303)
 
 
 @app.get("/garantia-servico/{token}.pdf")
