@@ -9,6 +9,26 @@
 {% if m.defeito %}<h2>Problema informado</h2><p>{{ m.defeito }}</p>{% endif %}
 {% if m.diagnostico %}<h2>Solução do técnico</h2><p>{{ m.diagnostico }}</p>{% endif %}
 
+<section class="acompanhamento-publico">
+  <div class="acompanhamento-cabecalho">
+    <p class="tag">ACOMPANHAMENTO</p>
+    <h2>Acompanhe aqui o andamento da sua solicitação</h2>
+    <p class="texto-suave">Esta página é atualizada conforme o serviço avança.</p>
+  </div>
+  <div class="linha-tempo-publica">
+    {% for item in linha_tempo %}
+      <div class="passo-publico {{ item.classe }} {% if item.atual %}atual{% elif item.concluida %}concluido{% else %}bloqueado{% endif %}">
+        <span class="passo-numero">{{ item.numero }}</span>
+        <div>
+          <strong>{{ item.titulo }}</strong>
+          <small>{% if item.atual %}Etapa atual{% elif item.concluida %}Concluída{% else %}Próxima etapa{% endif %}</small>
+          {% if item.data %}<time>{{ item.data|datahora }}</time>{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
 <form method="post" action="/orcamento/{{ orcamento.token }}/responder">
 <h2>Itens obrigatórios</h2>
 <div class="linha-item cliente"><span>✓ Serviço de manutenção</span></div>

@@ -247,27 +247,35 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
 '~((orcamento.prazo_dias_uteis|string)~' dias úteis após a confirmação do pagamento' if orcamento.prazo_dias_uteis else '-')~'
 
 Pelo link abaixo você pode:
-• Aprovar obrigatório
-• Aprovar tudo
-• Cancelar orçamento
+• Aprovar somente os itens obrigatórios
+• Aprovar todos os itens
+• Cancelar o orçamento
+• Acompanhar o andamento da sua solicitação
 
+Acompanhe aqui:
 '~request.url.scheme~'://'~request.url.netloc~'/orcamento/'~orcamento.token~'
 
 Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
-      <form class="aprovacao-manual-form" method="post" action="/organiza/manutencoes/{{ m.id }}/aprovar-manual"
-            onsubmit="return confirm('Confirma a aprovação dos itens selecionados? Esta lista será enviada para a execução do serviço.');">
+      {% set opcionais_orcamento = orcamento.itens|selectattr('opcional','equalto',1)|list %}
+      {% set opcionais_aprovados = opcionais_orcamento|selectattr('aprovado','equalto',1)|list %}
+      {% set aprovacao_existente = orcamento.aprovado_em %}
+      <form class="aprovacao-manual-form" method="post"
+            action="/organiza/manutencoes/{{ m.id }}/{% if aprovacao_existente %}corrigir-aprovacao{% else %}aprovar-manual{% endif %}"
+            onsubmit="return confirm('{% if aprovacao_existente %}Confirma a correção dos itens aprovados? A Etapa 5, os totais e o desconto serão atualizados.{% else %}Confirma a aprovação dos itens selecionados? Esta lista será enviada para a execução do serviço.{% endif %}');">
         <fieldset class="aprovacao-escolha">
-          <legend>Aprovação manual</legend>
+          <legend>{% if aprovacao_existente %}Corrigir itens aprovados{% else %}Aprovação manual{% endif %}</legend>
           <label>
-            <input type="radio" name="modalidade" value="obrigatorios" checked>
+            <input type="radio" name="modalidade" value="obrigatorios"
+                   {% if not aprovacao_existente or opcionais_aprovados|length < opcionais_orcamento|length %}checked{% endif %}>
             Aprovar somente os itens obrigatórios
           </label>
           <label>
-            <input type="radio" name="modalidade" value="todos">
+            <input type="radio" name="modalidade" value="todos"
+                   {% if aprovacao_existente and opcionais_orcamento and opcionais_aprovados|length == opcionais_orcamento|length %}checked{% endif %}>
             Aprovar todos os itens
           </label>
         </fieldset>
-        <button class="botao" type="submit">Confirmar aprovação manual</button>
+        <button class="botao" type="submit">{% if aprovacao_existente %}Salvar correção da aprovação{% else %}Confirmar aprovação manual{% endif %}</button>
       </form>
     </div>
   </details>

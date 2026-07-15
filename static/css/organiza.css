@@ -3214,3 +3214,63 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .aprovacao-escolha legend{font-weight:800;padding:0 6px}
 .aprovacao-escolha label{display:flex;gap:8px;align-items:center}
 .lista-execucao-negada .linha-item{opacity:.72}
+
+
+/* Linha do tempo pública da manutenção */
+.acompanhamento-publico {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid #d8e2f0;
+  border-radius: 16px;
+  background: #f8fbff;
+}
+.acompanhamento-cabecalho h2 { margin: 4px 0 6px; }
+.linha-tempo-publica {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+.passo-publico {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #d7deea;
+  border-radius: 12px;
+  background: #fff;
+}
+.passo-publico .passo-numero {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  font-weight: 800;
+  background: #e8edf5;
+}
+.passo-publico div { display: grid; gap: 2px; }
+.passo-publico small,
+.passo-publico time { color: #68758a; font-size: .82rem; }
+.passo-publico.status-equipe.atual {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.passo-publico.status-equipe.atual .passo-numero {
+  color: #fff;
+  background: #2563eb;
+}
+.passo-publico.status-cliente.atual {
+  border-color: #f97316;
+  background: #fff7ed;
+}
+.passo-publico.status-cliente.atual .passo-numero {
+  color: #fff;
+  background: #f97316;
+}
+.passo-publico.concluido { opacity: .82; }
+.passo-publico.bloqueado { opacity: .5; }
+@media (min-width: 760px) {
+  .linha-tempo-publica { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

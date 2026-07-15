@@ -376,7 +376,7 @@ def etapa_manutencao(m):
     if m.confirmacao_prazo_em:
         return 5
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
-    if o and o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente"):
+    if o and (o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente") or (o.status or "").startswith("Aprovado:")):
         return 4
     if o and o.status in ("Enviado", "Aguardando aprovação"):
         return 3
@@ -1676,6 +1676,7 @@ def registrar_aprovacao_orcamento(o: Orcamento, modalidade: str, origem: str) ->
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/aprovar-manual")
+@app.post("/organiza/manutencoes/{manutencao_id}/corrigir-aprovacao")
 async def aprovar_manual(
     manutencao_id: int,
     request: Request,
@@ -1683,15 +1684,18 @@ async def aprovar_manual(
     db: Session = Depends(get_db),
 ):
     m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.orcamentos:
+        raise HTTPException(404, "Orçamento não encontrado.")
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     form = dict(await request.form())
     modalidade = form.get("modalidade", "obrigatorios")
     if modalidade not in {"obrigatorios", "todos"}:
         modalidade = "obrigatorios"
 
-    registrar_aprovacao_orcamento(o, modalidade, "aprovação manual")
+    origem = "correção administrativa" if o.aprovado_em else "aprovação manual"
+    registrar_aprovacao_orcamento(o, modalidade, origem)
     db.commit()
-    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-3", status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pagamento")
@@ -2165,11 +2169,49 @@ async def retirada_publica_salvar(token: str, request: Request, db: Session = De
         status_code=400,
     )
 
+def linha_tempo_publica(m):
+    etapa_atual = etapa_manutencao(m)
+    datas = {
+        1: m.entrega_prevista_em or m.criado_em,
+        2: m.recebido_em,
+        3: None,
+        4: None,
+        5: m.confirmacao_prazo_em,
+        6: m.pronto_em or m.retirada_em,
+        7: m.entregue_em,
+    }
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    if o:
+        datas[3] = o.criado_em
+        datas[4] = o.aprovado_em
+    itens = []
+    for numero in range(1, 8):
+        dados = ETAPAS_MANUTENCAO[numero]
+        itens.append({
+            "numero": numero,
+            "titulo": dados["titulo"],
+            "rotulo": dados["rotulo"],
+            "classe": dados["classe"],
+            "data": datas.get(numero),
+            "concluida": numero < etapa_atual,
+            "atual": numero == etapa_atual,
+            "bloqueada": numero > etapa_atual,
+        })
+    return itens
+
+
 @app.get("/orcamento/{token}", response_class=HTMLResponse)
 def orcamento_publico(token: str, request: Request, db: Session = Depends(get_db)):
     o = db.query(Orcamento).options(selectinload(Orcamento.itens), selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente), selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento)).filter(Orcamento.token == token).first()
     if not o: raise HTTPException(404)
-    return templates.TemplateResponse("organiza/orcamento_publico.html", {"request": request, "orcamento": o, "m": o.manutencao, "totais": totais_orcamento(o)})
+    return templates.TemplateResponse("organiza/orcamento_publico.html", {
+        "request": request,
+        "orcamento": o,
+        "m": o.manutencao,
+        "totais": totais_orcamento(o),
+        "linha_tempo": linha_tempo_publica(o.manutencao),
+        "etapa_atual": etapa_manutencao(o.manutencao),
+    })
 
 
 @app.post("/orcamento/{token}/responder")
