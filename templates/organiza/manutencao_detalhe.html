@@ -39,9 +39,9 @@
   </nav>
 
   <details id="etapa-1" class="cartao manutencao-card {% if etapa_atual == 1 %}destaque-etapa{% endif %}" data-etapa="1" {% if etapa_atual == 1 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 1</b> · Cliente, equipamento e entrada</span><small>{% if etapa_atual == 1 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 1</b> · Equipamento e entrada</span><small>{% if etapa_atual == 1 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header">
-      <div><p class="tag">Etapa 1</p><h2>Cliente, equipamento e entrada</h2></div>
+      <div><p class="tag">Etapa 1</p><h2>Equipamento e entrada</h2></div>
       {% if not m.recebido_em %}
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/receber">
         <button class="botao primario" type="submit">Confirmar equipamento recebido</button>
@@ -66,27 +66,28 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
     <div class="alerta">O equipamento selecionado já é o equipamento desta manutenção.</div>
     {% endif %}
 
-    <form id="correcao-equipamento-{{ m.id }}" hidden class="formulario manutencao-subcard"
+    <form id="correcao-equipamento-{{ m.id }}" class="formulario manutencao-subcard"
           method="post" action="/organiza/manutencoes/{{ m.id }}/corrigir-equipamento"
           onsubmit="return confirmarCorrecaoEquipamento(this);">
-      <h3>Corrigir equipamento da manutenção</h3>
+      <h3>Equipamento da manutenção</h3>
       <p class="texto-suave">
-        Esta alteração será aplicada à manutenção inteira, ao orçamento, à agenda, aos documentos e ao histórico do equipamento.
+        Selecione o equipamento correto. A alteração será aplicada à manutenção, ao orçamento, à agenda, aos documentos e ao histórico.
       </p>
-      <label>Novo equipamento
-        <select name="equipamento_id" required>
-          <option value="">Selecione o equipamento correto</option>
-          {% for equipamento in equipamentos_cliente %}
-          <option value="{{ equipamento.id }}"
-                  data-rotulo="{{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Código técnico: {{ equipamento|codigo_tecnico }}">
-            {{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Cód. técnico: {{ equipamento|codigo_tecnico }}
-          </option>
-          {% endfor %}
-        </select>
-      </label>
-      <div class="manutencao-form-acoes">
-        <button class="botao secundario" type="button" onclick="this.form.hidden = true; document.querySelector('.campo-equipamento-atual .botao').hidden = false;">Cancelar</button>
-        <button class="botao primario" type="submit">Alterar equipamento</button>
+      <div class="manutencao-grid equipamento-alteracao-grid">
+        <label>Equipamento
+          <select name="equipamento_id" required>
+            {% for equipamento in equipamentos_cliente %}
+            <option value="{{ equipamento.id }}"
+                    {% if equipamento.id == m.equipamento_id %}selected{% endif %}
+                    data-rotulo="{{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Código técnico: {{ equipamento|codigo_tecnico }}">
+              {{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Cód. técnico: {{ equipamento|codigo_tecnico }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="manutencao-form-acoes equipamento-alteracao-acao">
+          <button class="botao primario" type="submit">Salvar alteração</button>
+        </div>
       </div>
     </form>
 
@@ -94,16 +95,6 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
       <div class="manutencao-grid dois">
         <label>Cliente<input value="{{ m.cliente.nome }}" disabled></label>
         <label>WhatsApp<input value="{{ m.cliente.telefone|telefone }}" disabled></label>
-        <div class="campo-equipamento-atual">
-          <span class="rotulo-campo">Equipamento da manutenção</span>
-          <div class="equipamento-atual-resumo">
-            <strong>{{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</strong>
-            <small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
-          </div>
-          <button class="botao secundario" type="button" onclick="document.getElementById('correcao-equipamento-{{ m.id }}').hidden = false; this.hidden = true;">
-            Corrigir equipamento
-          </button>
-        </div>
         <label>Tipo de atendimento<select name="tipo_atendimento" id="tipo-atendimento-editar"><option value="loja" {% if m.tipo_atendimento != 'online' %}selected{% endif %}>Atendimento na loja</option><option value="online" {% if m.tipo_atendimento == 'online' %}selected{% endif %}>Atendimento via WhatsApp / online</option></select></label>
         <label>{% if m.tipo_atendimento == 'online' %}Data e horário do atendimento{% else %}Previsão para trazer{% endif %}<input type="datetime-local" name="entrega_prevista_em" step="1800" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
       </div>
@@ -438,6 +429,14 @@ details.manutencao-card[open]>.manutencao-etapa-summary{border-bottom:1px solid 
 .fluxo-checklist p{margin:7px 0}.fluxo-checklist .feito{color:#15803d;font-weight:700}
 .fluxo-bloqueado{opacity:.72}.fluxo-pausado{border-color:#f59e0b;background:#fff7ed}
 button[disabled]{opacity:.45;cursor:not-allowed}
+
+.equipamento-alteracao-grid{grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px}
+.equipamento-alteracao-acao{margin:0}
+.equipamento-alteracao-acao .botao{min-width:180px}
+@media (max-width:700px){
+  .equipamento-alteracao-grid{grid-template-columns:1fr}
+  .equipamento-alteracao-acao .botao{width:100%}
+}
 </style>
 <script>
 document.querySelectorAll('.manutencao-etapas a').forEach(link=>{
