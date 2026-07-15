@@ -12,6 +12,7 @@ from pathlib import Path
 import unicodedata
 from datetime import date, datetime, time, timedelta
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
@@ -64,7 +65,7 @@ templates.env.filters["descricao_equipamento"] = descricao_equipamento
 templates.env.filters["codigo_tecnico"] = codigo_tecnico
 
 
-STATUS_EQUIPE = {"Aguardando equipamento", "Recebida", "Orçamento em elaboração", "Em manutenção"}
+STATUS_EQUIPE = {"Aguardando equipamento", "Recebida", "Orçamento em elaboração", "Confirmação pendente", "Em manutenção", "Aguardando peça"}
 STATUS_CLIENTE = {"Aguardando aprovação", "Aprovado", "Pronto para retirada", "Retirada agendada"}
 STATUS_FINAL = {"Encerrada", "Cancelada"}
 
@@ -85,7 +86,9 @@ def rotulo_status(status: str) -> str:
         "Orçamento em elaboração": "Orçamento",
         "Aguardando aprovação": "Aguardando cliente",
         "Aprovado": "Pagamento ou prazo",
-        "Em manutenção": "Em manutenção",
+        "Confirmação pendente": "Enviar confirmação",
+        "Em manutenção": "Execução do serviço",
+        "Aguardando peça": "Execução pausada",
         "Pronto para retirada": "Pronto para retirada",
         "Retirada agendada": "Retirada agendada",
         "Encerrada": "Encerrado",
@@ -206,6 +209,12 @@ class Manutencao(Base):
     pronto_em = Column(DateTime, nullable=True)
     retirada_em = Column(DateTime, nullable=True)
     entregue_em = Column(DateTime, nullable=True)
+    confirmacao_prazo_em = Column(DateTime, nullable=True)
+    servico_pausado_em = Column(DateTime, nullable=True)
+    compra_descricao = Column(Text, nullable=True)
+    compra_previsao = Column(String(120), nullable=True)
+    compra_comunicada_em = Column(DateTime, nullable=True)
+    conclusao_comunicada_em = Column(DateTime, nullable=True)
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente")
@@ -359,16 +368,20 @@ def datetime_form(valor: str):
 
 
 def etapa_manutencao(m):
-    if m.status == "Encerrada" or m.entregue_em: return 7
-    if m.retirada_em: return 6
-    if m.pronto_em: return 5
+    """Única fonte de verdade para a etapa atual da manutenção."""
+    if m.status == "Encerrada" or m.entregue_em:
+        return 7
+    if m.retirada_em or m.pronto_em:
+        return 6
+    if m.confirmacao_prazo_em:
+        return 5
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     if o and o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente"):
-        recebido = sum(p.valor for p in o.pagamentos)
-        return 4 if recebido > 0 else 4
-    if o and o.status in ("Enviado", "Aguardando aprovação"): return 3
-    if o and o.itens: return 2
-    if m.recebido_em: return 2
+        return 4
+    if o and o.status in ("Enviado", "Aguardando aprovação"):
+        return 3
+    if (o and o.itens) or m.recebido_em:
+        return 2
     return 1
 
 
@@ -381,9 +394,12 @@ def iniciar_banco():
         existentes = {c["name"] for c in insp.get_columns("assistencias")}
         tipo_dt = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
         with engine.begin() as conn:
-            for coluna in ("entrega_prevista_em", "recebido_em", "entregue_em"):
+            for coluna in ("entrega_prevista_em", "recebido_em", "entregue_em", "confirmacao_prazo_em", "servico_pausado_em", "compra_comunicada_em", "conclusao_comunicada_em"):
                 if coluna not in existentes:
                     conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} {tipo_dt}"))
+            for coluna in ("compra_descricao", "compra_previsao"):
+                if coluna not in existentes:
+                    conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} TEXT"))
             if "tipo_atendimento" not in existentes:
                 conn.execute(text("ALTER TABLE assistencias ADD COLUMN tipo_atendimento VARCHAR(20) NOT NULL DEFAULT 'loja'"))
     if "assistencia_orcamentos" in insp.get_table_names():
@@ -1620,7 +1636,7 @@ async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usu
     valor = moeda_num(form.get("valor"))
     if valor > 0:
         db.add(Pagamento(orcamento_id=o.id, data=data_form(form.get("data") or "") or date.today(), valor=valor, forma=(form.get("forma") or "PIX").strip(), observacao=(form.get("observacao") or "").strip() or None))
-        m.status = "Em manutenção"; db.commit()
+        m.status = "Confirmação pendente"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
@@ -1630,6 +1646,107 @@ async def prazo_salvar(manutencao_id: int, request: Request, usuario: Usuario = 
     m.prazo = (form.get("prazo") or "").strip() or None; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
+
+
+def _orcamento_atual(m):
+    return sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+
+
+@app.get("/organiza/manutencoes/{manutencao_id}/confirmar-prazo-whatsapp")
+def confirmar_prazo_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    recebido = sum(p.valor for p in o.pagamentos) if o else 0
+    if not o or recebido <= 0 or not m.prazo:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_prazo", status_code=303)
+    m.confirmacao_prazo_em = datetime.now()
+    m.status = "Em manutenção"
+    db.commit()
+    mensagem = (
+        f"Olá, {m.cliente.nome}!\n\n"
+        "✅ Pagamento e prazo confirmados.\n\n"
+        f"Equipamento: {descricao_equipamento(m.equipamento)}\n"
+        f"Código técnico: {codigo_tecnico(m.equipamento)}\n"
+        f"Prazo previsto: {m.prazo}\n\n"
+        "Agora iniciaremos a execução do serviço.\n\nKaraokê RJ"
+    )
+    return RedirectResponse(f"https://wa.me/55{m.cliente.telefone}?text={quote(mensagem)}", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pausar-servico")
+async def pausar_servico(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or etapa_manutencao(m) != 5:
+        raise HTTPException(400, "Etapa indisponível.")
+    form = dict(await request.form())
+    descricao = (form.get("compra_descricao") or "").strip()
+    previsao = (form.get("compra_previsao") or "").strip()
+    if not descricao:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=compra", status_code=303)
+    m.compra_descricao = descricao
+    m.compra_previsao = previsao or None
+    m.servico_pausado_em = datetime.now()
+    m.compra_comunicada_em = None
+    m.status = "Aguardando peça"
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-5", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/retomar-servico")
+def retomar_servico(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    m.servico_pausado_em = None
+    m.status = "Em manutenção"
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-5", status_code=303)
+
+
+@app.get("/organiza/manutencoes/{manutencao_id}/comunicar-pausa-whatsapp")
+def comunicar_pausa_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.servico_pausado_em or not m.compra_descricao:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=compra", status_code=303)
+    m.compra_comunicada_em = datetime.now()
+    db.commit()
+    mensagem = (
+        f"Olá, {m.cliente.nome}!\n\n"
+        "⏸️ Durante a execução do serviço identificamos a necessidade de comprar:\n"
+        f"{m.compra_descricao}\n"
+        + (f"Previsão: {m.compra_previsao}\n" if m.compra_previsao else "")
+        + "\nO serviço ficará pausado até a chegada do item. Manteremos você informado.\n\nKaraokê RJ"
+    )
+    return RedirectResponse(f"https://wa.me/55{m.cliente.telefone}?text={quote(mensagem)}", status_code=303)
+
+
+@app.get("/organiza/manutencoes/{manutencao_id}/concluir-whatsapp")
+def concluir_servico_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    if etapa_manutencao(m) != 5 or m.servico_pausado_em or not (m.diagnostico or "").strip():
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=conclusao", status_code=303)
+    o = _orcamento_atual(m)
+    if not o:
+        raise HTTPException(400, "Orçamento não encontrado.")
+    agora = datetime.now()
+    m.pronto_em = agora
+    m.conclusao_comunicada_em = agora
+    m.status = "Pronto para retirada"
+    db.commit()
+    mensagem = (
+        f"Olá, {m.cliente.nome}!\n\n"
+        "✅ Seu serviço foi concluído.\n\n"
+        f"Equipamento: {descricao_equipamento(m.equipamento)}\n"
+        f"Código técnico: {codigo_tecnico(m.equipamento)}\n\n"
+        f"📄 Garantia de 30 dias: {PUBLIC_BASE_URL}/garantia-servico/{o.token}.pdf\n"
+        f"📅 Agende a retirada: {PUBLIC_BASE_URL}/retirada/{o.token}\n\n"
+        "Karaokê RJ"
+    )
+    return RedirectResponse(f"https://wa.me/55{m.cliente.telefone}?text={quote(mensagem)}", status_code=303)
 
 
 @app.get("/garantia-servico/{token}.pdf")

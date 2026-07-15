@@ -28,7 +28,7 @@
   </details>
 
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
-    {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Serviço concluído','Aguardando retirada','Encerrado'] %}
+    {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Execução do serviço','Aguardando retirada','Encerrado'] %}
     {% for nome in nomes %}
     <a href="#etapa-{{ loop.index }}" class="manutencao-etapa {% if loop.index < etapa_atual %}concluida{% elif loop.index == etapa_atual %}atual{% else %}bloqueada{% endif %}">
       <b>{{ loop.index }}</b><span>{{ nome }}</span>
@@ -234,51 +234,127 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
     </div>
   </details>
 
-  <details id="etapa-4" class="cartao manutencao-card {% if etapa_atual == 4 %}destaque-etapa{% endif %} {% if orcamento.status not in ['Aprovado','Aprovado parcialmente','Aprovado manualmente'] %}etapa-desabilitada{% endif %}" data-etapa="4" {% if etapa_atual == 4 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 4</b> · Pagamento e prazo</span><small>{% if etapa_atual == 4 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
-    <div class="manutencao-card-header"><div><p class="tag">Etapa 4</p><h2>Pagamento e prazo</h2></div></div>
-    <div class="manutencao-pagamento-grid">
-      <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento">
-        <h3>Registrar pagamento</h3>
-        <div class="manutencao-grid tres">
-          <label>Data<input type="date" name="data" required value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
-          <label>Valor<input name="valor" required></label>
-          <label>Forma<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
-        </div>
-        <label>Observação<input name="observacao"></label>
-        <button class="botao primario" type="submit">Registrar pagamento</button>
-      </form>
-      <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/prazo">
-        <h3>Prazo prometido</h3>
-        <label>Prazo<input name="prazo" value="{{ m.prazo or '' }}" placeholder="Ex.: 20/07/2026"></label>
-        <button class="botao" type="submit">Salvar prazo</button>
-      </form>
-    </div>
+  <details id="etapa-4" class="cartao manutencao-card {% if etapa_atual == 4 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}" data-etapa="4" {% if etapa_atual == 4 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 4</b> · Pagamento e prazo</span><small>{% if etapa_atual == 4 %}Etapa atual{% elif etapa_atual > 4 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
+    {% if etapa_atual < 4 %}
+      <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Conclua a etapa anterior para continuar.</p></div>
+    {% else %}
+      <div class="manutencao-card-header"><div><p class="tag">Etapa 4</p><h2>Pagamento e prazo</h2></div></div>
+      <div class="proximo-passo">
+        <strong>Próximo passo</strong>
+        <p>Registre o pagamento, informe o prazo e envie a confirmação. O envio abre o WhatsApp e inicia a Etapa 5.</p>
+      </div>
 
-    <div class="resumo-financeiro">
-      <div><small>Subtotal aprovado</small><strong>{{ totais.subtotal_aprovado|moeda }}</strong></div>
-      {% if totais.desconto > 0 %}<div><small>Desconto</small><strong>- {{ totais.desconto|moeda }}</strong></div>{% endif %}
-      <div><small>Total aprovado</small><strong>{{ totais.aprovado|moeda }}</strong></div>
-      <div><small>Recebido</small><strong>{{ totais.recebido|moeda }}</strong></div>
-      <div><small>Falta</small><strong>{{ totais.falta|moeda }}</strong></div>
-    </div>
-
-    <section class="manutencao-registros">
-      <h3>Pagamentos registrados</h3>
-      {% for p in orcamento.pagamentos %}
-      <details class="registro-card">
-        <summary><span>{{ p.data|data_br }} · {{ p.forma }}</span><strong>{{ p.valor|moeda }}</strong></summary>
-        <form class="formulario manutencao-grid dois" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento/{{ p.id }}/editar">
-          <label>Data<input type="date" name="data" value="{{ p.data.strftime('%Y-%m-%d') }}"></label>
-          <label>Valor<input name="valor" value="{{ '%.2f'|format(p.valor) }}"></label>
-          <label>Forma<input name="forma" value="{{ p.forma or '' }}"></label>
-          <label>Observação<input name="observacao" value="{{ p.observacao or '' }}"></label>
-          <button class="botao" type="submit">Salvar</button>
+      <div class="manutencao-pagamento-grid">
+        <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento">
+          <h3>Registrar pagamento</h3>
+          <div class="manutencao-grid tres">
+            <label>Data<input type="date" name="data" required value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
+            <label>Valor<input name="valor" required></label>
+            <label>Forma<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
+          </div>
+          <label>Observação<input name="observacao"></label>
+          <button class="botao primario" type="submit">Registrar pagamento</button>
         </form>
-        <form method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento/{{ p.id }}/excluir" onsubmit="return confirm('Excluir pagamento?')"><button class="botao perigo pequeno" type="submit">Excluir</button></form>
-      </details>
-      {% else %}<p class="texto-suave">Nenhum pagamento registrado.</p>{% endfor %}
-    </section>
+        <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/prazo">
+          <h3>Prazo prometido</h3>
+          <label>Prazo<input name="prazo" value="{{ m.prazo or '' }}" placeholder="Ex.: 20/07/2026"></label>
+          <button class="botao" type="submit">Salvar prazo</button>
+        </form>
+      </div>
+
+      <div class="fluxo-checklist">
+        <strong>Para passar para a Etapa 5:</strong>
+        <p class="{% if totais.recebido > 0 %}feito{% endif %}">{% if totais.recebido > 0 %}✓{% else %}○{% endif %} 1. Registrar pagamento</p>
+        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} 2. Informar prazo prometido</p>
+        <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} 3. Enviar confirmação no WhatsApp</p>
+      </div>
+
+      {% if etapa_atual == 4 %}
+        {% if totais.recebido > 0 and m.prazo %}
+          <a class="botao whatsapp manutencao-whatsapp-largo" href="/organiza/manutencoes/{{ m.id }}/confirmar-prazo-whatsapp">
+            Enviar confirmação no WhatsApp e iniciar serviço
+          </a>
+        {% else %}
+          <button class="botao whatsapp manutencao-whatsapp-largo" disabled title="Registre o pagamento e informe o prazo.">Enviar confirmação no WhatsApp e iniciar serviço</button>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  </details>
+
+  <details id="etapa-5" class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 5 %}etapa-desabilitada{% endif %}" data-etapa="5" {% if etapa_atual == 5 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 5</b> · Execução do serviço</span><small>{% if etapa_atual == 5 %}Etapa atual{% elif etapa_atual > 5 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
+    {% if etapa_atual < 5 %}
+      <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Envie a confirmação da Etapa 4 para iniciar o serviço.</p></div>
+    {% else %}
+      <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Execução do serviço</h2></div></div>
+      <div class="proximo-passo">
+        <strong>Próximo passo</strong>
+        <p>Execute o serviço. Caso precise comprar algo, pause e comunique o cliente. Quando terminar, preencha o diagnóstico final e conclua.</p>
+      </div>
+
+      {% if etapa_atual == 5 %}
+        {% if m.servico_pausado_em %}
+          <div class="fluxo-pausado">
+            <strong>⏸ Serviço pausado</strong>
+            <p><b>Item necessário:</b> {{ m.compra_descricao }}</p>
+            {% if m.compra_previsao %}<p><b>Previsão:</b> {{ m.compra_previsao }}</p>{% endif %}
+            <div class="manutencao-acoes">
+              <a class="botao whatsapp" href="/organiza/manutencoes/{{ m.id }}/comunicar-pausa-whatsapp">
+                {% if m.compra_comunicada_em %}Reenviar comunicação da pausa{% else %}Comunicar pausa no WhatsApp{% endif %}
+              </a>
+              <form method="post" action="/organiza/manutencoes/{{ m.id }}/retomar-servico"><button class="botao" type="submit">Item chegou — retomar serviço</button></form>
+            </div>
+          </div>
+        {% else %}
+          <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pausar-servico">
+            <h3>Preciso comprar algo</h3>
+            <label>O que precisa ser comprado<input name="compra_descricao" placeholder="Ex.: placa-mãe, fonte, memória"></label>
+            <label>Previsão<input name="compra_previsao" placeholder="Ex.: 22/07/2026"></label>
+            <button class="botao" type="submit">Pausar serviço</button>
+          </form>
+        {% endif %}
+
+        <div class="fluxo-checklist">
+          <strong>Para passar para a Etapa 6:</strong>
+          <p class="{% if m.diagnostico %}feito{% endif %}">{% if m.diagnostico %}✓{% else %}○{% endif %} 1. Preencher o diagnóstico final na Etapa 1</p>
+          <p class="{% if not m.servico_pausado_em %}feito{% endif %}">{% if not m.servico_pausado_em %}✓{% else %}○{% endif %} 2. Serviço não pode estar pausado</p>
+          <p class="{% if m.conclusao_comunicada_em %}feito{% endif %}">{% if m.conclusao_comunicada_em %}✓{% else %}○{% endif %} 3. Comunicar o serviço concluído no WhatsApp</p>
+        </div>
+
+        {% if m.diagnostico and not m.servico_pausado_em %}
+          <a class="botao whatsapp" href="/organiza/manutencoes/{{ m.id }}/concluir-whatsapp">Serviço concluído — comunicar cliente e avançar</a>
+        {% else %}
+          <button class="botao whatsapp" disabled title="Preencha o diagnóstico final e retire a pausa.">Serviço concluído — comunicar cliente e avançar</button>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  </details>
+
+  <details id="etapa-6" class="cartao manutencao-card {% if etapa_atual == 6 %}destaque-etapa{% endif %} {% if etapa_atual < 6 %}etapa-desabilitada{% endif %}" data-etapa="6" {% if etapa_atual == 6 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 6</b> · Aguardando retirada</span><small>{% if etapa_atual == 6 %}Etapa atual{% elif etapa_atual > 6 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
+    {% if etapa_atual < 6 %}
+      <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Conclua e comunique o serviço na Etapa 5.</p></div>
+    {% else %}
+      <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Aguardando retirada</h2><p class="texto-suave">O cliente pode usar o link recebido para escolher o horário.</p></div></div>
+      {% if orcamento %}<a class="botao" target="_blank" href="/garantia-servico/{{ orcamento.token }}.pdf">Abrir garantia de 30 dias</a>{% endif %}
+      <form class="formulario manutencao-retirada" method="post" action="/organiza/manutencoes/{{ m.id }}/retirada">
+        <label>Data e hora<input type="datetime-local" name="retirada_em" value="{% if m.retirada_em %}{{ m.retirada_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
+        <button class="botao primario" type="submit">Salvar na agenda</button>
+      </form>
+      {% if m.retirada_em %}
+        <p><strong>Agendado:</strong> {{ m.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</p>
+        <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar"><button class="botao primario" type="submit">Equipamento entregue — encerrar</button></form>
+      {% endif %}
+    {% endif %}
+  </details>
+
+  <details id="etapa-7" class="cartao manutencao-card {% if etapa_atual == 7 %}destaque-etapa{% endif %} {% if etapa_atual < 7 %}etapa-desabilitada{% endif %}" data-etapa="7" {% if etapa_atual == 7 %}open{% endif %}>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 7</b> · Encerrado</span><small>{% if etapa_atual == 7 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
+    {% if etapa_atual < 7 %}<div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Confirme a entrega do equipamento para encerrar.</p></div>
+    {% else %}<div class="proximo-passo"><strong>✓ Manutenção encerrada</strong><p>O equipamento foi entregue e não há mais pendências.</p></div>{% endif %}
+  </details>
+</section>
 
     {% set aprovados = orcamento.itens|selectattr('aprovado')|map(attribute='descricao')|join(', ') %}
     <a class="botao whatsapp manutencao-whatsapp-largo" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ ('Olá, '~m.cliente.nome~'!
@@ -302,29 +378,7 @@ Avisaremos assim que o equipamento estiver pronto.
 Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
   </details>
 
-  <details id="etapa-5" class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}" data-etapa="5" {% if etapa_atual == 5 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 5</b> · Serviço concluído</span><small>{% if etapa_atual == 5 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
-    <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Serviço concluído</h2></div></div>
-    <div class="manutencao-acoes">
-      {% if not m.pronto_em %}<form method="post" action="/organiza/manutencoes/{{ m.id }}/pronto"><button class="botao primario" type="submit">Marcar como pronto</button></form>{% endif %}
-      {% if m.pronto_em and orcamento %}<a class="botao" target="_blank" href="/garantia-servico/{{ orcamento.token }}.pdf">Abrir garantia de 30 dias</a>{% endif %}
-      {% if m.pronto_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ mensagem_retirada|urlencode }}">Enviar garantia e link de retirada</a>{% endif %}
-    </div>
-  </details>
-
-  <details id="etapa-6" class="cartao manutencao-card {% if etapa_atual == 6 %}destaque-etapa{% endif %} {% if not m.pronto_em %}etapa-desabilitada{% endif %}" data-etapa="6" {% if etapa_atual == 6 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 6</b> · Aguardando retirada</span><small>{% if etapa_atual == 6 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
-    <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Aguardando retirada</h2><p class="texto-suave">Somente segunda a sexta, entre 14:00 e 17:00.</p></div></div>
-    <form class="formulario manutencao-retirada" method="post" action="/organiza/manutencoes/{{ m.id }}/retirada">
-      <label>Data e hora<input type="datetime-local" name="retirada_em" value="{% if m.retirada_em %}{{ m.retirada_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
-      <button class="botao primario" type="submit">Salvar na agenda</button>
-    </form>
-    {% if m.retirada_em %}
-      <p><strong>Agendado:</strong> {{ m.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</p>
-      <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar"><button class="botao primario" type="submit">Equipamento entregue — encerrar</button></form>
-    {% endif %}
-  </details>
-</section>
+  </section>
 <script>
 (() => {
   const busca = document.querySelector('#pesquisa-item');
@@ -346,6 +400,11 @@ Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
 details.manutencao-card:not([open]){padding:0}
 details.manutencao-card[open]>.manutencao-etapa-summary{border-bottom:1px solid var(--borda,#ddd)}
 .manutencao-etapas a{text-decoration:none}
+
+.proximo-passo,.fluxo-checklist,.fluxo-bloqueado,.fluxo-pausado{border:1px solid var(--borda,#d8e0ec);border-radius:12px;padding:14px;margin:12px 0;background:#f8fafc}
+.fluxo-checklist p{margin:7px 0}.fluxo-checklist .feito{color:#15803d;font-weight:700}
+.fluxo-bloqueado{opacity:.72}.fluxo-pausado{border-color:#f59e0b;background:#fff7ed}
+button[disabled]{opacity:.45;cursor:not-allowed}
 </style>
 <script>
 document.querySelectorAll('.manutencao-etapas a').forEach(link=>{
