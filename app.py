@@ -1664,15 +1664,29 @@ def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_loga
 
 
 def registrar_aprovacao_orcamento(o: Orcamento, modalidade: str, origem: str) -> None:
-    """Grava exatamente o que foi autorizado para a execução técnica."""
+    """Grava exatamente o que foi autorizado para a execução técnica.
+
+    O campo ``status`` possui limite de 40 caracteres no banco. A descrição
+    anterior incluía modalidade e origem por extenso e ultrapassava esse limite
+    ao corrigir uma aprovação, causando erro 500 no PostgreSQL do Render.
+    """
     aprovar_tudo = modalidade == "todos"
     for item in o.itens:
         item.aprovado = 1 if (not item.opcional or aprovar_tudo) else 0
 
-    descricao_modalidade = "todos os itens" if aprovar_tudo else "somente itens obrigatórios"
-    o.status = f"Aprovado: {descricao_modalidade} ({origem})"
+    # Mantém o status curto, estável e compatível com o limite da coluna.
+    o.status = "Aprovado: todos" if aprovar_tudo else "Aprovado: obrigatórios"
     o.aprovado_em = datetime.now()
     o.manutencao.status = "Aprovado"
+
+    # Preserva a origem da última alteração sem aumentar o campo de status.
+    registro = (
+        f"Aprovação atualizada em {datetime.now().strftime('%d/%m/%Y %H:%M')}: "
+        f"{'todos os itens' if aprovar_tudo else 'somente itens obrigatórios'} "
+        f"({origem})."
+    )
+    observacao_atual = (o.observacao or "").strip()
+    o.observacao = f"{observacao_atual}\n{registro}".strip()
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/aprovar-manual")
