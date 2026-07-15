@@ -8,7 +8,7 @@
       <p class="texto-suave"><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}<br><small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small></p>
     </div>
     <div class="manutencao-header-acoes">
-      <span class="pill">{{ m.status }}</span>
+      <span class="pill {{ m.status|classe_status }}">{{ m.status|rotulo_status }}</span>
       <a class="botao" href="/organiza/clientes/{{ m.cliente.id }}">Cadastro do cliente</a>
       <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}">WhatsApp</a>
       <a class="botao" href="/organiza/manutencoes">Voltar</a>
@@ -28,7 +28,7 @@
   </details>
 
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
-    {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Pronto','Retirada','Encerrado'] %}
+    {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Serviço concluído','Aguardando retirada','Encerrado'] %}
     {% for nome in nomes %}
     <a href="#etapa-{{ loop.index }}" class="manutencao-etapa {% if loop.index < etapa_atual %}concluida{% elif loop.index == etapa_atual %}atual{% else %}bloqueada{% endif %}">
       <b>{{ loop.index }}</b><span>{{ nome }}</span>
@@ -303,17 +303,18 @@ Karaokê RJ')|urlencode }}">Enviar confirmação no WhatsApp</a>
   </details>
 
   <details id="etapa-5" class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}" data-etapa="5" {% if etapa_atual == 5 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 5</b> · Equipamento pronto</span><small>{% if etapa_atual == 5 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
-    <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Equipamento pronto</h2></div></div>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 5</b> · Serviço concluído</span><small>{% if etapa_atual == 5 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
+    <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Serviço concluído</h2></div></div>
     <div class="manutencao-acoes">
       {% if not m.pronto_em %}<form method="post" action="/organiza/manutencoes/{{ m.id }}/pronto"><button class="botao primario" type="submit">Marcar como pronto</button></form>{% endif %}
-      {% if m.pronto_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ mensagem_retirada|urlencode }}">Avisar cliente e enviar agendamento</a>{% endif %}
+      {% if m.pronto_em and orcamento %}<a class="botao" target="_blank" href="/garantia-servico/{{ orcamento.token }}.pdf">Abrir garantia de 30 dias</a>{% endif %}
+      {% if m.pronto_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}?text={{ mensagem_retirada|urlencode }}">Enviar garantia e link de retirada</a>{% endif %}
     </div>
   </details>
 
   <details id="etapa-6" class="cartao manutencao-card {% if etapa_atual == 6 %}destaque-etapa{% endif %} {% if not m.pronto_em %}etapa-desabilitada{% endif %}" data-etapa="6" {% if etapa_atual == 6 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 6</b> · Retirada e encerramento</span><small>{% if etapa_atual == 6 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
-    <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Retirada</h2><p class="texto-suave">Somente segunda a sexta, entre 14:00 e 17:00.</p></div></div>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 6</b> · Aguardando retirada</span><small>{% if etapa_atual == 6 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
+    <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Aguardando retirada</h2><p class="texto-suave">Somente segunda a sexta, entre 14:00 e 17:00.</p></div></div>
     <form class="formulario manutencao-retirada" method="post" action="/organiza/manutencoes/{{ m.id }}/retirada">
       <label>Data e hora<input type="datetime-local" name="retirada_em" value="{% if m.retirada_em %}{{ m.retirada_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
       <button class="botao primario" type="submit">Salvar na agenda</button>

@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 import unicodedata
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -46,6 +46,39 @@ def codigo_tecnico(equipamento) -> str:
 templates.env.filters["rotulo_maquina"] = rotulo_maquina
 templates.env.filters["descricao_equipamento"] = descricao_equipamento
 templates.env.filters["codigo_tecnico"] = codigo_tecnico
+
+
+STATUS_EQUIPE = {"Aguardando equipamento", "Recebida", "Orçamento em elaboração", "Em manutenção"}
+STATUS_CLIENTE = {"Aguardando aprovação", "Aprovado", "Pronto para retirada", "Retirada agendada"}
+STATUS_FINAL = {"Encerrada", "Cancelada"}
+
+def responsabilidade_status(status: str) -> str:
+    if status in STATUS_FINAL:
+        return "finalizado"
+    if status in STATUS_CLIENTE:
+        return "cliente"
+    return "equipe"
+
+def classe_status(status: str) -> str:
+    return f"status-{responsabilidade_status(status)}"
+
+def rotulo_status(status: str) -> str:
+    mapa = {
+        "Aguardando equipamento": "Entrada agendada",
+        "Recebida": "Orçamento",
+        "Orçamento em elaboração": "Orçamento",
+        "Aguardando aprovação": "Aguardando cliente",
+        "Aprovado": "Pagamento ou prazo",
+        "Em manutenção": "Em manutenção",
+        "Pronto para retirada": "Pronto para retirada",
+        "Retirada agendada": "Retirada agendada",
+        "Encerrada": "Encerrado",
+        "Cancelada": "Cancelado",
+    }
+    return mapa.get(status, status or "Sem status")
+
+templates.env.filters["classe_status"] = classe_status
+templates.env.filters["rotulo_status"] = rotulo_status
 
 
 class Usuario(Base):
@@ -1393,13 +1426,14 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     linhas_prontas = []
     for pronta in prontas_cliente:
         equipamento = pronta.equipamento
-        identificacao = equipamento.maquina or f"Equipamento #{equipamento.id}"
+        identificacao = rotulo_maquina(equipamento)
         descricao = f"{equipamento.tipo} {equipamento.modelo or ''}".strip()
-        linhas_prontas.append(f"• {identificacao} — {descricao}")
+        linhas_prontas.append(f"• {identificacao} · {descricao}\n  Código técnico: {codigo_tecnico(equipamento)}")
     mensagem_retirada = (
         f"Olá, {m.cliente.nome}. Os equipamentos abaixo estão prontos para retirada:\n"
         + "\n".join(linhas_prontas)
-        + f"\n\nEscolha a data e o horário neste link: {PUBLIC_BASE_URL}/retirada/{orcamento.token}"
+        + f"\n\n📄 Garantia do serviço (30 dias): {PUBLIC_BASE_URL}/garantia-servico/{orcamento.token}.pdf"
+        + f"\n\n📅 Escolha a data e o horário da retirada: {PUBLIC_BASE_URL}/retirada/{orcamento.token}"
         + "\n\nRetiradas de segunda a sexta-feira, somente das 14:00 às 17:00."
         + "\n\nKaraokê RJ"
     ) if orcamento and prontas_cliente else ""
@@ -1515,6 +1549,71 @@ async def prazo_salvar(manutencao_id: int, request: Request, usuario: Usuario = 
     m.prazo = (form.get("prazo") or "").strip() or None; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
+
+
+@app.get("/garantia-servico/{token}.pdf")
+def garantia_servico_pdf(token: str, db: Session = Depends(get_db)):
+    """Certificado público de 30 dias, acessível pelo link enviado ao cliente."""
+    orcamento = db.query(Orcamento).filter(Orcamento.token == token).first()
+    if not orcamento:
+        raise HTTPException(404)
+    m = (
+        db.query(Manutencao)
+        .options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento), selectinload(Manutencao.orcamentos))
+        .filter(Manutencao.id == orcamento.manutencao_id)
+        .first()
+    )
+    if not m or not m.pronto_em:
+        raise HTTPException(404)
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+    from reportlab.lib import colors
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=15*mm, bottomMargin=15*mm)
+    estilos = getSampleStyleSheet()
+    titulo = ParagraphStyle("TituloGarantia", parent=estilos["Title"], alignment=TA_CENTER, fontSize=18, leading=22, spaceAfter=8)
+    centro = ParagraphStyle("CentroGarantia", parent=estilos["BodyText"], alignment=TA_CENTER, fontSize=10, leading=14)
+    corpo = ParagraphStyle("CorpoGarantia", parent=estilos["BodyText"], fontSize=10, leading=15, spaceAfter=8)
+    elementos = []
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo-karaoke-rj.png")
+    if os.path.exists(logo_path):
+        elementos += [Image(logo_path, width=32*mm, height=32*mm), Spacer(1, 4*mm)]
+    elementos += [
+        Paragraph("CERTIFICADO DE GARANTIA DO SERVIÇO", titulo),
+        Paragraph("KARAOKÊ RJ", centro),
+        Spacer(1, 7*mm),
+    ]
+    eq = m.equipamento
+    dados = [
+        ["Ordem de serviço", f"#{m.id}"],
+        ["Cliente", m.cliente.nome],
+        ["Equipamento", descricao_equipamento(eq)],
+        ["Código técnico", codigo_tecnico(eq)],
+        ["Serviço concluído em", m.pronto_em.strftime("%d/%m/%Y")],
+        ["Garantia válida até", (m.pronto_em.date() + timedelta(days=30)).strftime("%d/%m/%Y")],
+    ]
+    tabela = Table(dados, colWidths=[48*mm, 110*mm])
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#F2F4F7")),
+        ("TEXTCOLOR", (0,0), (0,-1), colors.HexColor("#344054")),
+        ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
+        ("FONTNAME", (1,0), (1,-1), "Helvetica"),
+        ("GRID", (0,0), (-1,-1), .4, colors.HexColor("#D0D5DD")),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("PADDING", (0,0), (-1,-1), 7),
+    ]))
+    elementos += [tabela, Spacer(1, 8*mm)]
+    elementos += [
+        Paragraph("<b>Prazo e cobertura</b>", corpo),
+        Paragraph("Garantia de 30 dias sobre os serviços executados nesta ordem de serviço, contados a partir da data de conclusão. A garantia cobre exclusivamente o serviço realizado e não inclui mau uso, quedas, líquidos, ligação em tensão incorreta, intervenção de terceiros ou defeitos diferentes do reparo executado.", corpo),
+        Spacer(1, 7*mm),
+        Paragraph("Karaokê RJ · Rua João Romariz, 313 - Ramos - Rio de Janeiro/RJ<br/>WhatsApp: (21) 99507-9690 / (21) 99650-4516 · www.karaokerj.com.br", centro),
+    ]
+    doc.build(elementos)
+    return Response(buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="garantia-os-{m.id}.pdf"'})
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pronto")
 def manutencao_pronto(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):

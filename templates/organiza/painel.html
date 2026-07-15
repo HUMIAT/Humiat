@@ -29,7 +29,7 @@
   <div class="grade-pendencias">
     {% for chave, numero, titulo, descricao, icone in grupos %}
     {% set lista = pendencias[chave] %}
-    <section class="pendencia-card pendencia-{{ chave }}">
+    <section class="pendencia-card pendencia-{{ chave }} {% if chave in ['aceite','pagamento','agenda','retirada'] %}status-cliente{% else %}status-equipe{% endif %}">
       <div class="pendencia-cabecalho">
         <span class="pendencia-icone">{{ icone }}</span>
         <div class="pendencia-titulo">
