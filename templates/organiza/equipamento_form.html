@@ -4,16 +4,15 @@
   <div class="titulo-linha"><div><p class="tag">Equipamento</p><h1>{{ 'Editar equipamento' if equipamento and equipamento.id else 'Novo equipamento' }}</h1><p class="texto-suave">Cliente: <strong>{{ cliente.nome }}</strong></p></div><a class="botao" href="/organiza/clientes/{{ cliente.id }}">Voltar</a></div>
   {% if request.query_params.get('criado') %}<div class="alerta sucesso">Venda criada. Agora você pode acompanhar e atualizar o status do equipamento.</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}{% if request.query_params.get('transferido') %}<div class="alerta sucesso">Equipamento transferido para este cliente com sucesso.</div>{% endif %}{% if request.query_params.get('erro_transferencia') %}<div class="alerta erro">{{ request.query_params.get('erro_transferencia') }}</div>{% endif %}
-  <form method="post" class="equipamento-form" id="form-equipamento">
-    <input type="hidden" name="confirmar_codigo_cliente" id="confirmar-codigo-cliente" value="0">
+  <form method="post" class="equipamento-form">
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Identificação</h2><p>Dados principais da máquina.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
-        <label>Tipo *<select name="tipo" id="tipo-equipamento" required><option value="">Selecione</option>{% for tipo in tipos %}<option value="{{ tipo }}" {% if equipamento and equipamento.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
+        <label>Tipo *<select name="tipo" required><option value="">Selecione</option>{% for tipo in tipos %}<option value="{{ tipo }}" {% if equipamento and equipamento.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
         <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}"></label>
-        <label>Código da máquina para o monitor (código técnico)<input name="maquina" value="{{ equipamento.maquina if equipamento and equipamento.maquina else proxima_maquina }}" required pattern="KRJ[0-9]{5}" placeholder="KRJ00001"><small>Identificação técnica única do equipamento.</small></label>
-        <label>Ordem definida pelo cliente<input id="numero-cliente" type="number" min="1" name="numero_maquina_cliente" value="{{ equipamento.numero_maquina_cliente if equipamento and equipamento.numero_maquina_cliente else proximo_numero_cliente }}" required><small>O sistema monta JUK1, MAL1, IPH1 ou FLIP1 conforme o tipo.</small></label>
-        <label class="campo-duplo">Pré-visualização<input id="previa-identificacao" value="{{ equipamento|rotulo_maquina if equipamento else 'JUK' ~ proximo_numero_cliente }} · {{ equipamento.tipo if equipamento and equipamento.tipo else 'JUKEBOX' }} {{ equipamento.modelo if equipamento and equipamento.modelo else '' }}" readonly aria-readonly="true"><small>Identificação operacional do cliente. O código KRJ permanece separado.</small></label>
+        <label>Código da máquina para o monitor<input name="maquina" value="{{ equipamento.maquina if equipamento and equipamento.maquina else proxima_maquina }}" required pattern="KRJ[0-9]{5}" placeholder="KRJ00001"><small>Identificação técnica única do equipamento.</small></label>
+        <label>Número da máquina no cliente<input type="number" min="1" name="numero_maquina_cliente" value="{{ equipamento.numero_maquina_cliente if equipamento and equipamento.numero_maquina_cliente else proximo_numero_cliente }}" required><small>Será exibido como MAQ 1, MAQ 2...</small></label>
+        <label class="campo-duplo">Pré-visualização<input value="MAQ {{ equipamento.numero_maquina_cliente if equipamento and equipamento.numero_maquina_cliente else proximo_numero_cliente }} · {{ equipamento.tipo if equipamento and equipamento.tipo else 'EQUIPAMENTO' }} {{ equipamento.modelo if equipamento and equipamento.modelo else '' }}" readonly aria-readonly="true"><small>O código técnico aparece abaixo nos detalhes.</small></label>
         <label class="campo-duplo">Número / código do HD<input name="numero_hd" value="{{ equipamento.numero_hd if equipamento and equipamento.numero_hd else '' }}" placeholder="Cole o código gerado pelo monitor"></label>
         <label>Fabricante<select name="fabricante"><option value="KARAOKERJ" {% if not equipamento or not equipamento.fabricante or equipamento.fabricante|upper == 'KARAOKERJ' %}selected{% endif %}>KARAOKERJ</option><option value="OUTROS" {% if equipamento and equipamento.fabricante|upper == 'OUTROS' %}selected{% endif %}>OUTROS</option></select></label>
         <label>Status<select name="status">{% for s in ['Ativo','Solicitar gabinete','Montagem','Pronto para entrega','Entregue','Em manutenção','Vendido','Inativo'] %}<option {% if equipamento and equipamento.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
@@ -64,12 +63,7 @@
       <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}4{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
       <label class="campo-largo"><textarea name="observacao">{{ equipamento.observacao if equipamento and equipamento.observacao else '' }}</textarea></label>
     </section>
-    {% if confirmar_duplicado %}
-    <div class="alerta erro"><strong>Código repetido para este cliente.</strong><br>Você pode confirmar agora e depois alterar ou excluir o cadastro antigo.</div>
-    <button class="botao primario botao-cheio" type="submit" onclick="document.getElementById('confirmar-codigo-cliente').value='1'">Sim, utilizar este código</button>
-    {% else %}
     <button class="botao primario botao-cheio" type="submit">Salvar equipamento</button>
-    {% endif %}
   </form>
 
   {% if equipamento and equipamento.id %}
@@ -88,20 +82,5 @@
 </section>
 <script>
 (function(){const t=document.getElementById('valor_total'),p=document.getElementById('valor_recebido'),f=document.getElementById('valor_restante'); const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0}; const a=()=>f.value=Math.max(n(t.value)-n(p.value),0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});t.addEventListener('input',a);p.addEventListener('input',a);a();})();
-</script>
-<script>
-(function(){
-  const tipo=document.getElementById('tipo-equipamento');
-  const numero=document.getElementById('numero-cliente');
-  const previa=document.getElementById('previa-identificacao');
-  const modelo=document.querySelector('input[name="modelo"]');
-  const prefixos={JUKEBOX:'JUK',MALETA:'MAL',IPHONE:'IPH',FLIPERAMA:'FLIP'};
-  function atualizar(){
-    const t=(tipo.value||'JUKEBOX').toUpperCase();
-    previa.value=(prefixos[t]||'EQP')+(numero.value||'?')+' · '+t+(modelo.value?' '+modelo.value:'');
-  }
-  [tipo,numero,modelo].forEach(c=>c&&c.addEventListener('input',atualizar));
-  atualizar();
-})();
 </script>
 {% endblock %}

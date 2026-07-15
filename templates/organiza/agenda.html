@@ -1,44 +1,12 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean">
-  <div class="titulo-linha">
-    <div><p class="tag">Agenda</p><h1>Agenda operacional</h1><p class="texto-suave">Azul: ação da equipe · Laranja: ação do cliente · Verde: vendas.</p></div>
-  </div>
-
-  <div class="agenda-secao">
-    <h2>Vendas</h2>
-    <div class="agenda-grid">
-      {% for v in vendas %}
-      <a class="agenda-evento venda" href="/organiza/clientes/{{v.cliente_id}}/equipamentos/{{v.id}}/editar">
-        <span>{{ v.status|upper }}</span>
-        <strong>{{v.previsao_entrega.strftime('%d/%m/%Y')}}</strong>
-        <b>{{v.cliente.nome}}</b>
-        <small><strong>{{ v|rotulo_maquina }}</strong> · {{v.tipo}} {{v.modelo or ''}}</small>
-        <small>Código técnico: {{ v|codigo_tecnico }}</small>
-        <em>Falta: {{v.falta|moeda}}</em>
-      </a>
-      {% else %}<p class="vazio">Nenhuma venda agendada.</p>{% endfor %}
-    </div>
-  </div>
-
-  <div class="agenda-secao">
-    <h2>Manutenções</h2>
-    <div class="agenda-grid">
-      {% for m in manutencoes %}
-      <a class="agenda-evento {{ m.status|classe_status }}" href="/organiza/manutencoes/{{m.id}}">
-        <span>{{ m.status|rotulo_status|upper }}</span>
-        <strong>
-          {% if m.retirada_em %}{{m.retirada_em.strftime('%d/%m/%Y %H:%M')}}
-          {% elif m.entrega_prevista_em %}{{m.entrega_prevista_em.strftime('%d/%m/%Y %H:%M')}}
-          {% else %}Sem horário definido{% endif %}
-        </strong>
-        <b>#{{m.id}} · {{m.cliente.nome}}</b>
-        <small><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small>
-        <small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
-        <em>{% if m.status|classe_status == 'status-cliente' %}Aguardando cliente{% elif m.status|classe_status == 'status-equipe' %}Ação da equipe{% else %}Finalizado{% endif %}</em>
-      </a>
-      {% else %}<p class="vazio">Nenhum compromisso de manutenção.</p>{% endfor %}
-    </div>
-  </div>
+  <div class="titulo-linha"><div><p class="tag">Agenda</p><h1>Entregas e retiradas</h1><p class="texto-suave">Manutenções e vendas reunidas por data.</p></div></div>
+  <div class="agenda-secao"><h2>Vendas</h2><div class="agenda-grid">
+    {% for v in vendas %}<a class="agenda-evento venda" href="/organiza/clientes/{{v.cliente_id}}/equipamentos/{{v.id}}/editar"><span>{{ v.status|upper }}</span><strong>{{v.previsao_entrega.strftime('%d/%m/%Y')}}</strong><b>{{v.cliente.nome}}</b><small>{{ v|rotulo_maquina }} · {{v.tipo}} {{v.modelo or ''}} · Cód. {{ v|codigo_tecnico }}</small><em>Falta: {{v.falta|moeda}}</em></a>{% else %}<p class="vazio">Nenhuma entrega de venda agendada.</p>{% endfor %}
+  </div></div>
+  <div class="agenda-secao"><h2>Manutenções</h2><div class="agenda-grid">
+    {% for m in manutencoes %}{% if m.entrega_prevista_em %}<a class="agenda-evento" href="/organiza/manutencoes/{{m.id}}"><span>ENTREGA</span><strong>{{m.entrega_prevista_em.strftime('%d/%m/%Y %H:%M')}}</strong><b>{{m.cliente.nome}}</b><small>{{ m.equipamento|rotulo_maquina }} · {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}} · Cód. {{ m.equipamento|codigo_tecnico }}</small></a>{% endif %}{% if m.retirada_em %}<a class="agenda-evento retirada" href="/organiza/manutencoes/{{m.id}}"><span>RETIRADA</span><strong>{{m.retirada_em.strftime('%d/%m/%Y %H:%M')}}</strong><b>{{m.cliente.nome}}</b><small>{{ m.equipamento|rotulo_maquina }} · {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}} · Cód. {{ m.equipamento|codigo_tecnico }}</small></a>{% endif %}{% else %}<p class="vazio">Nenhum compromisso de manutenção.</p>{% endfor %}
+  </div></div>
 </section>
 {% endblock %}
