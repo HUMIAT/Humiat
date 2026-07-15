@@ -1,12 +1,28 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean">
+<section class="pagina-clean agenda-operacional">
   <div class="titulo-linha">
-    <div><p class="tag">Agenda</p><h1>Agenda operacional</h1><p class="texto-suave">Azul: ação da equipe · Laranja: ação do cliente · Verde: vendas.</p></div>
+    <div>
+      <p class="tag">Agenda</p>
+      <h1>Agenda operacional</h1>
+      <p class="texto-suave">A etapa, o nome e a cor são os mesmos do painel e da manutenção.</p>
+    </div>
   </div>
 
+  <nav class="agenda-filtros" aria-label="Filtrar agenda por etapa">
+    <a class="agenda-filtro {% if not etapa_filtro %}ativo{% endif %}" href="/organiza/agenda">Todas</a>
+    {% for numero, info in etapas.items() %}
+      {% if numero < 7 %}
+      <a class="agenda-filtro {{ info.classe }} {% if etapa_filtro == numero %}ativo{% endif %}" href="/organiza/agenda?etapa={{ numero }}">
+        {{ numero }}. {{ info.titulo }}
+      </a>
+      {% endif %}
+    {% endfor %}
+  </nav>
+
+  {% if not etapa_filtro %}
   <div class="agenda-secao">
-    <h2>Vendas</h2>
+    <h2><span class="legenda-cor venda"></span> Vendas</h2>
     <div class="agenda-grid">
       {% for v in vendas %}
       <a class="agenda-evento venda" href="/organiza/clientes/{{v.cliente_id}}/equipamentos/{{v.id}}/editar">
@@ -20,25 +36,42 @@
       {% else %}<p class="vazio">Nenhuma venda agendada.</p>{% endfor %}
     </div>
   </div>
+  {% endif %}
 
   <div class="agenda-secao">
-    <h2>Manutenções</h2>
-    <div class="agenda-grid">
-      {% for m in manutencoes %}
-      <a class="agenda-evento {{ m.status|classe_status }}" href="/organiza/manutencoes/{{m.id}}">
-        <span>{{ m.status|rotulo_status|upper }}</span>
-        <strong>
-          {% if m.retirada_em %}{{m.retirada_em.strftime('%d/%m/%Y %H:%M')}}
-          {% elif m.entrega_prevista_em %}{{m.entrega_prevista_em.strftime('%d/%m/%Y %H:%M')}}
-          {% else %}Sem horário definido{% endif %}
-        </strong>
-        <b>#{{m.id}} · {{m.cliente.nome}}</b>
-        <small><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small>
-        <small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
-        <em>{% if m.status|classe_status == 'status-cliente' %}Aguardando cliente{% elif m.status|classe_status == 'status-equipe' %}Ação da equipe{% else %}Finalizado{% endif %}</em>
-      </a>
-      {% else %}<p class="vazio">Nenhum compromisso de manutenção.</p>{% endfor %}
-    </div>
+    <h2>Manutenções{% if etapa_filtro %} · {{ etapas[etapa_filtro].titulo }}{% endif %}</h2>
+
+    {% for numero, info in etapas.items() %}
+      {% if numero < 7 and (not etapa_filtro or etapa_filtro == numero) %}
+        {% set itens_etapa = manutencoes|selectattr('agenda_etapa', 'equalto', numero)|list %}
+        {% if itens_etapa %}
+        <section class="agenda-grupo-etapa">
+          <header class="agenda-grupo-cabecalho {{ info.classe }}">
+            <div>
+              <small>ETAPA {{ numero }}</small>
+              <h3>{{ info.rotulo }}</h3>
+            </div>
+            <span>{{ info.responsavel }}</span>
+            <b>{{ itens_etapa|length }}</b>
+          </header>
+          <div class="agenda-grid">
+            {% for m in itens_etapa %}
+            <a class="agenda-evento {{ info.classe }}" href="/organiza/manutencoes/{{m.id}}#etapa-{{ numero }}">
+              <span>ETAPA {{ numero }} · {{ info.rotulo|upper }}</span>
+              <strong>{% if m.agenda_data %}{{ m.agenda_data.strftime('%d/%m/%Y %H:%M') }}{% else %}Sem data registrada{% endif %}</strong>
+              <b>#{{m.id}} · {{m.cliente.nome}}</b>
+              <small><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small>
+              <small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
+              <em>{% if info.classe == 'status-cliente' %}Aguardando ação do cliente{% else %}Ação da equipe{% endif %}</em>
+            </a>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+
+    {% if not manutencoes %}<p class="vazio">Nenhuma manutenção nesta etapa.</p>{% endif %}
   </div>
 </section>
 {% endblock %}

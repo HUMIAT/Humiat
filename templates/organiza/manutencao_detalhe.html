@@ -8,7 +8,8 @@
       <p class="texto-suave"><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}<br><small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small></p>
     </div>
     <div class="manutencao-header-acoes">
-      <span class="pill {{ m.status|classe_status }}">{{ m.status|rotulo_status }}</span>
+      {% set etapa_info_atual = ETAPAS_MANUTENCAO[etapa_atual] %}
+      <span class="pill {{ etapa_info_atual.classe }}">{{ etapa_info_atual.rotulo }}</span>
       <a class="botao" href="/organiza/clientes/{{ m.cliente.id }}">Cadastro do cliente</a>
       <a class="botao whatsapp" target="_blank" rel="noopener" href="https://wa.me/55{{ m.cliente.telefone }}">WhatsApp</a>
       <a class="botao" href="/organiza/manutencoes">Voltar</a>
@@ -28,10 +29,11 @@
   </details>
 
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
-    {% set nomes = ['Entrada','Orçamento','Aceite','Pagamento e prazo','Execução do serviço','Aguardando retirada','Encerrado'] %}
-    {% for nome in nomes %}
-    <a href="#etapa-{{ loop.index }}" class="manutencao-etapa {% if loop.index < etapa_atual %}concluida{% elif loop.index == etapa_atual %}atual{% else %}bloqueada{% endif %}">
-      <b>{{ loop.index }}</b><span>{{ nome }}</span>
+    {% for numero, info in ETAPAS_MANUTENCAO.items() %}
+    <a href="#etapa-{{ numero }}"
+       class="manutencao-etapa {{ info.classe }} {% if numero < etapa_atual %}concluida{% elif numero == etapa_atual %}atual{% else %}bloqueada{% endif %}"
+       aria-current="{% if numero == etapa_atual %}step{% else %}false{% endif %}">
+      <b>{{ numero }}</b><span>{{ info.titulo }}</span>
     </a>
     {% endfor %}
   </nav>

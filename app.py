@@ -384,6 +384,42 @@ def etapa_manutencao(m):
         return 2
     return 1
 
+ETAPAS_MANUTENCAO = {
+    1: {"rotulo": "Aguardando equipamento", "titulo": "Entrada", "classe": "status-cliente", "responsavel": "Cliente"},
+    2: {"rotulo": "Orçamento pendente", "titulo": "Orçamento", "classe": "status-equipe", "responsavel": "Equipe"},
+    3: {"rotulo": "Aguardando aceite", "titulo": "Aceite", "classe": "status-cliente", "responsavel": "Cliente"},
+    4: {"rotulo": "Pagamento e prazo", "titulo": "Pagamento e prazo", "classe": "status-cliente", "responsavel": "Cliente"},
+    5: {"rotulo": "Execução do serviço", "titulo": "Execução do serviço", "classe": "status-equipe", "responsavel": "Equipe"},
+    6: {"rotulo": "Aguardando retirada", "titulo": "Aguardando retirada", "classe": "status-cliente", "responsavel": "Cliente"},
+    7: {"rotulo": "Encerrado", "titulo": "Encerrado", "classe": "status-finalizado", "responsavel": "Finalizado"},
+}
+
+def info_etapa_manutencao(m):
+    return ETAPAS_MANUTENCAO[etapa_manutencao(m)]
+
+def data_etapa_manutencao(m):
+    """Retorna a data mais representativa da etapa atual."""
+    etapa = etapa_manutencao(m)
+    orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if getattr(m, "orcamentos", None) else None
+    if etapa == 1:
+        return m.entrega_prevista_em or m.criado_em
+    if etapa == 2:
+        return m.recebido_em or m.criado_em
+    if etapa == 3:
+        return (orcamento.criado_em if orcamento else None) or m.recebido_em or m.criado_em
+    if etapa == 4:
+        return (orcamento.aprovado_em if orcamento else None) or m.recebido_em or m.criado_em
+    if etapa == 5:
+        return m.confirmacao_prazo_em or (orcamento.aprovado_em if orcamento else None) or m.criado_em
+    if etapa == 6:
+        return m.retirada_em or m.pronto_em or m.criado_em
+    return m.entregue_em or m.criado_em
+
+templates.env.globals["etapa_manutencao"] = etapa_manutencao
+templates.env.globals["info_etapa_manutencao"] = info_etapa_manutencao
+templates.env.globals["data_etapa_manutencao"] = data_etapa_manutencao
+templates.env.globals["ETAPAS_MANUTENCAO"] = ETAPAS_MANUTENCAO
+
 
 @app.on_event("startup")
 def iniciar_banco():
@@ -520,26 +556,31 @@ def painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         "agenda": [],
         "retirada": [],
     }
+    chave_por_etapa = {
+        1: "entrada",
+        2: "orcamento",
+        3: "aceite",
+        4: "pagamento",
+        5: "producao",
+        6: "agenda",
+    }
 
-    for m in manutencoes:
-        orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    for manutencao in manutencoes:
+        etapa = etapa_manutencao(manutencao)
+        if etapa == 7:
+            continue
+        orcamento = sorted(manutencao.orcamentos, key=lambda x: x.versao)[-1] if manutencao.orcamentos else None
         totais = totais_orcamento(orcamento) if orcamento else {"falta": 0}
-        m.painel_saldo = totais.get("falta", 0)
+        manutencao.painel_saldo = totais.get("falta", 0)
+        manutencao.painel_etapa = etapa
+        manutencao.painel_info = ETAPAS_MANUTENCAO[etapa]
 
-        if m.status == "Aguardando equipamento":
-            pendencias["entrada"].append(m)
-        elif m.status in ("Recebida", "Orçamento em elaboração") or (orcamento and orcamento.status == "Rascunho"):
-            pendencias["orcamento"].append(m)
-        elif m.status == "Aguardando aprovação" or (orcamento and orcamento.status in ("Enviado", "Aguardando aprovação")):
-            pendencias["aceite"].append(m)
-        elif m.status == "Aprovado" or (orcamento and orcamento.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente") and (totais.get("falta", 0) > 0 or not m.prazo)):
-            pendencias["pagamento"].append(m)
-        elif m.status == "Em manutenção":
-            pendencias["producao"].append(m)
-        elif m.status == "Pronto para retirada" and not m.retirada_em:
-            pendencias["agenda"].append(m)
-        elif m.status == "Retirada agendada":
-            pendencias["retirada"].append(m)
+        # Etapa 6 é dividida apenas para facilitar a operação:
+        # sem horário = agendamento pendente; com horário = retirada agendada.
+        if etapa == 6 and manutencao.retirada_em:
+            pendencias["retirada"].append(manutencao)
+        else:
+            pendencias[chave_por_etapa[etapa]].append(manutencao)
 
     return templates.TemplateResponse("organiza/painel.html", {
         "request": request,
@@ -1893,19 +1934,37 @@ def manutencao_encerrar(manutencao_id: int, usuario: Usuario = Depends(usuario_l
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)
-def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    # A agenda é operacional: nunca exibe manutenção encerrada/cancelada
-    # nem equipamento de venda já entregue ou apenas cadastrado como "Ativo".
-    lista = (
+def agenda(request: Request, etapa: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    manutencoes = (
         db.query(Manutencao)
-        .options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
+        .options(
+            selectinload(Manutencao.cliente),
+            selectinload(Manutencao.equipamento),
+            selectinload(Manutencao.orcamentos),
+        )
         .filter(
-            or_(Manutencao.entrega_prevista_em.isnot(None), Manutencao.retirada_em.isnot(None)),
             Manutencao.entregue_em.is_(None),
             ~Manutencao.status.in_(("Encerrada", "Cancelada")),
         )
-        .order_by(Manutencao.entrega_prevista_em.asc(), Manutencao.retirada_em.asc())
         .all()
+    )
+
+    agenda_manutencoes = []
+    for manutencao in manutencoes:
+        numero = etapa_manutencao(manutencao)
+        if numero == 7 or (etapa and numero != etapa):
+            continue
+        manutencao.agenda_etapa = numero
+        manutencao.agenda_info = ETAPAS_MANUTENCAO[numero]
+        manutencao.agenda_data = data_etapa_manutencao(manutencao)
+        agenda_manutencoes.append(manutencao)
+
+    agenda_manutencoes.sort(
+        key=lambda item: (
+            item.agenda_etapa,
+            item.agenda_data or datetime.max,
+            item.id,
+        )
     )
 
     status_venda_pendentes = ("Solicitar gabinete", "Montagem", "Pronto para entrega")
@@ -1922,7 +1981,14 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
 
     return templates.TemplateResponse(
         "organiza/agenda.html",
-        {"request": request, "usuario": usuario, "manutencoes": lista, "vendas": vendas},
+        {
+            "request": request,
+            "usuario": usuario,
+            "manutencoes": agenda_manutencoes,
+            "vendas": vendas,
+            "etapa_filtro": etapa,
+            "etapas": ETAPAS_MANUTENCAO,
+        },
     )
 
 def manutencoes_prontas_cliente(db: Session, cliente_id: int):

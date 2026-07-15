@@ -17,19 +17,19 @@
   </div>
 
   {% set grupos = [
-    ('entrada', '1', 'Atendimentos agendados', 'Equipamentos para receber e atendimentos via WhatsApp/online.', '📥'),
-    ('orcamento', '2', 'Orçamento pendente', 'Equipamento recebido e orçamento ainda precisa ser montado.', '🧾'),
-    ('aceite', '3', 'Aguardando aceite', 'Orçamento enviado e aguardando a resposta do cliente.', '✅'),
-    ('pagamento', '4', 'Pagamento ou prazo', 'Orçamento aprovado; registre pagamento e prazo de entrega.', '💳'),
-    ('producao', '5', 'Em manutenção', 'Serviços aprovados que ainda precisam ser concluídos.', '🔧'),
-    ('agenda', '6', 'Agendamento pendente', 'Equipamento pronto aguardando o cliente escolher a retirada.', '📅'),
-    ('retirada', '7', 'Retiradas agendadas', 'Equipamentos com dia e horário definidos para retirada.', '📦')
+    ('entrada', '1', 'Aguardando equipamento', 'Cliente ainda precisa trazer o equipamento ou iniciar o atendimento online.', '📥'),
+    ('orcamento', '2', 'Orçamento pendente', 'Equipamento recebido; a equipe precisa montar o orçamento.', '🧾'),
+    ('aceite', '3', 'Aguardando aceite', 'Orçamento enviado; aguardando a decisão do cliente.', '✅'),
+    ('pagamento', '4', 'Pagamento e prazo', 'Aguardando pagamento, definição de prazo ou confirmação ao cliente.', '💳'),
+    ('producao', '5', 'Execução do serviço', 'Serviço liberado para execução pela equipe técnica.', '🔧'),
+    ('agenda', '6', 'Aguardando retirada', 'Equipamento pronto; o cliente precisa escolher a retirada.', '📅'),
+    ('retirada', '6', 'Retirada agendada', 'Cliente já escolheu o dia e horário da retirada.', '📦')
   ] %}
 
   <div class="grade-pendencias">
     {% for chave, numero, titulo, descricao, icone in grupos %}
     {% set lista = pendencias[chave] %}
-    <section class="pendencia-card pendencia-{{ chave }} {% if chave in ['aceite','pagamento','agenda','retirada'] %}status-cliente{% else %}status-equipe{% endif %}">
+    <section class="pendencia-card pendencia-{{ chave }} {% if chave in ['entrada','aceite','pagamento','agenda','retirada'] %}status-cliente{% else %}status-equipe{% endif %}">
       <div class="pendencia-cabecalho">
         <span class="pendencia-icone">{{ icone }}</span>
         <div class="pendencia-titulo">

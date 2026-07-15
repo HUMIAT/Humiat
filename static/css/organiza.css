@@ -3117,3 +3117,94 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .pendencia-card.status-equipe{border-top:4px solid var(--status-equipe)}
 .pendencia-card.status-cliente{border-top:4px solid var(--status-cliente)}
 .manutencao-etapa.atual{border-color:var(--status-equipe)}
+
+
+/* =========================================================
+   FLUXO ÚNICO — mesma etapa, nome e cor em todas as telas
+   Azul: ação da equipe | Laranja: ação do cliente | Verde: venda
+   ========================================================= */
+.manutencao-etapa.status-equipe,
+.manutencao-etapa.status-equipe.concluida,
+.manutencao-etapa.status-equipe.atual{
+  border-color:var(--status-equipe)!important;
+  background:var(--status-equipe-bg)!important;
+  color:#1d4ed8!important;
+}
+.manutencao-etapa.status-equipe b{background:var(--status-equipe)!important}
+.manutencao-etapa.status-cliente,
+.manutencao-etapa.status-cliente.concluida,
+.manutencao-etapa.status-cliente.atual{
+  border-color:var(--status-cliente)!important;
+  background:var(--status-cliente-bg)!important;
+  color:#c2410c!important;
+}
+.manutencao-etapa.status-cliente b{background:var(--status-cliente)!important}
+.manutencao-etapa.status-finalizado,
+.manutencao-etapa.status-finalizado.concluida,
+.manutencao-etapa.status-finalizado.atual{
+  border-color:#98a2b3!important;
+  background:#f2f4f7!important;
+  color:#475467!important;
+}
+.manutencao-etapa.status-finalizado b{background:#667085!important}
+.manutencao-etapa.atual{
+  opacity:1!important;
+  box-shadow:0 0 0 2px rgba(15,23,42,.12)!important;
+  font-weight:800;
+}
+.manutencao-etapa.bloqueada{opacity:.48}
+
+.agenda-filtros{
+  display:flex;
+  gap:8px;
+  overflow-x:auto;
+  padding:2px 2px 10px;
+  scrollbar-width:thin;
+}
+.agenda-filtro{
+  flex:0 0 auto;
+  padding:9px 13px;
+  border:1px solid #dbe3ee;
+  border-radius:999px;
+  background:#fff;
+  color:#334155;
+  font-size:.82rem;
+  font-weight:700;
+  text-decoration:none;
+}
+.agenda-filtro.ativo{
+  box-shadow:0 0 0 2px rgba(15,23,42,.14);
+  font-weight:900;
+}
+.agenda-grupo-etapa{display:grid;gap:12px;margin:0 0 22px}
+.agenda-grupo-cabecalho{
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  align-items:center;
+  gap:12px;
+  padding:13px 16px;
+  border:1px solid;
+  border-radius:14px;
+}
+.agenda-grupo-cabecalho h3{margin:2px 0 0}
+.agenda-grupo-cabecalho small{font-weight:800;letter-spacing:.08em}
+.agenda-grupo-cabecalho>span{font-size:.82rem;font-weight:700}
+.agenda-grupo-cabecalho>b{
+  display:grid;
+  place-items:center;
+  min-width:32px;
+  height:32px;
+  padding:0 8px;
+  border-radius:999px;
+  background:rgba(255,255,255,.72);
+}
+.agenda-evento.status-equipe>span{color:var(--status-equipe)!important}
+.agenda-evento.status-cliente>span{color:var(--status-cliente)!important}
+.agenda-evento.status-equipe>em{color:#1d4ed8}
+.agenda-evento.status-cliente>em{color:#c2410c}
+.agenda-evento em{font-style:normal;font-weight:700;font-size:.78rem}
+@media(max-width:620px){
+  .agenda-grupo-cabecalho{grid-template-columns:1fr auto}
+  .agenda-grupo-cabecalho>span{grid-column:1}
+  .agenda-grupo-cabecalho>b{grid-column:2;grid-row:1 / span 2}
+}
