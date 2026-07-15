@@ -59,6 +59,7 @@ Agora faremos a análise e enviaremos o orçamento para sua aprovação.
 Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: atendimento iniciado{% else %}WhatsApp: equipamento recebido{% endif %}</a>{% endif %}
     </div>
     {% if request.query_params.get('erro_equipamento') %}<div class="alerta erro">Selecione um equipamento válido deste cliente.</div>{% endif %}
+    {% if request.query_params.get('erro_agendamento') %}<div class="alerta erro">Não foi possível alterar o agendamento. O diagnóstico e as observações podem ser salvos sem mudar a previsão de entrada.</div>{% endif %}
     {% if request.query_params.get('equipamento_corrigido') %}
     <div class="alerta sucesso">Equipamento corrigido. A manutenção e todo o histórico agora estão vinculados ao equipamento selecionado.</div>
     {% endif %}
@@ -309,6 +310,29 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
         </form>
       </div>
 
+      <div class="manutencao-subcard">
+        <h3>Resumo financeiro</h3>
+        <div class="manutencao-grid tres">
+          <div><small>Total aprovado</small><strong>{{ totais.aprovado|moeda }}</strong></div>
+          <div><small>Total recebido</small><strong>{{ totais.recebido|moeda }}</strong></div>
+          <div><small>Falta receber</small><strong>{{ totais.falta|moeda }}</strong></div>
+        </div>
+
+        <h3>Pagamentos registrados</h3>
+        {% if orcamento.pagamentos %}
+          <div class="lista-execucao-aprovada">
+            {% for pagamento in orcamento.pagamentos|sort(attribute='data') %}
+              <div class="linha-item cliente">
+                <span>{{ pagamento.data|data }} · {{ pagamento.forma or 'Não informada' }}{% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}</span>
+                <strong>{{ pagamento.valor|moeda }}</strong>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="texto-suave">Nenhum pagamento registrado.</p>
+        {% endif %}
+      </div>
+
       <div class="fluxo-checklist">
         <strong>Para passar para a Etapa 5:</strong>
         <p class="{% if totais.recebido > 0 %}feito{% endif %}">{% if totais.recebido > 0 %}✓{% else %}○{% endif %} 1. Registrar pagamento</p>
@@ -344,7 +368,10 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
       <div class="manutencao-subcard">
         <h3>Serviços aprovados para execução</h3>
         <div class="lista-execucao-aprovada">
-          <div class="linha-item cliente"><span>✓ Serviço de manutenção</span></div>
+          <div class="linha-item cliente">
+            <span>✓ Serviço de manutenção</span>
+            <strong>{{ orcamento.valor_manutencao|moeda }}</strong>
+          </div>
           {% for item in itens_aprovados %}
             <div class="linha-item cliente">
               <span>✓ {{ item.quantidade }}× {{ item.descricao }}</span>

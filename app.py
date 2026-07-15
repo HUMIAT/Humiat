@@ -368,12 +368,17 @@ def datetime_form(valor: str):
 
 
 def etapa_manutencao(m):
-    """Única fonte de verdade para a etapa atual da manutenção."""
-    if m.status == "Encerrada" or m.entregue_em:
+    """Única fonte de verdade para a etapa atual da manutenção.
+
+    Também reconhece registros antigos pelo status, evitando que o painel
+    mostre uma etapa anterior à exibida dentro da ordem de serviço.
+    """
+    status = (m.status or "").strip()
+    if status in {"Encerrada", "Cancelada"} or m.entregue_em:
         return 7
-    if m.retirada_em or m.pronto_em:
+    if status in {"Pronto para retirada", "Retirada agendada"} or m.retirada_em or m.pronto_em:
         return 6
-    if m.confirmacao_prazo_em:
+    if status in {"Em manutenção", "Serviço pausado"} or m.confirmacao_prazo_em:
         return 5
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     if o and (o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente") or (o.status or "").startswith("Aprovado:")):
@@ -1664,29 +1669,15 @@ def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_loga
 
 
 def registrar_aprovacao_orcamento(o: Orcamento, modalidade: str, origem: str) -> None:
-    """Grava exatamente o que foi autorizado para a execução técnica.
-
-    O campo ``status`` possui limite de 40 caracteres no banco. A descrição
-    anterior incluía modalidade e origem por extenso e ultrapassava esse limite
-    ao corrigir uma aprovação, causando erro 500 no PostgreSQL do Render.
-    """
+    """Grava exatamente o que foi autorizado para a execução técnica."""
     aprovar_tudo = modalidade == "todos"
     for item in o.itens:
         item.aprovado = 1 if (not item.opcional or aprovar_tudo) else 0
 
-    # Mantém o status curto, estável e compatível com o limite da coluna.
-    o.status = "Aprovado: todos" if aprovar_tudo else "Aprovado: obrigatórios"
+    descricao_modalidade = "todos os itens" if aprovar_tudo else "somente itens obrigatórios"
+    o.status = f"Aprovado: {descricao_modalidade} ({origem})"
     o.aprovado_em = datetime.now()
     o.manutencao.status = "Aprovado"
-
-    # Preserva a origem da última alteração sem aumentar o campo de status.
-    registro = (
-        f"Aprovação atualizada em {datetime.now().strftime('%d/%m/%Y %H:%M')}: "
-        f"{'todos os itens' if aprovar_tudo else 'somente itens obrigatórios'} "
-        f"({origem})."
-    )
-    observacao_atual = (o.observacao or "").strip()
-    o.observacao = f"{observacao_atual}\n{registro}".strip()
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/aprovar-manual")
@@ -1922,12 +1913,22 @@ async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuar
     m.observacao = (form.get("observacao") or "").strip() or None
     m.diagnostico = (form.get("diagnostico") or "").strip() or None
     tipo_atendimento = (form.get("tipo_atendimento") or m.tipo_atendimento or "loja").strip().lower()
-    agendamento = datetime_form(form.get("entrega_prevista_em") or "")
-    if tipo_atendimento not in ("loja", "online") or not horario_atendimento_valido(tipo_atendimento, agendamento) or horario_atendimento_ocupado(db, agendamento, m.id):
+    agendamento_informado = (form.get("entrega_prevista_em") or "").strip()
+    agendamento = datetime_form(agendamento_informado) if agendamento_informado else m.entrega_prevista_em
+
+    # Depois que o equipamento entrou, o técnico pode corrigir diagnóstico e
+    # observações sem ser bloqueado por uma previsão antiga, vazia ou vencida.
+    alterou_agendamento = agendamento != m.entrega_prevista_em or tipo_atendimento != (m.tipo_atendimento or "loja")
+    if tipo_atendimento not in ("loja", "online"):
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_agendamento=1", status_code=303)
+    if alterou_agendamento and not m.recebido_em:
+        if not horario_atendimento_valido(tipo_atendimento, agendamento) or horario_atendimento_ocupado(db, agendamento, m.id):
+            return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_agendamento=1", status_code=303)
+
     m.tipo_atendimento = tipo_atendimento
     m.entrega_prevista_em = agendamento
-    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-1", status_code=303)
 
 @app.post("/organiza/manutencoes/{manutencao_id}/corrigir-equipamento")
 async def manutencao_corrigir_equipamento(
