@@ -59,20 +59,51 @@ Agora faremos a análise e enviaremos o orçamento para sua aprovação.
 Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: atendimento iniciado{% else %}WhatsApp: equipamento recebido{% endif %}</a>{% endif %}
     </div>
     {% if request.query_params.get('erro_equipamento') %}<div class="alerta erro">Selecione um equipamento válido deste cliente.</div>{% endif %}
+    {% if request.query_params.get('equipamento_corrigido') %}
+    <div class="alerta sucesso">Equipamento corrigido. A manutenção e todo o histórico agora estão vinculados ao equipamento selecionado.</div>
+    {% endif %}
+    {% if request.query_params.get('equipamento_inalterado') %}
+    <div class="alerta">O equipamento selecionado já é o equipamento desta manutenção.</div>
+    {% endif %}
+
+    <form id="correcao-equipamento-{{ m.id }}" hidden class="formulario manutencao-subcard"
+          method="post" action="/organiza/manutencoes/{{ m.id }}/corrigir-equipamento"
+          onsubmit="return confirmarCorrecaoEquipamento(this);">
+      <h3>Corrigir equipamento da manutenção</h3>
+      <p class="texto-suave">
+        Esta alteração será aplicada à manutenção inteira, ao orçamento, à agenda, aos documentos e ao histórico do equipamento.
+      </p>
+      <label>Novo equipamento
+        <select name="equipamento_id" required>
+          <option value="">Selecione o equipamento correto</option>
+          {% for equipamento in equipamentos_cliente %}
+          <option value="{{ equipamento.id }}"
+                  data-rotulo="{{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Código técnico: {{ equipamento|codigo_tecnico }}">
+            {{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Cód. técnico: {{ equipamento|codigo_tecnico }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="manutencao-form-acoes">
+        <button class="botao secundario" type="button" onclick="this.form.hidden = true; document.querySelector('.campo-equipamento-atual .botao').hidden = false;">Cancelar</button>
+        <button class="botao primario" type="submit">Alterar equipamento</button>
+      </div>
+    </form>
+
     <form class="formulario manutencao-form" method="post" action="/organiza/manutencoes/{{ m.id }}/editar">
       <div class="manutencao-grid dois">
         <label>Cliente<input value="{{ m.cliente.nome }}" disabled></label>
         <label>WhatsApp<input value="{{ m.cliente.telefone|telefone }}" disabled></label>
-        <label>Equipamento
-          <select name="equipamento_id" required>
-            {% for equipamento in equipamentos_cliente %}
-            <option value="{{ equipamento.id }}" {% if equipamento.id == m.equipamento_id %}selected{% endif %}>
-              {{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Cód. técnico: {{ equipamento|codigo_tecnico }}
-            </option>
-            {% endfor %}
-          </select>
-          <small class="texto-suave">Use este campo para corrigir o equipamento quando o chamado tiver sido aberto incorretamente.</small>
-        </label>
+        <div class="campo-equipamento-atual">
+          <span class="rotulo-campo">Equipamento da manutenção</span>
+          <div class="equipamento-atual-resumo">
+            <strong>{{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</strong>
+            <small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
+          </div>
+          <button class="botao secundario" type="button" onclick="document.getElementById('correcao-equipamento-{{ m.id }}').hidden = false; this.hidden = true;">
+            Corrigir equipamento
+          </button>
+        </div>
         <label>Tipo de atendimento<select name="tipo_atendimento" id="tipo-atendimento-editar"><option value="loja" {% if m.tipo_atendimento != 'online' %}selected{% endif %}>Atendimento na loja</option><option value="online" {% if m.tipo_atendimento == 'online' %}selected{% endif %}>Atendimento via WhatsApp / online</option></select></label>
         <label>{% if m.tipo_atendimento == 'online' %}Data e horário do atendimento{% else %}Previsão para trazer{% endif %}<input type="datetime-local" name="entrega_prevista_em" step="1800" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
       </div>
@@ -415,5 +446,22 @@ document.querySelectorAll('.manutencao-etapas a').forEach(link=>{
     if(alvo){ alvo.open=true; }
   });
 });
+</script>
+
+<script>
+function confirmarCorrecaoEquipamento(formulario) {
+  const campo = formulario.querySelector('select[name="equipamento_id"]');
+  const opcao = campo.options[campo.selectedIndex];
+  if (!campo.value) {
+    campo.focus();
+    return false;
+  }
+  const equipamento = opcao.dataset.rotulo || opcao.textContent.trim();
+  return window.confirm(
+    'Deseja alterar o equipamento desta manutenção para:\n\n' +
+    equipamento +
+    '\n\nA alteração será aplicada em todos os lugares e o histórico ficará vinculado ao equipamento correto.'
+  );
+}
 </script>
 {% endblock %}

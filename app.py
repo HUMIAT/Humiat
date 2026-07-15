@@ -1544,7 +1544,7 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     equipamentos_cliente = ordenar_equipamentos(
         db.query(Equipamento).filter(
             Equipamento.cliente_id == m.cliente_id,
-            Equipamento.status == "Ativo",
+            or_(Equipamento.status == "Ativo", Equipamento.id == m.equipamento_id),
         ).all()
     )
     orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
@@ -1875,14 +1875,8 @@ async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuar
     m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
     if not m: raise HTTPException(404)
     form = dict(await request.form())
-    equipamento_id = int(form.get("equipamento_id") or 0)
-    equipamento = db.query(Equipamento).filter(
-        Equipamento.id == equipamento_id,
-        Equipamento.cliente_id == m.cliente_id,
-    ).first()
-    if not equipamento:
-        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_equipamento=1", status_code=303)
-    m.equipamento_id = equipamento.id
+    # O equipamento é corrigido por uma ação exclusiva e confirmada.
+    # Este formulário altera apenas os demais dados da Etapa 1.
     m.defeito = (form.get("defeito") or "").strip()
     m.observacao = (form.get("observacao") or "").strip() or None
     m.diagnostico = (form.get("diagnostico") or "").strip() or None
@@ -1893,6 +1887,69 @@ async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuar
     m.tipo_atendimento = tipo_atendimento
     m.entrega_prevista_em = agendamento
     db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+@app.post("/organiza/manutencoes/{manutencao_id}/corrigir-equipamento")
+async def manutencao_corrigir_equipamento(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Corrige o equipamento da OS e mantém todo o histórico ligado ao equipamento correto."""
+    m = (
+        db.query(Manutencao)
+        .options(selectinload(Manutencao.equipamento), selectinload(Manutencao.cliente))
+        .filter(Manutencao.id == manutencao_id)
+        .first()
+    )
+    if not m:
+        raise HTTPException(404)
+
+    form = dict(await request.form())
+    try:
+        equipamento_id = int(form.get("equipamento_id") or 0)
+    except (TypeError, ValueError):
+        equipamento_id = 0
+
+    equipamento_novo = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.status == "Ativo",
+    ).first()
+    if not equipamento_novo:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_equipamento=1#etapa-1",
+            status_code=303,
+        )
+
+    # A manutenção pertence ao equipamento. O cliente é sempre derivado do dono atual dele.
+    equipamento_antigo = m.equipamento
+    if equipamento_antigo and equipamento_antigo.id == equipamento_novo.id:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?equipamento_inalterado=1#etapa-1",
+            status_code=303,
+        )
+
+    identificacao_antiga = (
+        f"{rotulo_maquina(equipamento_antigo)} / {codigo_tecnico(equipamento_antigo)}"
+        if equipamento_antigo else "não informado"
+    )
+    identificacao_nova = f"{rotulo_maquina(equipamento_novo)} / {codigo_tecnico(equipamento_novo)}"
+    registro = (
+        f"[{datetime.now().strftime('%d/%m/%Y %H:%M')}] "
+        f"Equipamento corrigido de {identificacao_antiga} para {identificacao_nova}."
+    )
+
+    m.equipamento_id = equipamento_novo.id
+    m.cliente_id = equipamento_novo.cliente_id
+    observacao_atual = (m.observacao or "").strip()
+    m.observacao = f"{observacao_atual}\n{registro}".strip()
+    db.commit()
+
+    return RedirectResponse(
+        f"/organiza/manutencoes/{manutencao_id}?equipamento_corrigido=1#etapa-1",
+        status_code=303,
+    )
+
 
 @app.post("/organiza/manutencoes/{manutencao_id}/receber")
 def manutencao_receber(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
