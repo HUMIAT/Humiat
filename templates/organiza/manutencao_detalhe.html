@@ -323,7 +323,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
           <div class="lista-execucao-aprovada">
             {% for pagamento in orcamento.pagamentos|sort(attribute='data') %}
               <div class="linha-item cliente">
-                <span>{{ pagamento.data|data }} · {{ pagamento.forma or 'Não informada' }}{% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}</span>
+                <span>{{ pagamento.data.strftime('%d/%m/%Y') if pagamento.data and pagamento.data.strftime is defined else (pagamento.data or '-') }} · {{ pagamento.forma or 'Não informada' }}{% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}</span>
                 <strong>{{ pagamento.valor|moeda }}</strong>
               </div>
             {% endfor %}
