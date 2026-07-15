@@ -28,10 +28,26 @@ app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+PREFIXOS_EQUIPAMENTO = {
+    "JUKEBOX": "JUK",
+    "MALETA": "MAL",
+    "IPHONE": "IPH",
+    "FLIPERAMA": "FLIP",
+}
+
+def tipo_equipamento_padrao(tipo: str) -> str:
+    valor = unicodedata.normalize("NFKD", (tipo or "").upper()).encode("ascii", "ignore").decode("ascii").strip()
+    aliases = {"IPHON": "IPHONE", "FLIPER": "FLIPERAMA", "ARCADE": "FLIPERAMA"}
+    return aliases.get(valor, valor)
+
+def prefixo_equipamento(tipo: str) -> str:
+    return PREFIXOS_EQUIPAMENTO.get(tipo_equipamento_padrao(tipo), "EQP")
+
 def rotulo_maquina(equipamento) -> str:
-    """Identificação principal usada por cliente e técnico."""
+    """Identificação operacional definida pelo cliente: JUK1, MAL2, IPH1, FLIP3."""
     numero = getattr(equipamento, "numero_maquina_cliente", None)
-    return f"MAQ {numero}" if numero else "MAQ ?"
+    prefixo = prefixo_equipamento(getattr(equipamento, "tipo", None))
+    return f"{prefixo}{numero}" if numero else f"{prefixo}?"
 
 def descricao_equipamento(equipamento) -> str:
     partes = [rotulo_maquina(equipamento)]
@@ -429,8 +445,10 @@ def iniciar_banco():
                 for item in itens_manutencao:
                     db.delete(item)
 
-        # A identificação é automática: ordem da data de entrega, iniciando em KRJ00040.
-        normalizar_identificacoes_equipamentos(db)
+        # Códigos KRJ existentes são permanentes e nunca são renumerados automaticamente.
+        # Apenas completa fabricante e identificações vazias, preservando todo o histórico.
+        for equipamento_existente in db.query(Equipamento).all():
+            equipamento_existente.fabricante = equipamento_existente.fabricante or "KARAOKERJ"
         db.commit()
     finally:
         db.close()
@@ -608,8 +626,19 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
         db.commit()
+    status_filtro = (request.query_params.get("status_equipamento") or "Ativo").strip()
+    tipo_filtro = tipo_equipamento_padrao(request.query_params.get("tipo_equipamento") or "")
+    equipamentos = list(cliente.equipamentos)
+    if status_filtro != "Todos":
+        equipamentos = [eq for eq in equipamentos if (eq.status or "Ativo") == status_filtro]
+    if tipo_filtro:
+        equipamentos = [eq for eq in equipamentos if tipo_equipamento_padrao(eq.tipo or "") == tipo_filtro]
+    equipamentos = ordenar_equipamentos(equipamentos)
     manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/cliente_detalhe.html", {"request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes})
+    return templates.TemplateResponse("organiza/cliente_detalhe.html", {
+        "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
+        "equipamentos": equipamentos, "status_filtro": status_filtro, "tipo_filtro": tipo_filtro,
+    })
 
 
 @app.get("/organiza/clientes/{cliente_id}/editar", response_class=HTMLResponse)
@@ -637,7 +666,7 @@ async def cliente_salvar(cliente_id: int, request: Request, usuario: Usuario = D
 
 
 def preencher_equipamento(eq: Equipamento, form: dict):
-    eq.tipo = (form.get("tipo") or "").strip() or None
+    eq.tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip()) or None
     eq.modelo = (form.get("modelo") or "").strip() or None
     eq.pacote = (form.get("pacote") or "").strip() or None
     try: eq.falta_pacote = int(form.get("falta_pacote")) if form.get("falta_pacote") else None
@@ -683,70 +712,88 @@ def _chave_ordenacao_equipamento(equipamento: Equipamento):
     return data_ordem, criado_ordem, equipamento.id or 0
 
 
-def normalizar_identificacoes_equipamentos(db: Session):
-    """
-    Gera a sequência global KRJ00040, KRJ00041... pela data de entrega.
-    Para cada cliente, gera 1, 2, 3... usando a mesma ordem.
-    """
-    equipamentos = db.query(Equipamento).all()
-    equipamentos.sort(key=_chave_ordenacao_equipamento)
+def _chave_ordenacao_equipamento(equipamento: Equipamento):
+    """Tipo, número do cliente e data de entrega; usada em todas as listas."""
+    ordem_tipo = {"JUKEBOX": 1, "MALETA": 2, "IPHONE": 3, "FLIPERAMA": 4}
+    tipo = tipo_equipamento_padrao(equipamento.tipo or "")
+    numero = equipamento.numero_maquina_cliente or 999999
+    data_referencia = equipamento.previsao_entrega or equipamento.data_compra or date.max
+    return ordem_tipo.get(tipo, 99), numero, data_referencia, equipamento.id or 0
 
-    por_cliente = {}
-    for indice, equipamento in enumerate(equipamentos, start=40):
-        equipamento.maquina = f"KRJ{indice:05d}"
-        equipamento.fabricante = equipamento.fabricante or "KARAOKERJ"
-        equipamento.numero_serie = None
 
-        proximo_cliente = por_cliente.get(equipamento.cliente_id, 0) + 1
-        por_cliente[equipamento.cliente_id] = proximo_cliente
-        equipamento.numero_maquina_cliente = proximo_cliente
+def ordenar_equipamentos(equipamentos):
+    return sorted(equipamentos, key=_chave_ordenacao_equipamento)
 
 
 def proximo_codigo_maquina(db: Session) -> str:
-    total = db.query(Equipamento).count()
-    return f"KRJ{40 + total:05d}"
+    """Cria o próximo KRJ livre sem alterar códigos já cadastrados."""
+    usados = {
+        int(m.group(1))
+        for (codigo,) in db.query(Equipamento.maquina).filter(Equipamento.maquina.isnot(None)).all()
+        if (m := re.fullmatch(r"KRJ(\d{5})", (codigo or "").strip().upper()))
+    }
+    numero = 41
+    while numero in usados:
+        numero += 1
+    return f"KRJ{numero:05d}"
 
 
-def proximo_numero_cliente(db: Session, cliente_id: int) -> int:
-    return db.query(Equipamento).filter(Equipamento.cliente_id == cliente_id).count() + 1
+def proximo_numero_cliente(db: Session, cliente_id: int, tipo: str = "JUKEBOX") -> int:
+    tipo = tipo_equipamento_padrao(tipo)
+    numeros = [
+        n for (n,) in db.query(Equipamento.numero_maquina_cliente)
+        .filter(Equipamento.cliente_id == cliente_id, func.upper(Equipamento.tipo) == tipo)
+        .all() if n
+    ]
+    return (max(numeros) if numeros else 0) + 1
+
+
 
 
 def reordenar_series_cliente(db: Session, cliente_id: int):
-    # A numeração depende da ordem global por data de entrega.
-    normalizar_identificacoes_equipamentos(db)
-
+    """Mantido por compatibilidade. A identificação do cliente não é mais renumerada automaticamente."""
+    return None
 
 def garantir_identificacao_equipamento(db: Session, equipamento: Equipamento):
-    if not equipamento.fabricante:
-        equipamento.fabricante = "KARAOKERJ"
+    equipamento.tipo = tipo_equipamento_padrao(equipamento.tipo or "")
+    equipamento.fabricante = equipamento.fabricante or "KARAOKERJ"
     if not equipamento.maquina:
         equipamento.maquina = proximo_codigo_maquina(db)
     if not equipamento.numero_maquina_cliente:
-        equipamento.numero_maquina_cliente = proximo_numero_cliente(db, equipamento.cliente_id)
+        equipamento.numero_maquina_cliente = proximo_numero_cliente(db, equipamento.cliente_id, equipamento.tipo)
 
-def validar_identificacoes_unicas(db: Session, equipamento: Equipamento):
+
+def validar_codigo_monitor(db: Session, equipamento: Equipamento, codigo_anterior: str = "") -> str:
     codigo = (equipamento.maquina or "").strip().upper()
     if not re.fullmatch(r"KRJ\d{5}", codigo):
         return "O campo “Código da máquina para o monitor” deve seguir o padrão KRJ00001."
     duplicado = db.query(Equipamento).filter(
-        Equipamento.maquina == codigo,
+        func.upper(Equipamento.maquina) == codigo,
         Equipamento.id != (equipamento.id or 0)
     ).first()
     if duplicado:
-        return f"O código técnico {codigo} já está vinculado a outro equipamento."
-    numero_duplicado = db.query(Equipamento).filter(
+        return f"O código do monitor {codigo} já está sendo utilizado e não pode ser repetido."
+    anterior = (codigo_anterior or "").strip().upper()
+    if anterior and codigo != anterior:
+        numero_anterior = int(anterior[3:]) if re.fullmatch(r"KRJ\d{5}", anterior) else 99999
+        if not 1 <= numero_anterior <= 40:
+            return f"O código do monitor {anterior} é permanente. Somente códigos de KRJ00001 a KRJ00040 podem ser corrigidos."
+    return ""
+
+
+def equipamento_codigo_duplicado(db: Session, equipamento: Equipamento):
+    return db.query(Equipamento).filter(
         Equipamento.cliente_id == equipamento.cliente_id,
+        func.upper(Equipamento.tipo) == tipo_equipamento_padrao(equipamento.tipo or ""),
         Equipamento.numero_maquina_cliente == equipamento.numero_maquina_cliente,
         Equipamento.id != (equipamento.id or 0)
     ).first()
-    if numero_duplicado:
-        return f"Já existe uma MAQ {equipamento.numero_maquina_cliente} para este cliente."
-    return ""
+
 
 def opcoes_equipamentos(db: Session):
     tipos_bd = [x[0] for x in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None), Equipamento.tipo != "").distinct().order_by(Equipamento.tipo).all()]
     pacotes_bd = [x[0] for x in db.query(Equipamento.pacote).filter(Equipamento.pacote.isnot(None), Equipamento.pacote != "").distinct().order_by(Equipamento.pacote.desc()).all()]
-    tipos = list(dict.fromkeys(["JUKEBOX", "MALETA", "FLIPERAMA", "COMPUTADOR", "SISTEMA"] + tipos_bd))
+    tipos = list(dict.fromkeys(["JUKEBOX", "MALETA", "IPHONE", "FLIPERAMA"] + tipos_bd))
     pacotes = list(dict.fromkeys(["2026.2", "2026.1"] + pacotes_bd))
     return tipos, pacotes
 
@@ -780,7 +827,14 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
         }, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
     garantir_identificacao_equipamento(db, eq)
-    erro_identificacao = validar_identificacoes_unicas(db, eq)
+    erro_identificacao = validar_codigo_monitor(db, eq)
+    duplicado_cliente = equipamento_codigo_duplicado(db, eq)
+    confirmou_duplicado = form.get("confirmar_codigo_cliente") == "1"
+    if duplicado_cliente and not confirmou_duplicado:
+        erro_identificacao = (
+            f"Este cliente já possui {rotulo_maquina(eq)}. "
+            "Confirme abaixo para utilizar o mesmo código; depois altere ou exclua o cadastro antigo."
+        )
     if erro_identificacao:
         tipos, pacotes = opcoes_equipamentos(db)
         return templates.TemplateResponse("organiza/equipamento_form.html", {
@@ -788,6 +842,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
             "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
             "proxima_maquina": eq.maquina,
             "proximo_numero_cliente": eq.numero_maquina_cliente,
+            "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
         }, status_code=400)
     db.add(eq)
     db.commit()
@@ -810,9 +865,17 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not eq: raise HTTPException(404)
     form = dict(await request.form())
+    codigo_anterior = (eq.maquina or "").strip().upper()
     preencher_equipamento(eq, form)
     garantir_identificacao_equipamento(db, eq)
-    erro_identificacao = validar_identificacoes_unicas(db, eq)
+    erro_identificacao = validar_codigo_monitor(db, eq, codigo_anterior)
+    duplicado_cliente = equipamento_codigo_duplicado(db, eq)
+    confirmou_duplicado = form.get("confirmar_codigo_cliente") == "1"
+    if duplicado_cliente and not confirmou_duplicado:
+        erro_identificacao = (
+            f"Este cliente já possui {rotulo_maquina(eq)}. "
+            "Confirme abaixo para utilizar o mesmo código; depois altere ou exclua o cadastro antigo."
+        )
     if erro_identificacao:
         cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
         tipos, pacotes = opcoes_equipamentos(db)
@@ -821,7 +884,8 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
         return templates.TemplateResponse("organiza/equipamento_form.html", {
             "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
             "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
-            "clientes_transferencia": clientes_transferencia, "transferencias": transferencias
+            "clientes_transferencia": clientes_transferencia, "transferencias": transferencias,
+            "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado)
         }, status_code=400)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
@@ -1377,14 +1441,26 @@ def manutencoes_lista(request: Request, status: str = "", usuario: Usuario = Dep
 @app.get("/organiza/manutencoes/nova", response_class=HTMLResponse)
 def manutencao_nova(request: Request, cliente_id: int = 0, equipamento_id: int = 0, erro: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome).all()
-    return templates.TemplateResponse("organiza/manutencao_form.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "equipamento_id": equipamento_id, "erro": erro})
+    equipamentos_ativos = {
+        cliente.id: ordenar_equipamentos([eq for eq in cliente.equipamentos if (eq.status or "Ativo") == "Ativo"])
+        for cliente in clientes
+    }
+    return templates.TemplateResponse("organiza/manutencao_form.html", {
+        "request": request, "usuario": usuario, "clientes": clientes,
+        "equipamentos_ativos": equipamentos_ativos,
+        "cliente_id": cliente_id, "equipamento_id": equipamento_id, "erro": erro
+    })
 
 
 @app.post("/organiza/manutencoes/nova")
 async def manutencao_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
     cliente_id = int(form.get("cliente_id") or 0); equipamento_id = int(form.get("equipamento_id") or 0)
-    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
+    eq = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.cliente_id == cliente_id,
+        Equipamento.status == "Ativo",
+    ).first()
     if not eq or not (form.get("defeito") or "").strip():
         return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}", status_code=303)
     tipo_atendimento = (form.get("tipo_atendimento") or "loja").strip().lower()
@@ -1408,7 +1484,12 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     m = carregar_manutencao(db, manutencao_id)
     if not m: raise HTTPException(404)
     itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome).all()
-    equipamentos_cliente = db.query(Equipamento).filter(Equipamento.cliente_id == m.cliente_id).order_by(Equipamento.tipo, Equipamento.modelo, Equipamento.id).all()
+    equipamentos_cliente = ordenar_equipamentos(
+        db.query(Equipamento).filter(
+            Equipamento.cliente_id == m.cliente_id,
+            Equipamento.status == "Ativo",
+        ).all()
+    )
     orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     totais = totais_orcamento(orcamento) if orcamento else {}
     prontas_cliente = (
@@ -1884,8 +1965,10 @@ def equipamento_com_manutencao_aberta(db: Session, equipamento_id: int):
 
 
 def equipamentos_portal(db: Session, cliente: Cliente):
+    """No chamado público aparecem somente equipamentos ativos."""
     resultado = []
-    for equipamento in sorted(cliente.equipamentos, key=lambda e: ((e.tipo or ""), (e.modelo or ""))):
+    ativos = [e for e in cliente.equipamentos if (e.status or "Ativo") == "Ativo"]
+    for equipamento in ordenar_equipamentos(ativos):
         aberta = equipamento_com_manutencao_aberta(db, equipamento.id)
         resultado.append({"equipamento": equipamento, "manutencao_aberta": aberta})
     return resultado
