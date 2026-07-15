@@ -3101,3 +3101,19 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   font-weight: 500;
   line-height: 1.4;
 }
+
+/* Linguagem operacional única: azul = equipe; laranja = cliente; verde = vendas */
+:root{--status-equipe:#2563eb;--status-equipe-bg:#eff6ff;--status-cliente:#f97316;--status-cliente-bg:#fff7ed;--status-venda:#16a34a;--status-venda-bg:#f0fdf4}
+.status-equipe{border-color:var(--status-equipe)!important;background:var(--status-equipe-bg)!important}
+.status-cliente{border-color:var(--status-cliente)!important;background:var(--status-cliente-bg)!important}
+.status-finalizado{border-color:#98a2b3!important;background:#f2f4f7!important}
+.pill.status-equipe{color:var(--status-equipe);border:1px solid #bfdbfe}
+.pill.status-cliente{color:var(--status-cliente);border:1px solid #fed7aa}
+.pill.status-finalizado{color:#667085;border:1px solid #d0d5dd}
+.agenda-evento{border-left:6px solid var(--status-equipe)}
+.agenda-evento.status-equipe{border-left-color:var(--status-equipe)!important}
+.agenda-evento.status-cliente{border-left-color:var(--status-cliente)!important}
+.agenda-evento.venda{border-left:6px solid var(--status-venda)!important;background:var(--status-venda-bg)!important}
+.pendencia-card.status-equipe{border-top:4px solid var(--status-equipe)}
+.pendencia-card.status-cliente{border-top:4px solid var(--status-cliente)}
+.manutencao-etapa.atual{border-color:var(--status-equipe)}
