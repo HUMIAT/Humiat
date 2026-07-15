@@ -1663,11 +1663,34 @@ def orcamento_enviar(manutencao_id: int, usuario: Usuario = Depends(usuario_loga
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
+def registrar_aprovacao_orcamento(o: Orcamento, modalidade: str, origem: str) -> None:
+    """Grava exatamente o que foi autorizado para a execução técnica."""
+    aprovar_tudo = modalidade == "todos"
+    for item in o.itens:
+        item.aprovado = 1 if (not item.opcional or aprovar_tudo) else 0
+
+    descricao_modalidade = "todos os itens" if aprovar_tudo else "somente itens obrigatórios"
+    o.status = f"Aprovado: {descricao_modalidade} ({origem})"
+    o.aprovado_em = datetime.now()
+    o.manutencao.status = "Aprovado"
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/aprovar-manual")
-def aprovar_manual(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    m = carregar_manutencao(db, manutencao_id); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
-    for i in o.itens: i.aprovado = 1
-    o.status = "Aprovado manualmente"; o.aprovado_em = datetime.now(); m.status = "Aprovado"; db.commit()
+async def aprovar_manual(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+    form = dict(await request.form())
+    modalidade = form.get("modalidade", "obrigatorios")
+    if modalidade not in {"obrigatorios", "todos"}:
+        modalidade = "obrigatorios"
+
+    registrar_aprovacao_orcamento(o, modalidade, "aprovação manual")
+    db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
@@ -2155,14 +2178,13 @@ async def orcamento_responder(token: str, request: Request, db: Session = Depend
     if not o: raise HTTPException(404)
     acao = form.get("acao")
     if acao == "cancelar":
-        o.status = "Cancelado"; o.manutencao.status = "Cancelado"
+        o.status = "Cancelado"
+        o.manutencao.status = "Cancelado"
     else:
-        selecionados = {int(v) for k,v in form.items() if k.startswith("opcional_") and str(v).isdigit()}
-        for i in o.itens:
-            i.aprovado = 1 if (not i.opcional or acao == "aprovar" or i.id in selecionados) else 0
-        o.status = "Aprovado" if acao == "aprovar" else "Aprovado obrigatório"
-        o.aprovado_em = datetime.now(); o.manutencao.status = "Aprovado"
-    db.commit(); return RedirectResponse(f"/orcamento/{token}?ok=1", status_code=303)
+        modalidade = "todos" if acao == "aprovar" else "obrigatorios"
+        registrar_aprovacao_orcamento(o, modalidade, "cliente")
+    db.commit()
+    return RedirectResponse(f"/orcamento/{token}?ok=1", status_code=303)
 
 # -----------------------------------------------------------------------------
 # Portal público simplificado para solicitação de manutenção

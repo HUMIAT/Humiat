@@ -15,7 +15,13 @@
 {% for i in orcamento.itens if not i.opcional %}<div class="linha-item cliente"><span>✓ {{ i.descricao }}{% if i.quantidade > 1 %} ({{ i.quantidade }}){% endif %}</span></div>{% else %}<p class="texto-suave">Nenhum outro item obrigatório.</p>{% endfor %}
 
 {% set opcionais = orcamento.itens|selectattr('opcional')|list %}
-{% if opcionais %}<h2>Itens opcionais</h2>{% for i in opcionais %}<label class="linha-item cliente opcao"><span><input type="checkbox" name="opcional_{{ i.id }}" value="{{ i.id }}"> {{ i.descricao }}{% if i.quantidade > 1 %} ({{ i.quantidade }}){% endif %}</span></label>{% endfor %}{% endif %}
+{% if opcionais %}
+<h2>Itens opcionais</h2>
+{% for i in opcionais %}
+<div class="linha-item cliente"><span>+ {{ i.descricao }}{% if i.quantidade > 1 %} ({{ i.quantidade }}){% endif %}</span></div>
+{% endfor %}
+<p class="texto-suave">Você poderá aprovar somente os obrigatórios ou aprovar tudo.</p>
+{% endif %}
 
 <h2>Valores</h2>
 {% if totais.desconto_informado > 0 %}
@@ -30,9 +36,18 @@
 <div class="total-linha"><span>Prazo</span><strong>{% if orcamento.prazo_dias_uteis %}{{ orcamento.prazo_dias_uteis }} dias úteis após a confirmação do pagamento{% else %}-{% endif %}</strong></div>
 
 <div class="acoes-publicas">
-<button class="botao" name="acao" value="parcial">Aprovar obrigatório</button>
-<button class="botao primario" name="acao" value="aprovar">Aprovar tudo</button>
-<button class="botao perigo" name="acao" value="cancelar">Cancelar orçamento</button>
+<button class="botao" name="acao" value="parcial"
+        onclick="return confirm('Confirma a aprovação somente dos itens obrigatórios? Os opcionais não serão executados.');">
+  Aprovar somente obrigatórios
+</button>
+<button class="botao primario" name="acao" value="aprovar"
+        onclick="return confirm('Confirma a aprovação de todos os itens, incluindo os opcionais?');">
+  Aprovar todos os itens
+</button>
+<button class="botao perigo" name="acao" value="cancelar"
+        onclick="return confirm('Deseja realmente cancelar este orçamento?');">
+  Cancelar orçamento
+</button>
 </div>
 </form></div></section>
 {% endblock %}

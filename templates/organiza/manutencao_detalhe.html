@@ -254,7 +254,21 @@ Pelo link abaixo você pode:
 '~request.url.scheme~'://'~request.url.netloc~'/orcamento/'~orcamento.token~'
 
 Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
-      <form method="post" action="/organiza/manutencoes/{{ m.id }}/aprovar-manual"><button class="botao" type="submit">Aprovação manual</button></form>
+      <form class="aprovacao-manual-form" method="post" action="/organiza/manutencoes/{{ m.id }}/aprovar-manual"
+            onsubmit="return confirm('Confirma a aprovação dos itens selecionados? Esta lista será enviada para a execução do serviço.');">
+        <fieldset class="aprovacao-escolha">
+          <legend>Aprovação manual</legend>
+          <label>
+            <input type="radio" name="modalidade" value="obrigatorios" checked>
+            Aprovar somente os itens obrigatórios
+          </label>
+          <label>
+            <input type="radio" name="modalidade" value="todos">
+            Aprovar todos os itens
+          </label>
+        </fieldset>
+        <button class="botao" type="submit">Confirmar aprovação manual</button>
+      </form>
     </div>
   </details>
 
@@ -314,7 +328,33 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
       <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Execução do serviço</h2></div></div>
       <div class="proximo-passo">
         <strong>Próximo passo</strong>
-        <p>Execute o serviço. Caso precise comprar algo, pause e comunique o cliente. Quando terminar, preencha o diagnóstico final e conclua.</p>
+        <p>Execute somente os itens autorizados abaixo. Caso precise comprar algo, pause e comunique o cliente. Quando terminar, preencha o diagnóstico final e conclua.</p>
+      </div>
+
+      {% set itens_aprovados = orcamento.itens|selectattr('aprovado','equalto',1)|list %}
+      {% set itens_nao_aprovados = orcamento.itens|selectattr('aprovado','equalto',0)|list %}
+      <div class="manutencao-subcard">
+        <h3>Serviços aprovados para execução</h3>
+        <div class="lista-execucao-aprovada">
+          <div class="linha-item cliente"><span>✓ Serviço de manutenção</span></div>
+          {% for item in itens_aprovados %}
+            <div class="linha-item cliente">
+              <span>✓ {{ item.quantidade }}× {{ item.descricao }}</span>
+              <strong>{{ (item.quantidade * item.preco_venda)|moeda }}</strong>
+            </div>
+          {% else %}
+            <p class="texto-suave">Nenhum item adicional foi aprovado.</p>
+          {% endfor %}
+        </div>
+
+        {% if itens_nao_aprovados %}
+          <h3>Não aprovado — não executar</h3>
+          <div class="lista-execucao-negada">
+            {% for item in itens_nao_aprovados %}
+              <div class="linha-item cliente"><span>✕ {{ item.quantidade }}× {{ item.descricao }}</span></div>
+            {% endfor %}
+          </div>
+        {% endif %}
       </div>
 
       {% if etapa_atual == 5 %}

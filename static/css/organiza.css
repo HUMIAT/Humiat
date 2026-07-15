@@ -3208,3 +3208,9 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .agenda-grupo-cabecalho>span{grid-column:1}
   .agenda-grupo-cabecalho>b{grid-column:2;grid-row:1 / span 2}
 }
+
+.aprovacao-manual-form{display:grid;gap:12px;min-width:min(100%,420px)}
+.aprovacao-escolha{display:grid;gap:10px;border:1px solid #d8e1ee;border-radius:12px;padding:12px 14px}
+.aprovacao-escolha legend{font-weight:800;padding:0 6px}
+.aprovacao-escolha label{display:flex;gap:8px;align-items:center}
+.lista-execucao-negada .linha-item{opacity:.72}
