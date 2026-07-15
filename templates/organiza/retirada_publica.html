@@ -9,8 +9,8 @@
     <div class="retirada-equipamentos">
       {% for manutencao in manutencoes_prontas %}
       <div class="retirada-equipamento">
-        <strong>{{ manutencao.equipamento.maquina or ('Equipamento #' ~ manutencao.equipamento.id) }}</strong>
-        <span>{{ manutencao.equipamento.tipo }}{% if manutencao.equipamento.modelo %} · {{ manutencao.equipamento.modelo }}{% endif %}</span>
+        <strong>{{ manutencao.equipamento|rotulo_maquina }} · {{ manutencao.equipamento.tipo }}{% if manutencao.equipamento.modelo %} · {{ manutencao.equipamento.modelo }}{% endif %}</strong>
+        <span>Código técnico: {{ manutencao.equipamento|codigo_tecnico }}</span>
       </div>
       {% endfor %}
     </div>

@@ -3,7 +3,7 @@
 <section class="orcamento-publico"><div class="publico-card">
 <p class="tag">KARAOKÊ RJ · ORÇAMENTO</p>
 <h1>{{ m.cliente.nome }}</h1>
-<p class="texto-suave">{{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</p>
+<p><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</p><p class="texto-suave">Código técnico: {{ m.equipamento|codigo_tecnico }}</p>
 {% if request.query_params.get('ok') %}<div class="alerta sucesso">Resposta registrada com sucesso.</div>{% endif %}
 
 {% if m.defeito %}<h2>Problema informado</h2><p>{{ m.defeito }}</p>{% endif %}

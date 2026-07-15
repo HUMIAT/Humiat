@@ -5,7 +5,7 @@
   <div class="vendas-grid">
     {% for venda in vendas %}
     <article class="cartao venda-card">
-      <div class="venda-card-topo"><div><span class="pill status-venda">{{ venda.status }}</span><h3>{{ venda.cliente.nome }}</h3><p>{{ venda.tipo or 'Equipamento' }} · {{ venda.modelo or 'Sem modelo' }}</p></div><a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}/equipamentos/{{ venda.id }}/editar">Abrir</a></div>
+      <div class="venda-card-topo"><div><span class="pill status-venda">{{ venda.status }}</span><h3>{{ venda.cliente.nome }}</h3><p><strong>{{ venda|rotulo_maquina }}</strong> · {{ venda.tipo or 'Equipamento' }} · {{ venda.modelo or 'Sem modelo' }}</p><small>Código técnico: {{ venda|codigo_tecnico }}</small></div><a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}/equipamentos/{{ venda.id }}/editar">Abrir</a></div>
       <div class="venda-card-dados">
         <div><small>Compra</small><strong>{{ venda.data_compra|data_br }}</strong></div>
         <div><small>Entrega</small><strong>{{ venda.previsao_entrega|data_br }}</strong></div>

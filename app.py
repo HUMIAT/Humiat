@@ -28,6 +28,25 @@ app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+def rotulo_maquina(equipamento) -> str:
+    """Identificação principal usada por cliente e técnico."""
+    numero = getattr(equipamento, "numero_maquina_cliente", None)
+    return f"MAQ {numero}" if numero else "MAQ ?"
+
+def descricao_equipamento(equipamento) -> str:
+    partes = [rotulo_maquina(equipamento)]
+    tipo = (getattr(equipamento, "tipo", None) or "EQUIPAMENTO").strip()
+    modelo = (getattr(equipamento, "modelo", None) or "").strip()
+    partes.append(tipo + (f" {modelo}" if modelo else ""))
+    return " · ".join(partes)
+
+def codigo_tecnico(equipamento) -> str:
+    return (getattr(equipamento, "maquina", None) or f"Equipamento #{getattr(equipamento, 'id', '?')}").strip()
+
+templates.env.filters["rotulo_maquina"] = rotulo_maquina
+templates.env.filters["descricao_equipamento"] = descricao_equipamento
+templates.env.filters["codigo_tecnico"] = codigo_tecnico
+
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -601,8 +620,16 @@ def preencher_equipamento(eq: Equipamento, form: dict):
     eq.falta = f"{max(total - recebido, 0):.2f}" if (eq.valor or eq.pago) else None
     eq.data_compra = data_form(form.get("data_compra") or "")
     eq.previsao_entrega = data_form(form.get("previsao_entrega") or "")
-    # NR máquina e número da máquina no cliente são automáticos e apenas para consulta.
-    # O único identificador digitado manualmente é o NR HD usado para gerar a licença.
+    # Identificadores podem ser corrigidos sem alterar os vínculos históricos.
+    maquina_informada = re.sub(r"[^A-Z0-9]", "", (form.get("maquina") or "").strip().upper())
+    if maquina_informada:
+        eq.maquina = maquina_informada
+    try:
+        numero_cliente = int(form.get("numero_maquina_cliente") or 0)
+        if numero_cliente > 0:
+            eq.numero_maquina_cliente = numero_cliente
+    except (TypeError, ValueError):
+        pass
     eq.numero_hd = re.sub(r"[^A-Z0-9]", "", (form.get("numero_hd") or "").strip().upper()) or None
     eq.numero_serie = None
     eq.status = (form.get("status") or "Ativo").strip()
@@ -659,6 +686,29 @@ def reordenar_series_cliente(db: Session, cliente_id: int):
 def garantir_identificacao_equipamento(db: Session, equipamento: Equipamento):
     if not equipamento.fabricante:
         equipamento.fabricante = "KARAOKERJ"
+    if not equipamento.maquina:
+        equipamento.maquina = proximo_codigo_maquina(db)
+    if not equipamento.numero_maquina_cliente:
+        equipamento.numero_maquina_cliente = proximo_numero_cliente(db, equipamento.cliente_id)
+
+def validar_identificacoes_unicas(db: Session, equipamento: Equipamento):
+    codigo = (equipamento.maquina or "").strip().upper()
+    if not re.fullmatch(r"KRJ\\d{5}", codigo):
+        return "O código técnico deve seguir o padrão KRJ00001."
+    duplicado = db.query(Equipamento).filter(
+        Equipamento.maquina == codigo,
+        Equipamento.id != (equipamento.id or 0)
+    ).first()
+    if duplicado:
+        return f"O código técnico {codigo} já está vinculado a outro equipamento."
+    numero_duplicado = db.query(Equipamento).filter(
+        Equipamento.cliente_id == equipamento.cliente_id,
+        Equipamento.numero_maquina_cliente == equipamento.numero_maquina_cliente,
+        Equipamento.id != (equipamento.id or 0)
+    ).first()
+    if numero_duplicado:
+        return f"Já existe uma MAQ {equipamento.numero_maquina_cliente} para este cliente."
+    return ""
 
 def opcoes_equipamentos(db: Session):
     tipos_bd = [x[0] for x in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None), Equipamento.tipo != "").distinct().order_by(Equipamento.tipo).all()]
@@ -697,8 +747,16 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
         }, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
     garantir_identificacao_equipamento(db, eq)
-    db.add(eq); db.flush()
-    normalizar_identificacoes_equipamentos(db)
+    erro_identificacao = validar_identificacoes_unicas(db, eq)
+    if erro_identificacao:
+        tipos, pacotes = opcoes_equipamentos(db)
+        return templates.TemplateResponse("organiza/equipamento_form.html", {
+            "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
+            "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
+            "proxima_maquina": eq.maquina,
+            "proximo_numero_cliente": eq.numero_maquina_cliente,
+        }, status_code=400)
+    db.add(eq)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
@@ -721,7 +779,17 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     form = dict(await request.form())
     preencher_equipamento(eq, form)
     garantir_identificacao_equipamento(db, eq)
-    normalizar_identificacoes_equipamentos(db)
+    erro_identificacao = validar_identificacoes_unicas(db, eq)
+    if erro_identificacao:
+        cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        tipos, pacotes = opcoes_equipamentos(db)
+        clientes_transferencia = db.query(Cliente).filter(Cliente.id != cliente_id).order_by(Cliente.nome.asc()).all()
+        transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
+        return templates.TemplateResponse("organiza/equipamento_form.html", {
+            "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
+            "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
+            "clientes_transferencia": clientes_transferencia, "transferencias": transferencias
+        }, status_code=400)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 

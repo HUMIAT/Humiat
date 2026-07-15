@@ -5,7 +5,7 @@
     <div class="manutencao-header-info">
       <p class="tag">Manutenção #{{ m.id }}</p>
       <h1>{{ m.cliente.nome }}</h1>
-      <p class="texto-suave"><strong>{{ m.equipamento.maquina or ('Equipamento #' ~ m.equipamento.id) }}{% if m.equipamento.numero_maquina_cliente %} - {{ m.equipamento.numero_maquina_cliente }}{% endif %}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</p>
+      <p class="texto-suave"><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}<br><small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small></p>
     </div>
     <div class="manutencao-header-acoes">
       <span class="pill">{{ m.status }}</span>
@@ -65,7 +65,7 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
           <select name="equipamento_id" required>
             {% for equipamento in equipamentos_cliente %}
             <option value="{{ equipamento.id }}" {% if equipamento.id == m.equipamento_id %}selected{% endif %}>
-              {{ equipamento.maquina or ('Equipamento #' ~ equipamento.id) }}{% if equipamento.numero_maquina_cliente %} - {{ equipamento.numero_maquina_cliente }}{% endif %} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %}
+              {{ equipamento|rotulo_maquina }} · {{ equipamento.tipo }}{% if equipamento.modelo %} · {{ equipamento.modelo }}{% endif %} · Cód. técnico: {{ equipamento|codigo_tecnico }}
             </option>
             {% endfor %}
           </select>

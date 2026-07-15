@@ -45,7 +45,7 @@
         <a href="/organiza/manutencoes/{{ m.id }}" class="pendencia-item">
           <div>
             <strong>#{{ m.id }} · {{ m.cliente.nome }}</strong>
-            <span>{{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</span>
+            <span><b>{{ m.equipamento|rotulo_maquina }}</b> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</span><small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
             {% if chave == 'entrada' %}<small>{{ 'WhatsApp/online' if m.tipo_atendimento == 'online' else 'Na loja' }}{% if m.entrega_prevista_em %} · {{ m.entrega_prevista_em|datahora }}{% endif %}</small>{% endif %}
             {% if chave == 'pagamento' and m.painel_saldo %}<small>Falta receber: {{ m.painel_saldo|moeda }}</small>{% endif %}
             {% if chave == 'retirada' and m.retirada_em %}<small>Retirada: {{ m.retirada_em|datahora }}</small>{% endif %}
