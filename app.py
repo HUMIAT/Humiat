@@ -726,8 +726,8 @@ def garantir_identificacao_equipamento(db: Session, equipamento: Equipamento):
 
 def validar_identificacoes_unicas(db: Session, equipamento: Equipamento):
     codigo = (equipamento.maquina or "").strip().upper()
-    if not re.fullmatch(r"KRJ\\d{5}", codigo):
-        return "O código técnico deve seguir o padrão KRJ00001."
+    if not re.fullmatch(r"KRJ\d{5}", codigo):
+        return "O campo “Código da máquina para o monitor” deve seguir o padrão KRJ00001."
     duplicado = db.query(Equipamento).filter(
         Equipamento.maquina == codigo,
         Equipamento.id != (equipamento.id or 0)
