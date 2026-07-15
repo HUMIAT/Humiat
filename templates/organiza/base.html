@@ -30,10 +30,20 @@
     </div>
   </aside>
   <main class="app-main">{% block conteudo %}{% endblock %}</main>
-  <nav class="mobile-nav clean-mobile">
-    <a href="/organiza"><span>⌂</span><small>Início</small></a>
-    <a class="plus" href="/organiza/manutencoes/nova">+</a>
-    <a href="/organiza/manutencoes"><span>🛠</span><small>Manutenções</small></a>
+  <nav class="mobile-nav clean-mobile" aria-label="Navegação principal no celular">
+    <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza">
+      <span>⌂</span><small>Início</small>
+    </a>
+    <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes">
+      <span>👥</span><small>Clientes</small>
+    </a>
+    <a class="plus {% if request.url.path == '/organiza/manutencoes/nova' %}ativo{% endif %}" href="/organiza/manutencoes/nova" aria-label="Nova manutenção">+</a>
+    <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda">
+      <span>▣</span><small>Agenda</small>
+    </a>
+    <a class="{% if request.url.path.startswith('/organiza/manutencoes') and request.url.path != '/organiza/manutencoes/nova' %}ativo{% endif %}" href="/organiza/manutencoes">
+      <span>🛠</span><small>Manutenções</small>
+    </a>
   </nav>
 </div>
 {% else %}
