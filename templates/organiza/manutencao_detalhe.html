@@ -426,6 +426,12 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
         {% else %}
           <button class="botao whatsapp" disabled title="Preencha o diagnóstico final e retire a pausa.">Serviço concluído — comunicar cliente e avançar</button>
         {% endif %}
+      {% elif etapa_atual > 5 %}
+        <div class="manutencao-subcard">
+          <h3>Comunicação do serviço concluído</h3>
+          <p class="texto-suave">O serviço já foi concluído. Este botão permanece disponível para reenviar a garantia e o link de agendamento caso o WhatsApp não abra ou ocorra algum erro.</p>
+          <a class="botao whatsapp" href="/organiza/manutencoes/{{ m.id }}/concluir-whatsapp">Reenviar conclusão e link de retirada no WhatsApp</a>
+        </div>
       {% endif %}
     {% endif %}
   </details>

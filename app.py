@@ -1798,19 +1798,32 @@ def comunicar_pausa_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
 
 @app.get("/organiza/manutencoes/{manutencao_id}/concluir-whatsapp")
 def concluir_servico_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Conclui a Etapa 5 ou reenvia a comunicação sem bloquear o fluxo.
+
+    A rota é idempotente: depois que o serviço já avançou, pode ser usada
+    novamente para reenviar a garantia e o link de retirada.
+    """
     m = carregar_manutencao(db, manutencao_id)
     if not m:
         raise HTTPException(404)
-    if etapa_manutencao(m) != 5 or m.servico_pausado_em or not (m.diagnostico or "").strip():
+
+    etapa = etapa_manutencao(m)
+    if etapa < 5 or m.servico_pausado_em or not (m.diagnostico or "").strip():
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=conclusao", status_code=303)
+
     o = _orcamento_atual(m)
     if not o:
         raise HTTPException(400, "Orçamento não encontrado.")
-    agora = datetime.now()
-    m.pronto_em = agora
-    m.conclusao_comunicada_em = agora
-    m.status = "Pronto para retirada"
-    db.commit()
+
+    # Avança somente na primeira conclusão. Em reenvios, preserva datas e etapa.
+    if etapa == 5:
+        agora = datetime.now()
+        if not m.pronto_em:
+            m.pronto_em = agora
+        m.conclusao_comunicada_em = agora
+        m.status = "Pronto para retirada"
+        db.commit()
+
     mensagem = (
         f"Olá, {m.cliente.nome}!\n\n"
         "✅ Seu serviço foi concluído.\n\n"
