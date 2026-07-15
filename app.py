@@ -154,6 +154,8 @@ class Orcamento(Base):
     status = Column(String(40), nullable=False, default="Rascunho")
     observacao = Column(Text, nullable=True)
     desconto = Column(Float, nullable=False, default=0)
+    # Quando ativo, o desconto só é concedido se todos os itens opcionais forem aprovados.
+    desconto_somente_com_opcionais = Column(Integer, nullable=False, default=0)
     valor_manutencao = Column(Float, nullable=False, default=0)
     forma_pagamento_orcamento = Column(String(80), nullable=True)
     prazo_dias_uteis = Column(Integer, nullable=True)
@@ -321,6 +323,8 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "desconto" not in existentes_orcamento:
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN desconto FLOAT NOT NULL DEFAULT 0"))
+            if "desconto_somente_com_opcionais" not in existentes_orcamento:
+                conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN desconto_somente_com_opcionais INTEGER NOT NULL DEFAULT 0"))
             if "valor_manutencao" not in existentes_orcamento:
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN valor_manutencao FLOAT NOT NULL DEFAULT 0"))
             if "forma_pagamento_orcamento" not in existentes_orcamento:
@@ -1128,14 +1132,36 @@ def totais_orcamento(orcamento: Orcamento):
     manutencao = max(float(orcamento.valor_manutencao or 0), 0)
     itens_obrigatorios = sum(i.preco_venda * i.quantidade for i in orcamento.itens if not i.opcional)
     obrigatorio = manutencao + itens_obrigatorios
-    opcionais = sum(i.preco_venda * i.quantidade for i in orcamento.itens if i.opcional)
-    subtotal_aprovado = manutencao + sum(i.preco_venda * i.quantidade for i in orcamento.itens if (not i.opcional) or i.aprovado)
+
+    itens_opcionais = [i for i in orcamento.itens if i.opcional]
+    opcionais = sum(i.preco_venda * i.quantidade for i in itens_opcionais)
+    opcionais_aprovados = [i for i in itens_opcionais if i.aprovado]
+    todos_opcionais_aprovados = bool(itens_opcionais) and len(opcionais_aprovados) == len(itens_opcionais)
+
+    subtotal_aprovado = manutencao + sum(
+        i.preco_venda * i.quantidade
+        for i in orcamento.itens
+        if (not i.opcional) or i.aprovado
+    )
+
     desconto_informado = max(float(orcamento.desconto or 0), 0)
-    desconto_aplicado = min(desconto_informado, subtotal_aprovado)
+    desconto_condicional = bool(orcamento.desconto_somente_com_opcionais)
+
+    # Desconto no valor efetivamente aprovado:
+    # - normal: aplica sobre qualquer combinação aprovada;
+    # - condicional: aplica apenas quando todos os opcionais forem aprovados.
+    pode_aplicar_desconto = (not desconto_condicional) or todos_opcionais_aprovados
+    desconto_aplicado = min(desconto_informado, subtotal_aprovado) if pode_aplicar_desconto else 0
     aprovado = max(subtotal_aprovado - desconto_aplicado, 0)
+
     geral_bruto = obrigatorio + opcionais
+    # O total com todos os opcionais sempre atende à condição.
     geral = max(geral_bruto - min(desconto_informado, geral_bruto), 0)
-    obrigatorio_final = max(obrigatorio - min(desconto_informado, obrigatorio), 0)
+
+    # No total obrigatório, o desconto condicional não é aplicado.
+    desconto_no_obrigatorio = 0 if desconto_condicional else min(desconto_informado, obrigatorio)
+    obrigatorio_final = max(obrigatorio - desconto_no_obrigatorio, 0)
+
     recebido = sum(p.valor for p in orcamento.pagamentos)
     return {
         "manutencao": manutencao,
@@ -1148,6 +1174,9 @@ def totais_orcamento(orcamento: Orcamento):
         "subtotal_aprovado": subtotal_aprovado,
         "desconto": desconto_aplicado,
         "desconto_informado": desconto_informado,
+        "desconto_condicional": desconto_condicional,
+        "desconto_disponivel": pode_aplicar_desconto,
+        "todos_opcionais_aprovados": todos_opcionais_aprovados,
         "aprovado": aprovado,
         "recebido": recebido,
         "falta": max(aprovado - recebido, 0),
@@ -1359,6 +1388,7 @@ async def orcamento_salvar_desconto(manutencao_id: int, request: Request, usuari
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     subtotal = max(float(o.valor_manutencao or 0), 0) + sum(i.preco_venda * i.quantidade for i in o.itens)
     o.desconto = min(max(moeda_num(form.get("desconto")), 0), subtotal)
+    o.desconto_somente_com_opcionais = 1 if form.get("desconto_somente_com_opcionais") else 0
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 

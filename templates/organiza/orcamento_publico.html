@@ -18,9 +18,12 @@
 {% if opcionais %}<h2>Itens opcionais</h2>{% for i in opcionais %}<label class="linha-item cliente opcao"><span><input type="checkbox" name="opcional_{{ i.id }}" value="{{ i.id }}"> {{ i.descricao }}{% if i.quantidade > 1 %} ({{ i.quantidade }}){% endif %}</span></label>{% endfor %}{% endif %}
 
 <h2>Valores</h2>
-{% if totais.desconto_informado > 0 %}<div class="total-linha"><span>Desconto</span><strong>- {{ totais.desconto_informado|moeda }}</strong></div>{% endif %}
-<div class="total-linha"><span>Total obrigatório</span><strong>{{ totais.obrigatorio_final|moeda }}</strong></div>
-<div class="total-linha"><span>Total com opcionais</span><strong>{{ totais.geral|moeda }}</strong></div>
+{% if totais.desconto_informado > 0 %}
+<div class="total-linha"><span>Desconto{% if totais.desconto_condicional %} com todos os opcionais{% endif %}</span><strong>- {{ totais.desconto_informado|moeda }}</strong></div>
+{% if totais.desconto_condicional %}<p class="alerta informativo">O desconto será aplicado somente ao aprovar os itens obrigatórios e todos os itens opcionais.</p>{% endif %}
+{% endif %}
+<div class="total-linha"><span>Total somente obrigatórios</span><strong>{{ totais.obrigatorio_final|moeda }}</strong></div>
+<div class="total-linha"><span>Total com todos os opcionais</span><strong>{{ totais.geral|moeda }}</strong></div>
 
 <h2>Condições</h2>
 <div class="total-linha"><span>Forma de pagamento</span><strong>{{ orcamento.forma_pagamento_orcamento or '-' }}</strong></div>
