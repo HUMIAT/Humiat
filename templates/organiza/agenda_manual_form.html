@@ -1,0 +1,48 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean agenda-formulario">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">AGENDA</p>
+      <h1>{% if evento %}Editar compromisso{% else %}Novo compromisso{% endif %}</h1>
+      <p class="texto-suave">Use para visitas, fornecedores ou pessoas que ainda não são clientes.</p>
+    </div>
+    <a class="btn secundario" href="/organiza/agenda">Voltar</a>
+  </div>
+
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+  <form method="post" class="form-card">
+    <label>Tipo
+      <select name="tipo" required>
+        {% set tipo_atual = evento.tipo if evento else 'visita' %}
+        <option value="visita" {% if tipo_atual == 'visita' %}selected{% endif %}>Visita</option>
+        <option value="entrada" {% if tipo_atual == 'entrada' %}selected{% endif %}>Cliente vai trazer</option>
+        <option value="online" {% if tipo_atual == 'online' %}selected{% endif %}>Atendimento online</option>
+        <option value="retirada" {% if tipo_atual == 'retirada' %}selected{% endif %}>Cliente vem buscar</option>
+        <option value="fornecedor" {% if tipo_atual == 'fornecedor' %}selected{% endif %}>Fornecedor</option>
+        <option value="outro" {% if tipo_atual == 'outro' %}selected{% endif %}>Outro</option>
+      </select>
+    </label>
+    <label>Título
+      <input name="titulo" required maxlength="180" value="{{ evento.titulo if evento else '' }}" placeholder="Ex.: Visita para conhecer a loja">
+    </label>
+    <label>Data e hora
+      <input type="datetime-local" name="data_hora" required value="{{ evento.data_hora.strftime('%Y-%m-%dT%H:%M') if evento else '' }}">
+    </label>
+    <label>Nome ou contato
+      <input name="contato" maxlength="120" value="{{ evento.contato if evento and evento.contato else '' }}" placeholder="Ex.: João / Fornecedor">
+    </label>
+    <label>Observação
+      <textarea name="observacao" rows="4" placeholder="Informações importantes">{{ evento.observacao if evento and evento.observacao else '' }}</textarea>
+    </label>
+    <button class="btn primario" type="submit">Salvar compromisso</button>
+  </form>
+
+  {% if evento %}
+  <form method="post" action="/organiza/agenda/manual/{{ evento.id }}/excluir" onsubmit="return confirm('Excluir este compromisso?')">
+    <button class="btn perigo" type="submit">Excluir compromisso</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

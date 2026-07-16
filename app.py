@@ -194,6 +194,17 @@ class Item(Base):
     criado_em = Column(DateTime, server_default=func.now())
 
 
+class AgendaManual(Base):
+    __tablename__ = "agenda_manual"
+    id = Column(Integer, primary_key=True)
+    titulo = Column(String(180), nullable=False)
+    tipo = Column(String(40), nullable=False, default="visita")
+    data_hora = Column(DateTime, nullable=False)
+    contato = Column(String(120), nullable=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
 class Manutencao(Base):
     __tablename__ = "assistencias"
     id = Column(Integer, primary_key=True)
@@ -545,57 +556,46 @@ def sair():
     return resposta
 
 
+def _contexto_operacao(db: Session):
+    manutencoes = _manutencoes_operacao(db)
+    filas = {
+        "atendimento": [], "orcamentos": [], "comunicar_orcamentos": [],
+        "aprovacoes": [], "pagamentos": [], "execucao": [],
+        "pausados": [], "prontos": [], "retiradas": [],
+    }
+    for manutencao in manutencoes:
+        chave = _fila_operacional_exclusiva(manutencao)
+        if chave:
+            filas[chave].append(manutencao)
+
+    # Datas úteis para leitura rápida nos cards da operação.
+    for lista in filas.values():
+        for m in lista:
+            if m.retirada_em:
+                m.operacao_data = m.retirada_em
+            elif m.entrega_prevista_em:
+                m.operacao_data = m.entrega_prevista_em
+            elif m.pronto_em:
+                m.operacao_data = m.pronto_em
+            elif m.recebido_em:
+                m.operacao_data = m.recebido_em
+            else:
+                m.operacao_data = m.criado_em
+
+    return {
+        "filas": filas,
+        "grupos": {chave: _agrupar_por_cliente(valor) for chave, valor in filas.items()},
+        "contagens": {chave: len(valor) for chave, valor in filas.items()},
+        "total_operacao": sum(len(valor) for valor in filas.values()),
+        "total_manutencoes": len(manutencoes),
+    }
+
+
 @app.get("/organiza", response_class=HTMLResponse)
 def painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    manutencoes = db.query(Manutencao).options(
-        selectinload(Manutencao.cliente),
-        selectinload(Manutencao.equipamento),
-        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
-        selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
-    ).order_by(Manutencao.criado_em.desc()).all()
-
-    pendencias = {
-        "entrada": [],
-        "orcamento": [],
-        "aceite": [],
-        "pagamento": [],
-        "producao": [],
-        "agenda": [],
-        "retirada": [],
-    }
-    chave_por_etapa = {
-        1: "entrada",
-        2: "orcamento",
-        3: "aceite",
-        4: "pagamento",
-        5: "producao",
-        6: "agenda",
-    }
-
-    for manutencao in manutencoes:
-        etapa = etapa_manutencao(manutencao)
-        if etapa == 7:
-            continue
-        orcamento = sorted(manutencao.orcamentos, key=lambda x: x.versao)[-1] if manutencao.orcamentos else None
-        totais = totais_orcamento(orcamento) if orcamento else {"falta": 0}
-        manutencao.painel_saldo = totais.get("falta", 0)
-        manutencao.painel_etapa = etapa
-        manutencao.painel_info = ETAPAS_MANUTENCAO[etapa]
-
-        # Etapa 6 é dividida apenas para facilitar a operação:
-        # sem horário = agendamento pendente; com horário = retirada agendada.
-        if etapa == 6 and manutencao.retirada_em:
-            pendencias["retirada"].append(manutencao)
-        else:
-            pendencias[chave_por_etapa[etapa]].append(manutencao)
-
-    return templates.TemplateResponse("organiza/painel.html", {
-        "request": request,
-        "usuario": usuario,
-        "total_manutencoes": len(manutencoes),
-        "pendencias": pendencias,
-        "total_pendencias": sum(len(lista) for lista in pendencias.values()),
-    })
+    contexto = _contexto_operacao(db)
+    contexto.update({"request": request, "usuario": usuario, "pagina_inicial": True})
+    return templates.TemplateResponse("organiza/operacao.html", contexto)
 
 
 @app.get("/organiza/clientes", response_class=HTMLResponse)
@@ -2205,34 +2205,9 @@ def _fila_operacional_exclusiva(m):
 
 @app.get("/organiza/operacao", response_class=HTMLResponse)
 def operacao_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    manutencoes = _manutencoes_operacao(db)
-    filas = {
-        "atendimento": [],
-        "orcamentos": [],
-        "comunicar_orcamentos": [],
-        "aprovacoes": [],
-        "pagamentos": [],
-        "execucao": [],
-        "pausados": [],
-        "prontos": [],
-        "retiradas": [],
-    }
-
-    for manutencao in manutencoes:
-        chave = _fila_operacional_exclusiva(manutencao)
-        if chave:
-            filas[chave].append(manutencao)
-
-    contagens = {chave: len(valor) for chave, valor in filas.items()}
-    grupos = {chave: _agrupar_por_cliente(valor) for chave, valor in filas.items()}
-
-    return templates.TemplateResponse("organiza/operacao.html", {
-        "request": request,
-        "usuario": usuario,
-        "filas": filas,
-        "grupos": grupos,
-        "contagens": contagens,
-    })
+    contexto = _contexto_operacao(db)
+    contexto.update({"request": request, "usuario": usuario, "pagina_inicial": False})
+    return templates.TemplateResponse("organiza/operacao.html", contexto)
 
 
 @app.get("/organiza/operacao/comunicacoes", response_class=HTMLResponse)
@@ -2382,62 +2357,122 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
 
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)
-def agenda(request: Request, etapa: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     manutencoes = (
         db.query(Manutencao)
-        .options(
-            selectinload(Manutencao.cliente),
-            selectinload(Manutencao.equipamento),
-            selectinload(Manutencao.orcamentos),
-        )
-        .filter(
-            Manutencao.entregue_em.is_(None),
-            ~Manutencao.status.in_(("Encerrada", "Cancelada")),
-        )
+        .options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
+        .filter(Manutencao.entregue_em.is_(None), ~Manutencao.status.in_(("Encerrada", "Cancelada")))
         .all()
     )
 
-    agenda_manutencoes = []
-    for manutencao in manutencoes:
-        numero = etapa_manutencao(manutencao)
-        if numero == 7 or (etapa and numero != etapa):
-            continue
-        manutencao.agenda_etapa = numero
-        manutencao.agenda_info = ETAPAS_MANUTENCAO[numero]
-        manutencao.agenda_data = data_etapa_manutencao(manutencao)
-        agenda_manutencoes.append(manutencao)
+    eventos = []
+    for m in manutencoes:
+        etapa = etapa_manutencao(m)
+        if etapa == 1 and m.entrega_prevista_em:
+            online = (m.tipo_atendimento or "loja") == "online"
+            eventos.append({
+                "tipo": "online" if online else "entrada",
+                "titulo": "Atendimento online" if online else "Cliente vai trazer",
+                "data_hora": m.entrega_prevista_em,
+                "cliente": m.cliente.nome,
+                "equipamento": descricao_equipamento(m.equipamento),
+                "link": f"/organiza/manutencoes/{m.id}#etapa-1",
+                "manual": False,
+            })
+        elif etapa == 6 and m.retirada_em:
+            eventos.append({
+                "tipo": "retirada",
+                "titulo": "Cliente vem buscar",
+                "data_hora": m.retirada_em,
+                "cliente": m.cliente.nome,
+                "equipamento": descricao_equipamento(m.equipamento),
+                "link": f"/organiza/manutencoes/{m.id}#etapa-6",
+                "manual": False,
+            })
 
-    agenda_manutencoes.sort(
-        key=lambda item: (
-            item.agenda_etapa,
-            item.agenda_data or datetime.max,
-            item.id,
-        )
-    )
+    for e in db.query(AgendaManual).order_by(AgendaManual.data_hora.asc()).all():
+        eventos.append({
+            "tipo": e.tipo,
+            "titulo": e.titulo,
+            "data_hora": e.data_hora,
+            "cliente": e.contato or "Compromisso manual",
+            "equipamento": e.observacao or "",
+            "link": f"/organiza/agenda/manual/{e.id}/editar",
+            "manual": True,
+        })
 
-    status_venda_pendentes = ("Solicitar gabinete", "Montagem", "Pronto para entrega")
-    vendas = (
-        db.query(Equipamento)
-        .options(selectinload(Equipamento.cliente))
-        .filter(
-            Equipamento.previsao_entrega.isnot(None),
-            Equipamento.status.in_(status_venda_pendentes),
-        )
-        .order_by(Equipamento.previsao_entrega.asc())
-        .all()
-    )
+    eventos.sort(key=lambda e: (e["data_hora"], e["titulo"]))
+    return templates.TemplateResponse("organiza/agenda.html", {
+        "request": request, "usuario": usuario, "eventos": eventos,
+    })
 
-    return templates.TemplateResponse(
-        "organiza/agenda.html",
-        {
-            "request": request,
-            "usuario": usuario,
-            "manutencoes": agenda_manutencoes,
-            "vendas": vendas,
-            "etapa_filtro": etapa,
-            "etapas": ETAPAS_MANUTENCAO,
-        },
-    )
+
+@app.get("/organiza/agenda/manual/novo", response_class=HTMLResponse)
+def agenda_manual_novo(request: Request, usuario: Usuario = Depends(usuario_logado)):
+    return templates.TemplateResponse("organiza/agenda_manual_form.html", {
+        "request": request, "usuario": usuario, "evento": None, "erro": "",
+    })
+
+
+@app.post("/organiza/agenda/manual/novo")
+async def agenda_manual_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = await request.form()
+    data_hora = datetime_form(form.get("data_hora"))
+    titulo = (form.get("titulo") or "").strip()
+    if not titulo or not data_hora:
+        return templates.TemplateResponse("organiza/agenda_manual_form.html", {
+            "request": request, "usuario": usuario, "evento": None,
+            "erro": "Informe o título e a data com horário.",
+        }, status_code=400)
+    db.add(AgendaManual(
+        titulo=titulo, tipo=(form.get("tipo") or "visita").strip(),
+        data_hora=data_hora, contato=(form.get("contato") or "").strip() or None,
+        observacao=(form.get("observacao") or "").strip() or None,
+    ))
+    db.commit()
+    return RedirectResponse("/organiza/agenda", status_code=303)
+
+
+@app.get("/organiza/agenda/manual/{evento_id}/editar", response_class=HTMLResponse)
+def agenda_manual_editar(evento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    evento = db.get(AgendaManual, evento_id)
+    if not evento:
+        raise HTTPException(404)
+    return templates.TemplateResponse("organiza/agenda_manual_form.html", {
+        "request": request, "usuario": usuario, "evento": evento, "erro": "",
+    })
+
+
+@app.post("/organiza/agenda/manual/{evento_id}/editar")
+async def agenda_manual_salvar(evento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    evento = db.get(AgendaManual, evento_id)
+    if not evento:
+        raise HTTPException(404)
+    form = await request.form()
+    data_hora = datetime_form(form.get("data_hora"))
+    titulo = (form.get("titulo") or "").strip()
+    if not titulo or not data_hora:
+        return templates.TemplateResponse("organiza/agenda_manual_form.html", {
+            "request": request, "usuario": usuario, "evento": evento,
+            "erro": "Informe o título e a data com horário.",
+        }, status_code=400)
+    evento.titulo = titulo
+    evento.tipo = (form.get("tipo") or "visita").strip()
+    evento.data_hora = data_hora
+    evento.contato = (form.get("contato") or "").strip() or None
+    evento.observacao = (form.get("observacao") or "").strip() or None
+    db.commit()
+    return RedirectResponse("/organiza/agenda", status_code=303)
+
+
+@app.post("/organiza/agenda/manual/{evento_id}/excluir")
+def agenda_manual_excluir(evento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    evento = db.get(AgendaManual, evento_id)
+    if evento:
+        db.delete(evento)
+        db.commit()
+    return RedirectResponse("/organiza/agenda", status_code=303)
+
 
 def manutencoes_prontas_cliente(db: Session, cliente_id: int):
     return (

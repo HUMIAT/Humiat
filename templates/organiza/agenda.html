@@ -1,77 +1,45 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean agenda-operacional">
+<section class="pagina-clean agenda-simples">
   <div class="titulo-linha">
     <div>
-      <p class="tag">Agenda</p>
-      <h1>Agenda operacional</h1>
-      <p class="texto-suave">A etapa, o nome e a cor são os mesmos do painel e da manutenção.</p>
+      <p class="tag">AGENDA</p>
+      <h1>Compromissos</h1>
+      <p class="texto-suave">Somente entradas na loja, atendimentos online e retiradas.</p>
     </div>
+    <a class="btn primario" href="/organiza/agenda/manual/novo">+ Adicionar compromisso</a>
   </div>
 
-  <nav class="agenda-filtros" aria-label="Filtrar agenda por etapa">
-    <a class="agenda-filtro {% if not etapa_filtro %}ativo{% endif %}" href="/organiza/agenda">Todas</a>
-    {% for numero, info in etapas.items() %}
-      {% if numero < 7 %}
-      <a class="agenda-filtro {{ info.classe }} {% if etapa_filtro == numero %}ativo{% endif %}" href="/organiza/agenda?etapa={{ numero }}">
-        {{ numero }}. {{ info.titulo }}
-      </a>
-      {% endif %}
-    {% endfor %}
-  </nav>
-
-  {% if not etapa_filtro %}
-  <div class="agenda-secao">
-    <h2><span class="legenda-cor venda"></span> Vendas</h2>
-    <div class="agenda-grid">
-      {% for v in vendas %}
-      <a class="agenda-evento venda" href="/organiza/clientes/{{v.cliente_id}}/equipamentos/{{v.id}}/editar">
-        <span>{{ v.status|upper }}</span>
-        <strong>{{v.previsao_entrega.strftime('%d/%m/%Y')}}</strong>
-        <b>{{v.cliente.nome}}</b>
-        <small><strong>{{ v|rotulo_maquina }}</strong> · {{v.tipo}} {{v.modelo or ''}}</small>
-        <small>Código técnico: {{ v|codigo_tecnico }}</small>
-        <em>Falta: {{v.falta|moeda}}</em>
-      </a>
-      {% else %}<p class="vazio">Nenhuma venda agendada.</p>{% endfor %}
-    </div>
+  <div class="agenda-legenda">
+    <span class="agenda-chip entrada">Cliente vai trazer</span>
+    <span class="agenda-chip online">Atendimento online</span>
+    <span class="agenda-chip retirada">Cliente vem buscar</span>
+    <span class="agenda-chip visita">Manual</span>
   </div>
-  {% endif %}
 
-  <div class="agenda-secao">
-    <h2>Manutenções{% if etapa_filtro %} · {{ etapas[etapa_filtro].titulo }}{% endif %}</h2>
-
-    {% for numero, info in etapas.items() %}
-      {% if numero < 7 and (not etapa_filtro or etapa_filtro == numero) %}
-        {% set itens_etapa = manutencoes|selectattr('agenda_etapa', 'equalto', numero)|list %}
-        {% if itens_etapa %}
-        <section class="agenda-grupo-etapa">
-          <header class="agenda-grupo-cabecalho {{ info.classe }}">
-            <div>
-              <small>ETAPA {{ numero }}</small>
-              <h3>{{ info.rotulo }}</h3>
-            </div>
-            <span>{{ info.responsavel }}</span>
-            <b>{{ itens_etapa|length }}</b>
-          </header>
-          <div class="agenda-grid">
-            {% for m in itens_etapa %}
-            <a class="agenda-evento {{ info.classe }}" href="/organiza/manutencoes/{{m.id}}#etapa-{{ numero }}">
-              <span>ETAPA {{ numero }} · {{ info.rotulo|upper }}</span>
-              <strong>{% if m.agenda_data %}{{ m.agenda_data.strftime('%d/%m/%Y %H:%M') }}{% else %}Sem data registrada{% endif %}</strong>
-              <b>#{{m.id}} · {{m.cliente.nome}}</b>
-              <small><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{m.equipamento.tipo}} {{m.equipamento.modelo or ''}}</small>
-              <small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
-              <em>{% if info.classe == 'status-cliente' %}Aguardando ação do cliente{% else %}Ação da equipe{% endif %}</em>
-            </a>
-            {% endfor %}
-          </div>
-        </section>
+  {% if eventos %}
+    <div class="agenda-lista-simples">
+      {% set ns = namespace(data='') %}
+      {% for e in eventos %}
+        {% set data_atual = e.data_hora.strftime('%d/%m/%Y') %}
+        {% if data_atual != ns.data %}
+          {% set ns.data = data_atual %}
+          <h2 class="agenda-dia">{{ data_atual }}</h2>
         {% endif %}
-      {% endif %}
-    {% endfor %}
-
-    {% if not manutencoes %}<p class="vazio">Nenhuma manutenção nesta etapa.</p>{% endif %}
-  </div>
+        <a href="{{ e.link }}" class="agenda-linha {{ e.tipo }}">
+          <time>{{ e.data_hora.strftime('%H:%M') }}</time>
+          <div>
+            <small>{{ e.titulo|upper }}</small>
+            <strong>{{ e.cliente }}</strong>
+            {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
+          </div>
+          {% if e.manual %}<em>Manual</em>{% endif %}
+          <b>›</b>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="agenda-vazia"><h2>Nenhum compromisso agendado</h2><p>Adicione manualmente uma visita ou aguarde novos agendamentos.</p></div>
+  {% endif %}
 </section>
 {% endblock %}
