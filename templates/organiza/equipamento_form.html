@@ -17,8 +17,8 @@
         <label class="campo-duplo">Número / código do HD<input name="numero_hd" value="{{ equipamento.numero_hd if equipamento and equipamento.numero_hd else '' }}" placeholder="Cole o código gerado pelo monitor"></label>
         <label>Fabricante<select name="fabricante"><option value="KARAOKERJ" {% if not equipamento or not equipamento.fabricante or equipamento.fabricante|upper == 'KARAOKERJ' %}selected{% endif %}>KARAOKERJ</option><option value="OUTROS" {% if equipamento and equipamento.fabricante|upper == 'OUTROS' %}selected{% endif %}>OUTROS</option></select></label>
         <label>Status<select name="status">{% for s in ['Ativo','Solicitar gabinete','Montagem','Pronto para entrega','Entregue','Em manutenção','Vendido','Inativo'] %}<option {% if equipamento and equipamento.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
-        <label>Pacote<select name="pacote"><option value="">Sem pacote</option>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if equipamento and equipamento.pacote == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select></label>
-        <label>Falta pacote<input name="falta_pacote" inputmode="numeric" value="{{ equipamento.falta_pacote if equipamento and equipamento.falta_pacote is not none else '' }}"></label>
+        <label>Pacote<select name="pacote" id="pacote-equipamento"><option value="">Sem pacote</option>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if equipamento and equipamento.pacote == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select></label>
+        <label>Falta pacote<input id="falta-pacote" inputmode="numeric" value="{{ equipamento.falta_pacote if equipamento and equipamento.falta_pacote is not none else '' }}" readonly aria-readonly="true" title="Calculado automaticamente conforme o pacote atual cadastrado"></label>
         <label>Plano<select name="plano"><option value="">Sem plano</option><option value="PLUS" {% if equipamento and equipamento.plano|upper == 'PLUS' %}selected{% endif %}>PLUS</option><option value="BÁSICO" {% if equipamento and equipamento.plano|upper in ['BÁSICO','BASICO'] %}selected{% endif %}>BÁSICO</option></select></label>
       </div>
     </section>
@@ -104,4 +104,26 @@
   atualizar();
 })();
 </script>
+<script>
+(() => {
+  const pacote = document.getElementById("pacote-equipamento");
+  const falta = document.getElementById("falta-pacote");
+  const pacoteAtual = "2026.1";
+
+  function indicePacote(valor) {
+    const partes = /^(\d{4})\.([12])$/.exec(valor || "");
+    return partes ? Number(partes[1]) * 2 + Number(partes[2]) : null;
+  }
+
+  function atualizarFaltaPacote() {
+    const atual = indicePacote(pacoteAtual);
+    const instalado = indicePacote(pacote.value);
+    falta.value = instalado === null ? "" : Math.max(atual - instalado, 0);
+  }
+
+  pacote.addEventListener("change", atualizarFaltaPacote);
+  atualizarFaltaPacote();
+})();
+</script>
+
 {% endblock %}

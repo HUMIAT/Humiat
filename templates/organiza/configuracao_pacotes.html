@@ -1,0 +1,42 @@
+{% extends "organiza/base.html" %}
+
+{% block titulo %}Pacote atual{% endblock %}
+
+{% block conteudo %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">CONFIGURAÇÃO</span>
+    <h1>Pacote atual</h1>
+    <p>Este valor controla o cálculo automático de pacotes pendentes.</p>
+  </div>
+</div>
+
+<section class="cartao" style="max-width: 620px;">
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
+
+  <form method="post" class="form-stack">
+    <label>
+      Pacote atual
+      <input
+        type="text"
+        name="pacote_atual"
+        value="{{ pacote_atual }}"
+        placeholder="Ex.: 2026.1"
+        pattern="\d{4}\.[12]"
+        required
+        autocomplete="off"
+      >
+      <small>Use o formato AAAA.1 ou AAAA.2.</small>
+    </label>
+
+    <div class="acoes-form">
+      <button type="submit" class="btn primario">Salvar pacote atual</button>
+    </div>
+  </form>
+
+  <div class="info-box" style="margin-top: 20px;">
+    Ao salvar, o sistema recalcula automaticamente o campo “Falta pacote” de todos os equipamentos.
+  </div>
+</section>
+{% endblock %}

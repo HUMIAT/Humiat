@@ -24,7 +24,10 @@
       <a class="menu-principal" href="/organiza/vendas/nova"><span>＋</span> Nova venda</a>
     </nav>
     <div class="side-bottom">
-      {% if usuario.is_admin %}<a href="/organiza/usuarios"><span>👤</span> Usuários</a>{% endif %}
+      {% if usuario.is_admin %}
+      <a href="/organiza/configuracoes/pacotes"><span>⚙</span> Pacote atual</a>
+      <a href="/organiza/usuarios"><span>👤</span> Usuários</a>
+      {% endif %}
       <a href="/area-restrita/sair"><span>⇥</span> Sair</a>
       <div class="side-user"><div class="avatar">{{ usuario.nome[:1] }}</div><div><strong>{{ usuario.nome }}</strong><small>{{ usuario.cargo or 'Equipe' }}</small></div></div>
     </div>

@@ -118,6 +118,16 @@ class Usuario(Base):
     criado_em = Column(DateTime, server_default=func.now())
 
 
+class ConfiguracaoSistema(Base):
+    __tablename__ = "configuracoes_sistema"
+    id = Column(Integer, primary_key=True)
+    chave = Column(String(80), unique=True, nullable=False)
+    valor = Column(String(120), nullable=True)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+
+
 class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(Integer, primary_key=True)
@@ -796,12 +806,39 @@ async def cliente_salvar(cliente_id: int, request: Request, usuario: Usuario = D
     return RedirectResponse(f"/organiza/clientes/{cliente.id}", status_code=303)
 
 
-def preencher_equipamento(eq: Equipamento, form: dict):
+PACOTE_ATUAL_PADRAO = "2026.1"
+
+
+def obter_pacote_atual(db: Session) -> str:
+    configuracao = db.query(ConfiguracaoSistema).filter(
+        ConfiguracaoSistema.chave == "pacote_atual"
+    ).first()
+    valor = (configuracao.valor if configuracao else PACOTE_ATUAL_PADRAO) or PACOTE_ATUAL_PADRAO
+    valor = valor.strip()
+    return valor if re.fullmatch(r"\d{4}\.[12]", valor) else PACOTE_ATUAL_PADRAO
+
+
+def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_PADRAO) -> int | None:
+    """Calcula quantas atualizações semestrais faltam até o pacote atual cadastrado."""
+    valor = (pacote or "").strip().upper()
+    atual = re.fullmatch(r"(\d{4})\.([12])", pacote_atual)
+    informado = re.fullmatch(r"(\d{4})\.([12])", valor)
+    if not atual or not informado:
+        return None
+
+    ano_atual, semestre_atual = map(int, atual.groups())
+    ano_pacote, semestre_pacote = map(int, informado.groups())
+    indice_atual = ano_atual * 2 + semestre_atual
+    indice_pacote = ano_pacote * 2 + semestre_pacote
+    return max(indice_atual - indice_pacote, 0)
+
+
+def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     eq.tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip()) or None
     eq.modelo = (form.get("modelo") or "").strip() or None
     eq.pacote = (form.get("pacote") or "").strip() or None
-    try: eq.falta_pacote = int(form.get("falta_pacote")) if form.get("falta_pacote") else None
-    except ValueError: eq.falta_pacote = None
+    # Este valor é derivado do pacote instalado e nunca é informado manualmente.
+    eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
     eq.plano = (form.get("plano") or "").strip() or None
     eq.valor = (form.get("valor") or "").strip() or None
     eq.preco_custo = (form.get("preco_custo") or "").strip() or None
@@ -927,9 +964,25 @@ def equipamento_codigo_duplicado(db: Session, equipamento: Equipamento):
 
 def opcoes_equipamentos(db: Session):
     tipos_bd = [x[0] for x in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None), Equipamento.tipo != "").distinct().order_by(Equipamento.tipo).all()]
-    pacotes_bd = [x[0] for x in db.query(Equipamento.pacote).filter(Equipamento.pacote.isnot(None), Equipamento.pacote != "").distinct().order_by(Equipamento.pacote.desc()).all()]
+    pacotes_bd = [x[0] for x in db.query(Equipamento.pacote).filter(Equipamento.pacote.isnot(None), Equipamento.pacote != "").distinct().all()]
     tipos = list(dict.fromkeys(["JUKEBOX", "MALETA", "IPHONE", "FLIPERAMA"] + tipos_bd))
-    pacotes = list(dict.fromkeys(["2026.2", "2026.1"] + pacotes_bd))
+
+    pacote_atual = obter_pacote_atual(db)
+    atual = tuple(map(int, pacote_atual.split(".")))
+    pacotes_validos = []
+    especiais = []
+    for pacote in pacotes_bd:
+        valor = (pacote or "").strip()
+        correspondencia = re.fullmatch(r"(\\d{4})\\.([12])", valor)
+        if correspondencia:
+            chave = tuple(map(int, correspondencia.groups()))
+            if chave <= atual:
+                pacotes_validos.append(valor)
+        elif valor.upper() in {"NE", "NA"}:
+            especiais.append(valor.upper())
+
+    pacotes_validos = sorted(set(pacotes_validos + [pacote_atual]), key=lambda valor: tuple(map(int, valor.split("."))), reverse=True)
+    pacotes = pacotes_validos + sorted(set(especiais))
     return tipos, pacotes
 
 
@@ -943,6 +996,7 @@ def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depen
         "erro": "", "tipos": tipos, "pacotes": pacotes,
         "proxima_maquina": proximo_codigo_maquina(db),
         "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
+        "pacote_atual": obter_pacote_atual(db),
     })
 
 
@@ -952,7 +1006,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
     if not cliente: raise HTTPException(404)
     form = dict(await request.form())
     if not (form.get("tipo") or "").strip():
-        eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
+        eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form, db)
         tipos, pacotes = opcoes_equipamentos(db)
         return templates.TemplateResponse("organiza/equipamento_form.html", {
             "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
@@ -960,7 +1014,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
             "proxima_maquina": proximo_codigo_maquina(db),
             "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
         }, status_code=400)
-    eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form)
+    eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
     erro_identificacao = validar_codigo_monitor(db, eq)
     duplicado_cliente = equipamento_codigo_duplicado(db, eq)
@@ -1001,7 +1055,7 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     if not eq: raise HTTPException(404)
     form = dict(await request.form())
     codigo_anterior = (eq.maquina or "").strip().upper()
-    preencher_equipamento(eq, form)
+    preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
     erro_identificacao = validar_codigo_monitor(db, eq, codigo_anterior)
     duplicado_cliente = equipamento_codigo_duplicado(db, eq)
@@ -1118,7 +1172,7 @@ async def equipamento_gerar_licenca(cliente_id: int, equipamento_id: int, reques
 
     # O mesmo botão salva as correções feitas nos campos antes de gerar.
     form = dict(await request.form())
-    preencher_equipamento(eq, form)
+    preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
     db.commit()
     _, zip_path = gerar_pasta_licenca(eq)
@@ -1229,7 +1283,7 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
         return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente.id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
 
     eq = Equipamento(cliente_id=cliente.id)
-    preencher_equipamento(eq, form)
+    preencher_equipamento(eq, form, db)
     if eq.status not in STATUS_VENDA:
         eq.status = "Solicitar gabinete"
     garantir_identificacao_equipamento(db, eq)
@@ -1412,6 +1466,68 @@ def dados_nota_csv(equipamento_id: int, usuario: Usuario = Depends(usuario_logad
     w.writerow({"nome":c.nome,"cpf_cnpj":c.documento or "","inscricao_estadual":c.inscricao_estadual or "","email":c.email or "","telefone":c.telefone,"cep":c.cep or "","logradouro":c.endereco or "","numero":c.endereco_numero or "","complemento":c.complemento or "","bairro":c.bairro or "","municipio":c.municipio or c.cidade or "","uf":c.estado or "","descricao":f"{eq.tipo or ''} {eq.modelo or ''}".strip(),"codigo":eq.maquina or "","numero_serie":eq.numero_serie or "","valor_total":str(moeda_num(eq.valor or eq.preco_venda or '0')).replace('.',','),"data_compra":eq.data_compra.strftime('%d/%m/%Y') if eq.data_compra else ""})
     conteudo = '\ufeff' + out.getvalue()
     return Response(conteudo.encode('utf-8'), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="dados_nota_{eq.id}.csv"'})
+
+
+@app.get("/organiza/configuracoes/pacotes", response_class=HTMLResponse)
+def configuracao_pacotes(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    exigir_admin(usuario)
+    return templates.TemplateResponse(
+        "organiza/configuracao_pacotes.html",
+        {
+            "request": request,
+            "usuario": usuario,
+            "pacote_atual": obter_pacote_atual(db),
+            "mensagem": request.query_params.get("mensagem", ""),
+            "erro": "",
+        },
+    )
+
+
+@app.post("/organiza/configuracoes/pacotes", response_class=HTMLResponse)
+async def configuracao_pacotes_salvar(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    exigir_admin(usuario)
+    form = dict(await request.form())
+    pacote_atual = (form.get("pacote_atual") or "").strip()
+
+    if not re.fullmatch(r"\d{4}\.[12]", pacote_atual):
+        return templates.TemplateResponse(
+            "organiza/configuracao_pacotes.html",
+            {
+                "request": request,
+                "usuario": usuario,
+                "pacote_atual": pacote_atual,
+                "mensagem": "",
+                "erro": "Informe o pacote no formato AAAA.1 ou AAAA.2.",
+            },
+            status_code=400,
+        )
+
+    configuracao = db.query(ConfiguracaoSistema).filter(
+        ConfiguracaoSistema.chave == "pacote_atual"
+    ).first()
+    if not configuracao:
+        configuracao = ConfiguracaoSistema(chave="pacote_atual")
+        db.add(configuracao)
+    configuracao.valor = pacote_atual
+
+    for equipamento in db.query(Equipamento).all():
+        equipamento.falta_pacote = calcular_falta_pacote(
+            equipamento.pacote, pacote_atual
+        )
+
+    db.commit()
+    return RedirectResponse(
+        "/organiza/configuracoes/pacotes?mensagem=Pacote+atual+salvo+e+cálculos+atualizados.",
+        status_code=303,
+    )
 
 
 @app.get("/organiza/usuarios", response_class=HTMLResponse)
