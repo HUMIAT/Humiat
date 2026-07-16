@@ -640,11 +640,15 @@ def _contexto_operacao(db: Session):
             else:
                 m.operacao_data = m.criado_em
 
+    grupos = {chave: _agrupar_por_cliente(valor) for chave, valor in filas.items()}
     return {
         "filas": filas,
-        "grupos": {chave: _agrupar_por_cliente(valor) for chave, valor in filas.items()},
-        "contagens": {chave: len(valor) for chave, valor in filas.items()},
-        "total_operacao": sum(len(valor) for valor in filas.values()),
+        "grupos": grupos,
+        # A Central trabalha por cliente. O número do card representa grupos de ação,
+        # enquanto a quantidade de equipamentos continua visível dentro de cada grupo.
+        "contagens": {chave: len(valor) for chave, valor in grupos.items()},
+        "contagens_equipamentos": {chave: len(valor) for chave, valor in filas.items()},
+        "total_operacao": sum(len(valor) for valor in grupos.values()),
         "total_manutencoes": len(manutencoes),
     }
 
@@ -2296,6 +2300,93 @@ def _fila_operacional_exclusiva(m):
 
     return None
 
+
+
+
+ETAPAS_OPERACAO_AGRUPADA = {
+    "atendimento": {
+        "titulo": "Aguardando atendimento ou entrega",
+        "descricao": "Selecione os equipamentos entregues pelo cliente e confirme todos de uma vez.",
+    },
+    "aprovacoes": {
+        "titulo": "Aguardando aprovação",
+        "descricao": "Acompanhe e reenvie, em uma única mensagem, os orçamentos selecionados do cliente.",
+    },
+    "execucao": {
+        "titulo": "Em execução",
+        "descricao": "Somente equipamentos aprovados e liberados para execução.",
+    },
+    "pausados": {
+        "titulo": "Aguardando item",
+        "descricao": "Equipamentos em execução pausados por peça ou material.",
+    },
+}
+
+
+@app.get("/organiza/operacao/etapa/{chave}", response_class=HTMLResponse)
+def operacao_etapa_agrupada(
+    chave: str,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    configuracao = ETAPAS_OPERACAO_AGRUPADA.get(chave)
+    if not configuracao:
+        raise HTTPException(404)
+    manutencoes = [
+        m for m in _manutencoes_operacao(db)
+        if _fila_operacional_exclusiva(m) == chave
+    ]
+    grupos = _agrupar_por_cliente(manutencoes)
+    if chave == "aprovacoes":
+        for grupo in grupos:
+            grupo["comunicado"] = all(_status_comunicacao(m, "orcamento") for m in grupo["manutencoes"])
+    return templates.TemplateResponse("organiza/operacao_etapa_agrupada.html", {
+        "request": request,
+        "usuario": usuario,
+        "chave": chave,
+        "titulo": configuracao["titulo"],
+        "descricao": configuracao["descricao"],
+        "grupos": grupos,
+        "sucesso": request.query_params.get("sucesso", ""),
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/organiza/operacao/receber")
+async def operacao_receber_em_lote(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        ids = sorted({int(x) for x in form.getlist("manutencao_id")})
+    except ValueError:
+        ids = []
+    selecionadas = [
+        m for m in _manutencoes_operacao(db)
+        if m.id in ids and _fila_operacional_exclusiva(m) == "atendimento"
+    ]
+    if not selecionadas:
+        return RedirectResponse(
+            "/organiza/operacao/etapa/atendimento?erro=Selecione pelo menos um equipamento",
+            status_code=303,
+        )
+    if len({m.cliente_id for m in selecionadas}) != 1:
+        return RedirectResponse(
+            "/organiza/operacao/etapa/atendimento?erro=Confirme um cliente por vez",
+            status_code=303,
+        )
+    agora = datetime.now()
+    for m in selecionadas:
+        m.recebido_em = agora
+        m.status = "Orçamento em elaboração"
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/operacao/etapa/atendimento?sucesso={len(selecionadas)} equipamento(s) recebido(s)",
+        status_code=303,
+    )
 
 
 @app.get("/organiza/operacao/orcamentos", response_class=HTMLResponse)

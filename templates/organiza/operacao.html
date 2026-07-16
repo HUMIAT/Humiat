@@ -17,13 +17,13 @@
   </section>
 
   {% set etapas = [
-    ("atendimento", "1", "Aguardando atendimento ou entrega", "Cliente vai trazer o equipamento ou iniciar atendimento online.", "/organiza/manutencoes?status=entrada", "cliente"),
+    ("atendimento", "1", "Aguardando atendimento ou entrega", "Cliente vai trazer o equipamento ou iniciar atendimento online.", "/organiza/operacao/etapa/atendimento", "cliente"),
     ("orcamentos", "2", "Aguardando orçamento", "Equipamento recebido; monte e salve o orçamento.", "/organiza/operacao/orcamentos", "equipe"),
     ("comunicar_orcamentos", "3", "Comunicar orçamentos", "Orçamentos salvos e prontos para enviar por cliente.", "/organiza/operacao/comunicacoes?tipo=orcamento", "equipe"),
-    ("aprovacoes", "4", "Aguardando aprovação", "Cliente precisa decidir todos os itens do orçamento.", "/organiza/manutencoes?status=aceite", "cliente"),
+    ("aprovacoes", "4", "Aguardando aprovação", "Cliente precisa decidir todos os itens do orçamento.", "/organiza/operacao/etapa/aprovacoes", "cliente"),
     ("pagamentos", "5", "Pagamento, prazo e confirmação", "Registre pagamento, prazo e comunique o cliente.", "/organiza/operacao/pagamentos", "cliente"),
-    ("execucao", "6", "Em execução", "Serviços autorizados para o técnico executar.", "/organiza/manutencoes?status=execucao", "equipe"),
-    ("pausados", "7", "Aguardando item", "Serviços pausados por compra de peça ou material.", "/organiza/manutencoes?status=execucao", "equipe"),
+    ("execucao", "6", "Em execução", "Serviços autorizados para o técnico executar.", "/organiza/operacao/etapa/execucao", "equipe"),
+    ("pausados", "7", "Aguardando item", "Serviços pausados por compra de peça ou material.", "/organiza/operacao/etapa/pausados", "equipe"),
     ("prontos", "8", "Comunicar equipamentos prontos", "Serviços concluídos aguardando mensagem ao cliente.", "/organiza/operacao/comunicacoes?tipo=pronto", "cliente"),
     ("retiradas", "9", "Aguardando retirada", "Cliente comunicado; falta agendar ou concluir a retirada.", "/organiza/agenda", "cliente")
   ] %}
