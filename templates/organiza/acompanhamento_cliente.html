@@ -1,175 +1,272 @@
 {% extends "organiza/base.html" %}
 {% block conteudo_publico %}
-<div class="publico-cabecalho">
+<header class="portal-topo">
   <img src="/static/img/logo-karaoke-rj.png" alt="Karaokê RJ">
-  <div><h1>Acompanhamento do atendimento</h1><p>{{ cliente.nome }}</p></div>
-</div>
+  <div>
+    <span>ACOMPANHAMENTO</span>
+    <h1>Olá, {{ cliente.nome }}</h1>
+    <p>Veja e responda seus orçamentos abaixo.</p>
+  </div>
+</header>
 
 {% if registros %}
-  {% if tem_prontos %}
-  <form id="acoes-atendimento">
-    <div class="acoes-coletivas">
-      <div>
-        <strong>Equipamentos concluídos</strong>
-        <span>Selecione um ou vários equipamentos prontos.</span>
-      </div>
-      <select id="acao-coletiva" aria-label="Ação para os equipamentos selecionados">
-        <option value="">O que deseja fazer?</option>
-        <option value="garantia">Abrir garantias selecionadas</option>
-        <option value="retirada">Agendar ou reagendar retirada</option>
-      </select>
-      <button class="btn btn-primary" type="submit">Continuar</button>
-    </div>
-  {% endif %}
-
-  <div class="fila-lista publica-lista">
+  <main class="portal-lista">
   {% for r in registros %}
-    <section class="fila-grupo atendimento-selecionavel">
-      {% if r.m.pronto_em %}
-      <label class="selecao-equipamento">
-        <input
-          type="checkbox"
-          name="manutencao_id"
-          value="{{ r.m.id }}"
-          data-pronto="1"
-          data-agendado="{{ '1' if r.retirada_agendada else '0' }}"
-        >
-        <span>Selecionar</span>
-      </label>
-      {% endif %}
-
-      <div class="fila-cabecalho">
-        <div class="identificacao-equipamento">
-          <h2>{{ rotulo_maquina(r.m.equipamento) }}</h2>
-          <p>{{ r.m.equipamento.tipo }} {{ r.m.equipamento.modelo or '' }}</p>
-          <small>Código técnico: {{ codigo_tecnico(r.m.equipamento) }}</small>
+    {% set aguardando = r.orcamento and r.orcamento.status in ("Enviado", "Aguardando aprovação") %}
+    <article class="portal-card {% if aguardando %}aguardando-resposta{% endif %}" id="manutencao-{{ r.m.id }}">
+      <button class="card-resumo" type="button" aria-expanded="false" {% if not aguardando %}disabled{% endif %}>
+        <div class="card-identificacao">
+          <strong>{{ rotulo_maquina(r.m.equipamento) }}</strong>
+          <span>{{ r.m.equipamento.tipo }}{% if r.m.equipamento.modelo %} · {{ r.m.equipamento.modelo }}{% endif %}</span>
         </div>
-        <span class="status-pill {{ r.meta.classe }}">{{ r.meta.rotulo }}</span>
-      </div>
-
-      {% if r.orcamento %}
-      <div class="resumo-orcamento">
-        <div>
-          <span>Serviço</span>
-          <strong>{{ r.totais.obrigatorio_final|moeda }}</strong>
+        <div class="card-status">
+          <span class="status-pill {{ r.meta.classe }}">{{ r.meta.rotulo }}</span>
+          {% if r.orcamento %}
+            <strong>{{ r.totais.obrigatorio_final|moeda }}</strong>
+          {% endif %}
+          {% if aguardando %}<span class="abrir-texto">Ver orçamento <b>⌄</b></span>{% endif %}
         </div>
-        {% if r.totais.geral != r.totais.obrigatorio_final %}
-        <div>
-          <span>Com opcionais</span>
-          <strong>{{ r.totais.geral|moeda }}</strong>
+      </button>
+
+      {% if aguardando %}
+      <section class="card-conteudo" hidden>
+        {% if r.m.defeito %}
+        <div class="bloco-texto">
+          <span>Problema informado</span>
+          <p>{{ r.m.defeito }}</p>
         </div>
         {% endif %}
-        <div>
-          <span>Pagamento</span>
-          <strong>{{ r.orcamento.forma_pagamento_orcamento or '-' }}</strong>
-        </div>
-        <div>
-          <span>Prazo</span>
-          <strong>{% if r.orcamento.prazo_dias_uteis %}{{ r.orcamento.prazo_dias_uteis }} dias úteis{% else %}-{% endif %}</strong>
-        </div>
-      </div>
-      {% endif %}
 
-      <div class="linha-tempo-publica">
-      {% for numero in range(1,8) %}
-        <div class="{% if numero < r.etapa %}concluida{% elif numero == r.etapa %}atual{% else %}futura{% endif %}">
-          <b>{{ numero }}</b><span>{{ ETAPAS_MANUTENCAO[numero].titulo }}</span>
+        {% if r.m.diagnostico %}
+        <div class="bloco-texto destaque">
+          <span>Diagnóstico técnico</span>
+          <p>{{ r.m.diagnostico }}</p>
         </div>
-      {% endfor %}
-      </div>
+        {% endif %}
 
-      {% if r.orcamento and r.orcamento.status in ("Enviado","Aguardando aprovação") %}
-        <a class="btn btn-primary acao-principal-cliente" href="/orcamento/{{ r.orcamento.token }}">Revisar e responder orçamento</a>
+        <div class="orcamento-secao">
+          <h2>Itens obrigatórios</h2>
+          {% if r.orcamento.valor_manutencao and r.orcamento.valor_manutencao > 0 %}
+          <div class="item-orcamento">
+            <div><strong>Serviço de manutenção</strong></div>
+            <strong>{{ r.orcamento.valor_manutencao|moeda }}</strong>
+          </div>
+          {% endif %}
+          {% for item in r.orcamento.itens if not item.opcional %}
+          <div class="item-orcamento">
+            <div>
+              <strong>{{ item.descricao }}</strong>
+              {% if item.quantidade > 1 %}<small>{{ item.quantidade }} unidades</small>{% endif %}
+            </div>
+            <strong>{{ (item.preco_venda * item.quantidade)|moeda }}</strong>
+          </div>
+          {% else %}
+            {% if not r.orcamento.valor_manutencao %}<p class="sem-itens">Nenhum item obrigatório informado.</p>{% endif %}
+          {% endfor %}
+          <div class="subtotal"><span>Total obrigatório</span><strong>{{ r.totais.obrigatorio_final|moeda }}</strong></div>
+        </div>
+
+        {% set opcionais = r.orcamento.itens|selectattr("opcional")|list %}
+        {% if opcionais %}
+        <div class="orcamento-secao opcionais">
+          <h2>Itens opcionais</h2>
+          {% for item in opcionais %}
+          <div class="item-orcamento">
+            <div>
+              <strong>{{ item.descricao }}</strong>
+              {% if item.quantidade > 1 %}<small>{{ item.quantidade }} unidades</small>{% endif %}
+            </div>
+            <strong>{{ (item.preco_venda * item.quantidade)|moeda }}</strong>
+          </div>
+          {% endfor %}
+          <div class="subtotal total-completo"><span>Total com tudo</span><strong>{{ r.totais.geral|moeda }}</strong></div>
+        </div>
+        {% endif %}
+
+        <div class="condicoes">
+          <div><span>Pagamento</span><strong>{{ r.orcamento.forma_pagamento_orcamento or "A combinar" }}</strong></div>
+          <div><span>Prazo após pagamento</span><strong>{% if r.orcamento.prazo_dias_uteis %}{{ r.orcamento.prazo_dias_uteis }} dias úteis{% else %}A combinar{% endif %}</strong></div>
+        </div>
+
+        <form class="form-resposta" action="/orcamento/{{ r.orcamento.token }}/responder" method="post">
+          <button class="acao aprovar" type="submit" name="acao" value="obrigatorios">
+            Aprovar obrigatórios
+            <small>{{ r.totais.obrigatorio_final|moeda }}</small>
+          </button>
+          {% if opcionais %}
+          <button class="acao aprovar-tudo" type="submit" name="acao" value="aprovar">
+            Aprovar tudo
+            <small>{{ r.totais.geral|moeda }}</small>
+          </button>
+          {% endif %}
+          <button class="acao cancelar" type="submit" name="acao" value="cancelar">Cancelar orçamento</button>
+        </form>
+        <p class="mensagem-resposta" role="status" hidden></p>
+      </section>
       {% endif %}
 
       {% if r.m.pronto_em %}
-        <div class="situacao-retirada {% if r.retirada_agendada %}agendada{% else %}pendente{% endif %}">
-          {% if r.retirada_agendada %}
-            <strong>Retirada agendada</strong>
-            <span>{{ r.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</span>
-          {% else %}
-            <strong>Retirada ainda não agendada</strong>
-            <span>Selecione este equipamento para agendar junto com os demais.</span>
-          {% endif %}
-        </div>
+      <div class="situacao-retirada {% if r.retirada_agendada %}agendada{% else %}pendente{% endif %}">
+        {% if r.retirada_agendada %}
+          <strong>Retirada agendada</strong>
+          <span>{{ r.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</span>
+        {% else %}
+          <strong>Pronto para retirada</strong>
+          <a class="btn-retirada" href="/retirada-cliente/{{ cliente.token_ficha }}?ids={{ r.m.id }}">Agendar retirada</a>
+        {% endif %}
+      </div>
       {% endif %}
-    </section>
+    </article>
   {% endfor %}
-  </div>
-
-  {% if tem_prontos %}
-  </form>
-  {% endif %}
+  </main>
+{% else %}
+  <div class="estado-vazio"><h2>Nenhum atendimento disponível</h2></div>
+{% endif %}
 
 <script>
 (() => {
-  const form = document.querySelector('#acoes-atendimento');
-  const acao = document.querySelector('#acao-coletiva');
-  if (!form || !acao) return;
+  const cards = [...document.querySelectorAll('.portal-card.aguardando-resposta')];
 
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const marcados = [...form.querySelectorAll('input[name="manutencao_id"]:checked')];
-    if (!marcados.length) {
-      alert('Selecione ao menos um equipamento pronto.');
-      return;
-    }
-    if (!acao.value) {
-      alert('Escolha o que deseja fazer.');
-      return;
-    }
+  function fecharCard(card) {
+    const conteudo = card.querySelector('.card-conteudo');
+    const resumo = card.querySelector('.card-resumo');
+    if (!conteudo || !resumo) return;
+    conteudo.hidden = true;
+    resumo.setAttribute('aria-expanded', 'false');
+    card.classList.remove('aberto');
+  }
 
-    const ids = marcados.map((item) => item.value).join(',');
-    if (acao.value === 'garantia') {
-      window.location.href = `/garantias/{{ cliente.token_ficha }}.pdf?ids=${encodeURIComponent(ids)}`;
-      return;
-    }
-    window.location.href = `/retirada-cliente/{{ cliente.token_ficha }}?ids=${encodeURIComponent(ids)}`;
+  cards.forEach((card) => {
+    const resumo = card.querySelector('.card-resumo');
+    const conteudo = card.querySelector('.card-conteudo');
+    const form = card.querySelector('.form-resposta');
+    if (!resumo || !conteudo) return;
+
+    resumo.addEventListener('click', () => {
+      const vaiAbrir = conteudo.hidden;
+      cards.forEach((outro) => {
+        if (outro !== card) fecharCard(outro);
+      });
+      conteudo.hidden = !vaiAbrir;
+      resumo.setAttribute('aria-expanded', String(vaiAbrir));
+      card.classList.toggle('aberto', vaiAbrir);
+      if (vaiAbrir) card.scrollIntoView({behavior: 'smooth', block: 'start'});
+    });
+
+    if (!form) return;
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const botao = event.submitter;
+      if (!botao) return;
+      if (botao.value === 'cancelar' && !confirm('Deseja realmente cancelar este orçamento?')) return;
+
+      const botoes = [...form.querySelectorAll('button')];
+      botoes.forEach((item) => item.disabled = true);
+      const textoOriginal = botao.innerHTML;
+      botao.textContent = 'Registrando...';
+
+      const dados = new FormData(form);
+      dados.set('acao', botao.value);
+
+      try {
+        const resposta = await fetch(form.action, {
+          method: 'POST',
+          body: dados,
+          headers: {'X-Requested-With': 'XMLHttpRequest'}
+        });
+        if (!resposta.ok) throw new Error('Não foi possível registrar a resposta.');
+        const resultado = await resposta.json();
+
+        const mensagem = card.querySelector('.mensagem-resposta');
+        mensagem.textContent = resultado.mensagem || 'Resposta registrada com sucesso.';
+        mensagem.hidden = false;
+        form.hidden = true;
+
+        const selo = card.querySelector('.status-pill');
+        selo.textContent = resultado.status || 'Resposta registrada';
+        selo.className = 'status-pill sucesso';
+        card.classList.remove('aguardando-resposta');
+
+        setTimeout(() => {
+          fecharCard(card);
+          const proximo = cards.find((item) =>
+            item !== card &&
+            item.classList.contains('aguardando-resposta') &&
+            item.querySelector('.card-conteudo')?.hidden
+          );
+          if (proximo) proximo.scrollIntoView({behavior: 'smooth', block: 'center'});
+        }, 1100);
+      } catch (erro) {
+        alert(erro.message);
+        botoes.forEach((item) => item.disabled = false);
+        botao.innerHTML = textoOriginal;
+      }
+    });
   });
 })();
 </script>
-{% else %}
-<div class="estado-vazio"><h2>Nenhum atendimento disponível</h2></div>
-{% endif %}
 
 <style>
+*{box-sizing:border-box}
 html,body{max-width:100%;overflow-x:hidden}
-.organiza-container.publica{width:100%;max-width:760px;margin:0 auto;padding:20px 14px;box-sizing:border-box}
-.publico-cabecalho{display:flex;align-items:center;gap:14px;margin-bottom:22px}
-.publico-cabecalho img{width:54px;height:54px;object-fit:contain;flex:0 0 auto}
-.publico-cabecalho h1{font-size:clamp(25px,7vw,38px);line-height:1.05;margin:0;overflow-wrap:anywhere}
-.publico-cabecalho p{margin:8px 0 0}
-.publica-lista,.fila-lista{width:100%;max-width:100%;min-width:0}
-.atendimento-selecionavel{position:relative;padding-top:18px;overflow:hidden;min-width:0}
-.atendimento-selecionavel:has(.selecao-equipamento){padding-top:54px}
-.selecao-equipamento{position:absolute;top:14px;left:16px;display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer}
-.selecao-equipamento input{width:20px;height:20px}
-.fila-cabecalho{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;min-width:0}
-.identificacao-equipamento{min-width:0;flex:1}
-.identificacao-equipamento h2,.identificacao-equipamento p,.identificacao-equipamento small{overflow-wrap:anywhere;word-break:break-word}
-.identificacao-equipamento h2{margin:0 0 5px}
-.resumo-orcamento{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px}
-.resumo-orcamento div{display:flex;flex-direction:column;gap:3px;min-width:0}
-.resumo-orcamento span{font-size:12px;color:#64748b}
-.resumo-orcamento strong{font-size:14px;overflow-wrap:anywhere}
-.linha-tempo-publica{display:grid!important;grid-template-columns:1fr!important;gap:8px!important;width:100%;min-width:0;overflow:visible!important}
-.linha-tempo-publica>div{display:grid!important;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:10px;width:100%;min-width:0;padding:8px 0}
-.linha-tempo-publica>div b{margin:0}
-.linha-tempo-publica>div span{white-space:normal!important;overflow-wrap:anywhere;text-align:left!important}
-.acao-principal-cliente{display:flex;width:100%;justify-content:center;box-sizing:border-box;margin-top:12px}
-.acoes-coletivas{display:grid;grid-template-columns:1fr;gap:10px;background:#fff;border:1px solid #d9e2ef;border-radius:16px;padding:14px;margin:0 0 18px;box-shadow:0 8px 24px rgba(15,23,42,.08)}
-.acoes-coletivas div{display:flex;flex-direction:column;gap:3px}.acoes-coletivas span{color:#64748b;font-size:14px}
-.acoes-coletivas select,.acoes-coletivas button{width:100%;min-height:44px;box-sizing:border-box}
-.acoes-coletivas select{border:1px solid #cbd5e1;border-radius:10px;padding:0 12px;background:#fff}
-.situacao-retirada{display:flex;flex-direction:column;gap:4px;margin-top:14px;padding:12px 14px;border-radius:12px}
-.situacao-retirada.agendada{background:#ecfdf3;border:1px solid #abefc6}
-.situacao-retirada.pendente{background:#fff7ed;border:1px solid #fed7aa}
-@media(max-width:520px){
-  .organiza-container.publica{padding:14px 10px}
-  .fila-grupo{padding-left:14px!important;padding-right:14px!important}
-  .fila-cabecalho{flex-direction:column}
-  .status-pill{align-self:flex-start}
-  .resumo-orcamento{grid-template-columns:1fr}
+.organiza-container.publica{width:100%;max-width:680px;margin:0 auto;padding:18px 12px 40px}
+.portal-topo{display:flex;gap:14px;align-items:center;margin:4px 0 22px}
+.portal-topo img{width:58px;height:58px;object-fit:contain;flex:0 0 auto}
+.portal-topo span{font-size:12px;font-weight:800;letter-spacing:.12em;color:#2563eb}
+.portal-topo h1{font-size:clamp(25px,7vw,34px);line-height:1.08;margin:3px 0 4px;overflow-wrap:anywhere}
+.portal-topo p{margin:0;color:#64748b}
+.portal-lista{display:grid;gap:12px;width:100%;min-width:0}
+.portal-card{background:#fff;border:1px solid #dbe3ee;border-radius:18px;overflow:hidden;box-shadow:0 7px 22px rgba(15,23,42,.06);min-width:0;scroll-margin-top:12px}
+.portal-card.aberto{border-color:#93b4ff;box-shadow:0 10px 28px rgba(37,99,235,.12)}
+.card-resumo{appearance:none;border:0;background:#fff;width:100%;padding:17px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;text-align:left;cursor:pointer;color:inherit;align-items:start}
+.card-resumo:disabled{cursor:default}
+.card-identificacao{display:flex;flex-direction:column;gap:4px;min-width:0}
+.card-identificacao strong{font-size:18px;overflow-wrap:anywhere}
+.card-identificacao span{font-size:13px;color:#64748b;overflow-wrap:anywhere}
+.card-status{display:flex;flex-direction:column;align-items:flex-end;gap:7px;text-align:right;min-width:104px}
+.card-status>strong{font-size:17px}
+.abrir-texto{font-size:13px;font-weight:800;color:#2563eb}
+.abrir-texto b{display:inline-block;transition:.2s}
+.portal-card.aberto .abrir-texto b{transform:rotate(180deg)}
+.status-pill{display:inline-flex;padding:6px 9px;border-radius:999px;font-size:11px;font-weight:800;background:#fff4e5;color:#9a5a00;white-space:normal;text-align:center}
+.status-pill.sucesso{background:#eafaf0;color:#08783e}
+.card-conteudo{border-top:1px solid #e7edf5;padding:16px;background:#fbfdff}
+.bloco-texto{margin-bottom:14px}
+.bloco-texto span,.condicoes span{display:block;font-size:12px;color:#64748b;margin-bottom:4px}
+.bloco-texto p{margin:0;line-height:1.5;overflow-wrap:anywhere}
+.bloco-texto.destaque{background:#eef5ff;border-radius:12px;padding:12px}
+.orcamento-secao{margin-top:17px}
+.orcamento-secao h2{font-size:16px;margin:0 0 8px}
+.item-orcamento{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid #e7edf5}
+.item-orcamento>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.item-orcamento strong{font-size:14px;overflow-wrap:anywhere}
+.item-orcamento small{color:#64748b}
+.subtotal{display:flex;justify-content:space-between;align-items:center;padding:13px 0 4px;font-weight:800}
+.total-completo{color:#175cd3}
+.sem-itens{color:#64748b;font-size:14px}
+.condicoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}
+.condicoes>div{background:#fff;border:1px solid #e1e8f0;border-radius:12px;padding:11px;min-width:0}
+.condicoes strong{font-size:14px;overflow-wrap:anywhere}
+.form-resposta{display:grid;gap:9px;margin-top:16px}
+.acao{width:100%;min-height:52px;border-radius:12px;border:0;padding:10px 14px;font-size:15px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.acao small{font-size:13px}
+.acao.aprovar{background:#16803c;color:#fff}
+.acao.aprovar-tudo{background:#175cd3;color:#fff}
+.acao.cancelar{background:#fff;color:#b42318;border:1px solid #f0b5b0;justify-content:center}
+.acao:disabled{opacity:.65;cursor:wait}
+.mensagem-resposta{background:#eafaf0;color:#08783e;border:1px solid #a9e4c3;border-radius:12px;padding:13px;text-align:center;font-weight:800;margin:14px 0 0}
+.situacao-retirada{margin:0 16px 16px;padding:12px;border-radius:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff7ed;border:1px solid #fed7aa}
+.situacao-retirada.agendada{background:#ecfdf3;border-color:#abefc6}
+.btn-retirada{background:#175cd3;color:#fff;text-decoration:none;padding:9px 12px;border-radius:9px;font-weight:800}
+@media(max-width:480px){
+  .organiza-container.publica{padding:12px 9px 32px}
+  .portal-topo{align-items:flex-start}
+  .portal-topo img{width:50px;height:50px}
+  .card-resumo{grid-template-columns:minmax(0,1fr);padding:15px}
+  .card-status{align-items:flex-start;text-align:left;min-width:0}
+  .condicoes{grid-template-columns:1fr}
+  .card-conteudo{padding:14px}
+  .situacao-retirada{align-items:flex-start;flex-direction:column}
 }
 </style>
 {% endblock %}

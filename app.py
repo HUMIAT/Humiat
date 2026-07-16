@@ -3240,6 +3240,17 @@ async def orcamento_responder(token: str, request: Request, db: Session = Depend
         modalidade = "todos" if acao == "aprovar" else "obrigatorios"
         registrar_aprovacao_orcamento(o, modalidade, "cliente")
     db.commit()
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        if acao == "cancelar":
+            mensagem = "Orçamento cancelado."
+            status = "Cancelado"
+        elif acao == "aprovar":
+            mensagem = "Orçamento completo aprovado."
+            status = "Tudo aprovado"
+        else:
+            mensagem = "Itens obrigatórios aprovados."
+            status = "Obrigatórios aprovados"
+        return JSONResponse({"ok": True, "mensagem": mensagem, "status": status})
     return RedirectResponse(f"/orcamento/{token}?ok=1", status_code=303)
 
 # -----------------------------------------------------------------------------
