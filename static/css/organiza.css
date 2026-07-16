@@ -3570,3 +3570,32 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .agenda-linha{grid-template-columns:58px 1fr 18px}
   .agenda-linha em{display:none}
 }
+
+
+/* Orçamentos operacionais: edição rápida sem abrir a manutenção */
+.orcamento-fila{display:grid;gap:14px}
+.orcamento-operacao-card{background:#fff;border:1px solid #d9e2ef;border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.05)}
+.orcamento-operacao-resumo{width:100%;display:flex;justify-content:space-between;gap:18px;align-items:center;text-align:left;border:0;background:#fff;padding:18px 20px;cursor:pointer}
+.orcamento-operacao-resumo>div{display:grid;gap:4px}
+.orcamento-operacao-resumo strong{font-size:18px}
+.orcamento-operacao-resumo span{color:#334155}
+.orcamento-operacao-resumo small{color:#64748b}
+.orcamento-operacao-acao{font-weight:800;color:#165dff!important;white-space:nowrap}
+.orcamento-operacao-form{padding:20px;border-top:1px solid #e2e8f0;display:grid;gap:16px;background:#f8fbff}
+.orcamento-operacao-form.oculto{display:none}
+.orcamento-operacao-form .grade-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.orcamento-operacao-form label{display:grid;gap:7px;font-weight:700}
+.orcamento-operacao-form input,.orcamento-operacao-form select{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
+.checkbox-linha{display:flex!important;align-items:center;gap:8px;font-weight:600!important}
+.checkbox-linha input{width:auto!important}
+.orcamento-itens-cabecalho{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.linhas-itens{display:grid;gap:10px}
+.linha-item{display:grid;grid-template-columns:minmax(260px,1fr) 110px 120px auto;gap:10px;align-items:center}
+.largura-total{width:100%}
+.alerta{padding:12px 14px;border-radius:10px;margin:12px 0}
+.alerta.sucesso{background:#ecfdf3;color:#166534;border:1px solid #bbf7d0}
+.alerta.erro{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}
+@media(max-width:760px){
+  .orcamento-operacao-form .grade-2,.linha-item{grid-template-columns:1fr}
+  .orcamento-operacao-resumo{align-items:flex-start}
+}

@@ -1,0 +1,168 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">OPERAÇÃO · ORÇAMENTOS</p>
+      <h1>Aguardando orçamento</h1>
+      <p class="texto-suave">Abra um equipamento, inclua os itens e salve. Ele seguirá automaticamente para comunicar orçamento.</p>
+    </div>
+    <a class="btn secundario" href="/organiza">Voltar ao início</a>
+  </div>
+
+  {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+  {% if manutencoes %}
+    <div class="orcamento-fila">
+      {% for m in manutencoes %}
+        {% set o = m.orcamentos|sort(attribute='versao')|last if m.orcamentos else none %}
+        <article class="orcamento-operacao-card" id="orcamento-{{ m.id }}">
+          <button type="button" class="orcamento-operacao-resumo" aria-expanded="{{ 'true' if abrir == m.id else 'false' }}">
+            <div>
+              <strong>{{ m.cliente.nome }}</strong>
+              <span>{{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</span>
+              <small>{{ m.defeito }}</small>
+            </div>
+            <span class="orcamento-operacao-acao">{{ 'Fechar' if abrir == m.id else 'Montar orçamento' }}</span>
+          </button>
+
+          <form method="post" action="/organiza/operacao/orcamentos/{{ m.id }}/salvar"
+                class="orcamento-operacao-form {% if abrir != m.id %}oculto{% endif %}">
+            <div class="grade-2">
+              <label>Valor da manutenção
+                <input name="valor_manutencao" inputmode="decimal" required
+                       value="{{ '%.2f'|format(o.valor_manutencao or 0) if o else '' }}">
+              </label>
+              <label>Forma de pagamento
+                <select name="forma_pagamento_orcamento" required>
+                  <option value="">Selecione</option>
+                  <option value="À vista" {% if o and o.forma_pagamento_orcamento == 'À vista' %}selected{% endif %}>À vista</option>
+                  <option value="50% de sinal + 50% na entrega" {% if o and o.forma_pagamento_orcamento == '50% de sinal + 50% na entrega' %}selected{% endif %}>50% de sinal + 50% na entrega</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="grade-2">
+              <label>Prazo após pagamento (dias úteis)
+                <input type="number" min="1" name="prazo_dias_uteis" required value="{{ o.prazo_dias_uteis if o else '' }}">
+              </label>
+              <label>Desconto
+                <input name="desconto" inputmode="decimal" value="{{ '%.2f'|format(o.desconto or 0) if o else '0,00' }}">
+              </label>
+            </div>
+
+            <label class="checkbox-linha">
+              <input type="checkbox" name="desconto_somente_com_opcionais" value="1"
+                     {% if o and o.desconto_somente_com_opcionais %}checked{% endif %}>
+              Aplicar desconto somente se todos os opcionais forem aprovados
+            </label>
+
+            <div class="orcamento-itens-cabecalho">
+              <h3>Itens do orçamento</h3>
+              <button type="button" class="btn secundario adicionar-linha">+ Adicionar item</button>
+            </div>
+
+            <div class="linhas-itens">
+              {% if o and o.itens %}
+                {% for item_orcamento in o.itens %}
+                  <div class="linha-item">
+                    <select name="item_id" required>
+                      <option value="">Selecione</option>
+                      {% for item in itens_catalogo %}
+                        <option value="{{ item.id }}" {% if item.id == item_orcamento.item_id %}selected{% endif %}>
+                          {{ item.nome }} · {{ item.preco_venda|moeda }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    <input type="number" name="quantidade" min="1" value="{{ item_orcamento.quantidade }}">
+                    <label class="checkbox-linha opcional-linha">
+                      <input type="checkbox" class="marcar-opcional" {% if item_orcamento.opcional %}checked{% endif %}>
+                      Opcional
+                    </label>
+                    <button type="button" class="btn perigo remover-linha">Remover</button>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="linha-item">
+                  <select name="item_id">
+                    <option value="">Selecione um item</option>
+                    {% for item in itens_catalogo %}
+                      <option value="{{ item.id }}">{{ item.nome }} · {{ item.preco_venda|moeda }}</option>
+                    {% endfor %}
+                  </select>
+                  <input type="number" name="quantidade" min="1" value="1">
+                  <label class="checkbox-linha opcional-linha"><input type="checkbox" class="marcar-opcional"> Opcional</label>
+                  <button type="button" class="btn perigo remover-linha">Remover</button>
+                </div>
+              {% endif %}
+            </div>
+
+            <button class="btn primario largura-total" type="submit">Salvar orçamento e ir para comunicar</button>
+          </form>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <article class="operacao-sem-pendencias">
+      <h2>Nenhum orçamento pendente</h2>
+      <p>Todos os equipamentos recebidos já possuem orçamento salvo.</p>
+    </article>
+  {% endif %}
+</section>
+
+<template id="modelo-linha-item">
+  <div class="linha-item">
+    <select name="item_id">
+      <option value="">Selecione um item</option>
+      {% for item in itens_catalogo %}
+        <option value="{{ item.id }}">{{ item.nome }} · {{ item.preco_venda|moeda }}</option>
+      {% endfor %}
+    </select>
+    <input type="number" name="quantidade" min="1" value="1">
+    <label class="checkbox-linha opcional-linha"><input type="checkbox" class="marcar-opcional"> Opcional</label>
+    <button type="button" class="btn perigo remover-linha">Remover</button>
+  </div>
+</template>
+
+<script>
+(function () {
+  function atualizarOpcionais(form) {
+    form.querySelectorAll(".linha-item").forEach(function (linha, indice) {
+      var caixa = linha.querySelector(".marcar-opcional");
+      if (caixa) {
+        caixa.name = "opcional";
+        caixa.value = String(indice);
+      }
+    });
+  }
+
+  document.querySelectorAll(".orcamento-operacao-card").forEach(function (card) {
+    var resumo = card.querySelector(".orcamento-operacao-resumo");
+    var form = card.querySelector(".orcamento-operacao-form");
+    resumo.addEventListener("click", function () {
+      form.classList.toggle("oculto");
+      var aberto = !form.classList.contains("oculto");
+      resumo.setAttribute("aria-expanded", aberto ? "true" : "false");
+      resumo.querySelector(".orcamento-operacao-acao").textContent = aberto ? "Fechar" : "Montar orçamento";
+    });
+
+    card.querySelector(".adicionar-linha").addEventListener("click", function () {
+      var modelo = document.querySelector("#modelo-linha-item").content.cloneNode(true);
+      card.querySelector(".linhas-itens").appendChild(modelo);
+      atualizarOpcionais(form);
+    });
+
+    card.addEventListener("click", function (evento) {
+      if (evento.target.classList.contains("remover-linha")) {
+        evento.target.closest(".linha-item").remove();
+        atualizarOpcionais(form);
+      }
+    });
+
+    form.addEventListener("submit", function () { atualizarOpcionais(form); });
+    atualizarOpcionais(form);
+  });
+})();
+</script>
+{% endblock %}

@@ -18,7 +18,7 @@
 
   {% set etapas = [
     ("atendimento", "1", "Aguardando atendimento ou entrega", "Cliente vai trazer o equipamento ou iniciar atendimento online.", "/organiza/manutencoes?status=entrada", "cliente"),
-    ("orcamentos", "2", "Aguardando orçamento", "Equipamento recebido; monte e salve o orçamento.", "/organiza/manutencoes?status=orcamento", "equipe"),
+    ("orcamentos", "2", "Aguardando orçamento", "Equipamento recebido; monte e salve o orçamento.", "/organiza/operacao/orcamentos", "equipe"),
     ("comunicar_orcamentos", "3", "Comunicar orçamentos", "Orçamentos salvos e prontos para enviar por cliente.", "/organiza/operacao/comunicacoes?tipo=orcamento", "equipe"),
     ("aprovacoes", "4", "Aguardando aprovação", "Cliente precisa decidir todos os itens do orçamento.", "/organiza/manutencoes?status=aceite", "cliente"),
     ("pagamentos", "5", "Pagamento, prazo e confirmação", "Registre pagamento, prazo e comunique o cliente.", "/organiza/operacao/pagamentos", "cliente"),

@@ -379,26 +379,42 @@ def datetime_form(valor: str):
 
 
 def etapa_manutencao(m):
-    """Única fonte de verdade para a etapa atual da manutenção.
+    """Fonte única de verdade para a etapa operacional.
 
-    Também reconhece registros antigos pelo status, evitando que o painel
-    mostre uma etapa anterior à exibida dentro da ordem de serviço.
+    Um equipamento só entra em execução depois de:
+    1) ter sido recebido/iniciado;
+    2) ter orçamento aprovado;
+    3) possuir pagamento registrado;
+    4) possuir prazo;
+    5) ter a confirmação de prazo enviada.
     """
     status = (m.status or "").strip()
     if status in {"Encerrada", "Cancelada"} or m.entregue_em:
         return 7
     if status in {"Pronto para retirada", "Retirada agendada"} or m.retirada_em or m.pronto_em:
         return 6
-    if status in {"Em manutenção", "Serviço pausado"} or m.confirmacao_prazo_em:
-        return 5
+
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
-    if o and (o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente") or (o.status or "").startswith("Aprovado:")):
+    aprovado = bool(o and (
+        o.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente")
+        or (o.status or "").startswith("Aprovado:")
+    ))
+    recebido = bool(m.recebido_em)
+
+    # Sem recebimento/início do atendimento, permanece na entrada.
+    if not recebido:
+        return 1
+
+    if aprovado:
+        recebido_valor = sum(float(p.valor or 0) for p in o.pagamentos) if o else 0
+        pronto_execucao = bool(recebido_valor > 0 and (m.prazo or "").strip() and m.confirmacao_prazo_em)
+        if pronto_execucao:
+            return 5
         return 4
+
     if o and o.status in ("Enviado", "Aguardando aprovação"):
         return 3
-    if (o and o.itens) or m.recebido_em:
-        return 2
-    return 1
+    return 2
 
 ETAPAS_MANUTENCAO = {
     1: {"rotulo": "Aguardando equipamento", "titulo": "Entrada", "classe": "status-cliente", "responsavel": "Cliente"},
@@ -2201,6 +2217,138 @@ def _fila_operacional_exclusiva(m):
         return "prontos" if not m.conclusao_comunicada_em else "retiradas"
 
     return None
+
+
+
+@app.get("/organiza/operacao/orcamentos", response_class=HTMLResponse)
+def operacao_orcamentos(
+    request: Request,
+    abrir: int | None = None,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Fila de orçamentos editável sem entrar na manutenção."""
+    manutencoes = [
+        m for m in _manutencoes_operacao(db)
+        if _fila_operacional_exclusiva(m) == "orcamentos"
+    ]
+    itens_catalogo = (
+        db.query(Item)
+        .filter(Item.ativo == 1)
+        .order_by(Item.categoria.asc(), Item.nome.asc())
+        .all()
+    )
+    return templates.TemplateResponse("organiza/operacao_orcamentos.html", {
+        "request": request,
+        "usuario": usuario,
+        "manutencoes": manutencoes,
+        "itens_catalogo": itens_catalogo,
+        "abrir": abrir,
+        "sucesso": request.query_params.get("sucesso", ""),
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/organiza/operacao/orcamentos/{manutencao_id}/salvar")
+async def operacao_orcamento_salvar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Salva o orçamento completo em uma única ação e move para comunicação."""
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or etapa_manutencao(m) != 2:
+        return RedirectResponse(
+            "/organiza/operacao/orcamentos?erro=Este equipamento não está aguardando orçamento",
+            status_code=303,
+        )
+
+    o = _orcamento_atual(m)
+    if not o:
+        o = Orcamento(
+            manutencao_id=m.id,
+            versao=1,
+            token=secrets.token_urlsafe(24),
+            status="Rascunho",
+        )
+        db.add(o)
+        db.flush()
+
+    form = await request.form()
+    valor_manutencao = max(moeda_num(form.get("valor_manutencao")), 0)
+    forma = (form.get("forma_pagamento_orcamento") or "").strip()
+    if forma not in ("À vista", "50% de sinal + 50% na entrega"):
+        forma = ""
+    try:
+        prazo = int(form.get("prazo_dias_uteis") or 0)
+    except (TypeError, ValueError):
+        prazo = 0
+
+    item_ids = form.getlist("item_id")
+    quantidades = form.getlist("quantidade")
+    opcionais = set(form.getlist("opcional"))
+
+    novos_itens = []
+    for indice, item_id_texto in enumerate(item_ids):
+        if not item_id_texto:
+            continue
+        try:
+            item_id = int(item_id_texto)
+            quantidade = max(int(quantidades[indice] if indice < len(quantidades) else 1), 1)
+        except (TypeError, ValueError):
+            continue
+        item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+        if not item:
+            continue
+        opcional = str(indice) in opcionais
+        novos_itens.append(OrcamentoItem(
+            orcamento_id=o.id,
+            item_id=item.id,
+            descricao=item.nome,
+            quantidade=quantidade,
+            preco_custo=float(item.preco_custo or 0),
+            preco_venda=float(item.preco_venda or 0),
+            opcional=1 if opcional else 0,
+            aprovado=0 if opcional else 1,
+        ))
+
+    if valor_manutencao <= 0:
+        return RedirectResponse(
+            f"/organiza/operacao/orcamentos?abrir={m.id}&erro=Informe o valor da manutenção",
+            status_code=303,
+        )
+    if not forma:
+        return RedirectResponse(
+            f"/organiza/operacao/orcamentos?abrir={m.id}&erro=Informe a forma de pagamento",
+            status_code=303,
+        )
+    if prazo <= 0:
+        return RedirectResponse(
+            f"/organiza/operacao/orcamentos?abrir={m.id}&erro=Informe o prazo em dias úteis",
+            status_code=303,
+        )
+
+    # Substitui o rascunho em uma única gravação para evitar itens duplicados.
+    for item_antigo in list(o.itens):
+        db.delete(item_antigo)
+    db.flush()
+    for novo in novos_itens:
+        db.add(novo)
+
+    o.valor_manutencao = valor_manutencao
+    o.forma_pagamento_orcamento = forma
+    o.prazo_dias_uteis = prazo
+    o.desconto = min(max(moeda_num(form.get("desconto")), 0), valor_manutencao + sum(i.preco_venda * i.quantidade for i in novos_itens))
+    o.desconto_somente_com_opcionais = 1 if form.get("desconto_somente_com_opcionais") else 0
+    o.status = "Pronto"
+    m.status = "Orçamento pronto"
+    db.commit()
+
+    return RedirectResponse(
+        "/organiza/operacao/orcamentos?sucesso=Orçamento salvo e enviado para a fila de comunicação",
+        status_code=303,
+    )
 
 
 @app.get("/organiza/operacao", response_class=HTMLResponse)
