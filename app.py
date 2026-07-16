@@ -2281,20 +2281,41 @@ def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
             total_geral += total_obrigatorio
 
             linhas += ["", f"*{rotulo_maquina(m.equipamento)}*"]
-            descricoes = []
+
+            obrigatorios = []
             if orcamento.valor_manutencao and orcamento.valor_manutencao > 0:
-                descricoes.append("Serviço de manutenção")
-            descricoes.extend(i.descricao for i in orcamento.itens)
-            for descricao in dict.fromkeys(descricoes):
-                linhas.append(f"• {descricao}")
+                obrigatorios.append("Serviço de manutenção")
+            obrigatorios.extend(i.descricao for i in orcamento.itens if not i.opcional)
+
+            if obrigatorios:
+                linhas.append("*Itens obrigatórios:*")
+                for descricao in dict.fromkeys(obrigatorios):
+                    linhas.append(f"• {descricao}")
+
+            opcionais = [i for i in orcamento.itens if i.opcional]
+            if opcionais:
+                linhas.append("*Opcionais:*")
+                for item in opcionais:
+                    valor_opcional = float(item.preco_venda or 0) * int(item.quantidade or 0)
+                    quantidade = int(item.quantidade or 0)
+                    complemento_quantidade = f" ({quantidade}x)" if quantidade > 1 else ""
+                    linhas.append(
+                        f"• {item.descricao}{complemento_quantidade} — {formatar_moeda(valor_opcional)}"
+                    )
 
             linhas.append(f"Total obrigatório: {formatar_moeda(total_obrigatorio)}")
             if totais["desconto_condicional"] or totais["opcionais"] > 0:
                 if totais["desconto_informado"] > 0:
+                    if totais["desconto_condicional"]:
+                        rotulo_desconto = "Desconto ao aprovar todos os opcionais"
+                    else:
+                        rotulo_desconto = "Desconto aplicado ao total do orçamento"
                     linhas.append(
-                        f"Desconto no total completo: - {formatar_moeda(totais['desconto_informado'])}"
+                        f"{rotulo_desconto}: - {formatar_moeda(totais['desconto_informado'])}"
                     )
-                linhas.append(f"Total com todos os itens: {formatar_moeda(total_completo)}")
+                linhas.append(
+                    f"Total com opcionais e desconto: {formatar_moeda(total_completo)}"
+                )
 
         if len(selecionadas) > 1:
             totais_validos = [
@@ -2306,7 +2327,7 @@ def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
             linhas += ["", f"*Total geral obrigatório: {formatar_moeda(total_geral)}*"]
             if any(item["desconto_condicional"] or item["opcionais"] > 0 for item in totais_validos):
                 linhas.append(
-                    f"*Total geral com todos os itens: {formatar_moeda(total_geral_completo)}*"
+                    f"*Total geral com opcionais e descontos: {formatar_moeda(total_geral_completo)}*"
                 )
 
         linhas += ["", "Abra o link para revisar e responder cada orçamento."]
