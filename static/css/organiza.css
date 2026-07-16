@@ -3289,3 +3289,106 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .btn-whatsapp{background:#25d366;color:#fff;border:none}.publico-cabecalho{display:flex;align-items:center;gap:16px;margin:16px 0 24px}.publico-cabecalho img{width:72px;height:72px;object-fit:contain}.publica-lista{max-width:900px;margin:auto}
 .linha-tempo-publica{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:16px 0}.linha-tempo-publica div{display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center;font-size:11px;color:#98a2b3}.linha-tempo-publica b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#eaecf0}.linha-tempo-publica .concluida b{background:#dbeafe;color:#175cd3}.linha-tempo-publica .atual b{background:#f59e0b;color:white}.linha-tempo-publica .atual{color:#344054;font-weight:700}
 @media(max-width:900px){.operacao-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fila-cabecalho{flex-direction:column}.fila-cabecalho .btn{width:100%}.linha-tempo-publica{overflow-x:auto;grid-template-columns:repeat(7,90px)}}
+
+
+/* Central Operacional: fluxo único de trabalho */
+.fluxo-operacional {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 22px;
+}
+.fluxo-etapa {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid #d8e1ee;
+  border-left-width: 5px;
+  border-radius: 14px;
+  background: #fff;
+  color: inherit;
+  text-decoration: none;
+}
+.fluxo-etapa.status-equipe { border-left-color: #2563eb; }
+.fluxo-etapa.status-cliente { border-left-color: #f97316; }
+.fluxo-etapa:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, .07); }
+.fluxo-numero {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #eef4ff;
+  font-weight: 800;
+}
+.fluxo-etapa strong { display: block; font-size: 1rem; }
+.fluxo-etapa p { margin: 4px 0 0; color: #64748b; }
+.fluxo-etapa > b {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 1.05rem;
+}
+.filtros-operacao {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.filtros-operacao a {
+  padding: 9px 13px;
+  border-radius: 999px;
+  background: #e8eef7;
+  color: #334155;
+  text-decoration: none;
+  font-weight: 700;
+}
+.filtros-operacao a.ativo { background: #2563eb; color: #fff; }
+.barra-fila {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 15px;
+  margin: 12px 0;
+  border: 1px solid #d8e1ee;
+  border-radius: 13px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 5px 18px rgba(15, 23, 42, .06);
+}
+.rodape-fila { position: static; margin-top: 18px; }
+.cliente-selecao {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.cliente-selecao h2 { margin: 0; }
+.cliente-selecao p { margin: 4px 0 0; }
+.cliente-selecao input,
+.fila-item input { width: 20px; height: 20px; flex: 0 0 auto; }
+.status-comunicacao {
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: .82rem;
+  font-weight: 800;
+}
+.status-comunicacao.pendente { background: #fff0e6; color: #c2410c; }
+.status-comunicacao.enviado { background: #e8f7ee; color: #15803d; }
+.comunicacao-grupo.comunicado { opacity: .82; }
+.comunicacao-grupo.comunicado:hover { opacity: 1; }
+
+@media (max-width: 700px) {
+  .fluxo-etapa { grid-template-columns: 36px minmax(0, 1fr) auto; padding: 13px 11px; gap: 9px; }
+  .fluxo-etapa p { font-size: .82rem; }
+  .barra-fila { bottom: 72px; top: auto; }
+}

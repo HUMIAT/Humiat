@@ -15,7 +15,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import ClientDisconnect
@@ -2094,26 +2094,104 @@ def _agrupar_por_cliente(manutencoes):
 
 templates.env.globals["_saldo_manutencao"] = _saldo_manutencao
 
+
+def _orcamento_pronto_para_comunicar(m):
+    """Orçamento completo, salvo e ainda não enviado ao cliente."""
+    o = _orcamento_atual(m)
+    if not o:
+        return False
+    tem_valor = float(o.valor_manutencao or 0) > 0 or any(float(i.preco_venda or 0) > 0 for i in o.itens)
+    tem_condicoes = bool(o.forma_pagamento_orcamento) and o.prazo_dias_uteis is not None
+    nao_enviado = o.status in ("Rascunho", "Em elaboração", "Pronto", None, "")
+    return etapa_manutencao(m) == 2 and bool(o.itens or float(o.valor_manutencao or 0) > 0) and tem_valor and tem_condicoes and nao_enviado
+
+
+def _tipo_comunicacao(m):
+    if _orcamento_pronto_para_comunicar(m):
+        return "orcamento"
+    if etapa_manutencao(m) == 6 and m.pronto_em:
+        return "pronto"
+    return None
+
+
+def _status_comunicacao(m, tipo):
+    o = _orcamento_atual(m)
+    if tipo == "orcamento":
+        return bool(o and o.status in ("Enviado", "Aguardando aprovação"))
+    if tipo == "pronto":
+        return bool(m.conclusao_comunicada_em)
+    return False
+
+
+def _grupos_comunicacao(manutencoes, incluir_comunicados=True):
+    grupos = {}
+    for m in manutencoes:
+        tipo = _tipo_comunicacao(m)
+        # Também traz os já comunicados da etapa correspondente para permitir reenvio.
+        if not tipo:
+            o = _orcamento_atual(m)
+            if etapa_manutencao(m) == 3 and o and o.status in ("Enviado", "Aguardando aprovação"):
+                tipo = "orcamento"
+            elif etapa_manutencao(m) == 6 and m.pronto_em:
+                tipo = "pronto"
+        if not tipo:
+            continue
+        comunicado = _status_comunicacao(m, tipo)
+        if comunicado and not incluir_comunicados:
+            continue
+        chave = (m.cliente_id, tipo)
+        grupo = grupos.setdefault(chave, {
+            "cliente": m.cliente, "tipo": tipo, "manutencoes": [],
+            "comunicado": True, "ultima_comunicacao": None,
+        })
+        grupo["manutencoes"].append(m)
+        grupo["comunicado"] = grupo["comunicado"] and comunicado
+        datas = []
+        o = _orcamento_atual(m)
+        if tipo == "orcamento" and o and o.status in ("Enviado", "Aguardando aprovação"):
+            datas.append(o.criado_em)
+        if tipo == "pronto" and m.conclusao_comunicada_em:
+            datas.append(m.conclusao_comunicada_em)
+        for d in datas:
+            if d and (grupo["ultima_comunicacao"] is None or d > grupo["ultima_comunicacao"]):
+                grupo["ultima_comunicacao"] = d
+    resultado = list(grupos.values())
+    for grupo in resultado:
+        grupo["manutencoes"].sort(key=lambda m: (prefixo_equipamento(m.equipamento.tipo), m.equipamento.numero_maquina_cliente or 999999))
+    return sorted(resultado, key=lambda g: (g["comunicado"], (g["cliente"].nome or "").lower(), g["tipo"]))
+
+
+def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+    linhas = [f"Olá, {cliente.nome}!"]
+    if tipo == "orcamento":
+        linhas += ["", f"📋 Seus {len(selecionadas)} orçamento(s) estão prontos:"]
+        for m in selecionadas:
+            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
+        linhas += ["", "Você pode analisar e aprovar todos os itens em uma única tela."]
+    else:
+        linhas += ["", f"✅ Seus {len(selecionadas)} equipamento(s) estão prontos:"]
+        for m in selecionadas:
+            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
+        linhas += ["", "Acesse para consultar as garantias e agendar uma única retirada."]
+    linhas += ["", "Acompanhe tudo aqui:", f"{PUBLIC_BASE_URL}/acompanhar/{cliente.token_ficha}", "", "Karaokê RJ"]
+    return "\n".join(linhas)
+
 @app.get("/organiza/operacao", response_class=HTMLResponse)
 def operacao_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     manutencoes = _manutencoes_operacao(db)
     filas = {
+        "atendimento": [m for m in manutencoes if etapa_manutencao(m) == 1],
         "orcamentos": [m for m in manutencoes if etapa_manutencao(m) == 2],
-        "comunicacoes": [],
+        "comunicar_orcamentos": [m for m in manutencoes if _orcamento_pronto_para_comunicar(m)],
         "aprovacoes": [m for m in manutencoes if etapa_manutencao(m) == 3],
         "pagamentos": [m for m in manutencoes if etapa_manutencao(m) == 4 and _saldo_manutencao(m)[2] > 0.009],
         "execucao": [m for m in manutencoes if etapa_manutencao(m) == 5 and not m.servico_pausado_em],
         "pausados": [m for m in manutencoes if etapa_manutencao(m) == 5 and m.servico_pausado_em],
-        "prontos": [m for m in manutencoes if etapa_manutencao(m) == 6 and not m.retirada_em],
-        "retiradas": [m for m in manutencoes if etapa_manutencao(m) == 6 and m.retirada_em],
+        "prontos": [m for m in manutencoes if etapa_manutencao(m) == 6 and m.pronto_em and not m.conclusao_comunicada_em],
+        "retiradas": [m for m in manutencoes if etapa_manutencao(m) == 6 and (m.retirada_em or m.conclusao_comunicada_em)],
     }
-    for m in manutencoes:
-        etapa = etapa_manutencao(m)
-        o = _orcamento_atual(m)
-        if etapa == 2 and o and o.itens and float(o.valor_manutencao or 0) > 0 and o.forma_pagamento_orcamento and o.prazo_dias_uteis:
-            filas["comunicacoes"].append(m)
-        elif etapa == 6 and m.pronto_em:
-            filas["comunicacoes"].append(m)
     contagens = {chave: len(valor) for chave, valor in filas.items()}
     return templates.TemplateResponse("organiza/operacao.html", {
         "request": request, "usuario": usuario, "filas": filas, "contagens": contagens
@@ -2121,23 +2199,55 @@ def operacao_painel(request: Request, usuario: Usuario = Depends(usuario_logado)
 
 
 @app.get("/organiza/operacao/comunicacoes", response_class=HTMLResponse)
-def operacao_comunicacoes(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def operacao_comunicacoes(request: Request, tipo: str = "todos", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     manutencoes = _manutencoes_operacao(db)
-    pendentes = []
-    for m in manutencoes:
-        etapa = etapa_manutencao(m)
-        o = _orcamento_atual(m)
-        if etapa == 2 and o and o.itens and float(o.valor_manutencao or 0) > 0 and o.forma_pagamento_orcamento and o.prazo_dias_uteis:
-            pendentes.append(m)
-        elif etapa == 6 and m.pronto_em:
-            pendentes.append(m)
+    grupos = _grupos_comunicacao(manutencoes, incluir_comunicados=True)
+    if tipo in ("orcamento", "pronto"):
+        grupos = [g for g in grupos if g["tipo"] == tipo]
     return templates.TemplateResponse("organiza/operacao_comunicacoes.html", {
-        "request": request, "usuario": usuario, "grupos": _agrupar_por_cliente(pendentes)
+        "request": request, "usuario": usuario, "grupos": grupos, "tipo_filtro": tipo
+    })
+
+
+@app.post("/organiza/operacao/comunicacoes/preparar")
+async def operacao_comunicacoes_preparar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = await request.form()
+    try:
+        ids = sorted({int(x) for x in form.getlist("manutencao_id")})
+    except ValueError:
+        ids = []
+    tipo = (form.get("tipo") or "").strip()
+    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in ids]
+    if not selecionadas or tipo not in ("orcamento", "pronto"):
+        return JSONResponse({"ok": False, "erro": "Seleção inválida."}, status_code=400)
+    if len({m.cliente_id for m in selecionadas}) != 1:
+        return JSONResponse({"ok": False, "erro": "Selecione equipamentos de um único cliente."}, status_code=400)
+    cliente = selecionadas[0].cliente
+    if tipo == "orcamento":
+        for m in selecionadas:
+            o = _orcamento_atual(m)
+            if o:
+                o.status = "Enviado"
+                m.status = "Aguardando aprovação"
+    else:
+        agora = datetime.now()
+        for m in selecionadas:
+            m.conclusao_comunicada_em = m.conclusao_comunicada_em or agora
+    mensagem = _montar_mensagem_comunicacao(cliente, selecionadas, tipo)
+    db.commit()
+    telefone = limpar_telefone(cliente.telefone)
+    return JSONResponse({
+        "ok": True,
+        "whatsapp_url": f"https://wa.me/55{telefone}?text={quote(mensagem)}",
+        "cliente": cliente.nome,
+        "quantidade": len(selecionadas),
+        "tipo": tipo,
     })
 
 
 @app.get("/organiza/operacao/comunicacoes/enviar")
-def operacao_comunicacoes_enviar(ids: str, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def operacao_comunicacoes_enviar(ids: str, tipo: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Compatibilidade com links antigos."""
     try:
         manutencao_ids = sorted({int(x) for x in ids.split(",") if x.strip()})
     except ValueError:
@@ -2145,44 +2255,20 @@ def operacao_comunicacoes_enviar(ids: str, usuario: Usuario = Depends(usuario_lo
     selecionadas = [m for m in _manutencoes_operacao(db) if m.id in manutencao_ids]
     if not selecionadas:
         return RedirectResponse("/organiza/operacao/comunicacoes", status_code=303)
-    cliente_ids = {m.cliente_id for m in selecionadas}
-    if len(cliente_ids) != 1:
-        raise HTTPException(400, "Selecione apenas manutenções do mesmo cliente.")
+    if not tipo:
+        tipo = _tipo_comunicacao(selecionadas[0]) or "orcamento"
     cliente = selecionadas[0].cliente
-    if not cliente.token_ficha:
-        cliente.token_ficha = secrets.token_urlsafe(24)
-
-    orcamentos = []
-    prontos = []
-    for m in selecionadas:
-        etapa = etapa_manutencao(m)
-        o = _orcamento_atual(m)
-        if etapa == 2 and o:
-            o.status = "Enviado"
-            m.status = "Aguardando aprovação"
-            orcamentos.append(m)
-        elif etapa == 6 and m.pronto_em:
+    if tipo == "orcamento":
+        for m in selecionadas:
+            o = _orcamento_atual(m)
+            if o:
+                o.status = "Enviado"
+                m.status = "Aguardando aprovação"
+    else:
+        for m in selecionadas:
             m.conclusao_comunicada_em = m.conclusao_comunicada_em or datetime.now()
-            prontos.append(m)
+    mensagem = _montar_mensagem_comunicacao(cliente, selecionadas, tipo)
     db.commit()
-
-    linhas = [f"Olá, {cliente.nome}!"]
-    if orcamentos:
-        linhas += ["", f"📋 Você possui {len(orcamentos)} orçamento(s) disponível(is):"]
-        for m in orcamentos:
-            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
-    if prontos:
-        linhas += ["", f"✅ {len(prontos)} equipamento(s) pronto(s):"]
-        for m in prontos:
-            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
-    linhas += [
-        "",
-        "Acompanhe tudo em uma única tela:",
-        f"{PUBLIC_BASE_URL}/acompanhar/{cliente.token_ficha}",
-        "",
-        "Karaokê RJ",
-    ]
-    mensagem = "\n".join(linhas)
     telefone = limpar_telefone(cliente.telefone)
     return RedirectResponse(f"https://wa.me/55{telefone}?text={quote(mensagem)}", status_code=303)
 

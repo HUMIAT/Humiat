@@ -1,21 +1,77 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<header class="topbar"><div><h1>Central Operacional</h1><p>Trabalhe pelas tarefas do dia, sem procurar manutenção por manutenção.</p></div></header>
-<section class="operacao-grid">
-  <a class="operacao-card status-equipe" href="/organiza/manutencoes?status=orcamento"><strong>📋 Orçamentos</strong><b>{{ contagens.orcamentos }}</b><span>aguardando montar</span></a>
-  <a class="operacao-card status-cliente" href="/organiza/operacao/comunicacoes"><strong>💬 Comunicações</strong><b>{{ contagens.comunicacoes }}</b><span>prontas para enviar</span></a>
-  <a class="operacao-card status-cliente" href="/organiza/manutencoes?status=aceite"><strong>✅ Aprovações</strong><b>{{ contagens.aprovacoes }}</b><span>aguardando cliente</span></a>
-  <a class="operacao-card status-cliente" href="/organiza/operacao/pagamentos"><strong>💰 Pagamentos</strong><b>{{ contagens.pagamentos }}</b><span>para registrar</span></a>
-  <a class="operacao-card status-equipe" href="/organiza/manutencoes?status=execucao"><strong>🔧 Execução</strong><b>{{ contagens.execucao }}</b><span>equipamentos em serviço</span></a>
-  <a class="operacao-card status-equipe" href="/organiza/manutencoes?status=execucao"><strong>⏸ Pausados</strong><b>{{ contagens.pausados }}</b><span>aguardando item</span></a>
-  <a class="operacao-card status-cliente" href="/organiza/operacao/comunicacoes"><strong>🎁 Prontos</strong><b>{{ contagens.prontos }}</b><span>para comunicar</span></a>
-  <a class="operacao-card status-cliente" href="/organiza/agenda?etapa=6"><strong>📦 Retiradas</strong><b>{{ contagens.retiradas }}</b><span>agendadas</span></a>
+<header class="topbar">
+  <div>
+    <p class="tag">FLUXO DO DIA</p>
+    <h1>Central Operacional</h1>
+    <p>Faça cada etapa em sequência. Você não precisa procurar manutenção por manutenção.</p>
+  </div>
+</header>
+
+<section class="fluxo-operacional">
+  <a class="fluxo-etapa status-cliente" href="/organiza/manutencoes?status=entrada">
+    <span class="fluxo-numero">1</span>
+    <div><strong>Aguardando atendimento ou entrega</strong><p>Equipamento ainda não chegou ou atendimento online ainda não começou.</p></div>
+    <b>{{ contagens.atendimento }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-equipe" href="/organiza/manutencoes?status=orcamento">
+    <span class="fluxo-numero">2</span>
+    <div><strong>Aguardando orçamento</strong><p>Equipamento recebido ou atendimento online iniciado.</p></div>
+    <b>{{ contagens.orcamentos }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-equipe" href="/organiza/operacao/comunicacoes?tipo=orcamento">
+    <span class="fluxo-numero">3</span>
+    <div><strong>Comunicar orçamentos</strong><p>Orçamentos salvos e prontos para enviar, agrupados por cliente.</p></div>
+    <b>{{ contagens.comunicar_orcamentos }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-cliente" href="/organiza/manutencoes?status=aceite">
+    <span class="fluxo-numero">4</span>
+    <div><strong>Aguardando aprovação</strong><p>Cliente precisa aprovar ou recusar todos os itens.</p></div>
+    <b>{{ contagens.aprovacoes }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-cliente" href="/organiza/operacao/pagamentos">
+    <span class="fluxo-numero">5</span>
+    <div><strong>Pagamento, prazo e confirmação</strong><p>Registre um pagamento individual ou agrupado e comunique o cliente.</p></div>
+    <b>{{ contagens.pagamentos }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-equipe" href="/organiza/manutencoes?status=execucao">
+    <span class="fluxo-numero">6</span>
+    <div><strong>Em execução</strong><p>Execute o serviço, pause quando precisar comprar algo e conclua.</p></div>
+    <b>{{ contagens.execucao }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-equipe" href="/organiza/manutencoes?status=execucao">
+    <span class="fluxo-numero">7</span>
+    <div><strong>Aguardando item</strong><p>Serviços pausados por compra de peça ou material.</p></div>
+    <b>{{ contagens.pausados }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-cliente" href="/organiza/operacao/comunicacoes?tipo=pronto">
+    <span class="fluxo-numero">8</span>
+    <div><strong>Comunicar equipamentos prontos</strong><p>Envie uma única mensagem com todos os equipamentos prontos do cliente.</p></div>
+    <b>{{ contagens.prontos }}</b>
+  </a>
+
+  <a class="fluxo-etapa status-cliente" href="/organiza/agenda?etapa=6">
+    <span class="fluxo-numero">9</span>
+    <div><strong>Aguardando retirada</strong><p>Cliente comunicado, garantia disponível e retirada aguardando agendamento.</p></div>
+    <b>{{ contagens.retiradas }}</b>
+  </a>
 </section>
+
 <section class="painel-bloco">
-  <div class="section-title"><div><h2>Fluxo rápido</h2><p>As primeiras centrais já estão disponíveis.</p></div></div>
+  <div class="section-title">
+    <div><h2>Trabalho rápido</h2><p>As comunicações ficam em uma fila: enviar, voltar e chamar o próximo.</p></div>
+  </div>
   <div class="acoes-linha">
-    <a class="btn btn-primary" href="/organiza/operacao/comunicacoes">Enviar comunicações</a>
+    <a class="btn btn-primary" href="/organiza/operacao/comunicacoes?tipo=orcamento">Comunicar orçamentos</a>
     <a class="btn btn-secondary" href="/organiza/operacao/pagamentos">Registrar pagamentos</a>
+    <a class="btn btn-whatsapp" href="/organiza/operacao/comunicacoes?tipo=pronto">Comunicar prontos</a>
   </div>
 </section>
 {% endblock %}

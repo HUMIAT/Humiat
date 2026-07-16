@@ -1,26 +1,140 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<header class="topbar"><div><h1>Central de Comunicações</h1><p>Uma mensagem por cliente, mesmo com vários equipamentos.</p></div><a class="btn btn-secondary" href="/organiza/operacao">Voltar</a></header>
-{% if grupos %}
-<div class="fila-lista">
-{% for grupo in grupos %}
-<section class="fila-grupo">
-  <div class="fila-cabecalho">
-    <div><h2>{{ grupo.cliente.nome }}</h2><p>{{ grupo.manutencoes|length }} equipamento(s) · {{ grupo.cliente.telefone|telefone }}</p></div>
-    <a class="btn btn-whatsapp" target="_blank" href="/organiza/operacao/comunicacoes/enviar?ids={% for m in grupo.manutencoes %}{{ m.id }}{% if not loop.last %},{% endif %}{% endfor %}">Enviar mensagem única</a>
+<header class="topbar">
+  <div>
+    <p class="tag">COMUNICAÇÕES</p>
+    <h1>Fila de WhatsApp</h1>
+    <p>Escolha um ou vários clientes. Todos os equipamentos do mesmo cliente seguem em uma única mensagem.</p>
   </div>
+  <a class="btn btn-secondary" href="/organiza/operacao">Voltar</a>
+</header>
+
+<nav class="filtros-operacao">
+  <a class="{% if tipo_filtro == 'todos' %}ativo{% endif %}" href="/organiza/operacao/comunicacoes">Todas</a>
+  <a class="{% if tipo_filtro == 'orcamento' %}ativo{% endif %}" href="/organiza/operacao/comunicacoes?tipo=orcamento">Orçamentos</a>
+  <a class="{% if tipo_filtro == 'pronto' %}ativo{% endif %}" href="/organiza/operacao/comunicacoes?tipo=pronto">Equipamentos prontos</a>
+</nav>
+
+{% if grupos %}
+<div class="barra-fila">
+  <label><input id="selecionar-todos-clientes" type="checkbox"> Selecionar todos os clientes pendentes</label>
+  <div><strong id="contador-fila">0</strong> cliente(s) na fila</div>
+  <button id="enviar-proximo" class="btn btn-whatsapp" type="button" disabled>Enviar próxima mensagem</button>
+</div>
+
+<div class="fila-lista" id="lista-comunicacoes">
+{% for grupo in grupos %}
+<section class="fila-grupo comunicacao-grupo {% if grupo.comunicado %}comunicado{% endif %}"
+         data-cliente="{{ grupo.cliente.id }}" data-tipo="{{ grupo.tipo }}">
+  <div class="fila-cabecalho">
+    <label class="cliente-selecao">
+      <input class="selecionar-cliente" type="checkbox" {% if grupo.comunicado %}data-reenvio="1"{% endif %}>
+      <span>
+        <h2>{{ grupo.cliente.nome }}</h2>
+        <p>{{ grupo.manutencoes|length }} equipamento(s) · {{ grupo.cliente.telefone|telefone }}</p>
+      </span>
+    </label>
+    <span class="status-comunicacao {% if grupo.comunicado %}enviado{% else %}pendente{% endif %}">
+      {% if grupo.comunicado %}✓ Comunicado{% else %}Aguardando comunicação{% endif %}
+    </span>
+  </div>
+
   <div class="fila-equipamentos">
   {% for m in grupo.manutencoes %}
-    <label class="fila-item">
+    <label class="fila-item selecionavel">
+      <input class="equipamento-comunicacao" type="checkbox" value="{{ m.id }}" checked>
       <span><strong>{{ rotulo_maquina(m.equipamento) }}</strong> · {{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</span>
-      <small>{% if etapa_manutencao(m) == 2 %}Orçamento pronto{% else %}Equipamento pronto{% endif %}</small>
+      <small>{% if grupo.tipo == 'orcamento' %}Orçamento{% else %}Serviço concluído{% endif %}</small>
     </label>
   {% endfor %}
+  </div>
+
+  <div class="acoes-linha">
+    <button class="btn {% if grupo.comunicado %}btn-secondary{% else %}btn-whatsapp{% endif %} enviar-grupo" type="button">
+      {% if grupo.comunicado %}Reenviar mensagem{% else %}Comunicar cliente{% endif %}
+    </button>
   </div>
 </section>
 {% endfor %}
 </div>
+
+<div class="barra-fila rodape-fila">
+  <span id="resultado-fila">Selecione os clientes e envie um por vez.</span>
+  <button id="enviar-proximo-rodape" class="btn btn-whatsapp" type="button" disabled>Enviar próxima mensagem</button>
+</div>
 {% else %}
-<div class="estado-vazio"><h2>Nenhuma comunicação pendente</h2><p>Quando houver orçamento pronto ou equipamento concluído, aparecerá aqui.</p></div>
+<div class="estado-vazio"><h2>Nenhuma comunicação nesta fila</h2><p>Quando houver orçamento pronto ou equipamento concluído, aparecerá aqui.</p></div>
 {% endif %}
+
+<script>
+(() => {
+  const grupos = [...document.querySelectorAll('.comunicacao-grupo')];
+  if (!grupos.length) return;
+
+  const botoesProximo = [document.getElementById('enviar-proximo'), document.getElementById('enviar-proximo-rodape')].filter(Boolean);
+  const contador = document.getElementById('contador-fila');
+  const resultado = document.getElementById('resultado-fila');
+  const marcarTodos = document.getElementById('selecionar-todos-clientes');
+
+  function selecionados() {
+    return grupos.filter(g => g.querySelector('.selecionar-cliente').checked && !g.dataset.processado);
+  }
+
+  function atualizar() {
+    const total = selecionados().length;
+    if (contador) contador.textContent = total;
+    botoesProximo.forEach(b => b.disabled = total === 0);
+  }
+
+  async function enviar(grupo) {
+    const ids = [...grupo.querySelectorAll('.equipamento-comunicacao:checked')].map(i => i.value);
+    if (!ids.length) {
+      alert('Selecione ao menos um equipamento deste cliente.');
+      return;
+    }
+    const dados = new FormData();
+    dados.append('tipo', grupo.dataset.tipo);
+    ids.forEach(id => dados.append('manutencao_id', id));
+
+    const resposta = await fetch('/organiza/operacao/comunicacoes/preparar', {method: 'POST', body: dados});
+    const retorno = await resposta.json();
+    if (!resposta.ok || !retorno.ok) {
+      alert(retorno.erro || 'Não foi possível preparar a mensagem.');
+      return;
+    }
+
+    window.open(retorno.whatsapp_url, '_blank', 'noopener');
+    grupo.dataset.processado = '1';
+    grupo.classList.add('comunicado');
+    grupo.querySelector('.status-comunicacao').className = 'status-comunicacao enviado';
+    grupo.querySelector('.status-comunicacao').textContent = '✓ Comunicado';
+    grupo.querySelector('.selecionar-cliente').checked = false;
+    grupo.querySelector('.enviar-grupo').textContent = 'Reenviar mensagem';
+    grupo.querySelector('.enviar-grupo').className = 'btn btn-secondary enviar-grupo';
+    if (resultado) resultado.textContent = `${retorno.cliente}: mensagem preparada para ${retorno.quantidade} equipamento(s).`;
+    atualizar();
+  }
+
+  grupos.forEach(grupo => {
+    grupo.querySelector('.selecionar-cliente').addEventListener('change', atualizar);
+    grupo.querySelector('.enviar-grupo').addEventListener('click', () => enviar(grupo));
+  });
+
+  marcarTodos?.addEventListener('change', () => {
+    grupos.forEach(g => {
+      if (!g.dataset.processado && !g.classList.contains('comunicado')) {
+        g.querySelector('.selecionar-cliente').checked = marcarTodos.checked;
+      }
+    });
+    atualizar();
+  });
+
+  async function enviarProximo() {
+    const grupo = selecionados()[0];
+    if (grupo) await enviar(grupo);
+  }
+  botoesProximo.forEach(b => b.addEventListener('click', enviarProximo));
+  atualizar();
+})();
+</script>
 {% endblock %}
