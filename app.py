@@ -424,6 +424,8 @@ templates.env.globals["etapa_manutencao"] = etapa_manutencao
 templates.env.globals["info_etapa_manutencao"] = info_etapa_manutencao
 templates.env.globals["data_etapa_manutencao"] = data_etapa_manutencao
 templates.env.globals["ETAPAS_MANUTENCAO"] = ETAPAS_MANUTENCAO
+templates.env.globals["rotulo_maquina"] = rotulo_maquina
+templates.env.globals["codigo_tecnico"] = codigo_tecnico
 
 
 @app.on_event("startup")
@@ -2045,6 +2047,216 @@ def manutencao_encerrar(manutencao_id: int, usuario: Usuario = Depends(usuario_l
     if not m or not m.retirada_em: raise HTTPException(400, "Agende a retirada antes de encerrar")
     m.entregue_em=datetime.now(); m.status="Encerrada"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+def _manutencoes_operacao(db: Session):
+    return (
+        db.query(Manutencao)
+        .options(
+            selectinload(Manutencao.cliente),
+            selectinload(Manutencao.equipamento),
+            selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+            selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
+        )
+        .filter(Manutencao.entregue_em.is_(None), ~Manutencao.status.in_(("Encerrada", "Cancelada")))
+        .order_by(Manutencao.criado_em.asc(), Manutencao.id.asc())
+        .all()
+    )
+
+
+def _saldo_manutencao(m: Manutencao):
+    o = _orcamento_atual(m)
+    if not o:
+        return 0.0, 0.0, 0.0
+    totais = totais_orcamento(o)
+    total = float(totais.get("aprovado", 0) or 0)
+    recebido = sum(float(p.valor or 0) for p in o.pagamentos)
+    return total, recebido, max(total - recebido, 0)
+
+
+def _agrupar_por_cliente(manutencoes):
+    grupos = {}
+    for m in manutencoes:
+        grupo = grupos.setdefault(m.cliente_id, {
+            "cliente": m.cliente,
+            "manutencoes": [],
+            "total": 0.0,
+            "recebido": 0.0,
+            "saldo": 0.0,
+        })
+        grupo["manutencoes"].append(m)
+        total, recebido, saldo = _saldo_manutencao(m)
+        grupo["total"] += total
+        grupo["recebido"] += recebido
+        grupo["saldo"] += saldo
+    return sorted(grupos.values(), key=lambda g: (g["cliente"].nome or "").lower())
+
+
+templates.env.globals["_saldo_manutencao"] = _saldo_manutencao
+
+@app.get("/organiza/operacao", response_class=HTMLResponse)
+def operacao_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    manutencoes = _manutencoes_operacao(db)
+    filas = {
+        "orcamentos": [m for m in manutencoes if etapa_manutencao(m) == 2],
+        "comunicacoes": [],
+        "aprovacoes": [m for m in manutencoes if etapa_manutencao(m) == 3],
+        "pagamentos": [m for m in manutencoes if etapa_manutencao(m) == 4 and _saldo_manutencao(m)[2] > 0.009],
+        "execucao": [m for m in manutencoes if etapa_manutencao(m) == 5 and not m.servico_pausado_em],
+        "pausados": [m for m in manutencoes if etapa_manutencao(m) == 5 and m.servico_pausado_em],
+        "prontos": [m for m in manutencoes if etapa_manutencao(m) == 6 and not m.retirada_em],
+        "retiradas": [m for m in manutencoes if etapa_manutencao(m) == 6 and m.retirada_em],
+    }
+    for m in manutencoes:
+        etapa = etapa_manutencao(m)
+        o = _orcamento_atual(m)
+        if etapa == 2 and o and o.itens and float(o.valor_manutencao or 0) > 0 and o.forma_pagamento_orcamento and o.prazo_dias_uteis:
+            filas["comunicacoes"].append(m)
+        elif etapa == 6 and m.pronto_em:
+            filas["comunicacoes"].append(m)
+    contagens = {chave: len(valor) for chave, valor in filas.items()}
+    return templates.TemplateResponse("organiza/operacao.html", {
+        "request": request, "usuario": usuario, "filas": filas, "contagens": contagens
+    })
+
+
+@app.get("/organiza/operacao/comunicacoes", response_class=HTMLResponse)
+def operacao_comunicacoes(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    manutencoes = _manutencoes_operacao(db)
+    pendentes = []
+    for m in manutencoes:
+        etapa = etapa_manutencao(m)
+        o = _orcamento_atual(m)
+        if etapa == 2 and o and o.itens and float(o.valor_manutencao or 0) > 0 and o.forma_pagamento_orcamento and o.prazo_dias_uteis:
+            pendentes.append(m)
+        elif etapa == 6 and m.pronto_em:
+            pendentes.append(m)
+    return templates.TemplateResponse("organiza/operacao_comunicacoes.html", {
+        "request": request, "usuario": usuario, "grupos": _agrupar_por_cliente(pendentes)
+    })
+
+
+@app.get("/organiza/operacao/comunicacoes/enviar")
+def operacao_comunicacoes_enviar(ids: str, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    try:
+        manutencao_ids = sorted({int(x) for x in ids.split(",") if x.strip()})
+    except ValueError:
+        raise HTTPException(400, "Seleção inválida.")
+    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in manutencao_ids]
+    if not selecionadas:
+        return RedirectResponse("/organiza/operacao/comunicacoes", status_code=303)
+    cliente_ids = {m.cliente_id for m in selecionadas}
+    if len(cliente_ids) != 1:
+        raise HTTPException(400, "Selecione apenas manutenções do mesmo cliente.")
+    cliente = selecionadas[0].cliente
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+
+    orcamentos = []
+    prontos = []
+    for m in selecionadas:
+        etapa = etapa_manutencao(m)
+        o = _orcamento_atual(m)
+        if etapa == 2 and o:
+            o.status = "Enviado"
+            m.status = "Aguardando aprovação"
+            orcamentos.append(m)
+        elif etapa == 6 and m.pronto_em:
+            m.conclusao_comunicada_em = m.conclusao_comunicada_em or datetime.now()
+            prontos.append(m)
+    db.commit()
+
+    linhas = [f"Olá, {cliente.nome}!"]
+    if orcamentos:
+        linhas += ["", f"📋 Você possui {len(orcamentos)} orçamento(s) disponível(is):"]
+        for m in orcamentos:
+            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
+    if prontos:
+        linhas += ["", f"✅ {len(prontos)} equipamento(s) pronto(s):"]
+        for m in prontos:
+            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
+    linhas += [
+        "",
+        "Acompanhe tudo em uma única tela:",
+        f"{PUBLIC_BASE_URL}/acompanhar/{cliente.token_ficha}",
+        "",
+        "Karaokê RJ",
+    ]
+    mensagem = "\n".join(linhas)
+    telefone = limpar_telefone(cliente.telefone)
+    return RedirectResponse(f"https://wa.me/55{telefone}?text={quote(mensagem)}", status_code=303)
+
+
+@app.get("/acompanhar/{token}", response_class=HTMLResponse)
+def acompanhamento_cliente(token: str, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    manutencoes = (
+        db.query(Manutencao)
+        .options(
+            selectinload(Manutencao.equipamento),
+            selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        )
+        .filter(Manutencao.cliente_id == cliente.id)
+        .order_by(Manutencao.criado_em.desc())
+        .all()
+    )
+    registros = []
+    for m in manutencoes:
+        o = _orcamento_atual(m)
+        if m.entregue_em or (o and o.status in ("Enviado", "Aguardando aprovação", "Aprovado", "Aprovado parcialmente", "Aprovado manualmente")) or m.pronto_em:
+            registros.append({"m": m, "orcamento": o, "etapa": etapa_manutencao(m), "meta": info_etapa_manutencao(m)})
+    return templates.TemplateResponse("organiza/acompanhamento_cliente.html", {
+        "request": request, "cliente": cliente, "registros": registros, "usuario": None
+    })
+
+
+@app.get("/organiza/operacao/pagamentos", response_class=HTMLResponse)
+def operacao_pagamentos(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    pendentes = [m for m in _manutencoes_operacao(db) if etapa_manutencao(m) == 4 and _saldo_manutencao(m)[2] > 0.009]
+    return templates.TemplateResponse("organiza/operacao_pagamentos.html", {
+        "request": request, "usuario": usuario, "grupos": _agrupar_por_cliente(pendentes),
+        "erro": request.query_params.get("erro", ""), "sucesso": request.query_params.get("sucesso", ""), "hoje": date.today().isoformat()
+    })
+
+
+@app.post("/organiza/operacao/pagamentos/registrar")
+async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = await request.form()
+    try:
+        ids = [int(x) for x in form.getlist("manutencao_id")]
+    except ValueError:
+        ids = []
+    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in ids]
+    if not selecionadas:
+        return RedirectResponse("/organiza/operacao/pagamentos?erro=Selecione pelo menos um equipamento", status_code=303)
+    if len({m.cliente_id for m in selecionadas}) != 1:
+        return RedirectResponse("/organiza/operacao/pagamentos?erro=Selecione equipamentos do mesmo cliente", status_code=303)
+    valor = moeda_num(form.get("valor"))
+    if valor <= 0:
+        return RedirectResponse("/organiza/operacao/pagamentos?erro=Informe um valor válido", status_code=303)
+    data_pagamento = data_form(form.get("data")) or date.today()
+    forma = (form.get("forma") or "").strip()
+    observacao = (form.get("observacao") or "").strip()
+    saldos = [(m, _orcamento_atual(m), _saldo_manutencao(m)[2]) for m in selecionadas]
+    saldo_total = sum(s for _, _, s in saldos)
+    if valor > saldo_total + 0.009:
+        return RedirectResponse("/organiza/operacao/pagamentos?erro=O valor é maior que o saldo dos equipamentos selecionados", status_code=303)
+    restante = valor
+    for m, o, saldo in saldos:
+        if restante <= 0.009 or not o or saldo <= 0:
+            continue
+        aplicado = min(restante, saldo)
+        db.add(Pagamento(
+            orcamento_id=o.id, data=data_pagamento, valor=round(aplicado, 2),
+            forma=forma or None,
+            observacao=(f"Pagamento agrupado. {observacao}".strip())
+        ))
+        restante -= aplicado
+    db.commit()
+    return RedirectResponse("/organiza/operacao/pagamentos?sucesso=Pagamento registrado e distribuído entre os equipamentos", status_code=303)
+
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)
 def agenda(request: Request, etapa: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):

@@ -1,0 +1,33 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<header class="topbar"><div><h1>Central de Pagamentos</h1><p>Registre um pagamento para um ou vários equipamentos do mesmo cliente.</p></div><a class="btn btn-secondary" href="/organiza/operacao">Voltar</a></header>
+{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+{% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+{% if grupos %}
+<div class="fila-lista">
+{% for grupo in grupos %}
+<form class="fila-grupo" method="post" action="/organiza/operacao/pagamentos/registrar">
+  <div class="fila-cabecalho"><div><h2>{{ grupo.cliente.nome }}</h2><p>Saldo do cliente: <strong>{{ grupo.saldo|moeda }}</strong></p></div></div>
+  <div class="fila-equipamentos">
+  {% for m in grupo.manutencoes %}
+    <label class="fila-item selecionavel">
+      <input type="checkbox" name="manutencao_id" value="{{ m.id }}" checked>
+      <span><strong>{{ rotulo_maquina(m.equipamento) }}</strong> · {{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</span>
+      <small>Saldo: {{ _saldo_manutencao(m)[2]|moeda }}</small>
+    </label>
+  {% endfor %}
+  </div>
+  <div class="form-grid pagamento-grid">
+    <label>Valor recebido<input name="valor" required inputmode="decimal" placeholder="0,00"></label>
+    <label>Data<input type="date" name="data" value="{{ hoje }}"></label>
+    <label>Forma<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select></label>
+    <label class="campo-largo">Observação<input name="observacao" placeholder="Opcional"></label>
+  </div>
+  <button class="btn btn-primary" type="submit">Registrar pagamento selecionado</button>
+</form>
+{% endfor %}
+</div>
+{% else %}
+<div class="estado-vazio"><h2>Nenhum pagamento pendente</h2><p>Os atendimentos aprovados com saldo aparecerão aqui.</p></div>
+{% endif %}
+{% endblock %}

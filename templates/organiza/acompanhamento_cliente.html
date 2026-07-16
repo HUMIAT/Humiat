@@ -1,0 +1,24 @@
+{% extends "organiza/base.html" %}
+{% block conteudo_publico %}
+<div class="publico-cabecalho"><img src="/static/img/logo-karaoke-rj.png" alt="Karaokê RJ"><div><h1>Acompanhamento do atendimento</h1><p>{{ cliente.nome }}</p></div></div>
+{% if registros %}
+<div class="fila-lista publica-lista">
+{% for r in registros %}
+<section class="fila-grupo">
+  <div class="fila-cabecalho"><div><h2>{{ rotulo_maquina(r.m.equipamento) }} · {{ r.m.equipamento.tipo }} {{ r.m.equipamento.modelo or '' }}</h2><p>Código técnico: {{ codigo_tecnico(r.m.equipamento) }}</p></div><span class="status-pill {{ r.meta.classe }}">{{ r.meta.rotulo }}</span></div>
+  <div class="linha-tempo-publica">
+  {% for numero in range(1,8) %}
+    <div class="{% if numero < r.etapa %}concluida{% elif numero == r.etapa %}atual{% else %}futura{% endif %}"><b>{{ numero }}</b><span>{{ ETAPAS_MANUTENCAO[numero].titulo }}</span></div>
+  {% endfor %}
+  </div>
+  {% if r.orcamento and r.orcamento.status in ("Enviado","Aguardando aprovação") %}
+    <a class="btn btn-primary" href="/orcamento/{{ r.orcamento.token }}">Revisar e responder orçamento</a>
+  {% endif %}
+  {% if r.m.pronto_em and r.orcamento %}
+    <div class="acoes-linha"><a class="btn btn-secondary" href="/garantia-servico/{{ r.orcamento.token }}.pdf">Abrir garantia</a><a class="btn btn-primary" href="/retirada/{{ r.orcamento.token }}">Agendar retirada</a></div>
+  {% endif %}
+</section>
+{% endfor %}
+</div>
+{% else %}<div class="estado-vazio"><h2>Nenhum atendimento disponível</h2></div>{% endif %}
+{% endblock %}

@@ -3274,3 +3274,18 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 @media (min-width: 760px) {
   .linha-tempo-publica { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+
+/* Central Operacional */
+.operacao-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:22px 0}
+.operacao-card{display:flex;flex-direction:column;gap:5px;padding:20px;border:1px solid #e6e9ef;border-left:6px solid #2f6fed;border-radius:16px;background:#fff;text-decoration:none;color:#172033;box-shadow:0 4px 18px rgba(16,24,40,.05)}
+.operacao-card.status-cliente{border-left-color:#f59e0b}
+.operacao-card.status-equipe{border-left-color:#2f6fed}
+.operacao-card strong{font-size:16px}.operacao-card b{font-size:34px;line-height:1}.operacao-card span{color:#667085;font-size:13px}
+.fila-lista{display:grid;gap:16px}.fila-grupo{background:#fff;border:1px solid #e6e9ef;border-radius:16px;padding:18px;box-shadow:0 4px 18px rgba(16,24,40,.04)}
+.fila-cabecalho{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}.fila-cabecalho h2{margin:0 0 4px;font-size:18px}.fila-cabecalho p{margin:0;color:#667085}
+.fila-equipamentos{display:grid;gap:8px;margin-bottom:16px}.fila-item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px;border:1px solid #eef0f4;border-radius:12px;background:#fafbfc}.fila-item small{color:#667085}.fila-item.selecionavel{grid-template-columns:auto 1fr auto}.fila-item input{width:18px;height:18px}
+.pagamento-grid{margin:14px 0}.estado-vazio{text-align:center;padding:42px;background:#fff;border:1px dashed #d0d5dd;border-radius:16px}.alerta{padding:12px 14px;border-radius:10px;margin-bottom:14px}.alerta.erro{background:#fff1f0;color:#b42318}.alerta.sucesso{background:#ecfdf3;color:#027a48}
+.btn-whatsapp{background:#25d366;color:#fff;border:none}.publico-cabecalho{display:flex;align-items:center;gap:16px;margin:16px 0 24px}.publico-cabecalho img{width:72px;height:72px;object-fit:contain}.publica-lista{max-width:900px;margin:auto}
+.linha-tempo-publica{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:16px 0}.linha-tempo-publica div{display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center;font-size:11px;color:#98a2b3}.linha-tempo-publica b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#eaecf0}.linha-tempo-publica .concluida b{background:#dbeafe;color:#175cd3}.linha-tempo-publica .atual b{background:#f59e0b;color:white}.linha-tempo-publica .atual{color:#344054;font-weight:700}
+@media(max-width:900px){.operacao-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.fila-cabecalho{flex-direction:column}.fila-cabecalho .btn{width:100%}.linha-tempo-publica{overflow-x:auto;grid-template-columns:repeat(7,90px)}}

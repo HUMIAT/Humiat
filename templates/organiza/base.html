@@ -16,6 +16,7 @@
     <nav class="side-nav">
       <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Início</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>
+      <a class="{% if request.url.path.startswith('/organiza/operacao') %}ativo{% endif %}" href="/organiza/operacao"><span>⚙</span> Operação</a>
       <a class="{% if request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/manutencoes"><span>🛠</span> Manutenções</a>
       <a class="{% if request.url.path.startswith('/organiza/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span>▤</span> Vendas</a>
       <a class="{% if request.url.path.startswith('/organiza/itens') %}ativo{% endif %}" href="/organiza/itens"><span>▦</span> Itens</a>
@@ -41,8 +42,8 @@
     <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda">
       <span>▣</span><small>Agenda</small>
     </a>
-    <a class="{% if request.url.path.startswith('/organiza/manutencoes') and request.url.path != '/organiza/manutencoes/nova' %}ativo{% endif %}" href="/organiza/manutencoes">
-      <span>🛠</span><small>Manutenções</small>
+    <a class="{% if request.url.path.startswith('/organiza/operacao') %}ativo{% endif %}" href="/organiza/operacao">
+      <span>⚙</span><small>Operação</small>
     </a>
   </nav>
 </div>

@@ -1,0 +1,21 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<header class="topbar"><div><h1>Central Operacional</h1><p>Trabalhe pelas tarefas do dia, sem procurar manutenção por manutenção.</p></div></header>
+<section class="operacao-grid">
+  <a class="operacao-card status-equipe" href="/organiza/manutencoes?status=orcamento"><strong>📋 Orçamentos</strong><b>{{ contagens.orcamentos }}</b><span>aguardando montar</span></a>
+  <a class="operacao-card status-cliente" href="/organiza/operacao/comunicacoes"><strong>💬 Comunicações</strong><b>{{ contagens.comunicacoes }}</b><span>prontas para enviar</span></a>
+  <a class="operacao-card status-cliente" href="/organiza/manutencoes?status=aceite"><strong>✅ Aprovações</strong><b>{{ contagens.aprovacoes }}</b><span>aguardando cliente</span></a>
+  <a class="operacao-card status-cliente" href="/organiza/operacao/pagamentos"><strong>💰 Pagamentos</strong><b>{{ contagens.pagamentos }}</b><span>para registrar</span></a>
+  <a class="operacao-card status-equipe" href="/organiza/manutencoes?status=execucao"><strong>🔧 Execução</strong><b>{{ contagens.execucao }}</b><span>equipamentos em serviço</span></a>
+  <a class="operacao-card status-equipe" href="/organiza/manutencoes?status=execucao"><strong>⏸ Pausados</strong><b>{{ contagens.pausados }}</b><span>aguardando item</span></a>
+  <a class="operacao-card status-cliente" href="/organiza/operacao/comunicacoes"><strong>🎁 Prontos</strong><b>{{ contagens.prontos }}</b><span>para comunicar</span></a>
+  <a class="operacao-card status-cliente" href="/organiza/agenda?etapa=6"><strong>📦 Retiradas</strong><b>{{ contagens.retiradas }}</b><span>agendadas</span></a>
+</section>
+<section class="painel-bloco">
+  <div class="section-title"><div><h2>Fluxo rápido</h2><p>As primeiras centrais já estão disponíveis.</p></div></div>
+  <div class="acoes-linha">
+    <a class="btn btn-primary" href="/organiza/operacao/comunicacoes">Enviar comunicações</a>
+    <a class="btn btn-secondary" href="/organiza/operacao/pagamentos">Registrar pagamentos</a>
+  </div>
+</section>
+{% endblock %}

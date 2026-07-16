@@ -1,0 +1,26 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<header class="topbar"><div><h1>Central de Comunicações</h1><p>Uma mensagem por cliente, mesmo com vários equipamentos.</p></div><a class="btn btn-secondary" href="/organiza/operacao">Voltar</a></header>
+{% if grupos %}
+<div class="fila-lista">
+{% for grupo in grupos %}
+<section class="fila-grupo">
+  <div class="fila-cabecalho">
+    <div><h2>{{ grupo.cliente.nome }}</h2><p>{{ grupo.manutencoes|length }} equipamento(s) · {{ grupo.cliente.telefone|telefone }}</p></div>
+    <a class="btn btn-whatsapp" target="_blank" href="/organiza/operacao/comunicacoes/enviar?ids={% for m in grupo.manutencoes %}{{ m.id }}{% if not loop.last %},{% endif %}{% endfor %}">Enviar mensagem única</a>
+  </div>
+  <div class="fila-equipamentos">
+  {% for m in grupo.manutencoes %}
+    <label class="fila-item">
+      <span><strong>{{ rotulo_maquina(m.equipamento) }}</strong> · {{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</span>
+      <small>{% if etapa_manutencao(m) == 2 %}Orçamento pronto{% else %}Equipamento pronto{% endif %}</small>
+    </label>
+  {% endfor %}
+  </div>
+</section>
+{% endfor %}
+</div>
+{% else %}
+<div class="estado-vazio"><h2>Nenhuma comunicação pendente</h2><p>Quando houver orçamento pronto ou equipamento concluído, aparecerá aqui.</p></div>
+{% endif %}
+{% endblock %}
