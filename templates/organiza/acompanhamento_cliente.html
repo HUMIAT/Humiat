@@ -49,7 +49,6 @@
           {% if r.orcamento.valor_manutencao and r.orcamento.valor_manutencao > 0 %}
           <div class="item-orcamento">
             <div><strong>Serviço de manutenção</strong></div>
-            <strong>{{ r.orcamento.valor_manutencao|moeda }}</strong>
           </div>
           {% endif %}
           {% for item in r.orcamento.itens if not item.opcional %}
@@ -58,11 +57,13 @@
               <strong>{{ item.descricao }}</strong>
               {% if item.quantidade > 1 %}<small>{{ item.quantidade }} unidades</small>{% endif %}
             </div>
-            <strong>{{ (item.preco_venda * item.quantidade)|moeda }}</strong>
           </div>
           {% else %}
             {% if not r.orcamento.valor_manutencao %}<p class="sem-itens">Nenhum item obrigatório informado.</p>{% endif %}
           {% endfor %}
+          {% if r.totais.desconto_informado > 0 and r.totais.obrigatorio_final < r.totais.obrigatorio %}
+          <div class="linha-desconto"><span>Desconto aplicado</span><strong>- {{ r.totais.desconto_informado|moeda }}</strong></div>
+          {% endif %}
           <div class="subtotal"><span>Total obrigatório</span><strong>{{ r.totais.obrigatorio_final|moeda }}</strong></div>
         </div>
 
@@ -76,9 +77,11 @@
               <strong>{{ item.descricao }}</strong>
               {% if item.quantidade > 1 %}<small>{{ item.quantidade }} unidades</small>{% endif %}
             </div>
-            <strong>{{ (item.preco_venda * item.quantidade)|moeda }}</strong>
           </div>
           {% endfor %}
+          {% if r.totais.desconto_informado > 0 %}
+          <div class="linha-desconto"><span>Desconto aplicado</span><strong>- {{ r.totais.desconto_informado|moeda }}</strong></div>
+          {% endif %}
           <div class="subtotal total-completo"><span>Total com tudo</span><strong>{{ r.totais.geral|moeda }}</strong></div>
         </div>
         {% endif %}
@@ -241,7 +244,7 @@ html,body{max-width:100%;overflow-x:hidden}
 .item-orcamento>div{display:flex;flex-direction:column;gap:3px;min-width:0}
 .item-orcamento strong{font-size:14px;overflow-wrap:anywhere}
 .item-orcamento small{color:#64748b}
-.subtotal{display:flex;justify-content:space-between;align-items:center;padding:13px 0 4px;font-weight:800}
+.linha-desconto{display:flex;justify-content:space-between;align-items:center;padding:11px 0 0;color:#08783e;font-weight:700}.subtotal{display:flex;justify-content:space-between;align-items:center;padding:13px 0 4px;font-weight:800}
 .total-completo{color:#175cd3}
 .sem-itens{color:#64748b;font-size:14px}
 .condicoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}

@@ -1432,7 +1432,7 @@ def totais_orcamento(orcamento: Orcamento):
     itens_opcionais = [i for i in orcamento.itens if i.opcional]
     opcionais = sum(i.preco_venda * i.quantidade for i in itens_opcionais)
     opcionais_aprovados = [i for i in itens_opcionais if i.aprovado]
-    todos_opcionais_aprovados = bool(itens_opcionais) and len(opcionais_aprovados) == len(itens_opcionais)
+    todos_opcionais_aprovados = len(opcionais_aprovados) == len(itens_opcionais)
 
     subtotal_aprovado = manutencao + sum(
         i.preco_venda * i.quantidade
@@ -2263,17 +2263,41 @@ def _grupos_comunicacao(manutencoes, incluir_comunicados=True):
 def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
+
     linhas = [f"Olá, {cliente.nome}!"]
+
     if tipo == "orcamento":
-        linhas += ["", f"📋 Seus {len(selecionadas)} orçamento(s) estão prontos:"]
+        linhas += ["", "📋 Seus orçamentos estão prontos:"]
+        total_geral = 0.0
+
         for m in selecionadas:
-            linhas.append(f"• {descricao_equipamento(m.equipamento)}")
-        linhas += ["", "Você pode analisar e aprovar todos os itens em uma única tela."]
+            orcamento = _orcamento_atual(m)
+            if not orcamento:
+                continue
+
+            totais = totais_orcamento(orcamento)
+            total_final = totais["geral"] if any(i.opcional for i in orcamento.itens) else totais["obrigatorio_final"]
+            total_geral += total_final
+
+            linhas += ["", f"*{rotulo_maquina(m.equipamento)}*"]
+            descricoes = []
+            if orcamento.valor_manutencao and orcamento.valor_manutencao > 0:
+                descricoes.append("Serviço de manutenção")
+            descricoes.extend(i.descricao for i in orcamento.itens)
+            for descricao in descricoes:
+                linhas.append(f"• {descricao}")
+            linhas.append(f"Total: {formatar_moeda(total_final)}")
+
+        if len(selecionadas) > 1:
+            linhas += ["", f"*Total geral: {formatar_moeda(total_geral)}*"]
+
+        linhas += ["", "Abra o link para revisar e responder cada orçamento."]
     else:
         linhas += ["", f"✅ Seus {len(selecionadas)} equipamento(s) estão prontos:"]
         for m in selecionadas:
             linhas.append(f"• {descricao_equipamento(m.equipamento)}")
         linhas += ["", "Acesse para consultar as garantias e agendar uma única retirada."]
+
     linhas += ["", "Acompanhe tudo aqui:", f"{PUBLIC_BASE_URL}/acompanhar/{cliente.token_ficha}", "", "Karaokê RJ"]
     return "\n".join(linhas)
 
