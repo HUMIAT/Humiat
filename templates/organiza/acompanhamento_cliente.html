@@ -22,6 +22,7 @@
         <div class="card-status">
           <span class="status-pill {{ r.meta.classe }}">{{ r.meta.rotulo }}</span>
           {% if r.orcamento %}
+            <small class="rotulo-total-card">Obrigatório</small>
             <strong>{{ r.totais.obrigatorio_final|moeda }}</strong>
           {% endif %}
           {% if aguardando %}<span class="abrir-texto">Ver orçamento <b>⌄</b></span>{% endif %}
@@ -68,21 +69,26 @@
         </div>
 
         {% set opcionais = r.orcamento.itens|selectattr("opcional")|list %}
-        {% if opcionais %}
+        {% if opcionais or r.totais.desconto_condicional %}
         <div class="orcamento-secao opcionais">
-          <h2>Itens opcionais</h2>
-          {% for item in opcionais %}
-          <div class="item-orcamento">
-            <div>
-              <strong>{{ item.descricao }}</strong>
-              {% if item.quantidade > 1 %}<small>{{ item.quantidade }} unidades</small>{% endif %}
+          <h2>Orçamento completo</h2>
+          {% if opcionais %}
+            <p class="rotulo-grupo-itens">Itens opcionais incluídos</p>
+            {% for item in opcionais %}
+            <div class="item-orcamento">
+              <div>
+                <strong>{{ item.descricao }}</strong>
+                {% if item.quantidade > 1 %}<small>{{ item.quantidade }} unidades</small>{% endif %}
+              </div>
             </div>
-          </div>
-          {% endfor %}
-          {% if r.totais.desconto_informado > 0 %}
-          <div class="linha-desconto"><span>Desconto aplicado</span><strong>- {{ r.totais.desconto_informado|moeda }}</strong></div>
+            {% endfor %}
+          {% else %}
+            <p class="sem-itens">Não há itens opcionais. O desconto abaixo é exclusivo para a aprovação completa.</p>
           {% endif %}
-          <div class="subtotal total-completo"><span>Total com tudo</span><strong>{{ r.totais.geral|moeda }}</strong></div>
+          {% if r.totais.desconto_informado > 0 %}
+          <div class="linha-desconto"><span>Desconto no total completo</span><strong>- {{ r.totais.desconto_informado|moeda }}</strong></div>
+          {% endif %}
+          <div class="subtotal total-completo"><span>Total com todos os itens</span><strong>{{ r.totais.geral|moeda }}</strong></div>
         </div>
         {% endif %}
 
@@ -96,7 +102,7 @@
             Aprovar obrigatórios
             <small>{{ r.totais.obrigatorio_final|moeda }}</small>
           </button>
-          {% if opcionais %}
+          {% if opcionais or r.totais.desconto_condicional %}
           <button class="acao aprovar-tudo" type="submit" name="acao" value="aprovar">
             Aprovar tudo
             <small>{{ r.totais.geral|moeda }}</small>

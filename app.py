@@ -2267,7 +2267,7 @@ def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
     linhas = [f"Olá, {cliente.nome}!"]
 
     if tipo == "orcamento":
-        linhas += ["", "📋 Seus orçamentos estão prontos:"]
+        linhas += ["", "*Seus orçamentos estão prontos:*"]
         total_geral = 0.0
 
         for m in selecionadas:
@@ -2276,20 +2276,38 @@ def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
                 continue
 
             totais = totais_orcamento(orcamento)
-            total_final = totais["geral"] if any(i.opcional for i in orcamento.itens) else totais["obrigatorio_final"]
-            total_geral += total_final
+            total_obrigatorio = totais["obrigatorio_final"]
+            total_completo = totais["geral"]
+            total_geral += total_obrigatorio
 
             linhas += ["", f"*{rotulo_maquina(m.equipamento)}*"]
             descricoes = []
             if orcamento.valor_manutencao and orcamento.valor_manutencao > 0:
                 descricoes.append("Serviço de manutenção")
             descricoes.extend(i.descricao for i in orcamento.itens)
-            for descricao in descricoes:
+            for descricao in dict.fromkeys(descricoes):
                 linhas.append(f"• {descricao}")
-            linhas.append(f"Total: {formatar_moeda(total_final)}")
+
+            linhas.append(f"Total obrigatório: {formatar_moeda(total_obrigatorio)}")
+            if totais["desconto_condicional"] or totais["opcionais"] > 0:
+                if totais["desconto_informado"] > 0:
+                    linhas.append(
+                        f"Desconto no total completo: - {formatar_moeda(totais['desconto_informado'])}"
+                    )
+                linhas.append(f"Total com todos os itens: {formatar_moeda(total_completo)}")
 
         if len(selecionadas) > 1:
-            linhas += ["", f"*Total geral: {formatar_moeda(total_geral)}*"]
+            totais_validos = [
+                totais_orcamento(_orcamento_atual(item))
+                for item in selecionadas
+                if _orcamento_atual(item)
+            ]
+            total_geral_completo = sum(item["geral"] for item in totais_validos)
+            linhas += ["", f"*Total geral obrigatório: {formatar_moeda(total_geral)}*"]
+            if any(item["desconto_condicional"] or item["opcionais"] > 0 for item in totais_validos):
+                linhas.append(
+                    f"*Total geral com todos os itens: {formatar_moeda(total_geral_completo)}*"
+                )
 
         linhas += ["", "Abra o link para revisar e responder cada orçamento."]
     else:
