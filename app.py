@@ -2752,9 +2752,21 @@ def acompanhamento_cliente(token: str, request: Request, db: Session = Depends(g
     for m in manutencoes:
         o = _orcamento_atual(m)
         if m.entregue_em or (o and o.status in ("Enviado", "Aguardando aprovação", "Aprovado", "Aprovado parcialmente", "Aprovado manualmente")) or m.pronto_em:
-            registros.append({"m": m, "orcamento": o, "etapa": etapa_manutencao(m), "meta": info_etapa_manutencao(m), "retirada_agendada": bool(m.retirada_em), "retirada_em": m.retirada_em})
+            registros.append({
+                "m": m,
+                "orcamento": o,
+                "totais": totais_orcamento(o) if o else None,
+                "etapa": etapa_manutencao(m),
+                "meta": info_etapa_manutencao(m),
+                "retirada_agendada": bool(m.retirada_em),
+                "retirada_em": m.retirada_em,
+            })
     return templates.TemplateResponse("organiza/acompanhamento_cliente.html", {
-        "request": request, "cliente": cliente, "registros": registros, "usuario": None
+        "request": request,
+        "cliente": cliente,
+        "registros": registros,
+        "tem_prontos": any(bool(r["m"].pronto_em) for r in registros),
+        "usuario": None,
     })
 
 
