@@ -198,10 +198,18 @@
 
 <script>
 (() => {
+  const geral = document.getElementById('marcar-todos-geral');
+
   const atualizarQuantidade = () => {
     const total = document.querySelectorAll('.equipamento-grupo:checked').length;
     const campo = document.getElementById('quantidade-selecionada');
     if (campo) campo.textContent = total;
+  };
+
+  const atualizarSelecaoGeral = () => {
+    if (!geral) return;
+    const caixas = [...document.querySelectorAll('.equipamento-grupo')];
+    geral.checked = caixas.length > 0 && caixas.every(c => c.checked);
   };
 
   document.querySelectorAll('.operacao-grupo').forEach(grupo => {
@@ -210,7 +218,65 @@
 
     marcar?.addEventListener('change', () => {
       caixas.forEach(c => c.checked = marcar.checked);
-    
+      atualizarQuantidade();
+      atualizarSelecaoGeral();
+    });
+
+    caixas.forEach(caixa => caixa.addEventListener('change', () => {
+      if (marcar) marcar.checked = caixas.length > 0 && caixas.every(c => c.checked);
+      atualizarQuantidade();
+      atualizarSelecaoGeral();
+    }));
+
+    const botaoWhatsApp = grupo.querySelector('.reenviar-grupo');
+    botaoWhatsApp?.addEventListener('click', async () => {
+      const ids = caixas.filter(c => c.checked).map(c => c.value);
+      if (!ids.length) {
+        alert('Selecione pelo menos um equipamento.');
+        return;
+      }
+
+      const dados = new FormData();
+      dados.append('tipo', 'orcamento');
+      ids.forEach(id => dados.append('manutencao_id', id));
+
+      try {
+        const resposta = await fetch('/organiza/operacao/comunicacoes/preparar', {
+          method: 'POST',
+          body: dados
+        });
+        const retorno = await resposta.json();
+        if (!resposta.ok || !retorno.ok) {
+          throw new Error(retorno.erro || 'Não foi possível preparar a mensagem.');
+        }
+
+        window.open(retorno.whatsapp_url, '_blank', 'noopener');
+        const status = grupo.querySelector('.status-comunicacao');
+        if (status) {
+          status.className = 'status-comunicacao enviado';
+          status.textContent = '✓ Comunicado';
+        }
+        botaoWhatsApp.textContent = 'Reenviar WhatsApp';
+        botaoWhatsApp.className = 'botao secundario reenviar-grupo';
+      } catch (erro) {
+        alert(erro.message || 'Não foi possível preparar a mensagem.');
+      }
+    });
+  });
+
+  geral?.addEventListener('change', () => {
+    document.querySelectorAll('.equipamento-grupo').forEach(c => c.checked = geral.checked);
+    document.querySelectorAll('.marcar-grupo').forEach(c => c.checked = geral.checked);
+    atualizarQuantidade();
+  });
+
+  document.getElementById('form-recebimento-geral')?.addEventListener('submit', event => {
+    if (!document.querySelectorAll('.equipamento-grupo:checked').length) {
+      event.preventDefault();
+      alert('Selecione pelo menos um equipamento.');
+    }
+  });
+
   const dialogAprovacao = document.getElementById('dialog-aprovacao-manual');
   const tituloAprovacao = document.getElementById('titulo-aprovacao-manual');
   const resumoAprovacao = document.getElementById('resumo-aprovacao-manual');
@@ -224,19 +290,24 @@
         alert('Selecione pelo menos um equipamento deste cliente.');
         return;
       }
+
       grupoAprovacaoAtual = grupo;
       const nomeCliente = grupo.querySelector('.fila-cabecalho h2')?.textContent?.trim() || 'cliente';
       if (tituloAprovacao) tituloAprovacao.textContent = `Registrar decisão de ${nomeCliente}`;
-      if (resumoAprovacao) {
-        resumoAprovacao.textContent = `${selecionados.length} equipamento(s) selecionado(s).`;
+      if (resumoAprovacao) resumoAprovacao.textContent = `${selecionados.length} equipamento(s) selecionado(s).`;
+
+      if (dialogAprovacao?.showModal) {
+        dialogAprovacao.showModal();
+      } else if (dialogAprovacao) {
+        dialogAprovacao.setAttribute('open', 'open');
       }
-      dialogAprovacao?.showModal();
     });
   });
 
   document.querySelectorAll('.acao-aprovacao-manual').forEach(botao => {
     botao.addEventListener('click', async () => {
       if (!grupoAprovacaoAtual) return;
+
       const acao = botao.dataset.acao;
       const selecionados = [...grupoAprovacaoAtual.querySelectorAll('.equipamento-grupo:checked')];
       if (!selecionados.length) {
@@ -247,13 +318,13 @@
       const rotulos = {
         obrigatorios: 'aprovar somente os itens obrigatórios',
         todos: 'aprovar todos os itens',
-        cancelar: 'cancelar o orçamento',
+        cancelar: 'cancelar o orçamento'
       };
       if (!confirm(`Confirma ${rotulos[acao]} para ${selecionados.length} equipamento(s)?`)) return;
 
       const botoes = [...document.querySelectorAll('.acao-aprovacao-manual')];
-      botoes.forEach(item => item.disabled = true);
       const textoOriginal = botao.textContent;
+      botoes.forEach(item => item.disabled = true);
       botao.textContent = 'Salvando...';
 
       try {
@@ -264,14 +335,21 @@
         const resposta = await fetch('/organiza/operacao/aprovacoes/manual', {
           method: 'POST',
           body: dados,
-          headers: {'X-Requested-With': 'XMLHttpRequest'},
+          headers: {'X-Requested-With': 'XMLHttpRequest'}
         });
-        const retorno = await resposta.json();
+
+        let retorno;
+        try {
+          retorno = await resposta.json();
+        } catch {
+          throw new Error('O servidor retornou uma resposta inválida.');
+        }
+
         if (!resposta.ok || !retorno.ok) {
           throw new Error(retorno.erro || 'Não foi possível registrar a aprovação.');
         }
 
-        dialogAprovacao?.close();
+        dialogAprovacao?.close?.();
         alert(retorno.mensagem);
         window.location.reload();
       } catch (erro) {
@@ -283,90 +361,28 @@
     });
   });
 
-  atualizarQuantidade();
-      atualizarSelecaoGeral();
-    });
-
-    caixas.forEach(caixa => caixa.addEventListener('change', () => {
-      if (marcar) marcar.checked = caixas.every(c => c.checked);
-      atualizarQuantidade();
-      atualizarSelecaoGeral();
-    }));
-
-    const botao = grupo.querySelector('.reenviar-grupo');
-    botao?.addEventListener('click', async () => {
-      const ids = caixas.filter(c => c.checked).map(c => c.value);
-      if (!ids.length) {
-        alert('Selecione pelo menos um equipamento.');
-        return;
-      }
-      const dados = new FormData();
-      dados.append('tipo', 'orcamento');
-      ids.forEach(id => dados.append('manutencao_id', id));
-      const resposta = await fetch('/organiza/operacao/comunicacoes/preparar', {method: 'POST', body: dados});
-      const retorno = await resposta.json();
-      if (!resposta.ok || !retorno.ok) {
-        alert(retorno.erro || 'Não foi possível preparar a mensagem.');
-        return;
-      }
-      window.open(retorno.whatsapp_url, '_blank', 'noopener');
-      const status = grupo.querySelector('.status-comunicacao');
-      if (status) {
-        status.className = 'status-comunicacao enviado';
-        status.textContent = '✓ Comunicado';
-      }
-      botao.textContent = 'Reenviar WhatsApp';
-      botao.className = 'botao secundario reenviar-grupo';
-    });
-  });
-
-  const geral = document.getElementById('marcar-todos-geral');
-  const atualizarSelecaoGeral = () => {
-    if (!geral) return;
-    const caixas = [...document.querySelectorAll('.equipamento-grupo')];
-    geral.checked = caixas.length > 0 && caixas.every(c => c.checked);
-  };
-
-  geral?.addEventListener('change', () => {
-    document.querySelectorAll('.equipamento-grupo').forEach(c => c.checked = geral.checked);
-    document.querySelectorAll('.marcar-grupo').forEach(c => c.checked = geral.checked);
-    atualizarQuantidade();
-  });
-
-  document.getElementById('form-recebimento-geral')?.addEventListener('submit', event => {
-    const selecionados = document.querySelectorAll('.equipamento-grupo:checked').length;
-    if (!selecionados) {
-      event.preventDefault();
-      alert('Selecione pelo menos um equipamento.');
-    }
-  });
-
-
   const marcarTodosAprovacoes = document.getElementById('marcar-todos-aprovacoes');
   const botaoFilaAprovacoes = document.getElementById('enviar-fila-aprovacoes');
   const statusFilaAprovacoes = document.getElementById('status-fila-aprovacoes');
 
   marcarTodosAprovacoes?.addEventListener('change', () => {
     document.querySelectorAll('.operacao-grupo').forEach(grupo => {
+      if (grupo.dataset.processado === '1') return;
       const marcarGrupo = grupo.querySelector('.marcar-grupo');
       const caixas = [...grupo.querySelectorAll('.equipamento-grupo')];
-      if (grupo.dataset.processado !== '1') {
-        caixas.forEach(c => c.checked = marcarTodosAprovacoes.checked);
-        if (marcarGrupo) marcarGrupo.checked = marcarTodosAprovacoes.checked;
-      }
+      caixas.forEach(c => c.checked = marcarTodosAprovacoes.checked);
+      if (marcarGrupo) marcarGrupo.checked = marcarTodosAprovacoes.checked;
     });
+    atualizarQuantidade();
   });
 
-  function gruposPendentesDaFila() {
-    return [...document.querySelectorAll('.operacao-grupo')].filter(grupo => {
-      if (grupo.dataset.processado === '1') return false;
-      return [...grupo.querySelectorAll('.equipamento-grupo')].some(c => c.checked);
-    });
-  }
+  const gruposPendentesDaFila = () => [...document.querySelectorAll('.operacao-grupo')].filter(grupo => {
+    if (grupo.dataset.processado === '1') return false;
+    return [...grupo.querySelectorAll('.equipamento-grupo')].some(c => c.checked);
+  });
 
   async function prepararProximoDaFila() {
-    const pendentes = gruposPendentesDaFila();
-    const grupo = pendentes[0];
+    const grupo = gruposPendentesDaFila()[0];
     if (!grupo) {
       if (statusFilaAprovacoes) statusFilaAprovacoes.textContent = 'Fila concluída.';
       if (botaoFilaAprovacoes) {
@@ -381,39 +397,48 @@
     dados.append('tipo', 'orcamento');
     ids.forEach(id => dados.append('manutencao_id', id));
 
-    const resposta = await fetch('/organiza/operacao/comunicacoes/preparar', {method: 'POST', body: dados});
-    const retorno = await resposta.json();
-    if (!resposta.ok || !retorno.ok) {
-      alert(retorno.erro || 'Não foi possível preparar a mensagem.');
-      return;
-    }
+    try {
+      const resposta = await fetch('/organiza/operacao/comunicacoes/preparar', {
+        method: 'POST',
+        body: dados
+      });
+      const retorno = await resposta.json();
+      if (!resposta.ok || !retorno.ok) {
+        throw new Error(retorno.erro || 'Não foi possível preparar a mensagem.');
+      }
 
-    window.open(retorno.whatsapp_url, '_blank', 'noopener');
-    grupo.dataset.processado = '1';
-    const status = grupo.querySelector('.status-comunicacao');
-    if (status) {
-      status.className = 'status-comunicacao enviado';
-      status.textContent = '✓ Comunicado';
-    }
-    const botaoGrupo = grupo.querySelector('.reenviar-grupo');
-    if (botaoGrupo) {
-      botaoGrupo.textContent = 'Reenviar WhatsApp';
-      botaoGrupo.className = 'botao secundario reenviar-grupo';
-    }
+      window.open(retorno.whatsapp_url, '_blank', 'noopener');
+      grupo.dataset.processado = '1';
 
-    const restantes = gruposPendentesDaFila().length;
-    if (statusFilaAprovacoes) {
-      statusFilaAprovacoes.textContent = `${retorno.cliente}: mensagem aberta. ${restantes} cliente(s) restante(s).`;
-    }
-    if (botaoFilaAprovacoes) {
-      botaoFilaAprovacoes.textContent = restantes ? `Enviar próximo (${restantes})` : 'Todos preparados';
-      botaoFilaAprovacoes.disabled = restantes === 0;
+      const status = grupo.querySelector('.status-comunicacao');
+      if (status) {
+        status.className = 'status-comunicacao enviado';
+        status.textContent = '✓ Comunicado';
+      }
+
+      const botaoGrupo = grupo.querySelector('.reenviar-grupo');
+      if (botaoGrupo) {
+        botaoGrupo.textContent = 'Reenviar WhatsApp';
+        botaoGrupo.className = 'botao secundario reenviar-grupo';
+      }
+
+      const restantes = gruposPendentesDaFila().length;
+      if (statusFilaAprovacoes) {
+        statusFilaAprovacoes.textContent = `${retorno.cliente}: mensagem aberta. ${restantes} cliente(s) restante(s).`;
+      }
+      if (botaoFilaAprovacoes) {
+        botaoFilaAprovacoes.textContent = restantes ? `Enviar próximo (${restantes})` : 'Todos preparados';
+        botaoFilaAprovacoes.disabled = restantes === 0;
+      }
+    } catch (erro) {
+      alert(erro.message || 'Não foi possível preparar a mensagem.');
     }
   }
 
   botaoFilaAprovacoes?.addEventListener('click', prepararProximoDaFila);
 
   atualizarQuantidade();
+  atualizarSelecaoGeral();
 })();
 </script>
 {% endblock %}
