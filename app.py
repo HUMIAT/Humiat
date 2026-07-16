@@ -2178,23 +2178,60 @@ def _montar_mensagem_comunicacao(cliente, selecionadas, tipo):
     linhas += ["", "Acompanhe tudo aqui:", f"{PUBLIC_BASE_URL}/acompanhar/{cliente.token_ficha}", "", "Karaokê RJ"]
     return "\n".join(linhas)
 
+def _fila_operacional_exclusiva(m):
+    """Retorna uma única fila operacional para cada manutenção."""
+    etapa = etapa_manutencao(m)
+
+    if etapa == 1:
+        return "atendimento"
+
+    if etapa == 2:
+        return "comunicar_orcamentos" if _orcamento_pronto_para_comunicar(m) else "orcamentos"
+
+    if etapa == 3:
+        return "aprovacoes"
+
+    if etapa == 4:
+        return "pagamentos"
+
+    if etapa == 5:
+        return "pausados" if m.servico_pausado_em else "execucao"
+
+    if etapa == 6:
+        return "prontos" if not m.conclusao_comunicada_em else "retiradas"
+
+    return None
+
+
 @app.get("/organiza/operacao", response_class=HTMLResponse)
 def operacao_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     manutencoes = _manutencoes_operacao(db)
     filas = {
-        "atendimento": [m for m in manutencoes if etapa_manutencao(m) == 1],
-        "orcamentos": [m for m in manutencoes if etapa_manutencao(m) == 2],
-        "comunicar_orcamentos": [m for m in manutencoes if _orcamento_pronto_para_comunicar(m)],
-        "aprovacoes": [m for m in manutencoes if etapa_manutencao(m) == 3],
-        "pagamentos": [m for m in manutencoes if etapa_manutencao(m) == 4 and _saldo_manutencao(m)[2] > 0.009],
-        "execucao": [m for m in manutencoes if etapa_manutencao(m) == 5 and not m.servico_pausado_em],
-        "pausados": [m for m in manutencoes if etapa_manutencao(m) == 5 and m.servico_pausado_em],
-        "prontos": [m for m in manutencoes if etapa_manutencao(m) == 6 and m.pronto_em and not m.conclusao_comunicada_em],
-        "retiradas": [m for m in manutencoes if etapa_manutencao(m) == 6 and (m.retirada_em or m.conclusao_comunicada_em)],
+        "atendimento": [],
+        "orcamentos": [],
+        "comunicar_orcamentos": [],
+        "aprovacoes": [],
+        "pagamentos": [],
+        "execucao": [],
+        "pausados": [],
+        "prontos": [],
+        "retiradas": [],
     }
+
+    for manutencao in manutencoes:
+        chave = _fila_operacional_exclusiva(manutencao)
+        if chave:
+            filas[chave].append(manutencao)
+
     contagens = {chave: len(valor) for chave, valor in filas.items()}
+    grupos = {chave: _agrupar_por_cliente(valor) for chave, valor in filas.items()}
+
     return templates.TemplateResponse("organiza/operacao.html", {
-        "request": request, "usuario": usuario, "filas": filas, "contagens": contagens
+        "request": request,
+        "usuario": usuario,
+        "filas": filas,
+        "grupos": grupos,
+        "contagens": contagens,
     })
 
 

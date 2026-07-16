@@ -4,74 +4,71 @@
   <div>
     <p class="tag">FLUXO DO DIA</p>
     <h1>Central Operacional</h1>
-    <p>Faça cada etapa em sequência. Você não precisa procurar manutenção por manutenção.</p>
+    <p>Cada equipamento aparece em uma única etapa. Etapas vazias ficam ocultas.</p>
   </div>
 </header>
 
-<section class="fluxo-operacional">
-  <a class="fluxo-etapa status-cliente" href="/organiza/manutencoes?status=entrada">
-    <span class="fluxo-numero">1</span>
-    <div><strong>Aguardando atendimento ou entrega</strong><p>Equipamento ainda não chegou ou atendimento online ainda não começou.</p></div>
-    <b>{{ contagens.atendimento }}</b>
-  </a>
+{% set etapas = [
+  ("atendimento", "1", "Aguardando atendimento ou entrega", "Equipamento ainda não chegou ou atendimento online ainda não começou.", "/organiza/manutencoes?status=entrada", "cliente"),
+  ("orcamentos", "2", "Aguardando orçamento", "Equipamento recebido ou atendimento online iniciado.", "/organiza/manutencoes?status=orcamento", "equipe"),
+  ("comunicar_orcamentos", "3", "Comunicar orçamentos", "Orçamentos salvos e prontos para enviar, agrupados por cliente.", "/organiza/operacao/comunicacoes?tipo=orcamento", "equipe"),
+  ("aprovacoes", "4", "Aguardando aprovação", "Cliente precisa aprovar ou recusar todos os itens.", "/organiza/manutencoes?status=aceite", "cliente"),
+  ("pagamentos", "5", "Pagamento, prazo e confirmação", "Registre o pagamento, informe o prazo e comunique o cliente.", "/organiza/operacao/pagamentos", "cliente"),
+  ("execucao", "6", "Em execução", "Serviços autorizados para execução.", "/organiza/manutencoes?status=execucao", "equipe"),
+  ("pausados", "7", "Aguardando item", "Serviços pausados por compra de peça ou material.", "/organiza/manutencoes?status=execucao", "equipe"),
+  ("prontos", "8", "Comunicar equipamentos prontos", "Equipamentos concluídos que ainda precisam ser comunicados.", "/organiza/operacao/comunicacoes?tipo=pronto", "cliente"),
+  ("retiradas", "9", "Aguardando retirada", "Cliente comunicado; retirada aguardando agendamento ou conclusão.", "/organiza/agenda?etapa=6", "cliente")
+] %}
 
-  <a class="fluxo-etapa status-equipe" href="/organiza/manutencoes?status=orcamento">
-    <span class="fluxo-numero">2</span>
-    <div><strong>Aguardando orçamento</strong><p>Equipamento recebido ou atendimento online iniciado.</p></div>
-    <b>{{ contagens.orcamentos }}</b>
-  </a>
+<section class="operacao-lista">
+  {% set ns = namespace(total=0) %}
+  {% for chave, numero, titulo, descricao, link, responsavel in etapas %}
+    {% if contagens[chave] > 0 %}
+      {% set ns.total = ns.total + contagens[chave] %}
+      <article class="operacao-etapa status-{{ responsavel }}">
+        <a class="operacao-etapa-cabecalho" href="{{ link }}">
+          <span class="operacao-etapa-numero">{{ numero }}</span>
+          <div class="operacao-etapa-titulo">
+            <strong>{{ titulo }}</strong>
+            <p>{{ descricao }}</p>
+          </div>
+          <span class="operacao-etapa-total">{{ contagens[chave] }} equipamento{% if contagens[chave] != 1 %}s{% endif %}</span>
+        </a>
 
-  <a class="fluxo-etapa status-equipe" href="/organiza/operacao/comunicacoes?tipo=orcamento">
-    <span class="fluxo-numero">3</span>
-    <div><strong>Comunicar orçamentos</strong><p>Orçamentos salvos e prontos para enviar, agrupados por cliente.</p></div>
-    <b>{{ contagens.comunicar_orcamentos }}</b>
-  </a>
+        <div class="operacao-clientes">
+          {% for grupo in grupos[chave][:4] %}
+            <a class="operacao-cliente" href="{{ link }}">
+              <div>
+                <strong>{{ grupo.cliente.nome }}</strong>
+                <span>
+                  {{ grupo.manutencoes|length }} equipamento{% if grupo.manutencoes|length != 1 %}s{% endif %}
+                  nesta etapa
+                </span>
+              </div>
+              <div class="operacao-equipamentos">
+                {% for m in grupo.manutencoes[:3] %}
+                  <span>{{ m.equipamento|descricao_equipamento }}</span>
+                {% endfor %}
+                {% if grupo.manutencoes|length > 3 %}
+                  <span>+ {{ grupo.manutencoes|length - 3 }} outro{% if grupo.manutencoes|length - 3 != 1 %}s{% endif %}</span>
+                {% endif %}
+              </div>
+            </a>
+          {% endfor %}
+        </div>
 
-  <a class="fluxo-etapa status-cliente" href="/organiza/manutencoes?status=aceite">
-    <span class="fluxo-numero">4</span>
-    <div><strong>Aguardando aprovação</strong><p>Cliente precisa aprovar ou recusar todos os itens.</p></div>
-    <b>{{ contagens.aprovacoes }}</b>
-  </a>
+        {% if grupos[chave]|length > 4 %}
+          <a class="operacao-ver-todos" href="{{ link }}">Ver todos os clientes desta etapa</a>
+        {% endif %}
+      </article>
+    {% endif %}
+  {% endfor %}
 
-  <a class="fluxo-etapa status-cliente" href="/organiza/operacao/pagamentos">
-    <span class="fluxo-numero">5</span>
-    <div><strong>Pagamento, prazo e confirmação</strong><p>Registre um pagamento individual ou agrupado e comunique o cliente.</p></div>
-    <b>{{ contagens.pagamentos }}</b>
-  </a>
-
-  <a class="fluxo-etapa status-equipe" href="/organiza/manutencoes?status=execucao">
-    <span class="fluxo-numero">6</span>
-    <div><strong>Em execução</strong><p>Execute o serviço, pause quando precisar comprar algo e conclua.</p></div>
-    <b>{{ contagens.execucao }}</b>
-  </a>
-
-  <a class="fluxo-etapa status-equipe" href="/organiza/manutencoes?status=execucao">
-    <span class="fluxo-numero">7</span>
-    <div><strong>Aguardando item</strong><p>Serviços pausados por compra de peça ou material.</p></div>
-    <b>{{ contagens.pausados }}</b>
-  </a>
-
-  <a class="fluxo-etapa status-cliente" href="/organiza/operacao/comunicacoes?tipo=pronto">
-    <span class="fluxo-numero">8</span>
-    <div><strong>Comunicar equipamentos prontos</strong><p>Envie uma única mensagem com todos os equipamentos prontos do cliente.</p></div>
-    <b>{{ contagens.prontos }}</b>
-  </a>
-
-  <a class="fluxo-etapa status-cliente" href="/organiza/agenda?etapa=6">
-    <span class="fluxo-numero">9</span>
-    <div><strong>Aguardando retirada</strong><p>Cliente comunicado, garantia disponível e retirada aguardando agendamento.</p></div>
-    <b>{{ contagens.retiradas }}</b>
-  </a>
-</section>
-
-<section class="painel-bloco">
-  <div class="section-title">
-    <div><h2>Trabalho rápido</h2><p>As comunicações ficam em uma fila: enviar, voltar e chamar o próximo.</p></div>
-  </div>
-  <div class="acoes-linha">
-    <a class="btn btn-primary" href="/organiza/operacao/comunicacoes?tipo=orcamento">Comunicar orçamentos</a>
-    <a class="btn btn-secondary" href="/organiza/operacao/pagamentos">Registrar pagamentos</a>
-    <a class="btn btn-whatsapp" href="/organiza/operacao/comunicacoes?tipo=pronto">Comunicar prontos</a>
-  </div>
+  {% if ns.total == 0 %}
+    <section class="painel-bloco operacao-vazia">
+      <h2>Nenhuma pendência operacional</h2>
+      <p>Todos os equipamentos estão fora das filas de trabalho.</p>
+    </section>
+  {% endif %}
 </section>
 {% endblock %}
