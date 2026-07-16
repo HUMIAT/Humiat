@@ -14,7 +14,8 @@
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 
   {% if grupos %}
-  <form method="post" action="/organiza/operacao/orcamentos/salvar-lote" id="form-orcamentos-lote">
+  <form method="post" action="/organiza/operacao/orcamentos/salvar-lote" id="form-orcamentos-lote" novalidate>
+    <div id="erros-orcamento" class="alerta erro oculto" role="alert" aria-live="assertive"></div>
     <div class="orcamento-fila">
       {% for grupo in grupos %}
       <article class="orcamento-cliente-card">
@@ -119,38 +120,38 @@
                 <button type="button" class="btn primario adicionar-linha">Adicionar item</button>
               </div>
 
-              <div class="tabela-responsiva">
-                <table class="tabela-itens">
-                  <thead>
-                    <tr>
-                      <th>Item ou serviço</th>
-                      <th class="col-quantidade">Qtd.</th>
-                      <th class="col-valor">Valor unitário</th>
-                      <th class="col-valor">Subtotal</th>
-                      <th class="col-opcional">Opcional</th>
-                      <th class="col-acao"></th>
-                    </tr>
-                  </thead>
-                  <tbody class="linhas-itens">
-                    {% if o and o.itens %}
-                      {% for item_orcamento in o.itens %}
-                      <tr class="linha-item" data-preco="{{ '%.2f'|format(item_orcamento.preco_venda or 0) }}">
-                        <td>
-                          <input type="hidden" name="item_id_{{ m.id }}" value="{{ item_orcamento.item_id }}">
-                          <strong>{{ item_orcamento.descricao }}</strong>
-                        </td>
-                        <td><input class="quantidade-tabela" type="number" name="quantidade_{{ m.id }}" min="1" value="{{ item_orcamento.quantidade }}"></td>
-                        <td class="valor-unitario">{{ item_orcamento.preco_venda|moeda }}</td>
-                        <td class="subtotal-item">—</td>
-                        <td class="celula-central">
-                          <input type="checkbox" class="marcar-opcional" {% if item_orcamento.opcional %}checked{% endif %}>
-                        </td>
-                        <td class="celula-central"><button type="button" class="btn-icone remover-linha" title="Remover">×</button></td>
-                      </tr>
-                      {% endfor %}
-                    {% endif %}
-                  </tbody>
-                </table>
+              <div class="lista-itens">
+                <div class="lista-itens-cabecalho">
+                  <span>Item ou serviço</span>
+                  <span>Qtd.</span>
+                  <span>Valor unitário</span>
+                  <span>Subtotal</span>
+                  <span>Opcional</span>
+                  <span></span>
+                </div>
+                <div class="linhas-itens">
+                  {% if o and o.itens %}
+                    {% for item_orcamento in o.itens %}
+                    <div class="linha-item" data-preco="{{ '%.2f'|format(item_orcamento.preco_venda or 0) }}">
+                      <div class="item-descricao">
+                        <input type="hidden" name="item_id_{{ m.id }}" value="{{ item_orcamento.item_id }}">
+                        <strong>{{ item_orcamento.descricao }}</strong>
+                      </div>
+                      <label class="campo-mobile">
+                        <span>Quantidade</span>
+                        <input class="quantidade-tabela" type="number" name="quantidade_{{ m.id }}" min="1" value="{{ item_orcamento.quantidade }}">
+                      </label>
+                      <div class="valor-unitario" data-rotulo="Valor unitário">{{ item_orcamento.preco_venda|moeda }}</div>
+                      <div class="subtotal-item" data-rotulo="Subtotal">—</div>
+                      <label class="opcional-linha">
+                        <span class="rotulo-mobile">Opcional</span>
+                        <input type="checkbox" class="marcar-opcional" {% if item_orcamento.opcional %}checked{% endif %}>
+                      </label>
+                      <button type="button" class="btn-icone remover-linha" title="Remover item" aria-label="Remover item">×</button>
+                    </div>
+                    {% endfor %}
+                  {% endif %}
+                </div>
                 <div class="tabela-vazia {% if o and o.itens %}oculto{% endif %}">Nenhum item adicionado.</div>
               </div>
 
@@ -212,20 +213,38 @@
 .itens-titulo h3{margin:0}.itens-titulo p{margin:4px 0 0;color:#64748b;font-size:.86rem}
 .adicionar-item-barra{display:grid;grid-template-columns:minmax(260px,1fr) 110px auto auto;gap:12px;align-items:end;margin-top:16px;padding:14px;background:#f8fafc;border-radius:12px}
 .item-opcional{padding-bottom:10px}
-.tabela-responsiva{overflow-x:auto;margin-top:16px;border:1px solid #e2e8f0;border-radius:12px}
-.tabela-itens{width:100%;border-collapse:collapse;min-width:720px}
-.tabela-itens th{background:#f1f5f9;color:#475569;text-align:left;font-size:.78rem;text-transform:uppercase;padding:11px 12px}
-.tabela-itens td{padding:11px 12px;border-top:1px solid #e2e8f0;vertical-align:middle}
-.col-quantidade{width:90px}.col-valor{width:125px}.col-opcional{width:85px}.col-acao{width:52px}
-.quantidade-tabela{width:70px;border:1px solid #cbd5e1;border-radius:8px;padding:8px}
-.celula-central{text-align:center}.btn-icone{width:32px;height:32px;border:0;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:20px;cursor:pointer}
+.lista-itens{margin-top:16px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#fff}
+.lista-itens-cabecalho,.linha-item{display:grid;grid-template-columns:minmax(220px,1fr) 90px 125px 125px 90px 44px;gap:12px;align-items:center}
+.lista-itens-cabecalho{padding:11px 12px;background:#f1f5f9;color:#475569;font-size:.76rem;font-weight:700;text-transform:uppercase}
+.linha-item{padding:12px;border-top:1px solid #e2e8f0}
+.item-descricao{min-width:0}.item-descricao strong{display:block;overflow-wrap:anywhere}
+.quantidade-tabela{width:72px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:8px;padding:8px}
+.campo-mobile>span,.rotulo-mobile{display:none}
+.opcional-linha{display:flex;align-items:center;justify-content:center}
+.btn-icone{width:32px;height:32px;border:0;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:20px;cursor:pointer}
 .tabela-vazia{text-align:center;color:#64748b;padding:20px;background:#fff}
+.campo-invalido{border-color:#dc2626!important;box-shadow:0 0 0 3px rgba(220,38,38,.12)!important}
+.orcamento-equipamento.com-erro{border-color:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.08)}
+#erros-orcamento{position:sticky;top:12px;z-index:20;margin-bottom:14px}
+#erros-orcamento strong{display:block;margin-bottom:6px}
+#erros-orcamento ul{margin:0;padding-left:20px}
 .resumo-itens{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:12px}.resumo-itens strong{font-size:1.05rem}
 .acao-lote-fixa{position:sticky;bottom:12px;background:#fff;border:1px solid #cfd9e8;border-radius:14px;padding:14px 16px;box-shadow:0 8px 28px rgba(15,35,65,.14);z-index:10}
 .orcamento-equipamento.desmarcado{opacity:.55}
 .oculto{display:none!important}
 @media(max-width:850px){.adicionar-item-barra{grid-template-columns:1fr 110px}.adicionar-item-barra .btn{grid-column:1/-1}.item-opcional{align-self:center}}
-@media(max-width:700px){.orcamento-cliente-cabecalho,.equipamento-cabecalho,.acao-lote-fixa{align-items:flex-start;flex-direction:column}.grade-campos{grid-template-columns:1fr}.adicionar-item-barra{grid-template-columns:1fr}.acao-lote-fixa .btn{width:100%}}
+@media(max-width:700px){
+.orcamento-cliente-cabecalho,.equipamento-cabecalho,.acao-lote-fixa{align-items:flex-start;flex-direction:column}
+.grade-campos{grid-template-columns:1fr}.adicionar-item-barra{grid-template-columns:1fr}.acao-lote-fixa .btn{width:100%}
+.lista-itens-cabecalho{display:none}
+.linha-item{grid-template-columns:1fr 1fr;gap:10px;padding:14px}
+.item-descricao{grid-column:1/-1}
+.campo-mobile>span,.rotulo-mobile{display:block;font-size:.72rem;font-weight:700;color:#64748b;margin-bottom:4px}
+.valor-unitario,.subtotal-item{display:flex;flex-direction:column;gap:4px}
+.valor-unitario:before,.subtotal-item:before{content:attr(data-rotulo);font-size:.72rem;font-weight:700;color:#64748b}
+.opcional-linha{justify-content:flex-start;align-items:flex-end;gap:8px}
+.btn-icone{justify-self:end;align-self:end}
+}
 </style>
 
 <script>
@@ -271,16 +290,16 @@
     var quantidade = Math.max(Number(quantidadeCampo.value || 1), 1);
     var opcional = secao.querySelector(".novo-opcional").checked;
     var preco = Number(option.dataset.preco || 0);
-    var linha = document.createElement("tr");
+    var linha = document.createElement("div");
     linha.className = "linha-item";
     linha.dataset.preco = String(preco);
     linha.innerHTML =
-      '<td><input type="hidden" value="' + select.value + '"><strong></strong></td>' +
-      '<td><input class="quantidade-tabela" type="number" min="1" value="' + quantidade + '"></td>' +
-      '<td class="valor-unitario">' + moeda(preco) + '</td>' +
-      '<td class="subtotal-item"></td>' +
-      '<td class="celula-central"><input type="checkbox" class="marcar-opcional"' + (opcional ? ' checked' : '') + '></td>' +
-      '<td class="celula-central"><button type="button" class="btn-icone remover-linha" title="Remover">×</button></td>';
+      '<div class="item-descricao"><input type="hidden" value="' + select.value + '"><strong></strong></div>' +
+      '<label class="campo-mobile"><span>Quantidade</span><input class="quantidade-tabela" type="number" min="1" value="' + quantidade + '"></label>' +
+      '<div class="valor-unitario" data-rotulo="Valor unitário">' + moeda(preco) + '</div>' +
+      '<div class="subtotal-item" data-rotulo="Subtotal"></div>' +
+      '<label class="opcional-linha"><span class="rotulo-mobile">Opcional</span><input type="checkbox" class="marcar-opcional"' + (opcional ? ' checked' : '') + '></label>' +
+      '<button type="button" class="btn-icone remover-linha" title="Remover item" aria-label="Remover item">×</button>';
     linha.querySelector("strong").textContent = option.dataset.nome || option.textContent;
     secao.querySelector(".linhas-itens").appendChild(linha);
     select.value = "";
@@ -352,9 +371,88 @@
     });
   }
 
-  document.querySelector("#form-orcamentos-lote")?.addEventListener("submit", function () {
-    document.querySelectorAll(".orcamento-equipamento").forEach(atualizarOpcionais);
-  });
+  var formulario = document.querySelector("#form-orcamentos-lote");
+  if (formulario) {
+    formulario.addEventListener("submit", function (evento) {
+      var erros = [];
+      var primeiroCampo = null;
+      var selecionadas = Array.from(document.querySelectorAll(".selecionar-equipamento:checked"));
+
+      document.querySelectorAll(".campo-invalido").forEach(function (campo) {
+        campo.classList.remove("campo-invalido");
+      });
+      document.querySelectorAll(".orcamento-equipamento.com-erro").forEach(function (secao) {
+        secao.classList.remove("com-erro");
+      });
+
+      if (!selecionadas.length) {
+        erros.push("Selecione pelo menos um equipamento.");
+      }
+
+      selecionadas.forEach(function (checkbox) {
+        var secao = checkbox.closest(".orcamento-equipamento");
+        var codigo = (secao.querySelector(".equipamento-identificacao strong")?.textContent || "Equipamento").trim();
+        var campos = [
+          {seletor:'textarea[name^="diagnostico_"]', mensagem:"informe o diagnóstico", teste:function(v){return v.trim().length > 0;}},
+          {seletor:'input[name^="valor_manutencao_"]', mensagem:"informe um valor de manutenção maior que zero", teste:function(v){return Number(String(v).replace(".", "").replace(",", ".")) > 0;}},
+          {seletor:'select[name^="forma_pagamento_orcamento_"]', mensagem:"selecione a forma de pagamento", teste:function(v){return v.trim().length > 0;}},
+          {seletor:'input[name^="prazo_dias_uteis_"]', mensagem:"informe o prazo em dias úteis", teste:function(v){return Number(v) > 0;}}
+        ];
+
+        campos.forEach(function (regra) {
+          var campo = secao.querySelector(regra.seletor);
+          if (!campo || !regra.teste(campo.value || "")) {
+            erros.push(codigo + ": " + regra.mensagem + ".");
+            secao.classList.add("com-erro");
+            if (campo) {
+              campo.classList.add("campo-invalido");
+              if (!primeiroCampo) primeiroCampo = campo;
+            }
+          }
+        });
+
+        secao.querySelectorAll(".quantidade-tabela").forEach(function (campo) {
+          if (Number(campo.value) < 1) {
+            erros.push(codigo + ": a quantidade dos itens deve ser pelo menos 1.");
+            campo.classList.add("campo-invalido");
+            secao.classList.add("com-erro");
+            if (!primeiroCampo) primeiroCampo = campo;
+          }
+        });
+
+        atualizarOpcionais(secao);
+      });
+
+      var caixaErros = document.querySelector("#erros-orcamento");
+      if (erros.length) {
+        evento.preventDefault();
+        var unicos = Array.from(new Set(erros));
+        caixaErros.innerHTML = "<strong>Não foi possível salvar. Corrija:</strong><ul>" +
+          unicos.map(function (erro) { return "<li>" + erro + "</li>"; }).join("") +
+          "</ul>";
+        caixaErros.classList.remove("oculto");
+
+        if (primeiroCampo) {
+          var secaoErro = primeiroCampo.closest(".orcamento-equipamento");
+          var conteudo = secaoErro.querySelector(".orcamento-conteudo");
+          conteudo.classList.remove("oculto");
+          secaoErro.querySelector(".alternar-orcamento").textContent = "Recolher";
+          primeiroCampo.scrollIntoView({behavior:"smooth", block:"center"});
+          setTimeout(function(){ primeiroCampo.focus(); }, 350);
+        } else {
+          caixaErros.scrollIntoView({behavior:"smooth", block:"center"});
+        }
+        return;
+      }
+
+      caixaErros.classList.add("oculto");
+      var botao = formulario.querySelector('button[type="submit"]');
+      if (botao) {
+        botao.disabled = true;
+        botao.textContent = "Salvando...";
+      }
+    });
+  }
 })();
 </script>
 {% endblock %}
