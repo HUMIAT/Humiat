@@ -836,7 +836,11 @@ def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_P
 def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     eq.tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip()) or None
     eq.modelo = (form.get("modelo") or "").strip() or None
-    eq.pacote = (form.get("pacote") or "").strip() or None
+    pacote_informado = (form.get("pacote") or "").strip()
+    if pacote_informado:
+        eq.pacote = pacote_informado
+    elif not eq.pacote:
+        eq.pacote = None
     # Este valor é derivado do pacote instalado e nunca é informado manualmente.
     eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
     eq.plano = (form.get("plano") or "").strip() or None
@@ -973,7 +977,7 @@ def opcoes_equipamentos(db: Session):
     especiais = []
     for pacote in pacotes_bd:
         valor = (pacote or "").strip()
-        correspondencia = re.fullmatch(r"(\\d{4})\\.([12])", valor)
+        correspondencia = re.fullmatch(r"(\d{4})\.([12])", valor)
         if correspondencia:
             chave = tuple(map(int, correspondencia.groups()))
             if chave <= atual:
