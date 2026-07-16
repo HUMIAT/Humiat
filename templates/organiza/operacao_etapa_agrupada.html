@@ -13,6 +13,21 @@
   {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 
+  {% if chave == "atendimento" and grupos %}
+  <form method="post" action="/organiza/operacao/receber" id="form-recebimento-geral">
+    <div class="acao-geral-recebimento">
+      <label class="campo-data-recebimento">
+        <span>Data do recebimento</span>
+        <input type="date" name="data_recebimento" value="{{ data_hoje }}" required>
+      </label>
+      <label class="selecionar-geral">
+        <input id="marcar-todos-geral" type="checkbox" checked>
+        Selecionar todos os equipamentos
+      </label>
+      <button class="botao primario" type="submit">Confirmar recebimento</button>
+    </div>
+  {% endif %}
+
   <div class="fila-lista">
     {% for grupo in grupos %}
     <section class="fila-grupo operacao-grupo" data-cliente="{{ grupo.cliente.id }}">
@@ -27,10 +42,6 @@
           </span>
         {% endif %}
       </div>
-
-      {% if chave == "atendimento" %}
-      <form method="post" action="/organiza/operacao/receber">
-      {% endif %}
 
       <div class="fila-equipamentos">
         {% for m in grupo.manutencoes %}
@@ -49,8 +60,7 @@
 
       <div class="acoes-linha">
         {% if chave == "atendimento" %}
-          <label><input class="marcar-grupo" type="checkbox" checked> Selecionar todos</label>
-          <button class="botao primario" type="submit">Confirmar recebimento</button>
+          <label><input class="marcar-grupo" type="checkbox" checked> Selecionar todos deste cliente</label>
         {% elif chave == "aprovacoes" %}
           <label><input class="marcar-grupo" type="checkbox" checked> Selecionar todos</label>
           <button class="botao {% if grupo.comunicado %}secundario{% else %}primario{% endif %} reenviar-grupo" type="button">
@@ -58,23 +68,79 @@
           </button>
         {% endif %}
       </div>
-
-      {% if chave == "atendimento" %}
-      </form>
-      {% endif %}
     </section>
     {% else %}
       <div class="estado-vazio"><h2>Nenhum cliente nesta etapa</h2><p>A fila está em dia.</p></div>
     {% endfor %}
   </div>
+
+  {% if chave == "atendimento" and grupos %}
+    <div class="acao-geral-recebimento rodape">
+      <span><strong id="quantidade-selecionada">0</strong> equipamento(s) selecionado(s)</span>
+      <button class="botao primario" type="submit">Confirmar recebimento</button>
+    </div>
+  </form>
+  {% endif %}
 </section>
+
+<style>
+.acao-geral-recebimento {
+  display: flex;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+}
+.acao-geral-recebimento.rodape {
+  justify-content: space-between;
+  align-items: center;
+}
+.campo-data-recebimento {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+.campo-data-recebimento input {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+}
+.selecionar-geral {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+</style>
 
 <script>
 (() => {
+  const atualizarQuantidade = () => {
+    const total = document.querySelectorAll('.equipamento-grupo:checked').length;
+    const campo = document.getElementById('quantidade-selecionada');
+    if (campo) campo.textContent = total;
+  };
+
   document.querySelectorAll('.operacao-grupo').forEach(grupo => {
     const marcar = grupo.querySelector('.marcar-grupo');
     const caixas = [...grupo.querySelectorAll('.equipamento-grupo')];
-    marcar?.addEventListener('change', () => caixas.forEach(c => c.checked = marcar.checked));
+
+    marcar?.addEventListener('change', () => {
+      caixas.forEach(c => c.checked = marcar.checked);
+      atualizarQuantidade();
+      atualizarSelecaoGeral();
+    });
+
+    caixas.forEach(caixa => caixa.addEventListener('change', () => {
+      if (marcar) marcar.checked = caixas.every(c => c.checked);
+      atualizarQuantidade();
+      atualizarSelecaoGeral();
+    }));
 
     const botao = grupo.querySelector('.reenviar-grupo');
     botao?.addEventListener('click', async () => {
@@ -102,6 +168,29 @@
       botao.className = 'botao secundario reenviar-grupo';
     });
   });
+
+  const geral = document.getElementById('marcar-todos-geral');
+  const atualizarSelecaoGeral = () => {
+    if (!geral) return;
+    const caixas = [...document.querySelectorAll('.equipamento-grupo')];
+    geral.checked = caixas.length > 0 && caixas.every(c => c.checked);
+  };
+
+  geral?.addEventListener('change', () => {
+    document.querySelectorAll('.equipamento-grupo').forEach(c => c.checked = geral.checked);
+    document.querySelectorAll('.marcar-grupo').forEach(c => c.checked = geral.checked);
+    atualizarQuantidade();
+  });
+
+  document.getElementById('form-recebimento-geral')?.addEventListener('submit', event => {
+    const selecionados = document.querySelectorAll('.equipamento-grupo:checked').length;
+    if (!selecionados) {
+      event.preventDefault();
+      alert('Selecione pelo menos um equipamento.');
+    }
+  });
+
+  atualizarQuantidade();
 })();
 </script>
 {% endblock %}

@@ -2348,6 +2348,7 @@ def operacao_etapa_agrupada(
         "titulo": configuracao["titulo"],
         "descricao": configuracao["descricao"],
         "grupos": grupos,
+        "data_hoje": datetime.now().date().isoformat(),
         "sucesso": request.query_params.get("sucesso", ""),
         "erro": request.query_params.get("erro", ""),
     })
@@ -2373,14 +2374,19 @@ async def operacao_receber_em_lote(
             "/organiza/operacao/etapa/atendimento?erro=Selecione pelo menos um equipamento",
             status_code=303,
         )
-    if len({m.cliente_id for m in selecionadas}) != 1:
+    data_texto = (form.get("data_recebimento") or "").strip()
+    try:
+        data_recebimento = datetime.strptime(data_texto, "%Y-%m-%d").date()
+    except ValueError:
         return RedirectResponse(
-            "/organiza/operacao/etapa/atendimento?erro=Confirme um cliente por vez",
+            "/organiza/operacao/etapa/atendimento?erro=Informe uma data de recebimento válida",
             status_code=303,
         )
-    agora = datetime.now()
+
+    horario_atual = datetime.now().time().replace(microsecond=0)
+    recebido_em = datetime.combine(data_recebimento, horario_atual)
     for m in selecionadas:
-        m.recebido_em = agora
+        m.recebido_em = recebido_em
         m.status = "Orçamento em elaboração"
     db.commit()
     return RedirectResponse(
