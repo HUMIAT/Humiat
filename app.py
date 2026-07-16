@@ -2506,6 +2506,8 @@ async def operacao_finalizar_retiradas(
         if not m.retirada_em:
             m.retirada_em = entregue_em
         m.status = "Encerrada"
+        if m.equipamento:
+            m.equipamento.status = "Ativo"
 
     db.commit()
     return RedirectResponse(

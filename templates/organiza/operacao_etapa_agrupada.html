@@ -28,6 +28,21 @@
     </div>
   {% endif %}
 
+  {% if chave == "retiradas" and grupos %}
+  <form method="post" action="/organiza/operacao/finalizar-retiradas" id="form-retiradas-geral">
+    <div class="acao-geral-recebimento">
+      <label class="campo-data-recebimento">
+        <span>Data da entrega</span>
+        <input type="date" name="data_entrega" value="{{ data_hoje }}" required>
+      </label>
+      <label class="selecionar-geral">
+        <input id="marcar-todos-retiradas" type="checkbox" checked>
+        Selecionar todos os equipamentos
+      </label>
+      <button class="botao primario" type="submit">Finalizar entregas</button>
+    </div>
+  {% endif %}
+
 
 
   {% if chave == "aprovacoes" and grupos %}
@@ -57,8 +72,8 @@
 
       <div class="fila-equipamentos">
         {% for m in grupo.manutencoes %}
-        <div class="fila-item{% if chave in ('atendimento', 'aprovacoes') %} selecionavel{% endif %}">
-          {% if chave in ("atendimento", "aprovacoes") %}
+        <div class="fila-item{% if chave in ('atendimento', 'aprovacoes', 'retiradas') %} selecionavel{% endif %}">
+          {% if chave in ("atendimento", "aprovacoes", "retiradas") %}
           <input class="equipamento-grupo" type="checkbox" name="manutencao_id" value="{{ m.id }}" checked>
           {% endif %}
           <span>
@@ -81,6 +96,8 @@
           <button class="botao secundario aprovacao-manual-grupo" type="button">
             Registrar aprovação manual
           </button>
+        {% elif chave == "retiradas" %}
+          <label><input class="marcar-grupo" type="checkbox" checked> Selecionar todos deste cliente</label>
         {% endif %}
       </div>
     </section>
@@ -93,6 +110,14 @@
     <div class="acao-geral-recebimento rodape">
       <span><strong id="quantidade-selecionada">0</strong> equipamento(s) selecionado(s)</span>
       <button class="botao primario" type="submit">Confirmar recebimento</button>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if chave == "retiradas" and grupos %}
+    <div class="acao-geral-recebimento rodape">
+      <span><strong id="quantidade-retiradas-selecionada">0</strong> equipamento(s) selecionado(s)</span>
+      <button class="botao primario" type="submit">Finalizar entregas</button>
     </div>
   </form>
   {% endif %}
