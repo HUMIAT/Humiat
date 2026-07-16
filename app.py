@@ -24,6 +24,10 @@ from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL
 from database import Base, SessionLocal, engine, get_db
+from services.comunicacao import (
+    ComunicacaoService, PAISES, formatar_telefone as formatar_telefone_internacional,
+    normalizar_contato, numero_internacional, telefone_valido as telefone_internacional_valido,
+)
 
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -117,7 +121,9 @@ class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(Integer, primary_key=True)
     nome = Column(String(140), nullable=False)
-    telefone = Column(String(20), unique=True, nullable=False)
+    telefone = Column(String(20), nullable=False)
+    pais = Column(String(2), nullable=False, default="BR")
+    ddi = Column(String(5), nullable=False, default="55")
     empresa = Column(String(140), nullable=True)
     documento = Column(String(30), nullable=True)
     cep = Column(String(20), nullable=True)
@@ -137,6 +143,12 @@ class Cliente(Base):
     inscricao_estadual = Column(String(30), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     equipamentos = relationship("Equipamento", back_populates="cliente", cascade="all, delete-orphan")
+
+    def whatsapp_completo(self):
+        return numero_internacional(self)
+
+    def telefone_formatado(self):
+        return formatar_telefone_internacional(self.pais, self.telefone)
 
 
 class Equipamento(Base):
@@ -227,10 +239,28 @@ class Manutencao(Base):
     compra_comunicada_em = Column(DateTime, nullable=True)
     conclusao_comunicada_em = Column(DateTime, nullable=True)
     observacao = Column(Text, nullable=True)
+    comunicado = Column(Integer, nullable=False, default=0)
+    ultima_comunicacao_em = Column(DateTime, nullable=True)
+    ultima_comunicacao_tipo = Column(String(30), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente")
     equipamento = relationship("Equipamento")
     orcamentos = relationship("Orcamento", back_populates="manutencao", cascade="all, delete-orphan")
+
+
+class HistoricoComunicacao(Base):
+    __tablename__ = "historico_comunicacoes"
+    id = Column(Integer, primary_key=True)
+    manutencao_id = Column(Integer, ForeignKey("assistencias.id"), nullable=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    tipo = Column(String(30), nullable=False, default="GERAL")
+    status = Column(String(30), nullable=False, default="ENVIADO")
+    mensagem = Column(Text, nullable=True)
+    enviado_em = Column(DateTime, nullable=False, default=datetime.now)
+    manutencao = relationship("Manutencao")
+    cliente = relationship("Cliente")
+    usuario = relationship("Usuario")
 
 
 class Orcamento(Base):
@@ -281,20 +311,15 @@ class Pagamento(Base):
 
 
 def limpar_telefone(valor: str) -> str:
-    numero = re.sub(r"\D", "", valor or "")
-    if numero.startswith("55") and len(numero) > 11:
-        numero = numero[2:]
-    return numero
+    return re.sub(r"\D", "", valor or "")
 
 
-def telefone_valido(valor: str) -> bool:
-    numero = limpar_telefone(valor)
-    return len(numero) == 11 and numero[2] == "9"
+def telefone_valido(valor: str, pais: str = "BR", ddi: str = "55") -> bool:
+    return telefone_internacional_valido(pais, ddi, valor)
 
 
-def formatar_telefone(valor: str) -> str:
-    numero = limpar_telefone(valor)
-    return f"({numero[:2]}) {numero[2:7]}-{numero[7:]}" if len(numero) == 11 else (valor or "")
+def formatar_telefone(valor: str, pais: str = "BR") -> str:
+    return formatar_telefone_internacional(pais, valor)
 
 
 def formatar_data(valor):
@@ -319,6 +344,8 @@ def formatar_moeda(valor):
 
 
 templates.env.filters["telefone"] = formatar_telefone
+templates.env.globals["PAISES"] = PAISES
+templates.env.globals["whatsapp_url"] = ComunicacaoService.url_whatsapp
 templates.env.filters["data_br"] = formatar_data
 templates.env.filters["datahora"] = formatar_datahora
 templates.env.filters["moeda"] = formatar_moeda
@@ -472,6 +499,12 @@ def iniciar_banco():
                     conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN {coluna} TEXT"))
             if "tipo_atendimento" not in existentes:
                 conn.execute(text("ALTER TABLE assistencias ADD COLUMN tipo_atendimento VARCHAR(20) NOT NULL DEFAULT 'loja'"))
+            if "comunicado" not in existentes:
+                conn.execute(text("ALTER TABLE assistencias ADD COLUMN comunicado INTEGER NOT NULL DEFAULT 0"))
+            if "ultima_comunicacao_em" not in existentes:
+                conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN ultima_comunicacao_em {tipo_dt}"))
+            if "ultima_comunicacao_tipo" not in existentes:
+                conn.execute(text("ALTER TABLE assistencias ADD COLUMN ultima_comunicacao_tipo VARCHAR(30)"))
     if "assistencia_orcamentos" in insp.get_table_names():
         existentes_orcamento = {c["name"] for c in insp.get_columns("assistencia_orcamentos")}
         with engine.begin() as conn:
@@ -490,6 +523,12 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "inscricao_estadual" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN inscricao_estadual VARCHAR(30)"))
+            if "pais" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN pais VARCHAR(2) NOT NULL DEFAULT 'BR'"))
+            if "ddi" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN ddi VARCHAR(5) NOT NULL DEFAULT '55'"))
+            conn.execute(text("UPDATE clientes SET pais = 'BR' WHERE pais IS NULL OR pais = ''"))
+            conn.execute(text("UPDATE clientes SET ddi = '55' WHERE ddi IS NULL OR ddi = ''"))
     if "equipamentos" in insp.get_table_names():
         existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
         with engine.begin() as conn:
@@ -518,6 +557,9 @@ def iniciar_banco():
         # Remove prefixos antigos usados no código do WhatsApp e mantém somente o nome real.
         for cliente_existente in db.query(Cliente).all():
             cliente_existente.nome = limpar_nome_cliente(cliente_existente.nome)
+            cliente_existente.pais, cliente_existente.ddi, cliente_existente.telefone = normalizar_contato(
+                cliente_existente.pais, cliente_existente.ddi, cliente_existente.telefone
+            )
 
         # Migra o antigo item "Manutenção" para o campo fixo do orçamento.
         for orcamento_existente in db.query(Orcamento).options(selectinload(Orcamento.itens)).all():
@@ -657,7 +699,11 @@ def cpf_valido(documento: str) -> bool:
 
 def preencher_cliente(cliente: Cliente, form: dict):
     cliente.nome = limpar_nome_cliente(form.get("nome") or "")
-    cliente.telefone = limpar_telefone(form.get("telefone") or "")
+    cliente.pais, cliente.ddi, cliente.telefone = normalizar_contato(
+        form.get("pais") or getattr(cliente, "pais", "BR"),
+        form.get("ddi") or getattr(cliente, "ddi", "55"),
+        form.get("telefone") or "",
+    )
     cliente.empresa = (form.get("empresa") or "").strip() or None
     cliente.documento = (form.get("documento") or "").strip() or None
     cliente.inscricao_estadual = (form.get("inscricao_estadual") or "").strip() or None
@@ -681,14 +727,14 @@ def cliente_novo(request: Request, usuario: Usuario = Depends(usuario_logado)):
 @app.post("/organiza/clientes/novo")
 async def cliente_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
-    telefone = limpar_telefone(form.get("telefone") or "")
+    pais, ddi, telefone = normalizar_contato(form.get("pais"), form.get("ddi"), form.get("telefone"))
     erro = ""
     if not (form.get("nome") or "").strip():
         erro = "Informe o nome do cliente."
-    elif not telefone_valido(telefone):
-        erro = "Informe um celular válido com 11 dígitos, incluindo DDD."
-    elif db.query(Cliente).filter(Cliente.telefone == telefone).first():
-        erro = "Já existe um cliente com este telefone."
+    elif not telefone_valido(telefone, pais, ddi):
+        erro = "Informe um WhatsApp válido para o país selecionado."
+    elif db.query(Cliente).filter(Cliente.ddi == ddi, Cliente.telefone == telefone).first():
+        erro = "Já existe um cliente com este WhatsApp."
     if erro:
         cliente = Cliente()
         preencher_cliente(cliente, form)
@@ -733,11 +779,11 @@ async def cliente_salvar(cliente_id: int, request: Request, usuario: Usuario = D
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
     form = dict(await request.form())
-    telefone = limpar_telefone(form.get("telefone") or "")
+    pais, ddi, telefone = normalizar_contato(form.get("pais"), form.get("ddi"), form.get("telefone"))
     erro = ""
     if not (form.get("nome") or "").strip(): erro = "Informe o nome do cliente."
-    elif not telefone_valido(telefone): erro = "Informe um celular válido com 11 dígitos, incluindo DDD."
-    elif db.query(Cliente).filter(Cliente.telefone == telefone, Cliente.id != cliente_id).first(): erro = "Já existe outro cliente com este telefone."
+    elif not telefone_valido(telefone, pais, ddi): erro = "Informe um WhatsApp válido para o país selecionado."
+    elif db.query(Cliente).filter(Cliente.ddi == ddi, Cliente.telefone == telefone, Cliente.id != cliente_id).first(): erro = "Já existe outro cliente com este WhatsApp."
     if erro:
         preencher_cliente(cliente, form)
         return templates.TemplateResponse("organiza/cliente_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "erro": erro}, status_code=400)
@@ -1764,7 +1810,8 @@ def confirmar_prazo_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
         f"Prazo previsto: {m.prazo}\n\n"
         "Agora iniciaremos a execução do serviço.\n\nKaraokê RJ"
     )
-    return RedirectResponse(f"https://wa.me/55{limpar_telefone(m.cliente.telefone)}?text={quote(mensagem)}", status_code=303)
+    url = ComunicacaoService.registrar_e_url(db, HistoricoComunicacao, m, usuario, "PRAZO", mensagem)
+    return RedirectResponse(url, status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pausar-servico")
@@ -1811,7 +1858,8 @@ def comunicar_pausa_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
         + (f"Previsão: {m.compra_previsao}\n" if m.compra_previsao else "")
         + "\nO serviço ficará pausado até a chegada do item. Manteremos você informado.\n\nKaraokê RJ"
     )
-    return RedirectResponse(f"https://wa.me/55{limpar_telefone(m.cliente.telefone)}?text={quote(mensagem)}", status_code=303)
+    url = ComunicacaoService.registrar_e_url(db, HistoricoComunicacao, m, usuario, "COMPRA", mensagem)
+    return RedirectResponse(url, status_code=303)
 
 
 @app.get("/organiza/manutencoes/{manutencao_id}/concluir-whatsapp")
@@ -1851,7 +1899,8 @@ def concluir_servico_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usu
         f"📅 Agende a retirada: {PUBLIC_BASE_URL}/retirada/{o.token}\n\n"
         "Karaokê RJ"
     )
-    return RedirectResponse(f"https://wa.me/55{limpar_telefone(m.cliente.telefone)}?text={quote(mensagem)}", status_code=303)
+    url = ComunicacaoService.registrar_e_url(db, HistoricoComunicacao, m, usuario, "PRONTO", mensagem)
+    return RedirectResponse(url, status_code=303)
 
 
 @app.get("/garantia-servico/{token}.pdf")
@@ -2395,10 +2444,11 @@ async def operacao_comunicacoes_preparar(request: Request, usuario: Usuario = De
             m.conclusao_comunicada_em = m.conclusao_comunicada_em or agora
     mensagem = _montar_mensagem_comunicacao(cliente, selecionadas, tipo)
     db.commit()
-    telefone = limpar_telefone(cliente.telefone)
+    for manutencao in selecionadas:
+        ComunicacaoService.registrar(db, HistoricoComunicacao, manutencao, usuario, tipo.upper(), mensagem=mensagem)
     return JSONResponse({
         "ok": True,
-        "whatsapp_url": f"https://wa.me/55{telefone}?text={quote(mensagem)}",
+        "whatsapp_url": ComunicacaoService.url_whatsapp(cliente, mensagem),
         "cliente": cliente.nome,
         "quantidade": len(selecionadas),
         "tipo": tipo,
@@ -2429,8 +2479,9 @@ def operacao_comunicacoes_enviar(ids: str, tipo: str = "", usuario: Usuario = De
             m.conclusao_comunicada_em = m.conclusao_comunicada_em or datetime.now()
     mensagem = _montar_mensagem_comunicacao(cliente, selecionadas, tipo)
     db.commit()
-    telefone = limpar_telefone(cliente.telefone)
-    return RedirectResponse(f"https://wa.me/55{telefone}?text={quote(mensagem)}", status_code=303)
+    for manutencao in selecionadas:
+        ComunicacaoService.registrar(db, HistoricoComunicacao, manutencao, usuario, tipo.upper(), mensagem=mensagem)
+    return RedirectResponse(ComunicacaoService.url_whatsapp(cliente, mensagem), status_code=303)
 
 
 @app.get("/acompanhar/{token}", response_class=HTMLResponse)

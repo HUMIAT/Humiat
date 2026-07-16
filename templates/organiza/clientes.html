@@ -8,7 +8,7 @@
     <div class="lista-cards-mobile">
     {% for cliente in clientes %}
       <article class="cliente-card-clean cliente-card-acoes">
-        <a class="cliente-main" href="/organiza/clientes/{{ cliente.id }}"><div><strong>{{ cliente.nome }}</strong><small>{{ cliente.telefone|telefone }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</small></div><span>{{ cliente.equipamentos|length }} equip.</span></a>
+        <a class="cliente-main" href="/organiza/clientes/{{ cliente.id }}"><div><strong>{{ cliente.nome }}</strong><small>+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</small></div><span>{{ cliente.equipamentos|length }} equip.</span></a>
         <a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a>
       </article>
     {% else %}<p class="texto-suave vazio">Nenhum cliente encontrado.</p>{% endfor %}

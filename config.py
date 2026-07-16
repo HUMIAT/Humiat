@@ -1,6 +1,6 @@
 import os
 
-ORGANIZA_VERSAO = "8.0"
+ORGANIZA_VERSAO = "8.1"
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://humiat.com.br").rstrip("/")
 
 # Render/Neon: configure DATABASE_URL nas variáveis de ambiente.

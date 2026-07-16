@@ -46,5 +46,26 @@
 {% else %}
 <main class="organiza-container publica">{% block conteudo_publico %}{% endblock %}</main>
 {% endif %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".js-pais").forEach((seletor) => {
+    const formulario = seletor.closest("form") || document;
+    const ddi = formulario.querySelector(".js-ddi");
+    const telefone = formulario.querySelector(".js-telefone-internacional");
+    const atualizar = () => {
+      const opcao = seletor.options[seletor.selectedIndex];
+      if (ddi) ddi.value = opcao.dataset.ddi || "";
+      if (telefone) telefone.placeholder = opcao.dataset.exemplo || "Número com código de área";
+    };
+    seletor.addEventListener("change", atualizar);
+    atualizar();
+  });
+  document.querySelectorAll(".js-ddi, .js-telefone-internacional").forEach((campo) => {
+    campo.addEventListener("input", () => {
+      campo.value = campo.value.replace(/[^0-9()+\-\s]/g, "");
+    });
+  });
+});
+</script>
 </body>
 </html>

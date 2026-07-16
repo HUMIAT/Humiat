@@ -319,7 +319,7 @@ function enviarOrcamentoWhatsApp(){
   }
   const numero = somenteDigitos(document.getElementById("telefone_whatsapp").value);
   const texto = document.getElementById("texto_orcamento")?.value || "";
-  window.open("https://wa.me/55" + numero + "?text=" + encodeURIComponent(texto), "_blank", "noopener");
+  window.open({{ whatsapp_url(m.cliente)|tojson }} + "?text=" + encodeURIComponent(texto), "_blank", "noopener");
 }
 document.addEventListener("input", function(e){ if(e.target?.id === "telefone_whatsapp") validarTelefoneWhatsApp(); });
 
