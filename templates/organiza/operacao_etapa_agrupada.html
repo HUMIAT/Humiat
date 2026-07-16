@@ -45,6 +45,17 @@
 
 
 
+  {% if chave == "execucao" and grupos %}
+  <div class="acao-geral-recebimento">
+    <label class="selecionar-geral">
+      <input id="marcar-todos-execucao" type="checkbox" checked>
+      Selecionar todos os equipamentos
+    </label>
+    <button id="imprimir-execucao" class="botao primario" type="button">🖨 Imprimir identificadores</button>
+    <span><strong id="quantidade-execucao-selecionada">0</strong> equipamento(s) selecionado(s)</span>
+  </div>
+  {% endif %}
+
   {% if chave == "aprovacoes" and grupos %}
   <div class="acao-geral-recebimento">
     <label class="selecionar-geral">
@@ -72,8 +83,8 @@
 
       <div class="fila-equipamentos">
         {% for m in grupo.manutencoes %}
-        <div class="fila-item{% if chave in ('atendimento', 'aprovacoes', 'retiradas') %} selecionavel{% endif %}">
-          {% if chave in ("atendimento", "aprovacoes", "retiradas") %}
+        <div class="fila-item{% if chave in ('atendimento', 'aprovacoes', 'retiradas', 'execucao') %} selecionavel{% endif %}">
+          {% if chave in ("atendimento", "aprovacoes", "retiradas", "execucao") %}
           <input class="equipamento-grupo" type="checkbox" name="manutencao_id" value="{{ m.id }}" checked>
           {% endif %}
           <span>
@@ -97,6 +108,8 @@
             Registrar aprovação manual
           </button>
         {% elif chave == "retiradas" %}
+          <label><input class="marcar-grupo" type="checkbox" checked> Selecionar todos deste cliente</label>
+        {% elif chave == "execucao" %}
           <label><input class="marcar-grupo" type="checkbox" checked> Selecionar todos deste cliente</label>
         {% endif %}
       </div>
@@ -246,6 +259,32 @@
 <script>
 (() => {
   const geral = document.getElementById('marcar-todos-geral');
+  const geralExecucao = document.getElementById('marcar-todos-execucao');
+  const botaoImprimirExecucao = document.getElementById('imprimir-execucao');
+
+  const caixasExecucao = () => [...document.querySelectorAll('.equipamento-grupo')];
+  const atualizarExecucao = () => {
+    if (!geralExecucao) return;
+    const caixas = caixasExecucao();
+    const selecionadas = caixas.filter(c => c.checked);
+    geralExecucao.checked = caixas.length > 0 && selecionadas.length === caixas.length;
+    geralExecucao.indeterminate = selecionadas.length > 0 && selecionadas.length < caixas.length;
+    const quantidade = document.getElementById('quantidade-execucao-selecionada');
+    if (quantidade) quantidade.textContent = selecionadas.length;
+    if (botaoImprimirExecucao) botaoImprimirExecucao.disabled = selecionadas.length === 0;
+  };
+
+  geralExecucao?.addEventListener('change', () => {
+    caixasExecucao().forEach(c => { c.checked = geralExecucao.checked; });
+    document.querySelectorAll('.marcar-grupo').forEach(c => { c.checked = geralExecucao.checked; });
+    atualizarExecucao();
+  });
+
+  botaoImprimirExecucao?.addEventListener('click', () => {
+    const ids = caixasExecucao().filter(c => c.checked).map(c => c.value);
+    if (!ids.length) return;
+    window.open(`/organiza/operacao/execucao/imprimir?ids=${ids.join(',')}`, '_blank');
+  });
 
   const atualizarQuantidade = () => {
     const total = document.querySelectorAll('.equipamento-grupo:checked').length;
@@ -518,6 +557,9 @@
   atualizarQuantidade();
   atualizarSelecaoGeral();
   atualizarRetiradas();
+  document.querySelectorAll('.equipamento-grupo').forEach(c => c.addEventListener('change', atualizarExecucao));
+  document.querySelectorAll('.marcar-grupo').forEach(c => c.addEventListener('change', () => setTimeout(atualizarExecucao, 0)));
+  atualizarExecucao();
 })();
 </script>
 {% endblock %}

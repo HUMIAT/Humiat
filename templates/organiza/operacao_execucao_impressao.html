@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Identificadores de manutenção</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef2f6; color: #000; font-family: Arial, Helvetica, sans-serif; }
+    .barra { position: sticky; top: 0; z-index: 2; display: flex; justify-content: center; gap: 10px; padding: 12px; background: #fff; border-bottom: 1px solid #ccd3dc; }
+    .barra button, .barra a { border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; text-decoration: none; color: #fff; background: #173b63; }
+    .barra a { background: #596677; }
+    .folha { width: 58mm; margin: 12px auto; padding: 2.5mm 2mm 5mm; background: #fff; font-size: 10.5px; line-height: 1.28; }
+    .cabecalho { text-align: center; }
+    .cabecalho h1 { margin: 0; font-size: 17px; letter-spacing: .5px; }
+    .cabecalho h2 { margin: 3px 0 0; font-size: 14px; }
+    .separador { border-top: 1px dashed #000; margin: 7px 0; }
+    .campo { margin: 5px 0; overflow-wrap: anywhere; }
+    .campo strong, .titulo-secao { display: block; font-size: 10px; text-transform: uppercase; }
+    .titulo-secao { margin-bottom: 3px; font-weight: 800; }
+    .texto { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .itens { margin: 0; padding-left: 15px; }
+    .itens li { margin: 2px 0; }
+    .financeiro { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    .financeiro td { padding: 1px 0; }
+    .financeiro td:last-child { text-align: right; font-weight: 700; }
+    .saldo td { padding-top: 4px; font-size: 12px; font-weight: 800; }
+    .assinatura { margin-top: 20px; text-align: center; }
+    .linha-assinatura { border-top: 1px solid #000; margin: 26px 3mm 4px; }
+    .rodape { margin-top: 8px; text-align: center; font-size: 8.5px; }
+    .vazio { width: min(520px, calc(100% - 30px)); margin: 30px auto; padding: 25px; border-radius: 12px; background: #fff; text-align: center; }
+    @media print {
+      @page { size: 58mm auto; margin: 0; }
+      body { background: #fff; }
+      .barra { display: none; }
+      .folha { width: 58mm; margin: 0; padding: 2.5mm 2mm 5mm; break-after: page; page-break-after: always; }
+      .folha:last-child { break-after: auto; page-break-after: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="barra">
+    <button type="button" onclick="window.print()">🖨 Imprimir todas</button>
+    <a href="/organiza/operacao/etapa/execucao">Voltar</a>
+  </div>
+
+  {% for ficha in fichas %}
+  {% set m = ficha.manutencao %}
+  <article class="folha">
+    <header class="cabecalho">
+      <h1>HUMIAT</h1>
+      <h2>MANUTENÇÃO Nº {{ '%06d'|format(m.id) }}</h2>
+    </header>
+
+    <div class="separador"></div>
+
+    <div class="campo"><strong>Cliente</strong>{{ m.cliente.nome }}</div>
+    <div class="campo"><strong>Telefone / WhatsApp</strong>{{ m.cliente.telefone_formatado() }}</div>
+    <div class="campo"><strong>Máquina</strong>{{ m.equipamento|rotulo_maquina }}</div>
+    <div class="campo"><strong>Equipamento</strong>{{ m.equipamento.tipo or '-' }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</div>
+
+    <div class="separador"></div>
+    <div class="titulo-secao">Erro apresentado</div>
+    <div class="texto">{{ m.defeito or 'Não informado.' }}</div>
+
+    <div class="separador"></div>
+    <div class="titulo-secao">Diagnóstico</div>
+    <div class="texto">{{ m.diagnostico or 'Ainda não informado.' }}</div>
+
+    <div class="separador"></div>
+    <div class="titulo-secao">Itens trocados / serviços</div>
+    {% if ficha.itens %}
+    <ul class="itens">
+      {% for item in ficha.itens %}
+      <li>{{ item.quantidade }}x {{ item.descricao }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="texto">Nenhum item informado.</div>
+    {% endif %}
+
+    <div class="separador"></div>
+    <div class="titulo-secao">Financeiro</div>
+    <table class="financeiro">
+      <tr><td>Total</td><td>{{ ficha.total|moeda }}</td></tr>
+      <tr><td>Recebido</td><td>{{ ficha.recebido|moeda }}</td></tr>
+      <tr class="saldo"><td>Falta receber</td><td>{{ ficha.saldo|moeda }}</td></tr>
+    </table>
+
+    <div class="separador"></div>
+    <div class="campo"><strong>Entrada</strong>{{ (m.recebido_em or m.criado_em)|datahora }}</div>
+    <div class="campo"><strong>Previsão</strong>{{ m.entrega_prevista_em|datahora }}</div>
+
+    <div class="assinatura">
+      <div class="linha-assinatura"></div>
+      Assinatura do cliente
+      <div style="margin-top:8px">Data: ____/____/________</div>
+    </div>
+
+    <div class="rodape">Impresso em {{ data_impressao|datahora }}</div>
+  </article>
+  {% else %}
+  <div class="vazio">
+    <h2>Nenhuma manutenção selecionada</h2>
+    <p>Volte à etapa Em execução e selecione os equipamentos que deseja imprimir.</p>
+  </div>
+  {% endfor %}
+</body>
+</html>

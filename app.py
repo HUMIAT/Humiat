@@ -2546,6 +2546,46 @@ def operacao_etapa_agrupada(
     })
 
 
+@app.get("/organiza/operacao/execucao/imprimir", response_class=HTMLResponse)
+def operacao_execucao_imprimir(
+    request: Request,
+    ids: str = "",
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    manutencao_ids = {int(valor) for valor in ids.split(",") if valor.strip().isdigit()}
+    manutencoes = [
+        m for m in _manutencoes_operacao(db)
+        if m.id in manutencao_ids and _fila_operacional_exclusiva(m) == "execucao"
+    ]
+    manutencoes.sort(key=lambda m: ((m.cliente.nome or "").lower(), m.id))
+
+    fichas = []
+    for m in manutencoes:
+        orcamento = _orcamento_atual(m)
+        itens = []
+        if orcamento:
+            itens = [
+                item for item in orcamento.itens
+                if (not item.opcional) or item.aprovado
+            ]
+        total, recebido, saldo = _saldo_manutencao(m)
+        fichas.append({
+            "manutencao": m,
+            "itens": itens,
+            "total": total,
+            "recebido": recebido,
+            "saldo": saldo,
+        })
+
+    return templates.TemplateResponse("organiza/operacao_execucao_impressao.html", {
+        "request": request,
+        "usuario": usuario,
+        "fichas": fichas,
+        "data_impressao": datetime.now(),
+    })
+
+
 @app.post("/organiza/operacao/receber")
 async def operacao_receber_em_lote(
     request: Request,
