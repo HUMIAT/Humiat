@@ -905,10 +905,14 @@ def validar_codigo_monitor(db: Session, equipamento: Equipamento, codigo_anterio
     if duplicado:
         return f"O código do monitor {codigo} já está sendo utilizado e não pode ser repetido."
     anterior = (codigo_anterior or "").strip().upper()
-    if anterior and codigo != anterior:
-        numero_anterior = int(anterior[3:]) if re.fullmatch(r"KRJ\d{5}", anterior) else 99999
-        if not 1 <= numero_anterior <= 40:
-            return f"O código do monitor {anterior} é permanente. Somente códigos de KRJ00001 a KRJ00040 podem ser corrigidos."
+    codigo_foi_alterado = not anterior or codigo != anterior
+    if codigo_foi_alterado:
+        numero_novo = int(codigo[3:])
+        if not 1 <= numero_novo <= 40:
+            return (
+                "Novos códigos e alterações devem utilizar um código entre "
+                "KRJ00001 e KRJ00040."
+            )
     return ""
 
 
