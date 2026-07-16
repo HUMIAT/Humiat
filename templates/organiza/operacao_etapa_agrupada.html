@@ -459,8 +459,40 @@
 
   botaoFilaAprovacoes?.addEventListener('click', prepararProximoDaFila);
 
+  const geralRetiradas = document.getElementById('marcar-todos-retiradas');
+  const campoQuantidadeRetiradas = document.getElementById('quantidade-retiradas-selecionada');
+
+  const atualizarRetiradas = () => {
+    const caixas = [...document.querySelectorAll('#form-retiradas-geral .equipamento-grupo')];
+    const selecionadas = caixas.filter(c => c.checked);
+    if (campoQuantidadeRetiradas) campoQuantidadeRetiradas.textContent = selecionadas.length;
+    if (geralRetiradas) geralRetiradas.checked = caixas.length > 0 && selecionadas.length === caixas.length;
+  };
+
+  geralRetiradas?.addEventListener('change', () => {
+    document.querySelectorAll('#form-retiradas-geral .equipamento-grupo').forEach(c => c.checked = geralRetiradas.checked);
+    document.querySelectorAll('#form-retiradas-geral .marcar-grupo').forEach(c => c.checked = geralRetiradas.checked);
+    atualizarRetiradas();
+  });
+
+  document.querySelectorAll('#form-retiradas-geral .equipamento-grupo, #form-retiradas-geral .marcar-grupo')
+    .forEach(c => c.addEventListener('change', atualizarRetiradas));
+
+  document.getElementById('form-retiradas-geral')?.addEventListener('submit', event => {
+    const selecionadas = document.querySelectorAll('#form-retiradas-geral .equipamento-grupo:checked');
+    if (!selecionadas.length) {
+      event.preventDefault();
+      alert('Selecione pelo menos um equipamento para finalizar.');
+      return;
+    }
+    if (!confirm(`Finalizar a entrega de ${selecionadas.length} equipamento(s)?`)) {
+      event.preventDefault();
+    }
+  });
+
   atualizarQuantidade();
   atualizarSelecaoGeral();
+  atualizarRetiradas();
 })();
 </script>
 {% endblock %}

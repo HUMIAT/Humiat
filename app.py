@@ -2384,6 +2384,10 @@ ETAPAS_OPERACAO_AGRUPADA = {
         "titulo": "Aguardando item",
         "descricao": "Equipamentos em execução pausados por peça ou material.",
     },
+    "retiradas": {
+        "titulo": "Aguardando retirada",
+        "descricao": "Selecione os equipamentos entregues ao cliente e finalize todos de uma vez.",
+    },
 }
 
 
@@ -2455,6 +2459,53 @@ async def operacao_receber_em_lote(
     db.commit()
     return RedirectResponse(
         f"/organiza/operacao/etapa/atendimento?sucesso={len(selecionadas)} equipamento(s) recebido(s)",
+        status_code=303,
+    )
+
+
+@app.post("/organiza/operacao/finalizar-retiradas")
+async def operacao_finalizar_retiradas(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        ids = sorted({int(x) for x in form.getlist("manutencao_id")})
+    except ValueError:
+        ids = []
+
+    selecionadas = [
+        m for m in _manutencoes_operacao(db)
+        if m.id in ids and _fila_operacional_exclusiva(m) == "retiradas"
+    ]
+    if not selecionadas:
+        return RedirectResponse(
+            "/organiza/operacao/etapa/retiradas?erro=Selecione pelo menos um equipamento",
+            status_code=303,
+        )
+
+    data_texto = (form.get("data_entrega") or "").strip()
+    try:
+        data_entrega = datetime.strptime(data_texto, "%Y-%m-%d").date()
+    except ValueError:
+        return RedirectResponse(
+            "/organiza/operacao/etapa/retiradas?erro=Informe uma data de entrega válida",
+            status_code=303,
+        )
+
+    horario_atual = datetime.now().time().replace(microsecond=0)
+    entregue_em = datetime.combine(data_entrega, horario_atual)
+
+    for m in selecionadas:
+        m.entregue_em = entregue_em
+        if not m.retirada_em:
+            m.retirada_em = entregue_em
+        m.status = "Encerrada"
+
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/operacao/etapa/retiradas?sucesso={len(selecionadas)} equipamento(s) finalizado(s)",
         status_code=303,
     )
 
