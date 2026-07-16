@@ -2833,6 +2833,78 @@ def acompanhamento_cliente(token: str, request: Request, db: Session = Depends(g
     })
 
 
+
+@app.post("/organiza/operacao/aprovacoes/manual")
+async def operacao_aprovacao_manual(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Registra no painel a mesma decisão disponível ao cliente no portal público."""
+    form = await request.form()
+    try:
+        ids = sorted({int(x) for x in form.getlist("manutencao_id")})
+    except (TypeError, ValueError):
+        ids = []
+
+    acao = (form.get("acao") or "").strip().lower()
+    if acao not in {"obrigatorios", "todos", "cancelar"}:
+        return JSONResponse(
+            {"ok": False, "erro": "Escolha uma ação válida."},
+            status_code=400,
+        )
+    if not ids:
+        return JSONResponse(
+            {"ok": False, "erro": "Selecione pelo menos um equipamento."},
+            status_code=400,
+        )
+
+    manutencoes = [
+        m for m in _manutencoes_operacao(db)
+        if m.id in ids and _fila_operacional_exclusiva(m) == "aprovacoes"
+    ]
+    if len(manutencoes) != len(ids):
+        return JSONResponse(
+            {"ok": False, "erro": "Um ou mais equipamentos não estão aguardando aprovação."},
+            status_code=400,
+        )
+    if len({m.cliente_id for m in manutencoes}) != 1:
+        return JSONResponse(
+            {"ok": False, "erro": "A aprovação manual deve ser feita para um cliente por vez."},
+            status_code=400,
+        )
+
+    for manutencao in manutencoes:
+        orcamento = _orcamento_atual(manutencao)
+        if not orcamento:
+            return JSONResponse(
+                {"ok": False, "erro": f"{codigo_tecnico(manutencao.equipamento)} está sem orçamento."},
+                status_code=400,
+            )
+        if acao == "cancelar":
+            orcamento.status = "Cancelado"
+            manutencao.status = "Cancelado"
+        else:
+            registrar_aprovacao_orcamento(
+                orcamento,
+                "todos" if acao == "todos" else "obrigatorios",
+                f"manual por {usuario.nome}",
+            )
+
+    db.commit()
+
+    mensagens = {
+        "obrigatorios": "Itens obrigatórios aprovados manualmente.",
+        "todos": "Orçamento completo aprovado manualmente.",
+        "cancelar": "Orçamento cancelado manualmente.",
+    }
+    return JSONResponse({
+        "ok": True,
+        "mensagem": mensagens[acao],
+        "quantidade": len(manutencoes),
+    })
+
+
 @app.get("/organiza/operacao/pagamentos", response_class=HTMLResponse)
 def operacao_pagamentos(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     pendentes = [m for m in _manutencoes_operacao(db) if etapa_manutencao(m) == 4 and _saldo_manutencao(m)[2] > 0.009]

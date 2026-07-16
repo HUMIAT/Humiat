@@ -78,6 +78,9 @@
           <button class="botao {% if grupo.comunicado %}secundario{% else %}primario{% endif %} reenviar-grupo" type="button">
             {% if grupo.comunicado %}Reenviar WhatsApp{% else %}Enviar WhatsApp{% endif %}
           </button>
+          <button class="botao secundario aprovacao-manual-grupo" type="button">
+            Registrar aprovação manual
+          </button>
         {% endif %}
       </div>
     </section>
@@ -92,6 +95,30 @@
       <button class="botao primario" type="submit">Confirmar recebimento</button>
     </div>
   </form>
+  {% endif %}
+
+  {% if chave == "aprovacoes" and grupos %}
+  <dialog id="dialog-aprovacao-manual" class="dialog-aprovacao">
+    <form method="dialog" class="dialog-conteudo" id="form-aprovacao-manual">
+      <button class="dialog-fechar" value="cancel" aria-label="Fechar">×</button>
+      <p class="tag">APROVAÇÃO MANUAL</p>
+      <h2 id="titulo-aprovacao-manual">Registrar decisão</h2>
+      <p class="texto-suave" id="resumo-aprovacao-manual"></p>
+
+      <div class="opcoes-aprovacao-manual">
+        <button type="button" class="botao primario acao-aprovacao-manual" data-acao="obrigatorios">
+          Aprovar obrigatórios
+        </button>
+        <button type="button" class="botao primario acao-aprovacao-manual" data-acao="todos">
+          Aprovar tudo
+        </button>
+        <button type="button" class="botao perigo acao-aprovacao-manual" data-acao="cancelar">
+          Cancelar orçamento
+        </button>
+      </div>
+      <p class="texto-suave">A decisão será aplicada somente aos equipamentos selecionados deste cliente.</p>
+    </form>
+  </dialog>
   {% endif %}
 </section>
 
@@ -128,6 +155,45 @@
   gap: 8px;
   min-height: 42px;
 }
+
+.dialog-aprovacao {
+  width: min(520px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 18px;
+  padding: 0;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .28);
+}
+.dialog-aprovacao::backdrop {
+  background: rgba(15, 23, 42, .58);
+}
+.dialog-conteudo {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+}
+.dialog-fechar {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  border: 0;
+  background: transparent;
+  font-size: 28px;
+  cursor: pointer;
+}
+.opcoes-aprovacao-manual {
+  display: grid;
+  gap: 10px;
+}
+.botao.perigo {
+  background: #fff;
+  color: #b42318;
+  border: 1px solid #f2b8b5;
+}
+@media (max-width: 640px) {
+  .dialog-conteudo { padding: 20px; }
+  .opcoes-aprovacao-manual .botao { width: 100%; }
+}
 </style>
 
 <script>
@@ -144,7 +210,80 @@
 
     marcar?.addEventListener('change', () => {
       caixas.forEach(c => c.checked = marcar.checked);
-      atualizarQuantidade();
+    
+  const dialogAprovacao = document.getElementById('dialog-aprovacao-manual');
+  const tituloAprovacao = document.getElementById('titulo-aprovacao-manual');
+  const resumoAprovacao = document.getElementById('resumo-aprovacao-manual');
+  let grupoAprovacaoAtual = null;
+
+  document.querySelectorAll('.aprovacao-manual-grupo').forEach(botao => {
+    botao.addEventListener('click', () => {
+      const grupo = botao.closest('.operacao-grupo');
+      const selecionados = [...grupo.querySelectorAll('.equipamento-grupo:checked')];
+      if (!selecionados.length) {
+        alert('Selecione pelo menos um equipamento deste cliente.');
+        return;
+      }
+      grupoAprovacaoAtual = grupo;
+      const nomeCliente = grupo.querySelector('.fila-cabecalho h2')?.textContent?.trim() || 'cliente';
+      if (tituloAprovacao) tituloAprovacao.textContent = `Registrar decisão de ${nomeCliente}`;
+      if (resumoAprovacao) {
+        resumoAprovacao.textContent = `${selecionados.length} equipamento(s) selecionado(s).`;
+      }
+      dialogAprovacao?.showModal();
+    });
+  });
+
+  document.querySelectorAll('.acao-aprovacao-manual').forEach(botao => {
+    botao.addEventListener('click', async () => {
+      if (!grupoAprovacaoAtual) return;
+      const acao = botao.dataset.acao;
+      const selecionados = [...grupoAprovacaoAtual.querySelectorAll('.equipamento-grupo:checked')];
+      if (!selecionados.length) {
+        alert('Selecione pelo menos um equipamento.');
+        return;
+      }
+
+      const rotulos = {
+        obrigatorios: 'aprovar somente os itens obrigatórios',
+        todos: 'aprovar todos os itens',
+        cancelar: 'cancelar o orçamento',
+      };
+      if (!confirm(`Confirma ${rotulos[acao]} para ${selecionados.length} equipamento(s)?`)) return;
+
+      const botoes = [...document.querySelectorAll('.acao-aprovacao-manual')];
+      botoes.forEach(item => item.disabled = true);
+      const textoOriginal = botao.textContent;
+      botao.textContent = 'Salvando...';
+
+      try {
+        const dados = new FormData();
+        dados.append('acao', acao);
+        selecionados.forEach(caixa => dados.append('manutencao_id', caixa.value));
+
+        const resposta = await fetch('/organiza/operacao/aprovacoes/manual', {
+          method: 'POST',
+          body: dados,
+          headers: {'X-Requested-With': 'XMLHttpRequest'},
+        });
+        const retorno = await resposta.json();
+        if (!resposta.ok || !retorno.ok) {
+          throw new Error(retorno.erro || 'Não foi possível registrar a aprovação.');
+        }
+
+        dialogAprovacao?.close();
+        alert(retorno.mensagem);
+        window.location.reload();
+      } catch (erro) {
+        alert(erro.message || 'Não foi possível registrar a aprovação.');
+      } finally {
+        botoes.forEach(item => item.disabled = false);
+        botao.textContent = textoOriginal;
+      }
+    });
+  });
+
+  atualizarQuantidade();
       atualizarSelecaoGeral();
     });
 
