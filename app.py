@@ -1,3 +1,4 @@
+from urllib.parse import quote_plus
 import hashlib
 import hmac
 import os
@@ -2413,15 +2414,137 @@ def operacao_orcamentos(
         .order_by(Item.categoria.asc(), Item.nome.asc())
         .all()
     )
+    grupos_por_cliente = {}
+    for manutencao in manutencoes:
+        grupo = grupos_por_cliente.setdefault(
+            manutencao.cliente_id,
+            {"cliente": manutencao.cliente, "manutencoes": []},
+        )
+        grupo["manutencoes"].append(manutencao)
+
     return templates.TemplateResponse("organiza/operacao_orcamentos.html", {
         "request": request,
         "usuario": usuario,
         "manutencoes": manutencoes,
+        "grupos": list(grupos_por_cliente.values()),
         "itens_catalogo": itens_catalogo,
         "abrir": abrir,
         "sucesso": request.query_params.get("sucesso", ""),
         "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/organiza/operacao/orcamentos/salvar-lote")
+async def operacao_orcamentos_salvar_lote(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Salva diagnósticos e orçamentos selecionados em uma única ação."""
+    form = await request.form()
+    try:
+        ids = sorted({int(valor) for valor in form.getlist("manutencao_id")})
+    except (TypeError, ValueError):
+        ids = []
+
+    if not ids:
+        return RedirectResponse(
+            "/organiza/operacao/orcamentos?erro=Selecione pelo menos um equipamento",
+            status_code=303,
+        )
+
+    manutencoes = [
+        m for m in _manutencoes_operacao(db)
+        if m.id in ids and _fila_operacional_exclusiva(m) == "orcamentos"
+    ]
+    if len(manutencoes) != len(ids):
+        return RedirectResponse(
+            "/organiza/operacao/orcamentos?erro=Um ou mais equipamentos não estão aguardando orçamento",
+            status_code=303,
+        )
+
+    erros = []
+    preparados = []
+    for m in manutencoes:
+        diagnostico = (form.get(f"diagnostico_{m.id}") or "").strip()
+        valor_manutencao = max(moeda_num(form.get(f"valor_manutencao_{m.id}")), 0)
+        forma = (form.get(f"forma_pagamento_orcamento_{m.id}") or "").strip()
+        try:
+            prazo = int(form.get(f"prazo_dias_uteis_{m.id}") or 0)
+        except (TypeError, ValueError):
+            prazo = 0
+
+        if not diagnostico:
+            erros.append(f"{m.equipamento.codigo}: informe o diagnóstico")
+        if valor_manutencao <= 0:
+            erros.append(f"{m.equipamento.codigo}: informe o valor da manutenção")
+        if forma not in ("À vista", "50% de sinal + 50% na entrega"):
+            erros.append(f"{m.equipamento.codigo}: informe a forma de pagamento")
+        if prazo <= 0:
+            erros.append(f"{m.equipamento.codigo}: informe o prazo em dias úteis")
+
+        item_ids = form.getlist(f"item_id_{m.id}")
+        quantidades = form.getlist(f"quantidade_{m.id}")
+        opcionais = set(form.getlist(f"opcional_{m.id}"))
+        novos_itens = []
+        for indice, item_id_texto in enumerate(item_ids):
+            if not item_id_texto:
+                continue
+            try:
+                item_id = int(item_id_texto)
+                quantidade = max(int(quantidades[indice] if indice < len(quantidades) else 1), 1)
+            except (TypeError, ValueError):
+                continue
+            item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+            if item:
+                novos_itens.append((item, quantidade, str(indice) in opcionais))
+
+        preparados.append({
+            "manutencao": m, "diagnostico": diagnostico,
+            "valor": valor_manutencao, "forma": forma, "prazo": prazo,
+            "desconto": max(moeda_num(form.get(f"desconto_{m.id}")), 0),
+            "desconto_opcionais": bool(form.get(f"desconto_somente_com_opcionais_{m.id}")),
+            "itens": novos_itens,
+        })
+
+    if erros:
+        return RedirectResponse(
+            f"/organiza/operacao/orcamentos?erro={quote_plus(' | '.join(erros[:5]))}",
+            status_code=303,
+        )
+
+    for dados in preparados:
+        m = dados["manutencao"]
+        o = _orcamento_atual(m)
+        if not o:
+            o = Orcamento(manutencao_id=m.id, versao=1, token=secrets.token_urlsafe(24), status="Rascunho")
+            db.add(o); db.flush()
+        for antigo in list(o.itens):
+            db.delete(antigo)
+        db.flush()
+        total_itens = 0
+        for item, quantidade, opcional in dados["itens"]:
+            total_itens += float(item.preco_venda or 0) * quantidade
+            db.add(OrcamentoItem(
+                orcamento_id=o.id, item_id=item.id, descricao=item.nome,
+                quantidade=quantidade, preco_custo=float(item.preco_custo or 0),
+                preco_venda=float(item.preco_venda or 0),
+                opcional=1 if opcional else 0, aprovado=0 if opcional else 1,
+            ))
+        m.diagnostico = dados["diagnostico"]
+        o.valor_manutencao = dados["valor"]
+        o.forma_pagamento_orcamento = dados["forma"]
+        o.prazo_dias_uteis = dados["prazo"]
+        o.desconto = min(dados["desconto"], dados["valor"] + total_itens)
+        o.desconto_somente_com_opcionais = 1 if dados["desconto_opcionais"] else 0
+        o.status = "Pronto"
+        m.status = "Orçamento pronto"
+
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/operacao/orcamentos?sucesso={len(preparados)} orçamento(s) salvo(s) e enviado(s) para a próxima etapa",
+        status_code=303,
+    )
 
 
 @app.post("/organiza/operacao/orcamentos/{manutencao_id}/salvar")
