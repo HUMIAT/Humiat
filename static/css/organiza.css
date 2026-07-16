@@ -3599,3 +3599,36 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .orcamento-operacao-form .grade-2,.linha-item{grid-template-columns:1fr}
   .orcamento-operacao-resumo{align-items:flex-start}
 }
+
+
+/* Central de Pagamentos */
+.pagamento-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:22px}
+.pagamento-topo h1{margin:3px 0 6px}.pagamento-topo p{margin:0;color:#667085}
+.eyebrow{font-size:12px;font-weight:900;letter-spacing:.12em;color:#2563eb}
+.pagamentos-lista{display:grid;gap:18px}
+.pagamento-card{padding:20px}
+.pagamento-cabecalho{align-items:center;border-bottom:1px solid #eef2f7;padding-bottom:16px}
+.selecionar-grupo{display:flex;align-items:center;gap:8px;font-weight:800;color:#344054;cursor:pointer}
+.selecionar-grupo input{width:18px;height:18px}
+.pagamento-item{grid-template-columns:auto minmax(0,1fr) auto}
+.pagamento-equipamento{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pagamento-equipamento strong,.pagamento-equipamento small{overflow-wrap:anywhere}
+.pagamento-saldo{white-space:nowrap;color:#667085}
+.pagamento-resumo{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;margin:16px 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px}
+.pagamento-resumo span{font-weight:700;color:#475467}.pagamento-resumo strong{font-size:20px;color:#1d4ed8}
+.pagamento-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.campo-form{display:flex;flex-direction:column;gap:7px;min-width:0}
+.campo-form>span{font-weight:800;color:#344054}
+.campo-form input,.campo-form select{display:block;width:100%;min-width:0;height:46px;border:1px solid #cbd5e1;border-radius:12px;padding:0 13px;background:#fff;color:#101828;font:inherit;box-sizing:border-box}
+.campo-form input:focus,.campo-form select:focus{outline:3px solid rgba(37,99,235,.13);border-color:#2563eb}
+.pagamento-acoes{display:flex;justify-content:flex-end;margin-top:18px}
+.pagamento-submit{min-width:220px}
+@media(max-width:760px){
+  .pagamento-topo{flex-direction:column}.pagamento-topo .btn{width:100%}
+  .pagamento-card{padding:14px}
+  .pagamento-cabecalho{align-items:flex-start;flex-direction:column}
+  .pagamento-form-grid{grid-template-columns:1fr}
+  .pagamento-item{grid-template-columns:auto minmax(0,1fr)}
+  .pagamento-saldo{grid-column:2;white-space:normal}
+  .pagamento-acoes .btn{width:100%}
+}
