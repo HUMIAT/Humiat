@@ -1,11 +1,11 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean">
+<section class="pagina-clean pagina-orcamentos">
   <div class="titulo-linha">
     <div>
       <p class="tag">OPERAÇÃO · ORÇAMENTOS</p>
       <h1>Aguardando orçamento</h1>
-      <p class="texto-suave">Preencha diagnóstico e itens por equipamento. No final, salve todos os selecionados em uma única ação.</p>
+      <p class="texto-suave">Complete cada equipamento e finalize os selecionados em uma única ação.</p>
     </div>
     <a class="btn secundario" href="/organiza">Voltar ao início</a>
   </div>
@@ -18,7 +18,7 @@
     <div class="orcamento-fila">
       {% for grupo in grupos %}
       <article class="orcamento-cliente-card">
-        <div class="orcamento-cliente-cabecalho">
+        <header class="orcamento-cliente-cabecalho">
           <div>
             <h2>{{ grupo.cliente.nome }}</h2>
             <p>{{ grupo.manutencoes|length }} equipamento{% if grupo.manutencoes|length != 1 %}s{% endif %}</p>
@@ -27,95 +27,140 @@
             <input type="checkbox" class="selecionar-cliente" checked>
             Selecionar todos
           </label>
-        </div>
+        </header>
 
         {% for m in grupo.manutencoes %}
-          {% set o = m.orcamentos|sort(attribute='versao')|last if m.orcamentos else none %}
-          <section class="orcamento-equipamento" data-manutencao="{{ m.id }}">
-            <div class="orcamento-equipamento-topo">
-              <label class="checkbox-linha equipamento-selecao">
-                <input type="checkbox" name="manutencao_id" value="{{ m.id }}" class="selecionar-equipamento" checked>
+        {% set o = m.orcamentos|sort(attribute='versao')|last if m.orcamentos else none %}
+        <section class="orcamento-equipamento" data-manutencao="{{ m.id }}">
+          <div class="equipamento-cabecalho">
+            <label class="equipamento-identificacao">
+              <input type="checkbox" name="manutencao_id" value="{{ m.id }}" class="selecionar-equipamento" checked>
+              <span>
                 <strong>{{ m.equipamento|rotulo_maquina }}</strong>
-              </label>
-              <button type="button" class="btn secundario alternar-orcamento">Fechar</button>
+                <small>{{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</small>
+              </span>
+            </label>
+            <button type="button" class="btn secundario alternar-orcamento">Recolher</button>
+          </div>
+
+          <div class="orcamento-conteudo">
+            <div class="defeito-box">
+              <span>Defeito informado</span>
+              <p>{{ m.defeito }}</p>
             </div>
-            <p class="texto-suave">{{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</p>
-            <small>{{ m.defeito }}</small>
 
-            <div class="orcamento-conteudo">
-              <label>Diagnóstico
-                <textarea name="diagnostico_{{ m.id }}" rows="3" required>{{ m.diagnostico or '' }}</textarea>
+            <div class="formulario-orcamento">
+              <label class="campo campo-diagnostico">
+                <span>Diagnóstico</span>
+                <textarea name="diagnostico_{{ m.id }}" rows="4" required placeholder="Descreva o diagnóstico técnico">{{ m.diagnostico or '' }}</textarea>
               </label>
 
-              <div class="grade-2">
-                <label>Valor da manutenção
+              <div class="grade-campos">
+                <label class="campo">
+                  <span>Valor da manutenção</span>
                   <input name="valor_manutencao_{{ m.id }}" inputmode="decimal" required
-                         value="{{ '%.2f'|format(o.valor_manutencao or 0) if o else '' }}">
+                         value="{{ '%.2f'|format(o.valor_manutencao or 0) if o else '' }}" placeholder="0,00">
                 </label>
-                <label>Forma de pagamento
+                <label class="campo">
+                  <span>Forma de pagamento</span>
                   <select name="forma_pagamento_orcamento_{{ m.id }}" required>
                     <option value="">Selecione</option>
                     <option value="À vista" {% if o and o.forma_pagamento_orcamento == 'À vista' %}selected{% endif %}>À vista</option>
                     <option value="50% de sinal + 50% na entrega" {% if o and o.forma_pagamento_orcamento == '50% de sinal + 50% na entrega' %}selected{% endif %}>50% de sinal + 50% na entrega</option>
                   </select>
                 </label>
+                <label class="campo">
+                  <span>Prazo após pagamento</span>
+                  <div class="campo-com-sufixo">
+                    <input type="number" min="1" name="prazo_dias_uteis_{{ m.id }}" required value="{{ o.prazo_dias_uteis if o else '' }}">
+                    <span>dias úteis</span>
+                  </div>
+                </label>
+                <label class="campo">
+                  <span>Desconto</span>
+                  <input name="desconto_{{ m.id }}" inputmode="decimal" value="{{ '%.2f'|format(o.desconto or 0) if o else '0.00' }}" placeholder="0,00">
+                </label>
               </div>
 
-              <div class="grade-2">
-                <label>Prazo após pagamento (dias úteis)
-                  <input type="number" min="1" name="prazo_dias_uteis_{{ m.id }}" required value="{{ o.prazo_dias_uteis if o else '' }}">
-                </label>
-                <label>Desconto
-                  <input name="desconto_{{ m.id }}" inputmode="decimal" value="{{ '%.2f'|format(o.desconto or 0) if o else '0,00' }}">
-                </label>
-              </div>
-
-              <label class="checkbox-linha">
+              <label class="checkbox-linha desconto-opcionais">
                 <input type="checkbox" name="desconto_somente_com_opcionais_{{ m.id }}" value="1"
                        {% if o and o.desconto_somente_com_opcionais %}checked{% endif %}>
                 Aplicar desconto somente se todos os opcionais forem aprovados
               </label>
+            </div>
 
-              <div class="orcamento-itens-cabecalho">
-                <h3>Itens e serviços</h3>
-                <button type="button" class="btn secundario adicionar-linha">+ Adicionar item</button>
+            <div class="itens-bloco">
+              <div class="itens-titulo">
+                <div>
+                  <h3>Itens e serviços</h3>
+                  <p>Escolha o item e clique em adicionar. Ele aparecerá na tabela.</p>
+                </div>
               </div>
 
-              <div class="linhas-itens">
-                {% if o and o.itens %}
-                  {% for item_orcamento in o.itens %}
-                  <div class="linha-item">
-                    <select name="item_id_{{ m.id }}">
-                      <option value="">Selecione</option>
-                      {% for item in itens_catalogo %}
-                      <option value="{{ item.id }}" {% if item.id == item_orcamento.item_id %}selected{% endif %}>
-                        {{ item.nome }} · {{ item.preco_venda|moeda }}
-                      </option>
+              <div class="adicionar-item-barra">
+                <label class="campo item-seletor">
+                  <span>Item ou serviço</span>
+                  <select class="novo-item">
+                    <option value="">Selecione um item</option>
+                    {% for item in itens_catalogo %}
+                    <option value="{{ item.id }}" data-nome="{{ item.nome|e }}" data-preco="{{ '%.2f'|format(item.preco_venda or 0) }}">
+                      {{ item.nome }} · {{ item.preco_venda|moeda }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label class="campo item-quantidade">
+                  <span>Quantidade</span>
+                  <input type="number" class="nova-quantidade" min="1" value="1">
+                </label>
+                <label class="checkbox-linha item-opcional">
+                  <input type="checkbox" class="novo-opcional"> Opcional
+                </label>
+                <button type="button" class="btn primario adicionar-linha">Adicionar item</button>
+              </div>
+
+              <div class="tabela-responsiva">
+                <table class="tabela-itens">
+                  <thead>
+                    <tr>
+                      <th>Item ou serviço</th>
+                      <th class="col-quantidade">Qtd.</th>
+                      <th class="col-valor">Valor unitário</th>
+                      <th class="col-valor">Subtotal</th>
+                      <th class="col-opcional">Opcional</th>
+                      <th class="col-acao"></th>
+                    </tr>
+                  </thead>
+                  <tbody class="linhas-itens">
+                    {% if o and o.itens %}
+                      {% for item_orcamento in o.itens %}
+                      <tr class="linha-item" data-preco="{{ '%.2f'|format(item_orcamento.preco_venda or 0) }}">
+                        <td>
+                          <input type="hidden" name="item_id_{{ m.id }}" value="{{ item_orcamento.item_id }}">
+                          <strong>{{ item_orcamento.descricao }}</strong>
+                        </td>
+                        <td><input class="quantidade-tabela" type="number" name="quantidade_{{ m.id }}" min="1" value="{{ item_orcamento.quantidade }}"></td>
+                        <td class="valor-unitario">{{ item_orcamento.preco_venda|moeda }}</td>
+                        <td class="subtotal-item">—</td>
+                        <td class="celula-central">
+                          <input type="checkbox" class="marcar-opcional" {% if item_orcamento.opcional %}checked{% endif %}>
+                        </td>
+                        <td class="celula-central"><button type="button" class="btn-icone remover-linha" title="Remover">×</button></td>
+                      </tr>
                       {% endfor %}
-                    </select>
-                    <input type="number" name="quantidade_{{ m.id }}" min="1" value="{{ item_orcamento.quantidade }}">
-                    <label class="checkbox-linha opcional-linha">
-                      <input type="checkbox" class="marcar-opcional" {% if item_orcamento.opcional %}checked{% endif %}> Opcional
-                    </label>
-                    <button type="button" class="btn perigo remover-linha">Remover</button>
-                  </div>
-                  {% endfor %}
-                {% else %}
-                  <div class="linha-item">
-                    <select name="item_id_{{ m.id }}">
-                      <option value="">Selecione um item</option>
-                      {% for item in itens_catalogo %}
-                      <option value="{{ item.id }}">{{ item.nome }} · {{ item.preco_venda|moeda }}</option>
-                      {% endfor %}
-                    </select>
-                    <input type="number" name="quantidade_{{ m.id }}" min="1" value="1">
-                    <label class="checkbox-linha opcional-linha"><input type="checkbox" class="marcar-opcional"> Opcional</label>
-                    <button type="button" class="btn perigo remover-linha">Remover</button>
-                  </div>
-                {% endif %}
+                    {% endif %}
+                  </tbody>
+                </table>
+                <div class="tabela-vazia {% if o and o.itens %}oculto{% endif %}">Nenhum item adicionado.</div>
+              </div>
+
+              <div class="resumo-itens">
+                <span>Total dos itens</span>
+                <strong class="total-itens">R$ 0,00</strong>
               </div>
             </div>
-          </section>
+          </div>
+        </section>
         {% endfor %}
       </article>
       {% endfor %}
@@ -130,59 +175,126 @@
     </div>
   </form>
   {% else %}
-    <article class="operacao-sem-pendencias">
-      <h2>Nenhum orçamento pendente</h2>
-      <p>Todos os equipamentos recebidos já possuem orçamento salvo.</p>
-    </article>
+  <article class="operacao-sem-pendencias">
+    <h2>Nenhum orçamento pendente</h2>
+    <p>Todos os equipamentos recebidos já possuem orçamento salvo.</p>
+  </article>
   {% endif %}
 </section>
 
-<template id="modelo-linha-item">
-  <div class="linha-item">
-    <select>
-      <option value="">Selecione um item</option>
-      {% for item in itens_catalogo %}
-      <option value="{{ item.id }}">{{ item.nome }} · {{ item.preco_venda|moeda }}</option>
-      {% endfor %}
-    </select>
-    <input type="number" min="1" value="1">
-    <label class="checkbox-linha opcional-linha"><input type="checkbox" class="marcar-opcional"> Opcional</label>
-    <button type="button" class="btn perigo remover-linha">Remover</button>
-  </div>
-</template>
-
 <style>
-.orcamento-cliente-card{background:#fff;border:1px solid #dbe3ef;border-radius:16px;padding:18px;margin-bottom:18px}
-.orcamento-cliente-cabecalho,.orcamento-equipamento-topo,.acao-lote-fixa{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.orcamento-cliente-cabecalho{padding-bottom:14px;border-bottom:1px solid #e7edf5}
-.orcamento-cliente-cabecalho h2{margin:0}.orcamento-cliente-cabecalho p{margin:4px 0 0}
-.orcamento-equipamento{margin-top:14px;padding:16px;border:1px solid #dbe3ef;border-radius:14px;background:#f9fbfe}
-.orcamento-equipamento-topo{margin-bottom:4px}.orcamento-conteudo{margin-top:14px}
+.pagina-orcamentos{padding-bottom:92px}
+.orcamento-cliente-card{background:#fff;border:1px solid #dbe3ef;border-radius:18px;padding:20px;margin-bottom:22px}
+.orcamento-cliente-cabecalho,.equipamento-cabecalho,.acao-lote-fixa{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.orcamento-cliente-cabecalho{padding-bottom:16px;border-bottom:1px solid #e7edf5}
+.orcamento-cliente-cabecalho h2{margin:0}.orcamento-cliente-cabecalho p{margin:4px 0 0;color:#64748b}
+.orcamento-equipamento{margin-top:16px;border:1px solid #dbe3ef;border-radius:16px;background:#f8fafc;overflow:hidden}
+.equipamento-cabecalho{padding:16px 18px;background:#fff}
+.equipamento-identificacao{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+.equipamento-identificacao input{margin-top:4px}
+.equipamento-identificacao span{display:flex;flex-direction:column;gap:3px}
+.equipamento-identificacao strong{font-size:1rem}.equipamento-identificacao small{color:#64748b}
+.orcamento-conteudo{padding:18px;border-top:1px solid #e7edf5}
+.defeito-box{padding:12px 14px;background:#eef4ff;border-left:4px solid #2563eb;border-radius:10px;margin-bottom:18px}
+.defeito-box span{display:block;font-size:.75rem;font-weight:700;text-transform:uppercase;color:#2563eb;margin-bottom:4px}
+.defeito-box p{margin:0;color:#334155}
+.formulario-orcamento{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px}
+.campo{display:flex;flex-direction:column;gap:6px}
+.campo>span{font-size:.82rem;font-weight:700;color:#334155}
+.campo input,.campo select,.campo textarea{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:9px;padding:10px 12px;background:#fff}
+.campo textarea{resize:vertical;min-height:96px}
+.campo-diagnostico{margin-bottom:14px}
+.grade-campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.campo-com-sufixo{display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;background:#fff;overflow:hidden}
+.campo-com-sufixo input{border:0;border-radius:0}.campo-com-sufixo span{padding:0 12px;color:#64748b;white-space:nowrap;font-size:.82rem}
+.desconto-opcionais{margin-top:14px}
+.itens-bloco{margin-top:16px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px}
+.itens-titulo h3{margin:0}.itens-titulo p{margin:4px 0 0;color:#64748b;font-size:.86rem}
+.adicionar-item-barra{display:grid;grid-template-columns:minmax(260px,1fr) 110px auto auto;gap:12px;align-items:end;margin-top:16px;padding:14px;background:#f8fafc;border-radius:12px}
+.item-opcional{padding-bottom:10px}
+.tabela-responsiva{overflow-x:auto;margin-top:16px;border:1px solid #e2e8f0;border-radius:12px}
+.tabela-itens{width:100%;border-collapse:collapse;min-width:720px}
+.tabela-itens th{background:#f1f5f9;color:#475569;text-align:left;font-size:.78rem;text-transform:uppercase;padding:11px 12px}
+.tabela-itens td{padding:11px 12px;border-top:1px solid #e2e8f0;vertical-align:middle}
+.col-quantidade{width:90px}.col-valor{width:125px}.col-opcional{width:85px}.col-acao{width:52px}
+.quantidade-tabela{width:70px;border:1px solid #cbd5e1;border-radius:8px;padding:8px}
+.celula-central{text-align:center}.btn-icone{width:32px;height:32px;border:0;border-radius:8px;background:#fee2e2;color:#b91c1c;font-size:20px;cursor:pointer}
+.tabela-vazia{text-align:center;color:#64748b;padding:20px;background:#fff}
+.resumo-itens{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-top:12px}.resumo-itens strong{font-size:1.05rem}
 .acao-lote-fixa{position:sticky;bottom:12px;background:#fff;border:1px solid #cfd9e8;border-radius:14px;padding:14px 16px;box-shadow:0 8px 28px rgba(15,35,65,.14);z-index:10}
-.orcamento-equipamento.desmarcado{opacity:.58}
-@media(max-width:700px){.orcamento-cliente-cabecalho,.orcamento-equipamento-topo,.acao-lote-fixa{align-items:flex-start;flex-direction:column}.acao-lote-fixa .btn{width:100%}}
+.orcamento-equipamento.desmarcado{opacity:.55}
+.oculto{display:none!important}
+@media(max-width:850px){.adicionar-item-barra{grid-template-columns:1fr 110px}.adicionar-item-barra .btn{grid-column:1/-1}.item-opcional{align-self:center}}
+@media(max-width:700px){.orcamento-cliente-cabecalho,.equipamento-cabecalho,.acao-lote-fixa{align-items:flex-start;flex-direction:column}.grade-campos{grid-template-columns:1fr}.adicionar-item-barra{grid-template-columns:1fr}.acao-lote-fixa .btn{width:100%}}
 </style>
 
 <script>
 (function () {
+  function moeda(valor) {
+    return Number(valor || 0).toLocaleString("pt-BR", {style:"currency", currency:"BRL"});
+  }
+
   function atualizarOpcionais(secao) {
     var id = secao.dataset.manutencao;
     secao.querySelectorAll(".linha-item").forEach(function (linha, indice) {
-      var select = linha.querySelector("select");
-      var quantidade = linha.querySelector('input[type="number"]');
+      var item = linha.querySelector('input[type="hidden"]');
+      var quantidade = linha.querySelector(".quantidade-tabela");
       var opcional = linha.querySelector(".marcar-opcional");
-      select.name = "item_id_" + id;
+      item.name = "item_id_" + id;
       quantidade.name = "quantidade_" + id;
       opcional.name = "opcional_" + id;
       opcional.value = String(indice);
     });
   }
 
+  function atualizarTotais(secao) {
+    var total = 0;
+    secao.querySelectorAll(".linha-item").forEach(function (linha) {
+      var preco = Number(linha.dataset.preco || 0);
+      var quantidade = Number(linha.querySelector(".quantidade-tabela").value || 0);
+      var subtotal = preco * quantidade;
+      total += subtotal;
+      linha.querySelector(".subtotal-item").textContent = moeda(subtotal);
+    });
+    secao.querySelector(".total-itens").textContent = moeda(total);
+    secao.querySelector(".tabela-vazia").classList.toggle("oculto", secao.querySelectorAll(".linha-item").length > 0);
+  }
+
+  function adicionarItem(secao) {
+    var select = secao.querySelector(".novo-item");
+    var option = select.options[select.selectedIndex];
+    if (!select.value) {
+      select.focus();
+      return;
+    }
+    var quantidadeCampo = secao.querySelector(".nova-quantidade");
+    var quantidade = Math.max(Number(quantidadeCampo.value || 1), 1);
+    var opcional = secao.querySelector(".novo-opcional").checked;
+    var preco = Number(option.dataset.preco || 0);
+    var linha = document.createElement("tr");
+    linha.className = "linha-item";
+    linha.dataset.preco = String(preco);
+    linha.innerHTML =
+      '<td><input type="hidden" value="' + select.value + '"><strong></strong></td>' +
+      '<td><input class="quantidade-tabela" type="number" min="1" value="' + quantidade + '"></td>' +
+      '<td class="valor-unitario">' + moeda(preco) + '</td>' +
+      '<td class="subtotal-item"></td>' +
+      '<td class="celula-central"><input type="checkbox" class="marcar-opcional"' + (opcional ? ' checked' : '') + '></td>' +
+      '<td class="celula-central"><button type="button" class="btn-icone remover-linha" title="Remover">×</button></td>';
+    linha.querySelector("strong").textContent = option.dataset.nome || option.textContent;
+    secao.querySelector(".linhas-itens").appendChild(linha);
+    select.value = "";
+    quantidadeCampo.value = "1";
+    secao.querySelector(".novo-opcional").checked = false;
+    atualizarOpcionais(secao);
+    atualizarTotais(secao);
+  }
+
   document.querySelectorAll(".orcamento-equipamento").forEach(function (secao) {
     var checkbox = secao.querySelector(".selecionar-equipamento");
     checkbox.addEventListener("change", function () {
       secao.classList.toggle("desmarcado", !checkbox.checked);
-      secao.querySelectorAll("input:not(.selecionar-equipamento), select, textarea").forEach(function (campo) {
+      secao.querySelectorAll(".orcamento-conteudo input, .orcamento-conteudo select, .orcamento-conteudo textarea, .orcamento-conteudo button").forEach(function (campo) {
         campo.disabled = !checkbox.checked;
       });
     });
@@ -190,22 +302,33 @@
     secao.querySelector(".alternar-orcamento").addEventListener("click", function (evento) {
       var conteudo = secao.querySelector(".orcamento-conteudo");
       conteudo.classList.toggle("oculto");
-      evento.currentTarget.textContent = conteudo.classList.contains("oculto") ? "Abrir" : "Fechar";
+      evento.currentTarget.textContent = conteudo.classList.contains("oculto") ? "Abrir orçamento" : "Recolher";
     });
 
     secao.querySelector(".adicionar-linha").addEventListener("click", function () {
-      var nova = document.querySelector("#modelo-linha-item").content.cloneNode(true);
-      secao.querySelector(".linhas-itens").appendChild(nova);
-      atualizarOpcionais(secao);
+      adicionarItem(secao);
+    });
+
+    secao.querySelector(".novo-item").addEventListener("keydown", function (evento) {
+      if (evento.key === "Enter") {
+        evento.preventDefault();
+        adicionarItem(secao);
+      }
+    });
+
+    secao.addEventListener("input", function (evento) {
+      if (evento.target.classList.contains("quantidade-tabela")) atualizarTotais(secao);
     });
 
     secao.addEventListener("click", function (evento) {
       if (evento.target.classList.contains("remover-linha")) {
         evento.target.closest(".linha-item").remove();
         atualizarOpcionais(secao);
+        atualizarTotais(secao);
       }
     });
     atualizarOpcionais(secao);
+    atualizarTotais(secao);
   });
 
   document.querySelectorAll(".orcamento-cliente-card").forEach(function (card) {
