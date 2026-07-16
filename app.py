@@ -1547,21 +1547,50 @@ def item_status(item_id: int, usuario: Usuario = Depends(usuario_logado), db: Se
 
 @app.get("/organiza/manutencoes", response_class=HTMLResponse)
 def manutencoes_lista(request: Request, status: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    query = db.query(Manutencao).options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
-    filtros = {
-        "entrada": ["Aguardando equipamento"],
-        "orcamento": ["Recebida", "Orçamento em elaboração"],
-        "aceite": ["Aguardando aprovação"],
-        "pagamento": ["Aprovado"],
-        "producao": ["Em manutenção"],
-        "agenda": ["Pronto para retirada"],
-        "retirada": ["Retirada agendada"],
-        "encerradas": ["Encerrada"],
-    }
-    if status in filtros:
-        query = query.filter(Manutencao.status.in_(filtros[status]))
+    """Lista usando a mesma regra operacional do painel.
+
+    Evita divergência entre o número exibido no card e os registros encontrados
+    ao abrir a etapa. Os aliases antigos continuam funcionando.
+    """
+    query = db.query(Manutencao).options(
+        selectinload(Manutencao.cliente),
+        selectinload(Manutencao.equipamento),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
+    )
     lista = query.order_by(Manutencao.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/manutencoes.html", {"request": request, "usuario": usuario, "manutencoes": lista, "filtro_status": status})
+
+    etapas_por_filtro = {
+        "entrada": 1,
+        "orcamento": 2,
+        "aceite": 3,
+        "aprovacao": 3,
+        "pagamento": 4,
+        "producao": 5,
+        "execucao": 5,
+        "agenda": 6,
+        "retirada": 6,
+    }
+    if status in etapas_por_filtro:
+        etapa = etapas_por_filtro[status]
+        lista = [m for m in lista if etapa_manutencao(m) == etapa]
+    elif status == "encerradas":
+        lista = [m for m in lista if etapa_manutencao(m) == 7]
+
+    # Informações prontas para a interface, sem recalcular regras no template.
+    for m in lista:
+        m.etapa_operacional = etapa_manutencao(m)
+        o = _orcamento_atual(m)
+        m.orcamento_comunicado = bool(
+            o and o.status in ("Enviado", "Aguardando aprovação")
+        )
+
+    return templates.TemplateResponse("organiza/manutencoes.html", {
+        "request": request,
+        "usuario": usuario,
+        "manutencoes": lista,
+        "filtro_status": status,
+    })
 
 
 @app.get("/organiza/manutencoes/nova", response_class=HTMLResponse)

@@ -1,1 +1,51 @@
-{% extends "organiza/base.html" %}{% block conteudo %}<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Operação</p><h1>Manutenções</h1><p class="texto-suave">Cliente, equipamento, orçamento, pagamento e retirada.</p></div><a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a></div><div class="lista-cards-mobile">{% for m in manutencoes %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.cliente.nome }}</strong><small><b>{{ m.equipamento|rotulo_maquina }}</b> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}<br>Código técnico: {{ m.equipamento|codigo_tecnico }}<br>{{ m.defeito }}</small></div><span class="pill {{ m.status|classe_status }}">{{ m.status|rotulo_status }}</span></a>{% else %}<p class="texto-suave vazio">Nenhuma manutenção cadastrada.</p>{% endfor %}</div></section>{% endblock %}
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">Operação</p>
+      <h1>Manutenções</h1>
+      <p class="texto-suave">Cliente, equipamento, orçamento, pagamento e retirada.</p>
+    </div>
+    <a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a>
+  </div>
+
+  <div class="lista-cards-mobile">
+    {% for m in manutencoes %}
+      <div class="cliente-card-clean">
+        <a href="/organiza/manutencoes/{{ m.id }}" style="flex:1;min-width:0;color:inherit;text-decoration:none">
+          <div>
+            <strong>#{{ m.id }} · {{ m.cliente.nome }}</strong>
+            <small>
+              <b>{{ m.equipamento|rotulo_maquina }}</b> · {{ m.equipamento.tipo }}
+              {% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}
+              <br>Código técnico: {{ m.equipamento|codigo_tecnico }}
+              <br>{{ m.defeito }}
+            </small>
+          </div>
+        </a>
+
+        <div style="display:flex;align-items:flex-end;gap:8px;flex-direction:column">
+          {% if filtro_status in ("aceite", "aprovacao") %}
+            {% if m.orcamento_comunicado %}
+              <span class="pill status-ok">Comunicado</span>
+              <a class="botao secundario pequeno"
+                 href="/organiza/operacao/comunicacoes/enviar?ids={{ m.id }}&tipo=orcamento"
+                 target="_blank" rel="noopener">Reenviar</a>
+            {% else %}
+              <span class="pill status-alerta">Não comunicado</span>
+              <a class="botao primario pequeno"
+                 href="/organiza/operacao/comunicacoes/enviar?ids={{ m.id }}&tipo=orcamento"
+                 target="_blank" rel="noopener">Enviar WhatsApp</a>
+            {% endif %}
+          {% else %}
+            <span class="pill {{ m.status|classe_status }}">{{ m.status|rotulo_status }}</span>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <p class="texto-suave vazio">Nenhuma manutenção encontrada nesta etapa.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
