@@ -51,6 +51,7 @@
     <strong class="js-saldo-selecionado">{{ grupo.saldo|moeda }}</strong>
   </div>
 
+  {% if grupo.saldo > 0.009 %}
   <div class="pagamento-form-grid">
     <label class="campo-form">
       <span>Valor recebido</span>
@@ -76,9 +77,30 @@
       <input name="observacao" placeholder="Opcional">
     </label>
   </div>
+  {% else %}
+  <div class="pagamento-quitado-aviso">
+    <strong>Pagamento concluído.</strong>
+    <span>Informe apenas a previsão para liberar os equipamentos para execução.</span>
+  </div>
+  <div class="pagamento-form-grid pagamento-form-grid-quitado">
+    <label class="campo-form">
+      <span>Previsão de conclusão</span>
+      <input type="date" name="previsao" required>
+    </label>
+    <label class="campo-form">
+      <span>Observação da confirmação</span>
+      <input name="observacao" placeholder="Opcional">
+    </label>
+  </div>
+  <input type="hidden" name="valor" value="0">
+  <input type="hidden" name="data" value="{{ hoje }}">
+  <input type="hidden" name="forma" value="">
+  {% endif %}
 
   <div class="pagamento-acoes">
-    <button class="btn btn-primary pagamento-submit" type="submit">Registrar, confirmar e iniciar execução</button>
+    <button class="btn btn-primary pagamento-submit" type="submit">
+      {% if grupo.saldo > 0.009 %}Registrar pagamento, confirmar e iniciar execução{% else %}Confirmar previsão e iniciar execução{% endif %}
+    </button>
   </div>
 </form>
 {% endfor %}

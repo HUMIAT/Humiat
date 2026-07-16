@@ -3632,3 +3632,28 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .pagamento-saldo{grid-column:2;white-space:normal}
   .pagamento-acoes .btn{width:100%}
 }
+
+.pagamento-quitado-aviso{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin:14px 0;
+  padding:14px 16px;
+  border:1px solid #b9e6c8;
+  border-radius:14px;
+  background:#eefbf2;
+  color:#185b2e;
+}
+.pagamento-form-grid-quitado{
+  grid-template-columns:minmax(220px, 1fr) minmax(260px, 2fr);
+}
+.pagamento-acoes .pagamento-submit{
+  min-height:44px;
+  padding:12px 20px;
+  font-weight:700;
+}
+@media (max-width: 720px){
+  .pagamento-form-grid-quitado{
+    grid-template-columns:1fr;
+  }
+}

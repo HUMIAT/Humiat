@@ -2935,16 +2935,16 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
     if not previsao:
         return RedirectResponse("/organiza/operacao/pagamentos?erro=Informe a previsão de conclusão", status_code=303)
 
-    valor = moeda_num(form.get("valor"))
+    saldos = [(m, _orcamento_atual(m), _saldo_manutencao(m)[2]) for m in selecionadas]
+    saldo_total = sum(s for _, _, s in saldos)
+
+    # Se os equipamentos já estiverem quitados, esta ação serve apenas para
+    # registrar a previsão, confirmar o cliente e liberar a execução.
+    valor = moeda_num(form.get("valor")) if saldo_total > 0.009 else 0
     data_pagamento = data_form(form.get("data")) or date.today()
     forma = (form.get("forma") or "").strip()
     observacao = (form.get("observacao") or "").strip()
 
-    saldos = [(m, _orcamento_atual(m), _saldo_manutencao(m)[2]) for m in selecionadas]
-    saldo_total = sum(s for _, _, s in saldos)
-
-    # Quando ainda existe saldo, o pagamento precisa ser informado. Se o grupo
-    # já foi quitado anteriormente, valor zero é aceito para concluir prazo e confirmação.
     if saldo_total > 0.009 and valor <= 0:
         return RedirectResponse("/organiza/operacao/pagamentos?erro=Informe o valor recebido", status_code=303)
     if valor > saldo_total + 0.009:
@@ -2973,6 +2973,19 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
         m.status = "Em manutenção"
 
     db.commit()
+
+    # Confere a transição depois da gravação para nunca deixar o equipamento
+    # entre a etapa de pagamento e a execução.
+    ids_nao_liberados = []
+    for manutencao_id in ids:
+        atual = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+        if atual and etapa_manutencao(atual) != 5:
+            ids_nao_liberados.append(str(manutencao_id))
+    if ids_nao_liberados:
+        return RedirectResponse(
+            "/organiza/operacao/pagamentos?erro=Não foi possível liberar alguns equipamentos para execução. Abra a manutenção e revise pagamento e previsão.",
+            status_code=303,
+        )
 
     linhas = [
         f"Olá, {selecionadas[0].cliente.nome}!",
