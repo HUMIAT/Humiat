@@ -2292,7 +2292,7 @@ def acompanhamento_cliente(token: str, request: Request, db: Session = Depends(g
     for m in manutencoes:
         o = _orcamento_atual(m)
         if m.entregue_em or (o and o.status in ("Enviado", "Aguardando aprovação", "Aprovado", "Aprovado parcialmente", "Aprovado manualmente")) or m.pronto_em:
-            registros.append({"m": m, "orcamento": o, "etapa": etapa_manutencao(m), "meta": info_etapa_manutencao(m)})
+            registros.append({"m": m, "orcamento": o, "etapa": etapa_manutencao(m), "meta": info_etapa_manutencao(m), "retirada_agendada": bool(m.retirada_em), "retirada_em": m.retirada_em})
     return templates.TemplateResponse("organiza/acompanhamento_cliente.html", {
         "request": request, "cliente": cliente, "registros": registros, "usuario": None
     })
@@ -2426,6 +2426,161 @@ def contexto_retirada_publica(request: Request, o: Orcamento, prontas, erro: str
         "erro": erro,
         "hoje": date.today().isoformat(),
     }
+
+
+
+def _ids_selecionados_publicos(ids_texto: str) -> list[int]:
+    try:
+        return sorted({int(x) for x in (ids_texto or "").split(",") if x.strip()})
+    except ValueError:
+        raise HTTPException(400, "Seleção inválida.")
+
+
+def _manutencoes_publicas_selecionadas(db: Session, cliente: Cliente, ids_texto: str, somente_prontas: bool = True):
+    ids = _ids_selecionados_publicos(ids_texto)
+    if not ids:
+        raise HTTPException(400, "Selecione ao menos um equipamento.")
+    consulta = (
+        db.query(Manutencao)
+        .options(
+            selectinload(Manutencao.cliente),
+            selectinload(Manutencao.equipamento),
+            selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        )
+        .filter(Manutencao.cliente_id == cliente.id, Manutencao.id.in_(ids))
+    )
+    if somente_prontas:
+        consulta = consulta.filter(Manutencao.pronto_em.isnot(None), Manutencao.entregue_em.is_(None))
+    manutencoes = consulta.order_by(Manutencao.id.asc()).all()
+    if len(manutencoes) != len(ids):
+        raise HTTPException(400, "Um ou mais equipamentos selecionados não estão disponíveis.")
+    return manutencoes
+
+
+@app.get("/garantias/{token}.pdf")
+def garantias_agrupadas_pdf(token: str, ids: str, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    manutencoes = _manutencoes_publicas_selecionadas(db, cliente, ids, somente_prontas=True)
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+    from reportlab.lib import colors
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=15*mm, bottomMargin=15*mm)
+    estilos = getSampleStyleSheet()
+    titulo = ParagraphStyle("TituloGarantiaGrupo", parent=estilos["Title"], alignment=TA_CENTER, fontSize=18, leading=22, spaceAfter=8)
+    centro = ParagraphStyle("CentroGarantiaGrupo", parent=estilos["BodyText"], alignment=TA_CENTER, fontSize=10, leading=14)
+    corpo = ParagraphStyle("CorpoGarantiaGrupo", parent=estilos["BodyText"], fontSize=10, leading=15, spaceAfter=8)
+    elementos = []
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo-karaoke-rj.png")
+
+    for indice, m in enumerate(manutencoes):
+        if indice:
+            elementos.append(PageBreak())
+        if os.path.exists(logo_path):
+            elementos += [Image(logo_path, width=32*mm, height=32*mm), Spacer(1, 4*mm)]
+        elementos += [
+            Paragraph("CERTIFICADO DE GARANTIA DO SERVIÇO", titulo),
+            Paragraph("KARAOKÊ RJ", centro),
+            Spacer(1, 7*mm),
+        ]
+        eq = m.equipamento
+        dados = [
+            ["Ordem de serviço", f"#{m.id}"],
+            ["Cliente", cliente.nome],
+            ["Equipamento", descricao_equipamento(eq)],
+            ["Código técnico", codigo_tecnico(eq)],
+            ["Serviço concluído em", m.pronto_em.strftime("%d/%m/%Y")],
+            ["Garantia válida até", (m.pronto_em.date() + timedelta(days=30)).strftime("%d/%m/%Y")],
+        ]
+        tabela = Table(dados, colWidths=[48*mm, 110*mm])
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#F2F4F7")),
+            ("TEXTCOLOR", (0,0), (0,-1), colors.HexColor("#344054")),
+            ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
+            ("FONTNAME", (1,0), (1,-1), "Helvetica"),
+            ("GRID", (0,0), (-1,-1), .4, colors.HexColor("#D0D5DD")),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("PADDING", (0,0), (-1,-1), 7),
+        ]))
+        elementos += [
+            tabela, Spacer(1, 8*mm),
+            Paragraph("<b>Garantia de 30 dias</b>", corpo),
+            Paragraph(
+                "A garantia cobre exclusivamente os serviços executados e os itens descritos na ordem de serviço. "
+                "Não cobre mau uso, quedas, líquidos, ligação em tensão incorreta, intervenção de terceiros ou defeitos diferentes do serviço realizado.",
+                corpo,
+            ),
+        ]
+    doc.build(elementos)
+    buffer.seek(0)
+    return Response(
+        buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="garantias-{cliente.id}.pdf"'},
+    )
+
+
+@app.get("/retirada-cliente/{token}", response_class=HTMLResponse)
+def retirada_cliente_publica(token: str, ids: str, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    manutencoes = _manutencoes_publicas_selecionadas(db, cliente, ids, somente_prontas=True)
+    agendamento_atual = next((m.retirada_em for m in manutencoes if m.retirada_em), None)
+    return templates.TemplateResponse("organiza/retirada_cliente_publica.html", {
+        "request": request,
+        "cliente": cliente,
+        "manutencoes": manutencoes,
+        "ids": ids,
+        "hoje": date.today().isoformat(),
+        "erro": "",
+        "agendamento_atual": agendamento_atual,
+    })
+
+
+@app.post("/retirada-cliente/{token}")
+async def retirada_cliente_publica_salvar(token: str, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    form = await request.form()
+    ids = (form.get("ids") or "").strip()
+    manutencoes = _manutencoes_publicas_selecionadas(db, cliente, ids, somente_prontas=True)
+    data_retirada = data_form(form.get("data_retirada") or "")
+    hora_texto = (form.get("hora_retirada") or "").strip()
+    dt = None
+    try:
+        hora_retirada = datetime.strptime(hora_texto, "%H:%M").time()
+        if data_retirada:
+            dt = datetime.combine(data_retirada, hora_retirada)
+    except ValueError:
+        pass
+
+    agora = datetime.now()
+    if dt and dt >= agora and dt.weekday() < 5 and time(14, 0) <= dt.time() <= time(17, 0):
+        for manutencao in manutencoes:
+            manutencao.retirada_em = dt
+            manutencao.status = "Retirada agendada"
+        db.commit()
+        return RedirectResponse(f"/retirada-cliente/{token}?ids={ids}&ok=1", status_code=303)
+
+    agendamento_atual = next((m.retirada_em for m in manutencoes if m.retirada_em), None)
+    return templates.TemplateResponse("organiza/retirada_cliente_publica.html", {
+        "request": request,
+        "cliente": cliente,
+        "manutencoes": manutencoes,
+        "ids": ids,
+        "hoje": date.today().isoformat(),
+        "erro": "Escolha uma data e um horário válidos, de segunda a sexta, entre 14:00 e 17:00.",
+        "agendamento_atual": agendamento_atual,
+    }, status_code=400)
 
 
 @app.get("/retirada/{token}", response_class=HTMLResponse)

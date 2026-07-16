@@ -1,24 +1,129 @@
 {% extends "organiza/base.html" %}
 {% block conteudo_publico %}
-<div class="publico-cabecalho"><img src="/static/img/logo-karaoke-rj.png" alt="Karaokê RJ"><div><h1>Acompanhamento do atendimento</h1><p>{{ cliente.nome }}</p></div></div>
+<div class="publico-cabecalho">
+  <img src="/static/img/logo-karaoke-rj.png" alt="Karaokê RJ">
+  <div><h1>Acompanhamento do atendimento</h1><p>{{ cliente.nome }}</p></div>
+</div>
+
 {% if registros %}
-<div class="fila-lista publica-lista">
-{% for r in registros %}
-<section class="fila-grupo">
-  <div class="fila-cabecalho"><div><h2>{{ rotulo_maquina(r.m.equipamento) }} · {{ r.m.equipamento.tipo }} {{ r.m.equipamento.modelo or '' }}</h2><p>Código técnico: {{ codigo_tecnico(r.m.equipamento) }}</p></div><span class="status-pill {{ r.meta.classe }}">{{ r.meta.rotulo }}</span></div>
-  <div class="linha-tempo-publica">
-  {% for numero in range(1,8) %}
-    <div class="{% if numero < r.etapa %}concluida{% elif numero == r.etapa %}atual{% else %}futura{% endif %}"><b>{{ numero }}</b><span>{{ ETAPAS_MANUTENCAO[numero].titulo }}</span></div>
+<form id="acoes-atendimento">
+  <div class="acoes-coletivas">
+    <div>
+      <strong>Selecione os equipamentos</strong>
+      <span>Escolha um ou vários e depois informe a ação.</span>
+    </div>
+    <select id="acao-coletiva" aria-label="Ação para os equipamentos selecionados">
+      <option value="">O que deseja fazer?</option>
+      <option value="garantia">Abrir garantias selecionadas</option>
+      <option value="retirada">Agendar ou reagendar retirada</option>
+    </select>
+    <button class="btn btn-primary" type="submit">Continuar</button>
+  </div>
+
+  <div class="fila-lista publica-lista">
+  {% for r in registros %}
+    <section class="fila-grupo atendimento-selecionavel">
+      <label class="selecao-equipamento">
+        <input
+          type="checkbox"
+          name="manutencao_id"
+          value="{{ r.m.id }}"
+          data-pronto="{{ '1' if r.m.pronto_em else '0' }}"
+          data-agendado="{{ '1' if r.retirada_agendada else '0' }}"
+        >
+        <span>Selecionar</span>
+      </label>
+
+      <div class="fila-cabecalho">
+        <div>
+          <h2>{{ rotulo_maquina(r.m.equipamento) }} · {{ r.m.equipamento.tipo }} {{ r.m.equipamento.modelo or '' }}</h2>
+          <p>Código técnico: {{ codigo_tecnico(r.m.equipamento) }}</p>
+        </div>
+        <span class="status-pill {{ r.meta.classe }}">{{ r.meta.rotulo }}</span>
+      </div>
+
+      <div class="linha-tempo-publica">
+      {% for numero in range(1,8) %}
+        <div class="{% if numero < r.etapa %}concluida{% elif numero == r.etapa %}atual{% else %}futura{% endif %}">
+          <b>{{ numero }}</b><span>{{ ETAPAS_MANUTENCAO[numero].titulo }}</span>
+        </div>
+      {% endfor %}
+      </div>
+
+      {% if r.orcamento and r.orcamento.status in ("Enviado","Aguardando aprovação") %}
+        <a class="btn btn-primary" href="/orcamento/{{ r.orcamento.token }}">Revisar e responder orçamento</a>
+      {% endif %}
+
+      {% if r.m.pronto_em %}
+        <div class="situacao-retirada {% if r.retirada_agendada %}agendada{% else %}pendente{% endif %}">
+          {% if r.retirada_agendada %}
+            <strong>Retirada agendada</strong>
+            <span>{{ r.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</span>
+            <small>Selecione este equipamento e escolha “Agendar ou reagendar retirada” para alterar.</small>
+          {% else %}
+            <strong>Retirada ainda não agendada</strong>
+            <span>Selecione este equipamento para agendar junto com os demais.</span>
+          {% endif %}
+        </div>
+      {% endif %}
+    </section>
   {% endfor %}
   </div>
-  {% if r.orcamento and r.orcamento.status in ("Enviado","Aguardando aprovação") %}
-    <a class="btn btn-primary" href="/orcamento/{{ r.orcamento.token }}">Revisar e responder orçamento</a>
-  {% endif %}
-  {% if r.m.pronto_em and r.orcamento %}
-    <div class="acoes-linha"><a class="btn btn-secondary" href="/garantia-servico/{{ r.orcamento.token }}.pdf">Abrir garantia</a><a class="btn btn-primary" href="/retirada/{{ r.orcamento.token }}">Agendar retirada</a></div>
-  {% endif %}
-</section>
-{% endfor %}
-</div>
-{% else %}<div class="estado-vazio"><h2>Nenhum atendimento disponível</h2></div>{% endif %}
+</form>
+
+<script>
+(() => {
+  const form = document.querySelector('#acoes-atendimento');
+  const acao = document.querySelector('#acao-coletiva');
+  if (!form || !acao) return;
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const marcados = [...form.querySelectorAll('input[name="manutencao_id"]:checked')];
+    if (!marcados.length) {
+      alert('Selecione ao menos um equipamento.');
+      return;
+    }
+    if (!acao.value) {
+      alert('Escolha o que deseja fazer.');
+      return;
+    }
+    const naoProntos = marcados.filter((item) => item.dataset.pronto !== '1');
+    if (naoProntos.length) {
+      alert('Esta ação está disponível apenas para equipamentos com serviço concluído.');
+      return;
+    }
+
+    const ids = marcados.map((item) => item.value).join(',');
+    if (acao.value === 'garantia') {
+      window.location.href = `/garantias/{{ cliente.token_ficha }}.pdf?ids=${encodeURIComponent(ids)}`;
+      return;
+    }
+    window.location.href = `/retirada-cliente/{{ cliente.token_ficha }}?ids=${encodeURIComponent(ids)}`;
+  });
+})();
+</script>
+{% else %}
+<div class="estado-vazio"><h2>Nenhum atendimento disponível</h2></div>
+{% endif %}
+
+<style>
+.acoes-coletivas{
+  position:sticky; top:0; z-index:20; display:grid; grid-template-columns:1fr minmax(240px,360px) auto;
+  gap:12px; align-items:center; background:#fff; border:1px solid #d9e2ef; border-radius:16px;
+  padding:14px 16px; margin:0 auto 18px; max-width:980px; box-shadow:0 8px 24px rgba(15,23,42,.08)
+}
+.acoes-coletivas div{display:flex;flex-direction:column;gap:3px}.acoes-coletivas span{color:#64748b;font-size:14px}
+.acoes-coletivas select{min-height:44px;border:1px solid #cbd5e1;border-radius:10px;padding:0 12px;background:#fff}
+.atendimento-selecionavel{position:relative;padding-top:52px}
+.selecao-equipamento{position:absolute;top:14px;left:16px;display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer}
+.selecao-equipamento input{width:20px;height:20px}
+.situacao-retirada{display:flex;flex-direction:column;gap:4px;margin-top:14px;padding:12px 14px;border-radius:12px}
+.situacao-retirada.agendada{background:#ecfdf3;border:1px solid #abefc6}
+.situacao-retirada.pendente{background:#fff7ed;border:1px solid #fed7aa}
+.situacao-retirada small{color:#64748b}
+@media(max-width:760px){
+  .acoes-coletivas{grid-template-columns:1fr;position:static}
+}
+</style>
 {% endblock %}
