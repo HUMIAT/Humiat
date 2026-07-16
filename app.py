@@ -2907,7 +2907,10 @@ async def operacao_aprovacao_manual(
 
 @app.get("/organiza/operacao/pagamentos", response_class=HTMLResponse)
 def operacao_pagamentos(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    pendentes = [m for m in _manutencoes_operacao(db) if etapa_manutencao(m) == 4 and _saldo_manutencao(m)[2] > 0.009]
+    # Mantém visíveis todos os equipamentos da etapa 4, inclusive os já quitados
+    # que ainda aguardam prazo e confirmação. Isso evita que desapareçam da
+    # Central antes de avançarem para execução.
+    pendentes = [m for m in _manutencoes_operacao(db) if etapa_manutencao(m) == 4]
     return templates.TemplateResponse("organiza/operacao_pagamentos.html", {
         "request": request, "usuario": usuario, "grupos": _agrupar_por_cliente(pendentes),
         "erro": request.query_params.get("erro", ""), "sucesso": request.query_params.get("sucesso", ""), "hoje": date.today().isoformat()
@@ -2921,34 +2924,78 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
         ids = [int(x) for x in form.getlist("manutencao_id")]
     except ValueError:
         ids = []
-    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in ids]
+
+    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in ids and etapa_manutencao(m) == 4]
     if not selecionadas:
         return RedirectResponse("/organiza/operacao/pagamentos?erro=Selecione pelo menos um equipamento", status_code=303)
     if len({m.cliente_id for m in selecionadas}) != 1:
         return RedirectResponse("/organiza/operacao/pagamentos?erro=Selecione equipamentos do mesmo cliente", status_code=303)
+
+    previsao = data_form(form.get("previsao"))
+    if not previsao:
+        return RedirectResponse("/organiza/operacao/pagamentos?erro=Informe a previsão de conclusão", status_code=303)
+
     valor = moeda_num(form.get("valor"))
-    if valor <= 0:
-        return RedirectResponse("/organiza/operacao/pagamentos?erro=Informe um valor válido", status_code=303)
     data_pagamento = data_form(form.get("data")) or date.today()
     forma = (form.get("forma") or "").strip()
     observacao = (form.get("observacao") or "").strip()
+
     saldos = [(m, _orcamento_atual(m), _saldo_manutencao(m)[2]) for m in selecionadas]
     saldo_total = sum(s for _, _, s in saldos)
+
+    # Quando ainda existe saldo, o pagamento precisa ser informado. Se o grupo
+    # já foi quitado anteriormente, valor zero é aceito para concluir prazo e confirmação.
+    if saldo_total > 0.009 and valor <= 0:
+        return RedirectResponse("/organiza/operacao/pagamentos?erro=Informe o valor recebido", status_code=303)
     if valor > saldo_total + 0.009:
         return RedirectResponse("/organiza/operacao/pagamentos?erro=O valor é maior que o saldo dos equipamentos selecionados", status_code=303)
-    restante = valor
+
+    restante = max(valor, 0)
     for m, o, saldo in saldos:
         if restante <= 0.009 or not o or saldo <= 0:
             continue
         aplicado = min(restante, saldo)
         db.add(Pagamento(
-            orcamento_id=o.id, data=data_pagamento, valor=round(aplicado, 2),
+            orcamento_id=o.id,
+            data=data_pagamento,
+            valor=round(aplicado, 2),
             forma=forma or None,
-            observacao=(f"Pagamento agrupado. {observacao}".strip())
+            observacao=(f"Pagamento agrupado. {observacao}".strip()),
         ))
         restante -= aplicado
+
+    agora = datetime.now()
+    prazo_texto = previsao.strftime("%d/%m/%Y")
+    for m, _, _ in saldos:
+        m.entrega_prevista_em = datetime.combine(previsao, time(17, 0))
+        m.prazo = prazo_texto
+        m.confirmacao_prazo_em = agora
+        m.status = "Em manutenção"
+
     db.commit()
-    return RedirectResponse("/organiza/operacao/pagamentos?sucesso=Pagamento registrado e distribuído entre os equipamentos", status_code=303)
+
+    linhas = [
+        f"Olá, {selecionadas[0].cliente.nome}!",
+        "",
+        "✅ Pagamento e prazo confirmados.",
+        "",
+        "Equipamentos liberados para execução:",
+    ]
+    for m in selecionadas:
+        linhas.append(f"• {rotulo_maquina(m.equipamento)} — previsão {prazo_texto}")
+    linhas.extend(["", "Agora iniciaremos a execução dos serviços.", "", "Karaokê RJ"])
+    mensagem = "\n".join(linhas)
+
+    # Registra a mesma comunicação em cada manutenção selecionada e abre uma
+    # única conversa do cliente, mantendo a operação agrupada.
+    for m in selecionadas:
+        ComunicacaoService.registrar(
+            db, HistoricoComunicacao, m, usuario, "PRAZO",
+            mensagem=mensagem,
+        )
+
+    url = ComunicacaoService.url_whatsapp(selecionadas[0].cliente, mensagem)
+    return RedirectResponse(url, status_code=303)
 
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)

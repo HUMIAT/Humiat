@@ -4,7 +4,7 @@
   <div>
     <span class="eyebrow">OPERAÇÃO · PAGAMENTOS</span>
     <h1>Central de Pagamentos</h1>
-    <p>Registre um pagamento para um ou vários equipamentos do mesmo cliente.</p>
+    <p>Registre o pagamento, informe a previsão e libere os equipamentos para execução.</p>
   </div>
   <a class="btn btn-secondary" href="/organiza/operacao">Voltar</a>
 </header>
@@ -35,7 +35,13 @@
         <strong>{{ rotulo_maquina(m.equipamento) }}</strong>
         <small>{{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</small>
       </span>
-      <span class="pagamento-saldo">Saldo: <strong>{{ _saldo_manutencao(m)[2]|moeda }}</strong></span>
+      <span class="pagamento-saldo">
+        {% if _saldo_manutencao(m)[2] > 0.009 %}
+        Saldo: <strong>{{ _saldo_manutencao(m)[2]|moeda }}</strong>
+        {% else %}
+        <strong>Pagamento concluído</strong>
+        {% endif %}
+      </span>
     </label>
   {% endfor %}
   </div>
@@ -48,7 +54,7 @@
   <div class="pagamento-form-grid">
     <label class="campo-form">
       <span>Valor recebido</span>
-      <input name="valor" required inputmode="decimal" autocomplete="off" placeholder="0,00">
+      <input name="valor" inputmode="decimal" autocomplete="off" placeholder="0,00">
     </label>
     <label class="campo-form">
       <span>Data do pagamento</span>
@@ -62,19 +68,23 @@
       </select>
     </label>
     <label class="campo-form">
+      <span>Previsão de conclusão</span>
+      <input type="date" name="previsao" required>
+    </label>
+    <label class="campo-form">
       <span>Observação</span>
       <input name="observacao" placeholder="Opcional">
     </label>
   </div>
 
   <div class="pagamento-acoes">
-    <button class="btn btn-primary pagamento-submit" type="submit">Registrar pagamento</button>
+    <button class="btn btn-primary pagamento-submit" type="submit">Registrar, confirmar e iniciar execução</button>
   </div>
 </form>
 {% endfor %}
 </div>
 {% else %}
-<div class="estado-vazio"><h2>Nenhum pagamento pendente</h2><p>Os atendimentos aprovados com saldo aparecerão aqui.</p></div>
+<div class="estado-vazio"><h2>Nenhuma pendência de pagamento e prazo</h2><p>Os atendimentos aprovados que aguardam pagamento, prazo ou confirmação aparecerão aqui.</p></div>
 {% endif %}
 
 <script>
@@ -110,14 +120,21 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Selecione pelo menos um equipamento.");
         return;
       }
-      const numero = Number((valor.value || "").replace(/\./g, "").replace(",", "."));
-      if (!numero || numero <= 0) {
+      const numero = Number((valor.value || "").replace(/\./g, "").replace(",", ".")) || 0;
+      const limite = marcadas.reduce((soma, caixa) => soma + Number(caixa.dataset.saldo || 0), 0);
+      if (limite > 0.009 && numero <= 0) {
         evento.preventDefault();
         valor.focus();
-        alert("Informe um valor recebido válido.");
+        alert("Informe o valor recebido.");
         return;
       }
-      const limite = marcadas.reduce((soma, caixa) => soma + Number(caixa.dataset.saldo || 0), 0);
+      const previsao = card.querySelector('input[name="previsao"]');
+      if (!previsao.value) {
+        evento.preventDefault();
+        previsao.focus();
+        alert("Informe a previsão de conclusão.");
+        return;
+      }
       if (numero > limite + 0.009) {
         evento.preventDefault();
         valor.focus();
