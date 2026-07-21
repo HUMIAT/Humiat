@@ -3615,13 +3615,25 @@ def central_financeiro_conect(
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
-    linhas = _linhas_central_financeiro(db)
-    pendentes = sum(1 for l in linhas if l["status_sync"] not in ("enviado", "ignorado"))
+    linhas_todas = _linhas_central_financeiro(db)
+    pendentes = sum(1 for l in linhas_todas if l["status_sync"] not in ("enviado", "ignorado"))
+    filtro_status = (request.query_params.get("status") or "nao_enviados").strip().lower()
+    if filtro_status == "enviados":
+        linhas = [l for l in linhas_todas if l["status_sync"] == "enviado"]
+    elif filtro_status == "todos":
+        linhas = linhas_todas
+    elif filtro_status == "ignorados":
+        linhas = [l for l in linhas_todas if l["status_sync"] == "ignorado"]
+    else:
+        filtro_status = "nao_enviados"
+        linhas = [l for l in linhas_todas if l["status_sync"] not in ("enviado", "ignorado")]
     return templates.TemplateResponse("organiza/central_financeiro_conect.html", {
         "request": request,
         "usuario": usuario,
         "linhas": linhas,
         "pendentes": pendentes,
+        "filtro_status": filtro_status,
+        "total_registros": len(linhas_todas),
         "connect_configurado": _connect_configurado(),
         "sucesso": request.query_params.get("sucesso", ""),
         "erro": request.query_params.get("erro", ""),
