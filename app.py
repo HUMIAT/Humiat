@@ -1529,17 +1529,17 @@ def garantia_pdf(equipamento_id: int, usuario: Usuario = Depends(usuario_logado)
     valor = formatar_moeda(eq.valor)
     meses = eq.garantia_meses if eq.garantia_meses is not None else 3
 
-    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "karaoke-rj-garantia.jpeg")
-    logo = Image(logo_path, width=25 * mm, height=25 * mm) if os.path.exists(logo_path) else Spacer(25 * mm, 25 * mm)
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo-karaoke-rj.png")
+    if not os.path.exists(logo_path):
+        logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "karaoke-rj-garantia.jpeg")
+    logo = Image(logo_path, width=30 * mm, height=22 * mm) if os.path.exists(logo_path) else Spacer(30 * mm, 22 * mm)
     dados_empresa = Paragraph(
-        "<b>EMPRESA KARAOKE &amp; GAMES RJ.</b><br/>"
-        "CNPJ: 35.458.112/0001-75 &nbsp;&nbsp;&nbsp; IM: 1213508-4<br/>"
+        "<b>KARAOKE &amp; GAMES RJ</b><br/>CNPJ: 35.458.112/0001-75 · IM: 1213508-4<br/>"
         "Rua João Romariz, 313 - Ramos - Rio de Janeiro/RJ - CEP: 21031-700<br/>"
-        "WhatsApp: (21) 99507-9690 / (21) 99650-4516<br/>"
-        "www.karaokerj.com.br &nbsp;&nbsp; contato@karaokerj.com.br", cabecalho
+        "WhatsApp: (21) 99507-9690 / (21) 99650-4516<br/>www.karaokerj.com.br · contato@karaokerj.com.br", cabecalho
     )
-    header = Table([[logo, dados_empresa]], colWidths=[30 * mm, 145 * mm])
-    header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"), ("LINEBELOW", (0,0), (-1,-1), 0.7, colors.HexColor("#555555")), ("LEFTPADDING", (0,0), (-1,-1), 0), ("RIGHTPADDING", (0,0), (-1,-1), 0), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+    header = Table([[logo, dados_empresa]], colWidths=[35 * mm, 145 * mm])
+    header.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "MIDDLE"), ("LINEBELOW", (0,0), (-1,-1), 0.8, colors.HexColor("#555555")), ("LEFTPADDING", (0,0), (-1,-1), 0), ("RIGHTPADDING", (0,0), (-1,-1), 0), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
 
     story = [header, Spacer(1, 8), Paragraph("VENDA DE EQUIPAMENTOS - TERMO DE GARANTIA", titulo)]
     story.append(Paragraph(
@@ -2072,7 +2072,7 @@ def manutencao_relatorio_pdf(
         story.append(tabela_itens)
         if exibir_valores:
             totais = totais_orcamento(orcamento)
-            story += [Spacer(1,5), Paragraph(f"<b>Total do orçamento: {formatar_moeda(totais.get('total_aprovado', totais.get('total', 0)))}</b>", corpo)]
+            story += [Spacer(1,5), Paragraph(f"<b>Total do orçamento: {formatar_moeda(totais.get('aprovado', totais.get('geral', 0)))}</b>", corpo)]
             if float(totais.get("desconto_informado", 0) or 0) > 0:
                 story.append(Paragraph(f"Desconto informado: {formatar_moeda(totais['desconto_informado'])}", corpo))
         if orcamento.forma_pagamento_orcamento:
@@ -2440,13 +2440,21 @@ def garantia_servico_pdf(token: str, db: Session = Depends(get_db)):
     corpo = ParagraphStyle("CorpoGarantia", parent=estilos["BodyText"], fontSize=10, leading=15, spaceAfter=8)
     elementos = []
     logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo-karaoke-rj.png")
-    if os.path.exists(logo_path):
-        elementos += [Image(logo_path, width=32*mm, height=32*mm), Spacer(1, 4*mm)]
-    elementos += [
-        Paragraph("CERTIFICADO DE GARANTIA DO SERVIÇO", titulo),
-        Paragraph("KARAOKÊ RJ", centro),
-        Spacer(1, 7*mm),
-    ]
+    if not os.path.exists(logo_path):
+        logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "karaoke-rj-garantia.jpeg")
+    logo = Image(logo_path, width=30*mm, height=22*mm) if os.path.exists(logo_path) else Spacer(30*mm, 22*mm)
+    empresa = Paragraph(
+        "<b>KARAOKE &amp; GAMES RJ</b><br/>CNPJ: 35.458.112/0001-75 · IM: 1213508-4<br/>"
+        "Rua João Romariz, 313 - Ramos - Rio de Janeiro/RJ - CEP: 21031-700<br/>"
+        "WhatsApp: (21) 99507-9690 / (21) 99650-4516<br/>www.karaokerj.com.br · contato@karaokerj.com.br",
+        ParagraphStyle("CabecalhoGarantiaServico", parent=corpo, fontSize=8, leading=10, spaceAfter=0),
+    )
+    header = Table([[logo, empresa]], colWidths=[35*mm, 139*mm])
+    header.setStyle(TableStyle([
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("LINEBELOW",(0,0),(-1,-1),0.8,colors.HexColor("#555555")),
+        ("LEFTPADDING",(0,0),(-1,-1),0), ("RIGHTPADDING",(0,0),(-1,-1),0), ("BOTTOMPADDING",(0,0),(-1,-1),5),
+    ]))
+    elementos += [header, Spacer(1, 7), Paragraph("CERTIFICADO DE GARANTIA DO SERVIÇO", titulo), Spacer(1, 4*mm)]
     eq = m.equipamento
     dados = [
         ["Ordem de serviço", f"#{m.id}"],
@@ -4463,17 +4471,25 @@ def garantias_agrupadas_pdf(token: str, ids: str, db: Session = Depends(get_db))
     corpo = ParagraphStyle("CorpoGarantiaGrupo", parent=estilos["BodyText"], fontSize=10, leading=15, spaceAfter=8)
     elementos = []
     logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo-karaoke-rj.png")
+    if not os.path.exists(logo_path):
+        logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "karaoke-rj-garantia.jpeg")
 
     for indice, m in enumerate(manutencoes):
         if indice:
             elementos.append(PageBreak())
-        if os.path.exists(logo_path):
-            elementos += [Image(logo_path, width=32*mm, height=32*mm), Spacer(1, 4*mm)]
-        elementos += [
-            Paragraph("CERTIFICADO DE GARANTIA DO SERVIÇO", titulo),
-            Paragraph("KARAOKÊ RJ", centro),
-            Spacer(1, 7*mm),
-        ]
+        logo = Image(logo_path, width=30*mm, height=22*mm) if os.path.exists(logo_path) else Spacer(30*mm, 22*mm)
+        empresa = Paragraph(
+            "<b>KARAOKE &amp; GAMES RJ</b><br/>CNPJ: 35.458.112/0001-75 · IM: 1213508-4<br/>"
+            "Rua João Romariz, 313 - Ramos - Rio de Janeiro/RJ - CEP: 21031-700<br/>"
+            "WhatsApp: (21) 99507-9690 / (21) 99650-4516<br/>www.karaokerj.com.br · contato@karaokerj.com.br",
+            ParagraphStyle(f"CabecalhoGarantiaGrupo{indice}", parent=corpo, fontSize=8, leading=10, spaceAfter=0),
+        )
+        header = Table([[logo, empresa]], colWidths=[35*mm, 139*mm])
+        header.setStyle(TableStyle([
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("LINEBELOW",(0,0),(-1,-1),0.8,colors.HexColor("#555555")),
+            ("LEFTPADDING",(0,0),(-1,-1),0), ("RIGHTPADDING",(0,0),(-1,-1),0), ("BOTTOMPADDING",(0,0),(-1,-1),5),
+        ]))
+        elementos += [header, Spacer(1, 7), Paragraph("CERTIFICADO DE GARANTIA DO SERVIÇO", titulo), Spacer(1, 4*mm)]
         eq = m.equipamento
         dados = [
             ["Ordem de serviço", f"#{m.id}"],
