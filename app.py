@@ -1273,12 +1273,66 @@ def equipamento_eh_venda(eq: Equipamento) -> bool:
 
 @app.get("/organiza/vendas", response_class=HTMLResponse)
 def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    equipamentos = db.query(Equipamento).options(selectinload(Equipamento.cliente)).order_by(
-        Equipamento.previsao_entrega.asc(), Equipamento.criado_em.desc()
-    ).all()
+    equipamentos = db.query(Equipamento).options(selectinload(Equipamento.cliente)).all()
     equipamentos = [eq for eq in equipamentos if equipamento_eh_venda(eq)]
+
+    # O financeiro exibido na listagem é sempre recalculado pelos pagamentos
+    # reais, evitando depender de campos legados pago/falta desatualizados.
+    ids = [eq.id for eq in equipamentos]
+    pagamentos_por_equipamento = {}
+    if ids:
+        for p in db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id.in_(ids)).all():
+            pagamentos_por_equipamento.setdefault(p.equipamento_id, 0.0)
+            pagamentos_por_equipamento[p.equipamento_id] += float(p.valor or 0)
+
+    for eq in equipamentos:
+        total = moeda_num(eq.valor)
+        recebido = round(pagamentos_por_equipamento.get(eq.id, 0.0), 2)
+        eq.total_calculado = total
+        eq.recebido_calculado = recebido
+        eq.falta_calculada = max(round(total - recebido, 2), 0)
+        eq.excesso_calculado = max(round(recebido - total, 2), 0)
+
+    q = (request.query_params.get("q") or "").strip().lower()
+    pagamento = (request.query_params.get("pagamento") or "todos").strip()
+    valor_filtro = (request.query_params.get("valor") or "todos").strip()
+    status = (request.query_params.get("status") or "todos").strip()
+    ordem = (request.query_params.get("ordem") or "recentes").strip()
+
+    if q:
+        equipamentos = [eq for eq in equipamentos if q in " ".join([
+            eq.cliente.nome or "", eq.tipo or "", eq.modelo or "",
+            codigo_tecnico(eq), rotulo_maquina(eq),
+        ]).lower()]
+    if pagamento == "pendente":
+        equipamentos = [eq for eq in equipamentos if eq.falta_calculada > 0.009]
+    elif pagamento == "quitado":
+        equipamentos = [eq for eq in equipamentos if eq.total_calculado > 0 and eq.falta_calculada <= 0.009 and eq.excesso_calculado <= 0.009]
+    elif pagamento == "sem_pagamento":
+        equipamentos = [eq for eq in equipamentos if eq.recebido_calculado <= 0.009]
+    elif pagamento == "excesso":
+        equipamentos = [eq for eq in equipamentos if eq.excesso_calculado > 0.009]
+
+    if valor_filtro == "acima_5000":
+        equipamentos = [eq for eq in equipamentos if eq.total_calculado > 5000]
+    if status != "todos":
+        equipamentos = [eq for eq in equipamentos if (eq.status or "") == status]
+
+    if ordem == "antigos":
+        equipamentos.sort(key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id))
+    elif ordem == "maior_valor":
+        equipamentos.sort(key=lambda eq: (eq.total_calculado, eq.data_compra or date.min, eq.id), reverse=True)
+    elif ordem == "maior_saldo":
+        equipamentos.sort(key=lambda eq: (eq.falta_calculada, eq.data_compra or date.min, eq.id), reverse=True)
+    else:
+        equipamentos.sort(key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id), reverse=True)
+
+    status_opcoes = sorted({eq.status for eq in db.query(Equipamento).all() if equipamento_eh_venda(eq) and eq.status})
     return templates.TemplateResponse("organiza/vendas.html", {
-        "request": request, "usuario": usuario, "vendas": equipamentos
+        "request": request, "usuario": usuario, "vendas": equipamentos,
+        "q": request.query_params.get("q", ""), "pagamento_filtro": pagamento,
+        "valor_filtro": valor_filtro, "status_filtro": status, "ordem": ordem,
+        "status_opcoes": status_opcoes,
     })
 
 
@@ -1582,11 +1636,43 @@ def usuarios(request: Request, usuario: Usuario = Depends(usuario_logado), db: S
     return templates.TemplateResponse("organiza/usuarios.html", {"request": request, "usuario": usuario, "usuarios": db.query(Usuario).order_by(Usuario.nome).all()})
 
 
-def moeda_num(valor: str) -> float:
-    texto = (valor or "0").replace("R$", "").strip().replace(".", "").replace(",", ".")
+def moeda_num(valor) -> float:
+    """Converte valores monetários sem perder casas decimais.
+
+    Aceita tanto o padrão brasileiro (1.234,56) quanto valores internos/HTML
+    com ponto decimal (1234.56). O parser anterior removia todo ponto e podia
+    transformar 180.00 em 18.000,00.
+    """
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+    texto = str(valor or "0").replace("R$", "").replace(" ", "").strip()
+    if not texto:
+        return 0.0
+
+    # Quando há os dois separadores, o último indica as casas decimais.
+    if "," in texto and "." in texto:
+        if texto.rfind(",") > texto.rfind("."):
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            texto = texto.replace(",", "")
+    elif "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    elif texto.count(".") > 1:
+        partes = texto.split(".")
+        if len(partes[-1]) in (1, 2):
+            texto = "".join(partes[:-1]) + "." + partes[-1]
+        else:
+            texto = "".join(partes)
+    elif texto.count(".") == 1:
+        inteiro, decimal = texto.split(".", 1)
+        # 5.000 é normalmente milhar em pt-BR; 2530.00 é decimal interno.
+        if len(decimal) == 3:
+            texto = inteiro + decimal
+
     try:
-        return round(float(texto), 2)
-    except ValueError:
+        numero = Decimal(texto).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return float(numero)
+    except (InvalidOperation, ValueError):
         return 0.0
 
 
@@ -1973,6 +2059,9 @@ async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usu
     m = carregar_manutencao(db, manutencao_id); form = dict(await request.form()); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     valor = moeda_num(form.get("valor"))
     forma = (form.get("forma") or "PIX").strip()
+    total, recebido, saldo = _saldo_manutencao(m)
+    if valor > saldo + 0.009:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_excedente", status_code=303)
     if valor > 0:
         db.add(Pagamento(
             orcamento_id=o.id,
@@ -2014,6 +2103,16 @@ async def manutencao_pagamento_editar(
         return RedirectResponse(
             f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=edicao_pagamento",
             status_code=303,
+        )
+
+    o = db.query(Orcamento).filter(Orcamento.id == p.orcamento_id).first()
+    total = totais_orcamento(o)["aprovado"] if o else 0
+    outros = sum(float(item.valor or 0) for item in db.query(Pagamento).filter(
+        Pagamento.orcamento_id == p.orcamento_id, Pagamento.id != pagamento_id
+    ).all())
+    if valor > round(total - outros, 2) + 0.009:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_excedente", status_code=303
         )
 
     p.valor = round(valor, 2)
@@ -2344,13 +2443,37 @@ async def orcamento_item_editar(manutencao_id: int, orcamento_item_id: int, requ
 async def pagamento_editar(manutencao_id: int, pagamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     p = db.query(Pagamento).filter(Pagamento.id == pagamento_id).first()
     if not p: raise HTTPException(404)
-    form = dict(await request.form()); p.data = data_form(form.get("data") or "") or p.data; p.valor = moeda_num(form.get("valor")); p.forma=(form.get("forma") or "PIX").strip(); p.observacao=(form.get("observacao") or "").strip() or None
-    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+    form = dict(await request.form())
+    valor = moeda_num(form.get("valor"))
+    o = db.query(Orcamento).filter(Orcamento.id == p.orcamento_id).first()
+    total = totais_orcamento(o)["aprovado"] if o else 0
+    outros = sum(float(item.valor or 0) for item in db.query(Pagamento).filter(
+        Pagamento.orcamento_id == p.orcamento_id, Pagamento.id != pagamento_id
+    ).all())
+    if valor <= 0 or valor > round(total - outros, 2) + 0.009:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_excedente", status_code=303)
+    p.data = data_form(form.get("data") or "") or p.data
+    p.valor = round(valor, 2)
+    p.forma = (form.get("forma") or "PIX").strip()
+    p.banco = p.forma
+    p.observacao = (form.get("observacao") or "").strip() or None
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pagamento/{pagamento_id}/excluir")
 def pagamento_excluir(manutencao_id: int, pagamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    p=db.query(Pagamento).filter(Pagamento.id==pagamento_id).first()
-    if p: db.delete(p); db.commit()
+    p = db.query(Pagamento).filter(Pagamento.id == pagamento_id).first()
+    if not p:
+        raise HTTPException(404)
+    integ = _registro_integracao(db, "manutencao", p.id)
+    if integ and integ.enviado_em:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_enviado_connect", status_code=303
+        )
+    if integ:
+        db.delete(integ)
+    db.delete(p)
+    db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 @app.post("/organiza/manutencoes/{manutencao_id}/encerrar")
@@ -2633,6 +2756,36 @@ def operacao_etapa_agrupada(
         "sucesso": request.query_params.get("sucesso", ""),
         "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/organiza/operacao/execucao/concluir")
+async def operacao_execucao_concluir(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    try:
+        ids = [int(x) for x in form.getlist("manutencao_id")]
+    except ValueError:
+        ids = []
+    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in ids and _fila_operacional_exclusiva(m) == "execucao"]
+    if not selecionadas:
+        return RedirectResponse("/organiza/operacao/etapa/execucao?erro=Selecione pelo menos um equipamento", status_code=303)
+
+    agora = datetime.now()
+    for m in selecionadas:
+        # A conclusão pela Central apenas avança para a etapa de comunicação.
+        # O cliente ainda não é marcado como comunicado aqui.
+        if not m.pronto_em:
+            m.pronto_em = agora
+        m.status = "Pronto para retirada"
+        m.conclusao_comunicada_em = None
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/operacao/etapa/execucao?sucesso={quote_plus(str(len(selecionadas)) + ' equipamento(s) enviado(s) para Comunicar equipamentos prontos')}",
+        status_code=303,
+    )
 
 
 @app.get("/organiza/operacao/execucao/imprimir", response_class=HTMLResponse)
@@ -3783,6 +3936,15 @@ async def venda_pagamento_registrar(
     observacao = (form.get("observacao") or "").strip()
     if valor <= 0:
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe um valor válido.", status_code=303)
+    total = moeda_num(eq.valor)
+    recebido = sum(float(p.valor or 0) for p in db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == equipamento_id).all())
+    saldo = round(total - recebido, 2)
+    if total <= 0:
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=A venda não possui um valor total válido. Corrija a venda antes de registrar pagamentos.", status_code=303)
+    if saldo <= 0.009:
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Esta venda já está totalmente paga.", status_code=303)
+    if valor > saldo + 0.009:
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=O pagamento não pode ser maior que o saldo da venda.", status_code=303)
     db.add(PagamentoVenda(
         equipamento_id=equipamento_id, data=data_pag, valor=round(valor, 2),
         banco=forma, forma=forma, observacao=observacao or None,
@@ -3814,6 +3976,17 @@ async def venda_pagamento_editar(
     if valor <= 0 or not data_pag or not forma:
         return RedirectResponse(
             f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe data, valor e forma válidos.",
+            status_code=303,
+        )
+
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
+    total = moeda_num(eq.valor if eq else 0)
+    outros = sum(float(item.valor or 0) for item in db.query(PagamentoVenda).filter(
+        PagamentoVenda.equipamento_id == equipamento_id, PagamentoVenda.id != pagamento_id
+    ).all())
+    if total <= 0 or valor > round(total - outros, 2) + 0.009:
+        return RedirectResponse(
+            f"/organiza/vendas/{equipamento_id}/pagamentos?erro=O valor informado ultrapassa o saldo disponível da venda.",
             status_code=303,
         )
 

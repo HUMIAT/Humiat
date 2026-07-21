@@ -1,20 +1,66 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean">
-  <div class="titulo-linha"><div><p class="tag">Vendas</p><h1>Vendas de equipamentos</h1><p class="texto-suave">Acompanhe gabinete, montagem e entrega em um único lugar.</p></div><a class="botao primario" href="/organiza/vendas/nova">+ Nova venda</a></div>
+  <div class="titulo-linha"><div><p class="tag">Vendas</p><h1>Vendas de equipamentos</h1><p class="texto-suave">Acompanhe gabinete, montagem, entrega e recebimentos em um único lugar.</p></div><a class="botao primario" href="/organiza/vendas/nova">+ Nova venda</a></div>
+
+  <form method="get" class="cartao filtros-vendas">
+    <label class="filtro-busca">Buscar
+      <input name="q" value="{{ q }}" placeholder="Cliente, equipamento ou código">
+    </label>
+    <label>Pagamento
+      <select name="pagamento">
+        <option value="todos" {% if pagamento_filtro == 'todos' %}selected{% endif %}>Todos</option>
+        <option value="pendente" {% if pagamento_filtro == 'pendente' %}selected{% endif %}>Falta pagamento</option>
+        <option value="sem_pagamento" {% if pagamento_filtro == 'sem_pagamento' %}selected{% endif %}>Sem pagamento</option>
+        <option value="quitado" {% if pagamento_filtro == 'quitado' %}selected{% endif %}>Quitados</option>
+        <option value="excesso" {% if pagamento_filtro == 'excesso' %}selected{% endif %}>Pagamento acima do total</option>
+      </select>
+    </label>
+    <label>Valor
+      <select name="valor">
+        <option value="todos" {% if valor_filtro == 'todos' %}selected{% endif %}>Todos os valores</option>
+        <option value="acima_5000" {% if valor_filtro == 'acima_5000' %}selected{% endif %}>Acima de R$ 5.000,00</option>
+      </select>
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="todos">Todos</option>
+        {% for item in status_opcoes %}<option value="{{ item }}" {% if status_filtro == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Ordenar
+      <select name="ordem">
+        <option value="recentes" {% if ordem == 'recentes' %}selected{% endif %}>Mais novos primeiro</option>
+        <option value="antigos" {% if ordem == 'antigos' %}selected{% endif %}>Mais antigos primeiro</option>
+        <option value="maior_valor" {% if ordem == 'maior_valor' %}selected{% endif %}>Maior valor</option>
+        <option value="maior_saldo" {% if ordem == 'maior_saldo' %}selected{% endif %}>Maior saldo a receber</option>
+      </select>
+    </label>
+    <div class="filtros-acoes">
+      <button class="botao primario" type="submit">Filtrar</button>
+      <a class="botao secundario" href="/organiza/vendas">Limpar</a>
+    </div>
+  </form>
+
+  <p class="texto-suave resultado-vendas"><strong>{{ vendas|length }}</strong> venda(s) encontrada(s)</p>
+
   <div class="vendas-grid">
     {% for venda in vendas %}
     <article class="cartao venda-card">
       <div class="venda-card-topo"><div><span class="pill status-venda">{{ venda.status }}</span><h3>{{ venda.cliente.nome }}</h3><p><strong>{{ venda|rotulo_maquina }}</strong> · {{ venda.tipo or 'Equipamento' }} · {{ venda.modelo or 'Sem modelo' }}</p><small>Código técnico: {{ venda|codigo_tecnico }}</small></div><div style="display:flex;gap:8px;flex-wrap:wrap"><a class="botao pequeno" href="/organiza/vendas/{{ venda.id }}/pagamentos">Registrar pagamento</a><a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}/equipamentos/{{ venda.id }}/editar">Abrir</a></div></div>
+      {% if venda.excesso_calculado > 0.009 %}<div class="alerta erro alerta-venda">Atenção: há {{ venda.excesso_calculado|moeda }} registrado acima do valor da venda.</div>{% endif %}
       <div class="venda-card-dados">
         <div><small>Compra</small><strong>{{ venda.data_compra|data_br }}</strong></div>
         <div><small>Entrega</small><strong>{{ venda.previsao_entrega|data_br }}</strong></div>
-        <div><small>Total</small><strong>{{ venda.valor|moeda }}</strong></div>
-        <div><small>Recebido</small><strong>{{ venda.pago|moeda }}</strong></div>
-        <div class="saldo"><small>Falta</small><strong>{{ venda.falta|moeda }}</strong></div>
+        <div><small>Total</small><strong>{{ venda.total_calculado|moeda }}</strong></div>
+        <div><small>Recebido</small><strong>{{ venda.recebido_calculado|moeda }}</strong></div>
+        <div class="saldo"><small>Falta</small><strong>{{ venda.falta_calculada|moeda }}</strong></div>
       </div>
     </article>
-    {% else %}<div class="cartao vazio">Nenhuma venda cadastrada.</div>{% endfor %}
+    {% else %}<div class="cartao vazio">Nenhuma venda encontrada com estes filtros.</div>{% endfor %}
   </div>
 </section>
+<style>
+.filtros-vendas{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(150px,1fr)) auto;gap:12px;align-items:end;margin:16px 0;padding:14px}.filtros-vendas label{display:grid;gap:6px;font-size:13px;font-weight:700}.filtros-vendas input,.filtros-vendas select{min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 10px;background:#fff}.filtros-acoes{display:flex;gap:8px}.resultado-vendas{margin:0 0 12px}.alerta-venda{margin:10px 0 0;padding:8px 10px;font-size:13px}@media(max-width:1100px){.filtros-vendas{grid-template-columns:repeat(2,minmax(0,1fr))}.filtro-busca{grid-column:1/-1}.filtros-acoes{grid-column:1/-1}}@media(max-width:640px){.filtros-vendas{grid-template-columns:1fr}.filtro-busca,.filtros-acoes{grid-column:auto}.filtros-acoes .botao{flex:1}}
+</style>
 {% endblock %}

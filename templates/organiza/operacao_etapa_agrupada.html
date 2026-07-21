@@ -46,12 +46,14 @@
 
 
   {% if chave == "execucao" and grupos %}
+  <form method="post" action="/organiza/operacao/execucao/concluir" id="form-concluir-execucao">
   <div class="acao-geral-recebimento">
     <label class="selecionar-geral">
       <input id="marcar-todos-execucao" type="checkbox" checked>
       Selecionar todos os equipamentos
     </label>
-    <button id="imprimir-execucao" class="botao primario" type="button">🖨 Imprimir identificadores</button>
+    <button id="imprimir-execucao" class="botao secundario" type="button">🖨 Imprimir identificadores</button>
+    <button id="concluir-execucao" class="botao primario" type="submit">Concluir execução →</button>
     <span><strong id="quantidade-execucao-selecionada">0</strong> equipamento(s) selecionado(s)</span>
   </div>
   {% endif %}
@@ -118,6 +120,8 @@
       <div class="estado-vazio"><h2>Nenhum cliente nesta etapa</h2><p>A fila está em dia.</p></div>
     {% endfor %}
   </div>
+
+  {% if chave == "execucao" and grupos %}</form>{% endif %}
 
   {% if chave == "atendimento" and grupos %}
     <div class="acao-geral-recebimento rodape">
@@ -284,6 +288,18 @@
     const ids = caixasExecucao().filter(c => c.checked).map(c => c.value);
     if (!ids.length) return;
     window.open(`/organiza/operacao/execucao/imprimir?ids=${ids.join(',')}`, '_blank');
+  });
+
+  document.getElementById('form-concluir-execucao')?.addEventListener('submit', event => {
+    const quantidade = caixasExecucao().filter(c => c.checked).length;
+    if (!quantidade) {
+      event.preventDefault();
+      alert('Selecione pelo menos um equipamento.');
+      return;
+    }
+    if (!confirm(`Concluir a execução de ${quantidade} equipamento(s) e enviar para a etapa de comunicar equipamentos prontos?`)) {
+      event.preventDefault();
+    }
   });
 
   const atualizarQuantidade = () => {
