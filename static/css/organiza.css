@@ -3657,3 +3657,6 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
     grid-template-columns:1fr;
   }
 }
+
+/* Ícones padronizados da navegação */
+.nav-icon{display:inline-grid;place-items:center;width:18px;height:18px;flex:0 0 18px}.nav-icon svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.side-nav a,.side-bottom a{position:relative;z-index:2}

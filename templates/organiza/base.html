@@ -14,22 +14,22 @@
   <aside class="app-sidebar">
     <a class="side-logo" href="/organiza"><span class="logo-check">O</span><div><strong>ORGANIZA</strong><small>Karaokê RJ</small></div></a>
     <nav class="side-nav">
-      <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Dashboard</a>
-      <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>
-      <a class="{% if request.url.path.startswith('/organiza/central') or request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/central"><span>⚙</span> Central Operacional</a>
-      <a class="{% if request.url.path.startswith('/organiza/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span>▤</span> Vendas</a>
-      <a class="{% if request.url.path.startswith('/organiza/financeiro/conect') %}ativo{% endif %}" href="/organiza/financeiro/conect"><span>↗</span> Central financeiro</a>
-      <a class="{% if request.url.path.startswith('/organiza/itens') %}ativo{% endif %}" href="/organiza/itens"><span>▦</span> Itens</a>
-      <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda"><span>▣</span> Agenda</a>
-      <a class="menu-principal" href="/organiza/manutencoes/nova"><span>＋</span> Nova manutenção</a>
-      <a class="menu-principal" href="/organiza/vendas/nova"><span>＋</span> Nova venda</a>
+      <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z"/><path d="M9 21v-7h6v7"/></svg></span> Dashboard</a>
+      <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Clientes</a>
+      <a class="{% if request.url.path.startswith('/organiza/central') or request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/central"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg></span> Central Operacional</a>
+      <a class="{% if request.url.path.startswith('/organiza/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h12l3 5v15H3V7z"/><path d="M3 7h18M8 11h8M8 15h8"/></svg></span> Vendas</a>
+      <a class="{% if request.url.path.startswith('/organiza/financeiro/conect') %}ativo{% endif %}" href="/organiza/financeiro/conect"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg></span> Central financeiro</a>
+      <a class="{% if request.url.path.startswith('/organiza/itens') %}ativo{% endif %}" href="/organiza/itens"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span> Itens</a>
+      <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span> Agenda</a>
+      <a class="menu-principal" href="/organiza/manutencoes/nova"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span> Nova manutenção</a>
+      <a class="menu-principal" href="/organiza/vendas/nova"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span> Nova venda</a>
     </nav>
     <div class="side-bottom">
       {% if usuario.is_admin %}
-      <a href="/organiza/configuracoes/pacotes"><span>⚙</span> Pacote atual</a>
-      <a href="/organiza/usuarios"><span>👤</span> Usuários</a>
+      <a href="/organiza/configuracoes/pacotes"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.55V20.3h-3v-.09a1.7 1.7 0 0 0-1.03-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.55-1.03h-.09v-3h.09A1.7 1.7 0 0 0 7 9.94a1.7 1.7 0 0 0-.34-1.88L6.6 8l2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.09a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.55 1.03h.09v3h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg></span> Pacote atual</a>
+      <a href="/organiza/usuarios"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span> Usuários</a>
       {% endif %}
-      <a href="/area-restrita/sair"><span>⇥</span> Sair</a>
+      <a href="/area-restrita/sair"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 3h7v18h-7"/></svg></span> Sair</a>
       <div class="side-user"><div class="avatar">{{ usuario.nome[:1] }}</div><div><strong>{{ usuario.nome }}</strong><small>{{ usuario.cargo or 'Equipe' }}</small></div></div>
     </div>
   </aside>
