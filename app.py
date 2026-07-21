@@ -4392,6 +4392,12 @@ def _payload_grupo_connect(grupo):
     if cliente:
         descricao += f" - {cliente}"
 
+    observacoes = []
+    for linha in grupo:
+        obs = (linha["payload"].get("observacao") or "").strip()
+        if obs and obs not in observacoes:
+            observacoes.append(obs)
+
     return {
         "id_externo": f"ORGANIZA-GRUPO-{tipo.upper()}-{assinatura}",
         "tipo": tipo,
@@ -4401,6 +4407,7 @@ def _payload_grupo_connect(grupo):
         "falta_receber": falta_receber,
         "data_pagamento": primeiro["data_pagamento"],
         "banco": primeiro.get("banco") or "",
+        "observacao": " | ".join(observacoes),
     }
 
 
