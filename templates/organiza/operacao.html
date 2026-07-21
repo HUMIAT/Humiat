@@ -41,19 +41,45 @@
     {% endfor %}
   </nav>
 
+  <section class="cartao central-acoes" id="central-acoes">
+    <div>
+      <strong><span id="selecionados-total">0</span> chamado(s) selecionado(s)</strong>
+      <small>Selecione clientes completos ou equipamentos individuais.</small>
+    </div>
+    <div class="central-acoes-botoes">
+      <button type="button" class="botao" id="acao-orcamento" disabled>Adicionar orçamento</button>
+      <button type="button" class="botao whatsapp" id="acao-comunicar" disabled>Comunicar via WhatsApp</button>
+      <button type="button" class="botao primario" id="acao-editar" disabled>Abrir / editar</button>
+      <button type="button" class="botao" id="acao-finalizar" disabled>Finalizar</button>
+      <button type="button" class="botao perigo" id="acao-excluir" disabled>Excluir</button>
+      <button type="button" class="botao" id="acao-limpar" disabled>Limpar seleção</button>
+    </div>
+  </section>
+
   <section class="chamados-lista">
     {% for grupo in central_grupos %}
       <article class="cliente-grupo">
         <header>
-          <div>
-            <h2>{{ grupo.cliente.nome }}</h2>
-            <small>{{ grupo.manutencoes|length }} chamado{% if grupo.manutencoes|length != 1 %}s{% endif %}</small>
-          </div>
+          <label class="cliente-selecao">
+            <input type="checkbox" class="selecionar-cliente" data-cliente="{{ grupo.cliente.id }}">
+            <span>
+              <h2>{{ grupo.cliente.nome }}</h2>
+              <small>{{ grupo.manutencoes|length }} chamado{% if grupo.manutencoes|length != 1 %}s{% endif %}</small>
+            </span>
+          </label>
           <a class="botao pequeno" href="/organiza/clientes/{{ grupo.cliente.id }}">Ver cliente</a>
         </header>
 
         {% for m in grupo.manutencoes %}
           <div class="chamado-linha">
+            <label class="chamado-check" title="Selecionar chamado">
+              <input type="checkbox" class="selecionar-chamado"
+                     data-cliente="{{ grupo.cliente.id }}"
+                     data-id="{{ m.id }}"
+                     data-etapa="{{ m.central_chave }}"
+                     data-cliente-nome="{{ grupo.cliente.nome|e }}"
+                     data-maquina="{{ m.equipamento|rotulo_maquina|e }}">
+            </label>
             <div class="chamado-info">
               <div class="chamado-etapa"><span>{{ m.central_numero }}</span><div><small>ETAPA {{ m.central_numero }}</small><strong>{{ m.central_titulo }}</strong></div></div>
               <h3>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }}</h3>
@@ -61,49 +87,8 @@
               <small>Código técnico: {{ m.equipamento|codigo_tecnico }}{% if m.defeito %} · {{ m.defeito }}{% endif %}</small>
             </div>
 
-            <div class="chamado-acoes">
-              {% if m.central_chave == 'atendimento' %}
-                <details class="acao-menu">
-                  <summary class="botao pequeno">Reagendar</summary>
-                  <form method="post" action="/organiza/agenda/manutencao/{{ m.id }}/reagendar">
-                    <label>Data<input type="date" name="data" required value="{{ m.entrega_prevista_em.strftime('%Y-%m-%d') if m.entrega_prevista_em else '' }}"></label>
-                    <label>Hora<input type="time" name="hora" required value="{{ m.entrega_prevista_em.strftime('%H:%M') if m.entrega_prevista_em else '' }}"></label>
-                    <button class="botao primario pequeno" type="submit">Salvar</button>
-                  </form>
-                </details>
-              {% endif %}
-
-              {% if m.central_chave in ('comunicar_orcamentos','aprovacoes') %}
-                <a class="botao whatsapp pequeno" target="_blank" rel="noopener" href="/organiza/operacao/comunicacoes/enviar?ids={{ m.id }}&tipo=orcamento">
-                  {% if m.orcamento_comunicado or m.comunicado %}Recomunicar{% else %}Comunicar{% endif %}
-                </a>
-              {% elif m.central_chave == 'prontos' %}
-                <a class="botao whatsapp pequeno" href="/organiza/manutencoes/{{ m.id }}/concluir-whatsapp">Comunicar pronto</a>
-              {% elif m.central_chave == 'execucao' %}
-                <a class="botao whatsapp pequeno" href="/organiza/manutencoes/{{ m.id }}/concluir-whatsapp">Concluir serviço</a>
-              {% endif %}
-
-              {% if m.central_chave == 'retiradas' %}
-                <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar" onsubmit="return confirm('Confirmar equipamento entregue e encerrar?')">
-                  <button class="botao primario pequeno" type="submit">Finalizar</button>
-                </form>
-              {% endif %}
-
-              {% if m.central_chave in ('atendimento','orcamentos','comunicar_orcamentos','aprovacoes') %}
-                <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar-pendente" onsubmit="return confirm('Finalizar este chamado sem seguir para as próximas etapas?')">
-                  <input type="hidden" name="acao" value="finalizar">
-                  <input type="hidden" name="destino" value="/organiza?etapa={{ etapa_filtro }}">
-                  <button class="botao pequeno" type="submit">Finalizar</button>
-                </form>
-                <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar-pendente" onsubmit="return confirm('Excluir esta pendência? O histórico será preservado.')">
-                  <input type="hidden" name="acao" value="cancelar">
-                  <input type="hidden" name="destino" value="/organiza?etapa={{ etapa_filtro }}">
-                  <button class="botao perigo pequeno" type="submit">Excluir</button>
-                </form>
-              {% endif %}
-
-              {% set ancora = '#etapa-4' if m.central_chave == 'pagamentos' else ('#etapa-5' if m.central_chave in ('execucao','pausados') else ('#etapa-6' if m.central_chave in ('prontos','retiradas') else '')) %}
-              <a class="botao primario pequeno" href="/organiza/manutencoes/{{ m.id }}{{ ancora }}">Abrir / editar</a>
+            <div class="chamado-acoes chamado-acoes-individuais">
+              <small>Selecione para usar as ações da Central</small>
             </div>
           </div>
         {% endfor %}
@@ -114,8 +99,99 @@
   </section>
 </section>
 
+<div class="central-modal" id="central-modal" hidden>
+  <div class="central-modal-fundo" data-fechar-modal></div>
+  <section class="central-modal-caixa" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+    <header>
+      <div>
+        <small id="modal-progresso"></small>
+        <h2 id="modal-titulo">Ação em lote</h2>
+        <p id="modal-subtitulo"></p>
+      </div>
+      <button type="button" class="botao pequeno" data-fechar-modal>Fechar</button>
+    </header>
+    <div id="modal-conteudo"></div>
+    <footer>
+      <button type="button" class="botao" id="modal-anterior">Anterior</button>
+      <button type="button" class="botao primario" id="modal-proximo">Próximo</button>
+    </footer>
+  </section>
+</div>
+
+<script>
+(() => {
+  const checks = [...document.querySelectorAll('.selecionar-chamado')];
+  const clientes = [...document.querySelectorAll('.selecionar-cliente')];
+  const total = document.getElementById('selecionados-total');
+  const botoes = {
+    orcamento: document.getElementById('acao-orcamento'),
+    comunicar: document.getElementById('acao-comunicar'),
+    editar: document.getElementById('acao-editar'),
+    finalizar: document.getElementById('acao-finalizar'),
+    excluir: document.getElementById('acao-excluir'),
+    limpar: document.getElementById('acao-limpar')
+  };
+  const selecionados = () => checks.filter(c => c.checked).map(c => ({
+    id: c.dataset.id, etapa: c.dataset.etapa, cliente: c.dataset.clienteNome, maquina: c.dataset.maquina
+  }));
+  function atualizar() {
+    const itens = selecionados(); total.textContent = itens.length;
+    Object.values(botoes).forEach(b => b.disabled = !itens.length);
+    botoes.orcamento.disabled = !itens.length || itens.some(i => i.etapa !== 'orcamentos');
+    botoes.comunicar.disabled = !itens.length || itens.some(i => !['comunicar_orcamentos','aprovacoes','prontos'].includes(i.etapa));
+    botoes.finalizar.disabled = !itens.length || itens.some(i => !['atendimento','orcamentos','comunicar_orcamentos','aprovacoes','retiradas'].includes(i.etapa));
+    botoes.excluir.disabled = !itens.length || itens.some(i => !['atendimento','orcamentos','comunicar_orcamentos','aprovacoes'].includes(i.etapa));
+    clientes.forEach(cc => {
+      const grupo = checks.filter(c => c.dataset.cliente === cc.dataset.cliente);
+      cc.checked = grupo.length && grupo.every(c => c.checked);
+      cc.indeterminate = grupo.some(c => c.checked) && !cc.checked;
+    });
+  }
+  checks.forEach(c => c.addEventListener('change', atualizar));
+  clientes.forEach(c => c.addEventListener('change', () => { checks.filter(x => x.dataset.cliente === c.dataset.cliente).forEach(x => x.checked = c.checked); atualizar(); }));
+  botoes.limpar.addEventListener('click', () => { checks.forEach(c => c.checked = false); atualizar(); });
+
+  const modal = document.getElementById('central-modal'), conteudo = document.getElementById('modal-conteudo');
+  const titulo = document.getElementById('modal-titulo'), subtitulo = document.getElementById('modal-subtitulo'), progresso = document.getElementById('modal-progresso');
+  const ant = document.getElementById('modal-anterior'), prox = document.getElementById('modal-proximo');
+  let fila = [], indice = 0, modo = '';
+  function fechar(){ modal.hidden = true; conteudo.innerHTML = ''; }
+  document.querySelectorAll('[data-fechar-modal]').forEach(b => b.addEventListener('click', fechar));
+  function render(){
+    const item = fila[indice]; if(!item){ fechar(); location.reload(); return; }
+    progresso.textContent = `${indice+1} de ${fila.length}`;
+    subtitulo.textContent = `${item.cliente} · ${item.maquina}`;
+    ant.disabled = indice === 0; prox.textContent = indice === fila.length-1 ? 'Concluir' : 'Próximo';
+    if(modo === 'orcamento' || modo === 'editar') {
+      titulo.textContent = modo === 'orcamento' ? 'Adicionar orçamento' : 'Abrir / editar chamado';
+      const ancora = modo === 'orcamento' ? '#etapa-2' : '';
+      conteudo.innerHTML = `<iframe class="central-iframe" src="/organiza/manutencoes/${item.id}${ancora}" title="${titulo.textContent}"></iframe>`;
+    } else if(modo === 'comunicar') {
+      titulo.textContent = 'Comunicar via WhatsApp';
+      const tipo = item.etapa === 'prontos' ? 'pronto' : 'orcamento';
+      const url = item.etapa === 'prontos' ? `/organiza/manutencoes/${item.id}/concluir-whatsapp` : `/organiza/operacao/comunicacoes/enviar?ids=${item.id}&tipo=${tipo}`;
+      conteudo.innerHTML = `<div class="modal-acao-simples"><p>Envie a comunicação deste chamado e, ao retornar, clique em <b>Próximo</b>.</p><a class="botao whatsapp" target="_blank" rel="noopener" href="${url}">Abrir WhatsApp de ${item.cliente}</a></div>`;
+    } else {
+      const acao = modo === 'excluir' ? 'cancelar' : 'finalizar';
+      titulo.textContent = modo === 'excluir' ? 'Excluir chamados selecionados' : 'Finalizar chamados selecionados';
+      conteudo.innerHTML = `<div class="modal-acao-simples"><p>Confirme a ação para <b>${item.cliente}</b> — ${item.maquina}.</p><form method="post" action="/organiza/manutencoes/${item.id}/encerrar-pendente"><input type="hidden" name="acao" value="${acao}"><input type="hidden" name="destino" value="/organiza?etapa={{ etapa_filtro }}"><button class="botao ${modo==='excluir'?'perigo':'primario'}" type="submit">Confirmar ${modo==='excluir'?'exclusão':'finalização'}</button></form><p class="texto-suave">Depois da confirmação, retorne a esta janela e avance para o próximo.</p></div>`;
+    }
+  }
+  function abrir(novoModo){ fila = selecionados(); if(!fila.length) return; modo = novoModo; indice = 0; modal.hidden = false; render(); }
+  ant.addEventListener('click', () => { if(indice>0){indice--; render();} });
+  prox.addEventListener('click', () => { indice++; render(); });
+  botoes.orcamento.addEventListener('click', () => abrir('orcamento'));
+  botoes.comunicar.addEventListener('click', () => abrir('comunicar'));
+  botoes.editar.addEventListener('click', () => abrir('editar'));
+  botoes.finalizar.addEventListener('click', () => abrir('finalizar'));
+  botoes.excluir.addEventListener('click', () => abrir('excluir'));
+  atualizar();
+})();
+</script>
+
 <style>
 .central-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.central-resumo article{background:#fff;border:1px solid #dbe3ef;border-radius:14px;padding:14px 16px}.central-resumo small{display:block;color:#667085;font-weight:700}.central-resumo strong{font-size:28px}.central-filtros{display:grid;grid-template-columns:minmax(260px,1.4fr) minmax(250px,1fr) auto auto;gap:10px;align-items:end;margin-bottom:12px}.central-filtros label{font-weight:700}.central-filtros input,.central-filtros select{width:100%}.etapas-rapidas{display:flex;gap:8px;overflow-x:auto;padding:4px 0 14px}.etapas-rapidas a{white-space:nowrap;text-decoration:none;border:1px solid #dbe3ef;background:#fff;border-radius:999px;padding:8px 11px;color:inherit;font-size:13px}.etapas-rapidas a span{display:inline-grid;place-items:center;min-width:22px;height:22px;margin-right:5px;border-radius:50%;background:#eef4ff;color:#155eef;font-weight:800}.etapas-rapidas a b{margin-left:5px}.etapas-rapidas a.ativo{border-color:#155eef;background:#eef4ff;color:#155eef}.chamados-lista{display:grid;gap:14px}.cliente-grupo{background:#fff;border:1px solid #dbe3ef;border-radius:16px;overflow:hidden}.cliente-grupo>header{display:flex;justify-content:space-between;align-items:center;padding:15px 16px;background:#f8fafc;border-bottom:1px solid #e4e7ec}.cliente-grupo h2{margin:0}.chamado-linha{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;padding:16px;border-bottom:1px solid #eef1f5}.chamado-linha:last-child{border-bottom:0}.chamado-info h3{margin:8px 0 3px}.chamado-info p{margin:0 0 3px;color:#475467}.chamado-etapa{display:flex;align-items:center;gap:8px}.chamado-etapa>span{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#eaf2ff;color:#155eef;font-weight:900}.chamado-etapa small{display:block;color:#667085}.chamado-acoes{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap;max-width:520px}.chamado-acoes form{margin:0}.acao-menu{position:relative}.acao-menu summary{list-style:none;cursor:pointer}.acao-menu summary::-webkit-details-marker{display:none}.acao-menu form{position:absolute;right:0;top:calc(100% + 6px);z-index:20;background:#fff;border:1px solid #dbe3ef;border-radius:12px;padding:12px;box-shadow:0 12px 30px rgba(16,24,40,.14);min-width:270px}.acao-menu form label{display:block;margin-bottom:8px;font-weight:700}.acao-menu form input{width:100%}.botao.perigo{border-color:#fda29b;color:#b42318;background:#fff5f4}
-@media(max-width:900px){.central-resumo{grid-template-columns:1fr}.central-filtros{grid-template-columns:1fr}.chamado-linha{grid-template-columns:1fr}.chamado-acoes{justify-content:flex-start;max-width:none}.cliente-grupo>header{align-items:flex-start}.central-chamados .titulo-linha{align-items:flex-start}}
+.central-acoes{position:sticky;top:8px;z-index:30;display:flex;justify-content:space-between;align-items:center;gap:16px;margin:12px 0;padding:12px 14px}.central-acoes small{display:block;color:#667085}.central-acoes-botoes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.cliente-selecao{display:flex;align-items:center;gap:12px;cursor:pointer}.cliente-selecao input,.chamado-check input{width:20px;height:20px}.chamado-linha{grid-template-columns:auto minmax(0,1fr) auto}.chamado-check{padding-top:8px}.chamado-acoes-individuais{color:#667085;font-style:italic}.central-modal[hidden]{display:none}.central-modal{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px}.central-modal-fundo{position:absolute;inset:0;background:rgba(15,23,42,.58)}.central-modal-caixa{position:relative;width:min(1180px,96vw);height:min(860px,94vh);background:#fff;border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.28);display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}.central-modal-caixa>header,.central-modal-caixa>footer{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #e4e7ec}.central-modal-caixa>footer{border-top:1px solid #e4e7ec;border-bottom:0;justify-content:flex-end}.central-modal-caixa h2{margin:2px 0}.central-modal-caixa p{margin:0}.central-iframe{width:100%;height:100%;border:0}.modal-acao-simples{padding:32px;display:grid;place-items:center;align-content:center;gap:18px;text-align:center;height:100%}.central-modal-caixa #modal-conteudo{min-height:0;overflow:auto}
+@media(max-width:900px){.central-resumo{grid-template-columns:1fr}.central-filtros{grid-template-columns:1fr}.central-acoes{position:static;align-items:flex-start;flex-direction:column}.central-acoes-botoes{justify-content:flex-start}.chamado-linha{grid-template-columns:auto 1fr}.chamado-acoes-individuais{grid-column:2}.chamado-acoes{justify-content:flex-start;max-width:none}.cliente-grupo>header{align-items:flex-start}.central-chamados .titulo-linha{align-items:flex-start}}
 </style>
 {% endblock %}
