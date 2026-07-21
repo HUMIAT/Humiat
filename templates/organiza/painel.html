@@ -1,67 +1,42 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean dashboard-pendencias">
-  <div class="titulo-linha dashboard-topo">
+<section class="pagina-clean dashboard-organiza">
+  <div class="titulo-linha">
     <div>
-      <p class="tag">ORGANIZA · KARAOKÊ RJ</p>
-      <h1>Pendências</h1>
-      <p class="texto-suave">Tudo o que precisa de ação nas vendas e manutenções.</p>
+      <p class="tag">DASHBOARD</p>
+      <h1>Visão geral da operação</h1>
+      <p class="texto-suave">Clique em uma etapa para abrir a Central Operacional já filtrada.</p>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="botao" href="/solicitar-manutencao" target="_blank">Link público</a><a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a></div>
+    <a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a>
   </div>
 
-  <div class="resumo-pendencias">
-    <article class="resumo-card destaque"><small>Total de pendências</small><strong>{{ total_pendencias }}</strong></article>
-    <article class="resumo-card"><small>Manutenções cadastradas</small><strong>{{ total_manutencoes }}</strong></article>
-    <a class="resumo-card acao" href="/organiza/manutencoes"><small>Consulta geral</small><strong>Ver todas →</strong></a>
-  </div>
+  <section class="dashboard-resumo">
+    <article><small>MANUTENÇÕES PENDENTES</small><strong>{{ total_operacao }}</strong></article>
+    <article><small>CLIENTES NA OPERAÇÃO</small><strong>{{ total_clientes_operacao }}</strong></article>
+    <a href="/organiza/central"><small>ABRIR</small><strong>Central Operacional →</strong></a>
+  </section>
 
-  {% set grupos = [
-    ('entrada', '1', 'Aguardando equipamento', 'Cliente ainda precisa trazer o equipamento ou iniciar o atendimento online.', '📥'),
-    ('orcamento', '2', 'Orçamento pendente', 'Equipamento recebido; a equipe precisa montar o orçamento.', '🧾'),
-    ('aceite', '3', 'Aguardando aceite', 'Orçamento enviado; aguardando a decisão do cliente.', '✅'),
-    ('pagamento', '4', 'Pagamento e prazo', 'Aguardando pagamento, definição de prazo ou confirmação ao cliente.', '💳'),
-    ('producao', '5', 'Execução do serviço', 'Serviço liberado para execução pela equipe técnica.', '🔧'),
-    ('agenda', '6', 'Aguardando retirada', 'Equipamento pronto; o cliente precisa escolher a retirada.', '📅'),
-    ('retirada', '6', 'Retirada agendada', 'Cliente já escolheu o dia e horário da retirada.', '📦')
-  ] %}
-
-  <div class="grade-pendencias">
-    {% for chave, numero, titulo, descricao, icone in grupos %}
-    {% set lista = pendencias[chave] %}
-    <section class="pendencia-card pendencia-{{ chave }} {% if chave in ['entrada','aceite','pagamento','agenda','retirada'] %}status-cliente{% else %}status-equipe{% endif %}">
-      <div class="pendencia-cabecalho">
-        <span class="pendencia-icone">{{ icone }}</span>
-        <div class="pendencia-titulo">
-          <small>ETAPA {{ numero }}</small>
-          <h2>{{ titulo }}</h2>
-          <p>{{ descricao }}</p>
-        </div>
-        <strong class="pendencia-contador">{{ lista|length }}</strong>
-      </div>
-
-      <div class="pendencia-lista">
-        {% for m in lista[:4] %}
-        <a href="/organiza/manutencoes/{{ m.id }}" class="pendencia-item">
-          <div>
-            <strong>#{{ m.id }} · {{ m.cliente.nome }}</strong>
-            <span><b>{{ m.equipamento|rotulo_maquina }}</b> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}</span><small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small>
-            {% if chave == 'entrada' %}<small>{{ 'WhatsApp/online' if m.tipo_atendimento == 'online' else 'Na loja' }}{% if m.entrega_prevista_em %} · {{ m.entrega_prevista_em|datahora }}{% endif %}</small>{% endif %}
-            {% if chave == 'pagamento' and m.painel_saldo %}<small>Falta receber: {{ m.painel_saldo|moeda }}</small>{% endif %}
-            {% if chave == 'retirada' and m.retirada_em %}<small>Retirada: {{ m.retirada_em|datahora }}</small>{% endif %}
-          </div>
-          <span class="seta">›</span>
-        </a>
-        {% else %}
-        <div class="pendencia-vazia">Nenhuma pendência nesta etapa.</div>
-        {% endfor %}
-      </div>
-
-      {% if lista|length > 0 %}
-      <a class="pendencia-ver-todos" href="/organiza/manutencoes?status={{ chave }}">Ver {{ lista|length }} pendência{% if lista|length != 1 %}s{% endif %}</a>
-      {% endif %}
-    </section>
+  <nav class="pipeline-dashboard" aria-label="Etapas principais da manutenção">
+    {% for fase in fases %}
+    <a href="/organiza/central?etapa={{ fase.filtro }}" class="fase fase-{{ fase.numero }}">
+      <span class="fase-numero">{{ fase.numero }}</span>
+      <span class="fase-conteudo"><small>ETAPA</small><strong>{{ fase.nome }}</strong></span>
+      <b>{{ fase.quantidade }}</b>
+    </a>
     {% endfor %}
-  </div>
+    <a href="/organiza/central?etapa=todos" class="fase fase-7 encerrado">
+      <span class="fase-numero">7</span>
+      <span class="fase-conteudo"><small>CONSULTA</small><strong>Todos</strong></span>
+      <b>→</b>
+    </a>
+  </nav>
+
+  <section class="dashboard-centrais">
+    <a href="/organiza/central"><span>⚙</span><div><small>TRABALHO DIÁRIO</small><h2>Central Operacional</h2><p>Recebimento, orçamento, comunicação, execução e retirada.</p></div><b>→</b></a>
+    <a href="/organiza/financeiro/conect"><span>R$</span><div><small>FINANCEIRO</small><h2>Central Financeira</h2><p>Pagamentos, cobranças, vínculos e conciliação.</p></div><b>→</b></a>
+  </section>
 </section>
+<style>
+.dashboard-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:20px 0}.dashboard-resumo article,.dashboard-resumo>a{display:flex;flex-direction:column;justify-content:center;min-height:105px;padding:18px;background:#fff;border:1px solid #d8e1ee;border-radius:16px;text-decoration:none;color:inherit}.dashboard-resumo small{font-weight:800;color:#667085}.dashboard-resumo strong{font-size:28px;margin-top:6px}.pipeline-dashboard{display:grid;grid-template-columns:repeat(7,minmax(145px,1fr));gap:8px;overflow-x:auto;padding:8px 0 20px}.pipeline-dashboard .fase{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;min-height:68px;padding:10px 12px;border:1.5px solid #f97316;border-radius:13px;background:#fff7ed;color:#9a3412;text-decoration:none;white-space:nowrap}.pipeline-dashboard .fase:nth-child(even){border-color:#2563eb;background:#eff6ff;color:#1d4ed8}.pipeline-dashboard .fase.encerrado{border-color:#94a3b8;background:#f8fafc;color:#475569}.fase-numero{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:currentColor;color:#fff;font-weight:900}.fase-conteudo{display:grid}.fase-conteudo small{font-size:10px;letter-spacing:.12em}.fase-conteudo strong{text-transform:uppercase;font-size:13px}.pipeline-dashboard .fase>b{font-size:18px}.dashboard-centrais{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:14px}.dashboard-centrais>a{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:16px;padding:22px;background:#fff;border:1px solid #d8e1ee;border-radius:18px;text-decoration:none;color:inherit;box-shadow:0 8px 24px rgba(16,24,40,.06)}.dashboard-centrais>a>span{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#eaf2ff;color:#155eef;font-weight:900}.dashboard-centrais h2,.dashboard-centrais p{margin:2px 0}.dashboard-centrais small{font-weight:800;color:#155eef}.dashboard-centrais>a>b{font-size:26px;color:#155eef}@media(max-width:900px){.dashboard-resumo,.dashboard-centrais{grid-template-columns:1fr}.pipeline-dashboard{grid-template-columns:repeat(7,minmax(170px,1fr))}}
+</style>
 {% endblock %}

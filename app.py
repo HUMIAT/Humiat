@@ -709,27 +709,51 @@ def _contexto_operacao(db: Session):
 @app.get("/organiza", response_class=HTMLResponse)
 def painel(
     request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Dashboard resumido do Organiza.
+
+    Os cards encaminham para a Central Operacional já com o filtro correto.
+    """
+    contexto = _contexto_operacao(db)
+    fases = [
+        {"numero": "1", "nome": "Entrada", "chaves": ["atendimento"], "filtro": "atendimento"},
+        {"numero": "2", "nome": "Orçamento", "chaves": ["orcamentos", "comunicar_orcamentos"], "filtro": "orcamentos"},
+        {"numero": "3", "nome": "Aceite", "chaves": ["aprovacoes"], "filtro": "aprovacoes"},
+        {"numero": "4", "nome": "Pagamento", "chaves": ["pagamentos"], "filtro": "pagamentos"},
+        {"numero": "5", "nome": "Execução", "chaves": ["execucao", "pausados", "prontos"], "filtro": "execucao"},
+        {"numero": "6", "nome": "Retirada", "chaves": ["retiradas"], "filtro": "retiradas"},
+    ]
+    for fase in fases:
+        fase["quantidade"] = sum(contexto["contagens_equipamentos"].get(chave, 0) for chave in fase["chaves"])
+    return templates.TemplateResponse("organiza/painel.html", {
+        "request": request, "usuario": usuario, "fases": fases,
+        "total_operacao": contexto["total_manutencoes"],
+        "total_clientes_operacao": contexto["total_operacao"],
+    })
+
+
+@app.get("/organiza/central", response_class=HTMLResponse)
+def central_operacional(
+    request: Request,
     etapa: str = "todos",
     busca: str = "",
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
-    """Central de chamados: todas as etapas e ações em uma única tela.
-
-    O filtro mantém a mesma classificação exclusiva da Central Operacional para
-    que uma manutenção nunca apareça em duas etapas ao mesmo tempo.
-    """
+    """Central Operacional: filtro, ações da etapa e seleção individual ou em lote."""
     contexto = _contexto_operacao(db)
     etapas_meta = {
-        "atendimento": ("1", "Aguardando atendimento ou entrega"),
-        "orcamentos": ("2", "Fazer orçamento"),
-        "comunicar_orcamentos": ("3", "Comunicar orçamento"),
-        "aprovacoes": ("4", "Aguardando aprovação"),
-        "pagamentos": ("5", "Pagamento, prazo e confirmação"),
-        "execucao": ("6", "Em execução"),
-        "pausados": ("7", "Aguardando item / peça"),
-        "prontos": ("8", "Comunicar equipamento pronto"),
-        "retiradas": ("9", "Aguardando retirada"),
+        "atendimento": ("1", "Entrada", "Aguardando atendimento ou entrega"),
+        "orcamentos": ("2", "Orçamento", "Fazer orçamento"),
+        "comunicar_orcamentos": ("3", "Comunicar", "Comunicar orçamento"),
+        "aprovacoes": ("4", "Aceite", "Aguardando aprovação"),
+        "pagamentos": ("5", "Pagamento", "Pagamento, prazo e confirmação"),
+        "execucao": ("6", "Execução", "Em execução"),
+        "pausados": ("7", "Peças", "Aguardando item / peça"),
+        "prontos": ("8", "Pronto", "Comunicar equipamento pronto"),
+        "retiradas": ("9", "Retirada", "Aguardando retirada"),
     }
     etapa = etapa if etapa in etapas_meta or etapa == "todos" else "todos"
     termo = (busca or "").strip().lower()
@@ -737,7 +761,7 @@ def painel(
     for chave, lista in contexto["filas"].items():
         if etapa != "todos" and chave != etapa:
             continue
-        numero, titulo = etapas_meta[chave]
+        numero, nome_curto, titulo = etapas_meta[chave]
         for m in lista:
             texto_busca = " ".join([
                 getattr(m.cliente, "nome", "") or "",
@@ -751,20 +775,15 @@ def painel(
                 continue
             m.central_chave = chave
             m.central_numero = numero
+            m.central_nome_curto = nome_curto
             m.central_titulo = titulo
             selecionadas.append(m)
 
-    # A lista principal é agrupada por cliente, independentemente da etapa.
     central_grupos = _agrupar_por_cliente(selecionadas)
     contexto.update({
-        "request": request,
-        "usuario": usuario,
-        "pagina_inicial": True,
-        "etapa_filtro": etapa,
-        "busca": busca,
-        "etapas_meta": etapas_meta,
-        "central_grupos": central_grupos,
-        "central_total": len(selecionadas),
+        "request": request, "usuario": usuario, "pagina_inicial": False,
+        "etapa_filtro": etapa, "busca": busca, "etapas_meta": etapas_meta,
+        "central_grupos": central_grupos, "central_total": len(selecionadas),
     })
     return templates.TemplateResponse("organiza/operacao.html", contexto)
 

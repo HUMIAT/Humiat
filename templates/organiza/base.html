@@ -14,9 +14,9 @@
   <aside class="app-sidebar">
     <a class="side-logo" href="/organiza"><span class="logo-check">O</span><div><strong>ORGANIZA</strong><small>Karaokê RJ</small></div></a>
     <nav class="side-nav">
-      <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Início</a>
+      <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span>⌂</span> Dashboard</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span>👥</span> Clientes</a>
-      <a class="{% if request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/manutencoes"><span>🛠</span> Manutenções</a>
+      <a class="{% if request.url.path.startswith('/organiza/central') or request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/central"><span>⚙</span> Central Operacional</a>
       <a class="{% if request.url.path.startswith('/organiza/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span>▤</span> Vendas</a>
       <a class="{% if request.url.path.startswith('/organiza/financeiro/conect') %}ativo{% endif %}" href="/organiza/financeiro/conect"><span>↗</span> Central financeiro</a>
       <a class="{% if request.url.path.startswith('/organiza/itens') %}ativo{% endif %}" href="/organiza/itens"><span>▦</span> Itens</a>
@@ -36,7 +36,7 @@
   <main class="app-main">{% block conteudo %}{% endblock %}</main>
   <nav class="mobile-nav clean-mobile" aria-label="Navegação principal no celular">
     <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza">
-      <span>⌂</span><small>Início</small>
+      <span>⌂</span><small>Dashboard</small>
     </a>
     <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes">
       <span>👥</span><small>Clientes</small>
