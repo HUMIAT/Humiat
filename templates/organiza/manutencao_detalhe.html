@@ -14,9 +14,21 @@
       <a class="botao whatsapp" target="_blank" rel="noopener" href="{{ whatsapp_url(m.cliente) }}">WhatsApp</a>
       <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=1">PDF com valores</a>
       <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=0">PDF sem valores</a>
+      {% if etapa_atual <= 3 %}
+      <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar-pendente" onsubmit="return confirm(this.dataset.msg);" data-msg="Finalizar esta manutenção e retirar todas as pendências? O histórico será preservado.">
+        <input type="hidden" name="acao" value="finalizar">
+        <button class="botao secundario" type="submit">Finalizar</button>
+      </form>
+      <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar-pendente" onsubmit="return confirm(this.dataset.msg);" data-msg="Excluir esta pendência? A manutenção será cancelada e o histórico ficará preservado.">
+        <input type="hidden" name="acao" value="cancelar">
+        <button class="botao perigo" type="submit">Excluir</button>
+      </form>
+      {% endif %}
       <a class="botao" href="/organiza/manutencoes">Voltar</a>
     </div>
   </header>
+
+  {% if request.query_params.get('erro_encerramento') %}<div class="alerta erro">{{ request.query_params.get('erro_encerramento') }}</div>{% endif %}
 
   <details class="cartao manutencao-cliente-resumo">
     <summary><strong>Dados do cliente</strong><span>Consultar cadastro completo</span></summary>

@@ -93,7 +93,15 @@
             <strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}
             <small>{{ m.defeito }}</small>
           </span>
-          <a class="botao secundario pequeno" href="/organiza/manutencoes/{{ m.id }}">Abrir</a>
+          <div class="fila-item-acoes">
+            <a class="botao secundario pequeno" href="/organiza/manutencoes/{{ m.id }}">Abrir</a>
+            {% if chave in ("atendimento", "aprovacoes") %}
+            <button class="botao secundario pequeno acao-encerrar-pendente" type="button"
+                    data-id="{{ m.id }}" data-acao="finalizar">Finalizar</button>
+            <button class="botao perigo pequeno acao-encerrar-pendente" type="button"
+                    data-id="{{ m.id }}" data-acao="cancelar">Excluir</button>
+            {% endif %}
+          </div>
         </div>
         {% endfor %}
       </div>
@@ -165,6 +173,11 @@
 </section>
 
 <style>
+
+.fila-item-acoes { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
+.fila-item-acoes .botao { width:auto; }
+@media (max-width: 640px) { .fila-item-acoes { justify-content:stretch; } .fila-item-acoes .botao { flex:1; } }
+
 
 .fila-item:not(.selecionavel) {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -578,4 +591,25 @@
   atualizarExecucao();
 })();
 </script>
+
+<script>
+document.querySelectorAll('.acao-encerrar-pendente').forEach((botao) => {
+  botao.addEventListener('click', async () => {
+    const acao = botao.dataset.acao;
+    const texto = acao === 'finalizar'
+      ? 'Finalizar esta manutenção e retirar a pendência? O histórico será preservado.'
+      : 'Excluir esta pendência? A manutenção será cancelada e o histórico será preservado.';
+    if (!confirm(texto)) return;
+    const dados = new FormData();
+    dados.append('acao', acao);
+    dados.append('destino', window.location.pathname);
+    const resposta = await fetch(`/organiza/manutencoes/${botao.dataset.id}/encerrar-pendente`, {
+      method: 'POST', body: dados, credentials: 'same-origin'
+    });
+    if (resposta.ok || resposta.redirected) window.location.reload();
+    else alert('Não foi possível concluir a ação. Abra a manutenção para verificar o status.');
+  });
+});
+</script>
+
 {% endblock %}

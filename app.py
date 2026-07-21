@@ -1977,6 +1977,52 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
 
 
+@app.post("/organiza/manutencoes/{manutencao_id}/encerrar-pendente")
+async def manutencao_encerrar_pendente(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Permite encerrar/cancelar uma manutenção sem deixar pendência antes da aprovação.
+
+    A ação é permitida somente até a etapa de aceite (1, 2 ou 3) e bloqueada
+    assim que houver orçamento aprovado, preservando a integridade financeira.
+    """
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+
+    etapa = etapa_manutencao(m)
+    orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    aprovado = bool(orcamento and (
+        orcamento.status in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente")
+        or (orcamento.status or "").startswith("Aprovado:")
+    ))
+    if etapa > 3 or aprovado:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{m.id}?erro_encerramento=Após a aprovação do orçamento, use o fluxo normal da manutenção.",
+            status_code=303,
+        )
+
+    form = await request.form()
+    acao = (form.get("acao") or "cancelar").strip().lower()
+    if acao == "finalizar":
+        m.status = "Encerrada"
+        m.entregue_em = m.entregue_em or datetime.now()
+    else:
+        # Não apaga fisicamente: remove das filas e preserva todo o histórico.
+        m.status = "Cancelada"
+    m.entrega_prevista_em = None
+    m.retirada_em = None
+    db.commit()
+
+    destino = (form.get("destino") or "").strip()
+    if destino.startswith("/organiza/"):
+        return RedirectResponse(destino, status_code=303)
+    return RedirectResponse("/organiza/manutencoes", status_code=303)
+
+
 @app.get("/organiza/manutencoes/{manutencao_id}/relatorio.pdf")
 def manutencao_relatorio_pdf(
     manutencao_id: int,
