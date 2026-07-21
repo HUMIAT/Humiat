@@ -1056,21 +1056,31 @@ def validar_codigo_monitor(db: Session, equipamento: Equipamento, codigo_anterio
     codigo = (equipamento.maquina or "").strip().upper()
     if not re.fullmatch(r"KRJ\d{5}", codigo):
         return "O campo “Código da máquina para o monitor” deve seguir o padrão KRJ00001."
+
     duplicado = db.query(Equipamento).filter(
         func.upper(Equipamento.maquina) == codigo,
         Equipamento.id != (equipamento.id or 0)
     ).first()
     if duplicado:
         return f"O código do monitor {codigo} já está sendo utilizado e não pode ser repetido."
+
     anterior = (codigo_anterior or "").strip().upper()
-    codigo_foi_alterado = not anterior or codigo != anterior
-    if codigo_foi_alterado:
+
+    # A faixa histórica KRJ00001..KRJ00040 só é protegida na EDIÇÃO.
+    # Cadastros novos devem aceitar normalmente a sequência automática atual
+    # (ex.: KRJ00671, KRJ00672...), sem limitar o número a 40.
+    if anterior and codigo != anterior:
+        numero_anterior = int(anterior[3:]) if re.fullmatch(r"KRJ\d{5}", anterior) else None
         numero_novo = int(codigo[3:])
-        if not 1 <= numero_novo <= 40:
+
+        # Equipamentos antigos/reservados devem permanecer dentro da faixa histórica
+        # quando o código técnico for alterado manualmente.
+        if numero_anterior is not None and 1 <= numero_anterior <= 40 and not 1 <= numero_novo <= 40:
             return (
-                "Novos códigos e alterações devem utilizar um código entre "
-                "KRJ00001 e KRJ00040."
+                "Este equipamento utiliza um código histórico entre "
+                "KRJ00001 e KRJ00040. Ao editar o código técnico, mantenha-o nessa faixa."
             )
+
     return ""
 
 
