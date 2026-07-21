@@ -1,3 +1,16 @@
 git add .
 git commit -m "Integra central financeiro do Organiza com Connect"
 git push origin main
+
+Conect@2026#SegredoMuitoGrande
+
+CONNECT
+ORGANIZA_API_KEY = CHAVE-ABC
+        ↕ mesma chave
+ORGANIZA
+CONNECT_API_KEY = CHAVE-ABC
+CONNECT_API_URL = https://seu-connect.onrender.com
+
+git add .
+git commit -m "Adiciona agrupamento de lancamentos para envio ao Connect"
+git push origin main

@@ -32,3 +32,19 @@ Manutenção:
 `ORGANIZA-MANUTENCAO-PAG-{id_do_pagamento}`
 
 Esses identificadores são estáveis. O Connect atualiza o registro existente ao receber novamente o mesmo `id_externo`.
+
+
+## Agrupamento manual
+
+Na Central Financeiro, selecione os lançamentos e use **Agrupar e enviar**.
+
+O Organiza agrupa automaticamente somente registros compatíveis:
+- mesmo cliente;
+- mesmo tipo (`venda` ou `manutencao`);
+- mesma data de pagamento;
+- mesmo banco.
+
+Exemplo: três manutenções do mesmo cliente de R$ 30,00 + R$ 100,00 + R$ 50,00,
+com a mesma data e banco, são enviadas ao Connect como um único lançamento de R$ 180,00.
+
+Os registros originais continuam separados no Organiza e ficam marcados individualmente como enviados.

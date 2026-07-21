@@ -349,6 +349,8 @@ class IntegracaoConect(Base):
     hash_conteudo = Column(String(64), nullable=True)
     enviado_em = Column(DateTime, nullable=True)
     resposta = Column(Text, nullable=True)
+    # Quando marcado, o lançamento permanece no histórico, mas não entra em envios automáticos.
+    ignorado = Column(Integer, nullable=False, default=0)
 
 
 def limpar_telefone(valor: str) -> str:
@@ -564,6 +566,11 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "banco" not in existentes_pagamentos:
                 conn.execute(text("ALTER TABLE assistencia_pagamentos ADD COLUMN banco VARCHAR(120)"))
+    if "integracao_conect" in insp.get_table_names():
+        existentes_integracao = {c["name"] for c in insp.get_columns("integracao_conect")}
+        with engine.begin() as conn:
+            if "ignorado" not in existentes_integracao:
+                conn.execute(text("ALTER TABLE integracao_conect ADD COLUMN ignorado INTEGER NOT NULL DEFAULT 0"))
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
@@ -3358,7 +3365,12 @@ def _linhas_central_financeiro(db: Session):
         payload = _payload_venda(p)
         integ = _registro_integracao(db, "venda", p.id)
         hash_atual = _payload_hash(payload)
-        status = "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em else ("atualizado" if integ and integ.enviado_em else "novo")
+        status = (
+            "ignorado" if integ and integ.ignorado
+            else "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em
+            else "atualizado" if integ and integ.enviado_em
+            else "novo"
+        )
         linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ})
 
     manutencoes = db.query(Pagamento).options(
@@ -3369,7 +3381,12 @@ def _linhas_central_financeiro(db: Session):
         payload = _payload_manutencao(p)
         integ = _registro_integracao(db, "manutencao", p.id)
         hash_atual = _payload_hash(payload)
-        status = "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em else ("atualizado" if integ and integ.enviado_em else "novo")
+        status = (
+            "ignorado" if integ and integ.ignorado
+            else "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em
+            else "atualizado" if integ and integ.enviado_em
+            else "novo"
+        )
         linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ})
     linhas.sort(key=lambda x: (x["registro"].data, x["registro"].id), reverse=True)
     return linhas
@@ -3382,7 +3399,7 @@ def central_financeiro_conect(
     db: Session = Depends(get_db),
 ):
     linhas = _linhas_central_financeiro(db)
-    pendentes = sum(1 for l in linhas if l["status_sync"] != "enviado")
+    pendentes = sum(1 for l in linhas if l["status_sync"] not in ("enviado", "ignorado"))
     return templates.TemplateResponse("organiza/central_financeiro_conect.html", {
         "request": request,
         "usuario": usuario,
@@ -3403,7 +3420,7 @@ def central_financeiro_conect_enviar(
         return RedirectResponse("/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.", status_code=303)
 
     linhas = _linhas_central_financeiro(db)
-    enviar = [l for l in linhas if l["status_sync"] != "enviado"]
+    enviar = [l for l in linhas if l["status_sync"] not in ("enviado", "ignorado")]
     enviados = 0
     erros = []
     for linha in enviar:
@@ -3421,6 +3438,7 @@ def central_financeiro_conect_enviar(
                 db.add(integ)
             integ.hash_conteudo = _payload_hash(payload)
             integ.enviado_em = datetime.now()
+            integ.ignorado = 0
             integ.resposta = json.dumps(resposta, ensure_ascii=False)[:4000]
             db.commit()
             enviados += 1
@@ -3433,6 +3451,225 @@ def central_financeiro_conect_enviar(
         msg = quote_plus(f"{enviados} enviado(s). Erro: {erros[0]}")
         return RedirectResponse(f"/organiza/financeiro/conect?erro={msg}", status_code=303)
     msg = quote_plus(f"{enviados} lançamento(s) enviado(s) ao Connect." if enviados else "Tudo já estava sincronizado.")
+    return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
+
+
+
+def _chave_linha_connect(linha) -> str:
+    origem = "venda" if linha["origem"] == "Venda" else "manutencao"
+    return f"{origem}:{linha['registro'].id}"
+
+
+@app.post("/organiza/financeiro/conect/enviar-selecionados")
+async def central_financeiro_conect_enviar_selecionados(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not _connect_configurado():
+        return RedirectResponse("/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.", status_code=303)
+
+    form = await request.form()
+    selecionados = set(form.getlist("selecionados"))
+    if not selecionados:
+        return RedirectResponse("/organiza/financeiro/conect?erro=Selecione pelo menos um lançamento.", status_code=303)
+
+    linhas = [l for l in _linhas_central_financeiro(db) if _chave_linha_connect(l) in selecionados]
+    enviados = 0
+    for linha in linhas:
+        payload = linha["payload"]
+        try:
+            resposta = _enviar_para_connect(payload)
+            origem = "venda" if linha["origem"] == "Venda" else "manutencao"
+            integ = _registro_integracao(db, origem, linha["registro"].id)
+            if not integ:
+                integ = IntegracaoConect(
+                    origem=origem,
+                    registro_id=linha["registro"].id,
+                    id_externo=payload["id_externo"],
+                )
+                db.add(integ)
+            integ.hash_conteudo = _payload_hash(payload)
+            integ.enviado_em = datetime.now()
+            integ.resposta = json.dumps(resposta, ensure_ascii=False)[:4000]
+            integ.ignorado = 0
+            db.commit()
+            enviados += 1
+        except Exception as exc:
+            db.rollback()
+            msg = quote_plus(f"{enviados} enviado(s). Erro em {payload['id_externo']}: {str(exc)}")
+            return RedirectResponse(f"/organiza/financeiro/conect?erro={msg}", status_code=303)
+
+    msg = quote_plus(f"{enviados} lançamento(s) selecionado(s) enviado(s) ao Connect.")
+    return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
+
+
+
+def _normalizar_texto_agrupamento(valor) -> str:
+    return re.sub(r"\s+", " ", (str(valor or "").strip().lower()))
+
+
+def _grupos_connect_selecionados(linhas):
+    """
+    Agrupa somente lançamentos compatíveis com um único lançamento no Connect:
+    mesmo tipo, cliente, data de pagamento e banco.
+    """
+    grupos = {}
+    for linha in linhas:
+        payload = linha["payload"]
+        chave = (
+            payload["tipo"],
+            _normalizar_texto_agrupamento(payload.get("cliente")),
+            payload["data_pagamento"],
+            _normalizar_texto_agrupamento(payload.get("banco")),
+        )
+        grupos.setdefault(chave, []).append(linha)
+    return list(grupos.values())
+
+
+def _payload_grupo_connect(grupo):
+    primeiro = grupo[0]["payload"]
+    chaves_origem = sorted(_chave_linha_connect(l) for l in grupo)
+    assinatura = hashlib.sha256("|".join(chaves_origem).encode("utf-8")).hexdigest()[:16]
+    tipo = primeiro["tipo"]
+    cliente = primeiro.get("cliente") or ""
+    quantidade = len(grupo)
+    valor_total = round(sum(float(l["payload"].get("valor") or 0) for l in grupo), 2)
+
+    rotulo_tipo = "Venda" if tipo == "venda" else "Manutenção"
+    descricao = f"{rotulo_tipo} agrupada - {quantidade} lançamento(s)"
+    if cliente:
+        descricao += f" - {cliente}"
+
+    return {
+        "id_externo": f"ORGANIZA-GRUPO-{tipo.upper()}-{assinatura}",
+        "tipo": tipo,
+        "cliente": cliente,
+        "descricao": descricao,
+        "valor": valor_total,
+        "data_pagamento": primeiro["data_pagamento"],
+        "banco": primeiro.get("banco") or "",
+    }
+
+
+@app.post("/organiza/financeiro/conect/enviar-agrupado")
+async def central_financeiro_conect_enviar_agrupado(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not _connect_configurado():
+        return RedirectResponse(
+            "/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.",
+            status_code=303,
+        )
+
+    form = await request.form()
+    selecionados = set(form.getlist("selecionados"))
+    if not selecionados:
+        return RedirectResponse(
+            "/organiza/financeiro/conect?erro=Selecione pelo menos um lançamento para agrupar.",
+            status_code=303,
+        )
+
+    linhas = [
+        l for l in _linhas_central_financeiro(db)
+        if _chave_linha_connect(l) in selecionados
+    ]
+    if not linhas:
+        return RedirectResponse(
+            "/organiza/financeiro/conect?erro=Nenhum lançamento válido foi selecionado.",
+            status_code=303,
+        )
+
+    grupos = _grupos_connect_selecionados(linhas)
+    enviados = 0
+
+    for grupo in grupos:
+        payload_grupo = _payload_grupo_connect(grupo)
+
+        try:
+            resposta = _enviar_para_connect(payload_grupo)
+
+            # Cada origem continua controlada individualmente no Organiza,
+            # embora o Connect receba apenas um lançamento com o total agrupado.
+            for linha in grupo:
+                origem = "venda" if linha["origem"] == "Venda" else "manutencao"
+                payload_individual = linha["payload"]
+                integ = _registro_integracao(db, origem, linha["registro"].id)
+
+                if not integ:
+                    integ = IntegracaoConect(
+                        origem=origem,
+                        registro_id=linha["registro"].id,
+                        id_externo=payload_individual["id_externo"],
+                    )
+                    db.add(integ)
+
+                integ.hash_conteudo = _payload_hash(payload_individual)
+                integ.enviado_em = datetime.now()
+                integ.ignorado = 0
+                integ.resposta = json.dumps({
+                    "modo": "agrupado",
+                    "id_externo_grupo": payload_grupo["id_externo"],
+                    "valor_grupo": payload_grupo["valor"],
+                    "quantidade_grupo": len(grupo),
+                    "resposta_connect": resposta,
+                }, ensure_ascii=False)[:4000]
+
+            db.commit()
+            enviados += 1
+
+        except Exception as exc:
+            db.rollback()
+            msg = quote_plus(
+                f"{enviados} grupo(s) enviado(s). Erro no grupo "
+                f"{payload_grupo['cliente']}: {str(exc)}"
+            )
+            return RedirectResponse(
+                f"/organiza/financeiro/conect?erro={msg}",
+                status_code=303,
+            )
+
+    total_origens = len(linhas)
+    msg = quote_plus(
+        f"{total_origens} lançamento(s) agrupado(s) em "
+        f"{enviados} lançamento(s) enviado(s) ao Connect."
+    )
+    return RedirectResponse(
+        f"/organiza/financeiro/conect?sucesso={msg}",
+        status_code=303,
+    )
+
+
+@app.post("/organiza/financeiro/conect/nao-enviar")
+async def central_financeiro_conect_nao_enviar(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    selecionados = set(form.getlist("selecionados"))
+    if not selecionados:
+        return RedirectResponse("/organiza/financeiro/conect?erro=Selecione pelo menos um lançamento.", status_code=303)
+
+    alterados = 0
+    for linha in _linhas_central_financeiro(db):
+        if _chave_linha_connect(linha) not in selecionados:
+            continue
+        origem = "venda" if linha["origem"] == "Venda" else "manutencao"
+        integ = _registro_integracao(db, origem, linha["registro"].id)
+        if not integ:
+            integ = IntegracaoConect(
+                origem=origem,
+                registro_id=linha["registro"].id,
+                id_externo=linha["payload"]["id_externo"],
+            )
+            db.add(integ)
+        integ.ignorado = 1
+        alterados += 1
+    db.commit()
+    msg = quote_plus(f"{alterados} lançamento(s) marcado(s) como 'Não enviar'.")
     return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
 
 

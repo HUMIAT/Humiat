@@ -5,11 +5,11 @@
     <div>
       <p class="tag">Central financeiro</p>
       <h1>Enviar para o Connect</h1>
-      <p class="texto-suave">Um único lugar para enviar vendas e manutenções novas ou alteradas.</p>
+      <p class="texto-suave">Selecione o que deve ir ao Connect. O que já foi validado pode ficar marcado como “Não enviar”.</p>
     </div>
     <form method="post" action="/organiza/financeiro/conect/enviar">
       <button class="botao primario" type="submit" {% if not connect_configurado %}disabled{% endif %}>
-        Enviar tudo{% if pendentes %} · {{ pendentes }}{% endif %}
+        Enviar tudo pendente{% if pendentes %} · {{ pendentes }}{% endif %}
       </button>
     </form>
   </div>
@@ -24,40 +24,104 @@
   {% endif %}
 
   <article class="cartao">
-    <div class="titulo-linha" style="margin-bottom:12px">
-      <div>
-        <h2>Lançamentos</h2>
-        <p class="texto-suave">{{ linhas|length }} registro(s) · {{ pendentes }} aguardando envio/atualização</p>
+    <form method="post" id="form-lancamentos-connect">
+      <div class="titulo-linha" style="margin-bottom:12px;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <h2>Lançamentos</h2>
+          <p class="texto-suave">{{ linhas|length }} registro(s) · {{ pendentes }} aguardando envio/atualização</p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="botao primario" type="submit"
+                  formaction="/organiza/financeiro/conect/enviar-selecionados"
+                  {% if not connect_configurado %}disabled{% endif %}>
+            Enviar selecionados
+          </button>
+        <button type="submit"
+                formaction="/organiza/financeiro/conect/enviar-agrupado"
+                class="btn btn-primary"
+                onclick="return confirm('Agrupar os selecionados por cliente, tipo, data e banco e enviar o total ao Connect?')">
+          Agrupar e enviar
+        </button>
+          <button class="botao" type="submit"
+                  formaction="/organiza/financeiro/conect/nao-enviar">
+            Não enviar selecionados
+          </button>
+        </div>
       </div>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Valor</th><th>Status Connect</th></tr></thead>
-        <tbody>
-        {% for linha in linhas %}
-          <tr>
-            <td>{{ linha.payload.data_pagamento }}</td>
-            <td><span class="pill">{{ linha.origem }}</span></td>
-            <td>{{ linha.payload.cliente or '-' }}</td>
-            <td>{{ linha.payload.descricao }}</td>
-            <td>{{ linha.payload.banco or 'Não informado' }}</td>
-            <td>{{ linha.payload.valor|moeda }}</td>
-            <td>
-              {% if linha.status_sync == 'enviado' %}
-                <span class="pill" style="background:#e9f9ef">Enviado</span>
-              {% elif linha.status_sync == 'atualizado' %}
-                <span class="pill" style="background:#fff4d8">Atualizado · reenviar</span>
-              {% else %}
-                <span class="pill" style="background:#eaf1ff">Novo</span>
-              {% endif %}
-            </td>
-          </tr>
-        {% else %}
-          <tr><td colspan="7">Nenhum pagamento registrado ainda.</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
+
+      <div class="table-wrap">
+        
+<div style="margin:10px 0 14px;padding:10px 12px;border:1px solid #dbe4ef;border-radius:10px;background:#f8fbff;font-size:13px;">
+  <strong>Agrupar e enviar:</strong>
+  selecione os lançamentos do mesmo pagamento. Mesmo cliente + mesmo tipo + mesma data + mesmo banco
+  são somados e chegam ao Connect como um único lançamento.
+</div>
+<table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:42px">
+                <input type="checkbox" id="selecionar-todos" aria-label="Selecionar todos">
+              </th>
+              <th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Valor</th><th>Status Connect</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for linha in linhas %}
+            <tr>
+              <td>
+                <input
+                  class="seletor-lancamento"
+                  type="checkbox"
+                  name="selecionados"
+                  value="{{ 'venda' if linha.origem == 'Venda' else 'manutencao' }}:{{ linha.registro.id }}"
+                  aria-label="Selecionar {{ linha.origem }} de {{ linha.payload.cliente or 'cliente não informado' }}"
+                >
+              </td>
+              <td>{{ linha.payload.data_pagamento }}</td>
+              <td><span class="pill">{{ linha.origem }}</span></td>
+              <td>{{ linha.payload.cliente or '-' }}</td>
+              <td>{{ linha.payload.descricao }}</td>
+              <td>{{ linha.payload.banco or 'Não informado' }}</td>
+              <td>{{ linha.payload.valor|moeda }}</td>
+              <td>
+                {% if linha.status_sync == 'enviado' %}
+                  <span class="pill" style="background:#e9f9ef">Enviado</span>
+                {% elif linha.status_sync == 'atualizado' %}
+                  <span class="pill" style="background:#fff4d8">Atualizado · reenviar</span>
+                {% elif linha.status_sync == 'ignorado' %}
+                  <span class="pill" style="background:#f1f3f5">Não enviar</span>
+                {% else %}
+                  <span class="pill" style="background:#eaf1ff">Novo</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8">Nenhum pagamento registrado ainda.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
   </article>
 </section>
+
+<script>
+(function () {
+  const todos = document.getElementById("selecionar-todos");
+  const itens = Array.from(document.querySelectorAll(".seletor-lancamento"));
+  if (!todos) return;
+
+  todos.addEventListener("change", function () {
+    itens.forEach(function (item) { item.checked = todos.checked; });
+  });
+
+  itens.forEach(function (item) {
+    item.addEventListener("change", function () {
+      const marcados = itens.filter(function (x) { return x.checked; }).length;
+      todos.checked = marcados === itens.length && itens.length > 0;
+      todos.indeterminate = marcados > 0 && marcados < itens.length;
+    });
+  });
+})();
+</script>
 {% endblock %}
