@@ -42,7 +42,7 @@
     </div>
   </form>
 
-  <p class="texto-suave resultado-vendas"><strong>{{ vendas|length }}</strong> venda(s) encontrada(s)</p>
+  <p class="texto-suave resultado-vendas"><strong>{{ total_vendas }}</strong> venda(s) encontrada(s) · exibindo até 50 por página</p>
 
   <div class="vendas-grid">
     {% for venda in vendas %}
@@ -59,6 +59,14 @@
     </article>
     {% else %}<div class="cartao vazio">Nenhuma venda encontrada com estes filtros.</div>{% endfor %}
   </div>
+  {% if total_paginas > 1 %}
+  <div style="display:flex;justify-content:center;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap">
+    {% if pagina > 1 %}<a class="botao secundario" href="?q={{ q }}&pagamento={{ pagamento_filtro }}&valor={{ valor_filtro }}&status={{ status_filtro }}&ordem={{ ordem }}&pagina={{ pagina-1 }}">← Anterior</a>{% endif %}
+    <span class="texto-suave">Página {{ pagina }} de {{ total_paginas }}</span>
+    {% if pagina < total_paginas %}<a class="botao secundario" href="?q={{ q }}&pagamento={{ pagamento_filtro }}&valor={{ valor_filtro }}&status={{ status_filtro }}&ordem={{ ordem }}&pagina={{ pagina+1 }}">Próxima →</a>{% endif %}
+  </div>
+  {% endif %}
+
 </section>
 <style>
 .filtros-vendas{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(150px,1fr)) auto;gap:12px;align-items:end;margin:16px 0;padding:14px}.filtros-vendas label{display:grid;gap:6px;font-size:13px;font-weight:700}.filtros-vendas input,.filtros-vendas select{min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 10px;background:#fff}.filtros-acoes{display:flex;gap:8px}.resultado-vendas{margin:0 0 12px}.alerta-venda{margin:10px 0 0;padding:8px 10px;font-size:13px}@media(max-width:1100px){.filtros-vendas{grid-template-columns:repeat(2,minmax(0,1fr))}.filtro-busca{grid-column:1/-1}.filtros-acoes{grid-column:1/-1}}@media(max-width:640px){.filtros-vendas{grid-template-columns:1fr}.filtro-busca,.filtros-acoes{grid-column:auto}.filtros-acoes .botao{flex:1}}

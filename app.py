@@ -1347,26 +1347,26 @@ def equipamento_eh_venda(eq: Equipamento) -> bool:
 
 
 def _migrar_pagamentos_legados_vendas(db: Session, equipamentos: list[Equipamento]) -> int:
-    """Converte o campo legado `pago` em pagamento histórico local.
+    """Converte recebimentos legados sem executar uma consulta por equipamento."""
+    candidatos = [eq for eq in equipamentos if round(moeda_num(eq.pago), 2) > 0.009]
+    if not candidatos:
+        return 0
 
-    Vendas antigas guardavam apenas o total recebido em `equipamentos.pago`. Ao passar
-    a calcular a tela exclusivamente por `venda_pagamentos`, esses recebimentos
-    desapareceriam visualmente. Este backfill cria UM lançamento histórico somente
-    quando ainda não existe nenhum pagamento detalhado para a venda e marca o registro
-    como ignorado na integração, garantindo que nunca seja reenviado ao Connect.
-    """
+    ids = [eq.id for eq in candidatos]
+    existentes = {
+        equipamento_id for (equipamento_id,) in
+        db.query(PagamentoVenda.equipamento_id)
+        .filter(PagamentoVenda.equipamento_id.in_(ids))
+        .distinct().all()
+    }
     alterados = 0
-    for eq in equipamentos:
-        recebido_legado = round(moeda_num(eq.pago), 2)
-        if recebido_legado <= 0.009:
-            continue
-        existe = db.query(PagamentoVenda.id).filter(PagamentoVenda.equipamento_id == eq.id).first()
-        if existe:
+    for eq in candidatos:
+        if eq.id in existentes:
             continue
         pagamento = PagamentoVenda(
             equipamento_id=eq.id,
             data=eq.data_compra or eq.previsao_entrega or date.today(),
-            valor=recebido_legado,
+            valor=round(moeda_num(eq.pago), 2),
             banco="Histórico",
             forma="Histórico",
             observacao=_obs_pagamento_padrao(eq, eq.cliente, "Saldo recebido antes do controle detalhado"),
@@ -1374,10 +1374,8 @@ def _migrar_pagamentos_legados_vendas(db: Session, equipamentos: list[Equipament
         db.add(pagamento)
         db.flush()
         db.add(IntegracaoConect(
-            origem="venda",
-            registro_id=pagamento.id,
-            id_externo=f"ORGANIZA-VENDA-PAG-{pagamento.id}",
-            ignorado=1,
+            origem="venda", registro_id=pagamento.id,
+            id_externo=f"ORGANIZA-VENDA-PAG-{pagamento.id}", ignorado=1,
             resposta="Pagamento histórico migrado do campo legado pago; não enviar ao Connect.",
         ))
         alterados += 1
@@ -1388,13 +1386,23 @@ def _migrar_pagamentos_legados_vendas(db: Session, equipamentos: list[Equipament
 
 @app.get("/organiza/vendas", response_class=HTMLResponse)
 def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    equipamentos = db.query(Equipamento).options(selectinload(Equipamento.cliente)).all()
+    equipamentos = (
+        db.query(Equipamento)
+        .options(selectinload(Equipamento.cliente))
+        .filter(or_(
+            Equipamento.data_compra.isnot(None),
+            Equipamento.previsao_entrega.isnot(None),
+            Equipamento.valor.isnot(None),
+            Equipamento.pago.isnot(None),
+            Equipamento.status.in_(STATUS_VENDA),
+        ))
+        .all()
+    )
     equipamentos = [eq for eq in equipamentos if equipamento_eh_venda(eq)]
+    status_opcoes = sorted({eq.status for eq in equipamentos if eq.status})
 
     # Recupera automaticamente os recebimentos antigos que existiam apenas no
     # campo legado `pago`. Esses lançamentos ficam locais e NUNCA vão ao Connect.
-    _migrar_pagamentos_legados_vendas(db, equipamentos)
-
     # O financeiro exibido na listagem é sempre recalculado pelos pagamentos
     # reais, evitando depender de campos legados pago/falta desatualizados.
     ids = [eq.id for eq in equipamentos]
@@ -1446,12 +1454,24 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     else:
         equipamentos.sort(key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id), reverse=True)
 
-    status_opcoes = sorted({eq.status for eq in db.query(Equipamento).all() if equipamento_eh_venda(eq) and eq.status})
+    # Paginação: não renderizar centenas de cards em uma única resposta.
+    total_vendas = len(equipamentos)
+    por_pagina = 50
+    try:
+        pagina = max(int(request.query_params.get("pagina") or 1), 1)
+    except (TypeError, ValueError):
+        pagina = 1
+    total_paginas = max((total_vendas + por_pagina - 1) // por_pagina, 1)
+    pagina = min(pagina, total_paginas)
+    inicio = (pagina - 1) * por_pagina
+    equipamentos = equipamentos[inicio:inicio + por_pagina]
+
     return templates.TemplateResponse("organiza/vendas.html", {
         "request": request, "usuario": usuario, "vendas": equipamentos,
         "q": request.query_params.get("q", ""), "pagamento_filtro": pagamento,
         "valor_filtro": valor_filtro, "status_filtro": status, "ordem": ordem,
-        "status_opcoes": status_opcoes,
+        "status_opcoes": status_opcoes, "total_vendas": total_vendas,
+        "pagina": pagina, "total_paginas": total_paginas,
     })
 
 
@@ -4075,18 +4095,20 @@ def _obs_pagamento_padrao(equipamento, cliente, nome_comprovante: str = "") -> s
     return " - ".join([p for p in partes if p])
 
 
-def _payload_venda(p: PagamentoVenda, db: Session):
+def _payload_venda(p: PagamentoVenda, db: Session, total_recebido_operacao=None):
     eq = p.equipamento
     cliente = eq.cliente if eq else None
     descricao = f"Venda {rotulo_maquina(eq)}" if eq else f"Venda #{p.equipamento_id}"
 
     total_operacao = moeda_num(eq.valor) if eq else 0.0
-    total_recebido = sum(
-        float(v or 0)
-        for (v,) in db.query(PagamentoVenda.valor)
-        .filter(PagamentoVenda.equipamento_id == p.equipamento_id)
-        .all()
-    )
+    total_recebido = total_recebido_operacao
+    if total_recebido is None:
+        total_recebido = sum(
+            float(v or 0)
+            for (v,) in db.query(PagamentoVenda.valor)
+            .filter(PagamentoVenda.equipamento_id == p.equipamento_id)
+            .all()
+        )
     falta_receber = max(float(total_operacao) - total_recebido, 0.0)
 
     return {
@@ -4128,12 +4150,22 @@ def _payload_manutencao(p: Pagamento, db: Session):
 
 def _linhas_central_financeiro(db: Session):
     linhas = []
+
     vendas = db.query(PagamentoVenda).options(
         selectinload(PagamentoVenda.equipamento).selectinload(Equipamento.cliente)
     ).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
+
+    totais_venda = dict(
+        db.query(PagamentoVenda.equipamento_id, func.sum(PagamentoVenda.valor))
+        .group_by(PagamentoVenda.equipamento_id).all()
+    )
+    integracoes = {
+        (i.origem, i.registro_id): i for i in db.query(IntegracaoConect).all()
+    }
+
     for p in vendas:
-        payload = _payload_venda(p, db)
-        integ = _registro_integracao(db, "venda", p.id)
+        payload = _payload_venda(p, db, float(totais_venda.get(p.equipamento_id) or 0))
+        integ = integracoes.get(("venda", p.id))
         hash_atual = _payload_hash(payload)
         status = (
             "ignorado" if integ and integ.ignorado
@@ -4146,10 +4178,12 @@ def _linhas_central_financeiro(db: Session):
     manutencoes = db.query(Pagamento).options(
         selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),
         selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento),
+        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
     ).order_by(Pagamento.data.desc(), Pagamento.id.desc()).all()
     for p in manutencoes:
         payload = _payload_manutencao(p, db)
-        integ = _registro_integracao(db, "manutencao", p.id)
+        integ = integracoes.get(("manutencao", p.id))
         hash_atual = _payload_hash(payload)
         status = (
             "ignorado" if integ and integ.ignorado
@@ -4180,6 +4214,20 @@ def central_financeiro_conect(
     else:
         filtro_status = "nao_enviados"
         linhas = [l for l in linhas_todas if l["status_sync"] not in ("enviado", "ignorado")]
+
+    # Evita gerar uma tabela HTML gigantesca. Mantém o filtro completo, mas
+    # entrega somente uma página por vez ao navegador.
+    total_filtrado = len(linhas)
+    por_pagina = 100
+    try:
+        pagina = max(int(request.query_params.get("pagina") or 1), 1)
+    except (TypeError, ValueError):
+        pagina = 1
+    total_paginas = max((total_filtrado + por_pagina - 1) // por_pagina, 1)
+    pagina = min(pagina, total_paginas)
+    inicio = (pagina - 1) * por_pagina
+    linhas = linhas[inicio:inicio + por_pagina]
+
     return templates.TemplateResponse("organiza/central_financeiro_conect.html", {
         "request": request,
         "usuario": usuario,
@@ -4187,6 +4235,9 @@ def central_financeiro_conect(
         "pendentes": pendentes,
         "filtro_status": filtro_status,
         "total_registros": len(linhas_todas),
+        "total_filtrado": total_filtrado,
+        "pagina": pagina,
+        "total_paginas": total_paginas,
         "connect_configurado": _connect_configurado(),
         "sucesso": request.query_params.get("sucesso", ""),
         "erro": request.query_params.get("erro", ""),
@@ -4603,8 +4654,21 @@ def venda_pagamento_excluir(
 def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     manutencoes = (
         db.query(Manutencao)
-        .options(selectinload(Manutencao.cliente), selectinload(Manutencao.equipamento))
-        .filter(Manutencao.entregue_em.is_(None), ~Manutencao.status.in_(("Encerrada", "Cancelada")))
+        .options(
+            selectinload(Manutencao.cliente),
+            selectinload(Manutencao.equipamento),
+            selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
+        )
+        .filter(
+            Manutencao.entregue_em.is_(None),
+            ~Manutencao.status.in_(("Encerrada", "Cancelada")),
+            or_(
+                Manutencao.entrega_prevista_em.isnot(None),
+                Manutencao.retirada_em.isnot(None),
+                Manutencao.pronto_em.isnot(None),
+                Manutencao.status.in_(("Pronto para retirada", "Retirada agendada")),
+            ),
+        )
         .all()
     )
 

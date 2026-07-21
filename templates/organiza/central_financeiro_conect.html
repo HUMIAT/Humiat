@@ -41,7 +41,7 @@
       <div class="titulo-linha" style="margin-bottom:12px;gap:12px;align-items:flex-end;flex-wrap:wrap">
         <div>
           <h2>Lançamentos</h2>
-          <p class="texto-suave">{{ linhas|length }} registro(s) exibido(s) · {{ pendentes }} aguardando envio/atualização</p>
+          <p class="texto-suave">{{ total_filtrado }} registro(s) no filtro · até 100 por página · {{ pendentes }} aguardando envio/atualização</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="botao primario" type="submit"
@@ -117,6 +117,13 @@
           </tbody>
         </table>
       </div>
+      {% if total_paginas > 1 %}
+      <div style="display:flex;justify-content:center;gap:10px;align-items:center;margin-top:16px">
+        {% if pagina > 1 %}<a class="botao" href="?status={{ filtro_status }}&pagina={{ pagina-1 }}">← Anterior</a>{% endif %}
+        <span class="texto-suave">Página {{ pagina }} de {{ total_paginas }}</span>
+        {% if pagina < total_paginas %}<a class="botao" href="?status={{ filtro_status }}&pagina={{ pagina+1 }}">Próxima →</a>{% endif %}
+      </div>
+      {% endif %}
     </form>
   </article>
 </section>
