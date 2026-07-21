@@ -24,11 +24,12 @@
       <div class="form-grid">
         <label>Valor<input name="valor" inputmode="decimal" placeholder="0,00" required></label>
         <label>Data do pagamento<input type="date" name="data" value="{{ hoje }}" required></label>
-        <label>Forma
+        <label>Banco
           <select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select>
         </label>
       </div>
-      <label>Observação<input name="observacao" placeholder="Opcional"></label>
+      <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ observacao_padrao }} - nome do comprovante (opcional)"></label>
+      <label class="check-card"><input type="checkbox" name="nao_enviar_connect" value="1"> Pagamento histórico — registrar, mas não enviar ao Connect</label>
       <div style="margin-top:14px"><button class="botao primario" type="submit">Registrar pagamento</button></div>
     </form>
   </article>
@@ -37,16 +38,15 @@
     <h2>Pagamentos registrados</h2>
     <div class="table-wrap" style="margin-top:12px">
       <table class="data-table">
-        <thead><tr><th>Data</th><th>Forma</th><th>Valor</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Banco</th><th>Valor</th><th></th></tr></thead>
         <tbody>
         {% for p in pagamentos %}
           <tr>
             <td colspan="5" style="padding:0">
               <details style="padding:12px 10px">
-                <summary style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:center;cursor:pointer">
+                <summary style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:center;cursor:pointer">
                   <span>{{ p.data|data_br }}</span>
-                  <span>{{ p.banco or 'Banco não informado' }}</span>
-                  <span>{{ p.forma or '-' }}</span>
+                  <span>{{ p.forma or p.banco or 'Banco não informado' }}</span>
                   <strong>{{ p.valor|moeda }}</strong>
                   <span>Editar</span>
                 </summary>
@@ -54,7 +54,7 @@
                   <div class="form-grid">
                     <label>Data<input type="date" name="data" required value="{{ p.data.isoformat() if p.data else '' }}"></label>
                     <label>Valor<input name="valor" required value="{{ '%.2f'|format(p.valor or 0) }}"></label>
-                    <label>Forma
+                    <label>Banco
                       <select name="forma">
                         {% for forma in ['PIX','Dinheiro','Cartão','Transferência','Outro'] %}
                         <option value="{{ forma }}" {% if p.forma == forma %}selected{% endif %}>{{ forma }}</option>
@@ -62,7 +62,7 @@
                       </select>
                     </label>
                   </div>
-                  <label>Observação<input name="observacao" value="{{ p.observacao or '' }}"></label>
+                  <label>Obs. / nome do comprovante<input name="observacao" value="{{ p.observacao or '' }}"></label>
                   <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
                     <button class="botao primario pequeno" type="submit">Salvar alterações</button>
                   </div>

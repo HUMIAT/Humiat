@@ -1271,10 +1271,54 @@ def equipamento_eh_venda(eq: Equipamento) -> bool:
     return bool(eq.data_compra or eq.previsao_entrega or eq.valor or eq.pago or eq.status in STATUS_VENDA)
 
 
+def _migrar_pagamentos_legados_vendas(db: Session, equipamentos: list[Equipamento]) -> int:
+    """Converte o campo legado `pago` em pagamento histórico local.
+
+    Vendas antigas guardavam apenas o total recebido em `equipamentos.pago`. Ao passar
+    a calcular a tela exclusivamente por `venda_pagamentos`, esses recebimentos
+    desapareceriam visualmente. Este backfill cria UM lançamento histórico somente
+    quando ainda não existe nenhum pagamento detalhado para a venda e marca o registro
+    como ignorado na integração, garantindo que nunca seja reenviado ao Connect.
+    """
+    alterados = 0
+    for eq in equipamentos:
+        recebido_legado = round(moeda_num(eq.pago), 2)
+        if recebido_legado <= 0.009:
+            continue
+        existe = db.query(PagamentoVenda.id).filter(PagamentoVenda.equipamento_id == eq.id).first()
+        if existe:
+            continue
+        pagamento = PagamentoVenda(
+            equipamento_id=eq.id,
+            data=eq.data_compra or eq.previsao_entrega or date.today(),
+            valor=recebido_legado,
+            banco="Histórico",
+            forma="Histórico",
+            observacao=_obs_pagamento_padrao(eq, eq.cliente, "Saldo recebido antes do controle detalhado"),
+        )
+        db.add(pagamento)
+        db.flush()
+        db.add(IntegracaoConect(
+            origem="venda",
+            registro_id=pagamento.id,
+            id_externo=f"ORGANIZA-VENDA-PAG-{pagamento.id}",
+            ignorado=1,
+            resposta="Pagamento histórico migrado do campo legado pago; não enviar ao Connect.",
+        ))
+        alterados += 1
+    if alterados:
+        db.commit()
+    return alterados
+
+
 @app.get("/organiza/vendas", response_class=HTMLResponse)
 def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     equipamentos = db.query(Equipamento).options(selectinload(Equipamento.cliente)).all()
     equipamentos = [eq for eq in equipamentos if equipamento_eh_venda(eq)]
+
+    # Recupera automaticamente os recebimentos antigos que existiam apenas no
+    # campo legado `pago`. Esses lançamentos ficam locais e NUNCA vão ao Connect.
+    _migrar_pagamentos_legados_vendas(db, equipamentos)
 
     # O financeiro exibido na listagem é sempre recalculado pelos pagamentos
     # reais, evitando depender de campos legados pago/falta desatualizados.
