@@ -14,3 +14,7 @@ CONNECT_API_URL = https://seu-connect.onrender.com
 git add .
 git commit -m "Adiciona agrupamento de lancamentos para envio ao Connect"
 git push origin main
+
+git add .
+git commit -m "Adiciona banco e edicao nos pagamentos do Organiza"
+git push origin main

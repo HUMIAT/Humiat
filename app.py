@@ -1972,10 +1972,62 @@ async def aprovar_manual(
 async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id); form = dict(await request.form()); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     valor = moeda_num(form.get("valor"))
+    banco = (form.get("banco") or "").strip()
     if valor > 0:
-        db.add(Pagamento(orcamento_id=o.id, data=data_form(form.get("data") or "") or date.today(), valor=valor, forma=(form.get("forma") or "PIX").strip(), observacao=(form.get("observacao") or "").strip() or None))
+        if not banco:
+            return RedirectResponse(
+                f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=banco_pagamento",
+                status_code=303,
+            )
+        db.add(Pagamento(
+            orcamento_id=o.id,
+            data=data_form(form.get("data") or "") or date.today(),
+            valor=valor,
+            forma=(form.get("forma") or "PIX").strip(),
+            banco=banco,
+            observacao=(form.get("observacao") or "").strip() or None,
+        ))
         m.status = "Confirmação pendente"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pagamentos/{pagamento_id}/editar")
+async def manutencao_pagamento_editar(
+    manutencao_id: int,
+    pagamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    ids_orcamentos = [o.id for o in m.orcamentos]
+    p = db.query(Pagamento).filter(
+        Pagamento.id == pagamento_id,
+        Pagamento.orcamento_id.in_(ids_orcamentos),
+    ).first()
+    if not p:
+        raise HTTPException(404)
+
+    form = dict(await request.form())
+    valor = moeda_num(form.get("valor"))
+    banco = (form.get("banco") or "").strip()
+    data_pag = data_form(form.get("data") or "")
+    if valor <= 0 or not data_pag or not banco:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=edicao_pagamento",
+            status_code=303,
+        )
+
+    p.valor = round(valor, 2)
+    p.data = data_pag
+    p.banco = banco
+    p.forma = (form.get("forma") or "").strip() or None
+    p.observacao = (form.get("observacao") or "").strip() or None
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-4", status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/prazo")
@@ -3371,7 +3423,7 @@ def _linhas_central_financeiro(db: Session):
             else "atualizado" if integ and integ.enviado_em
             else "novo"
         )
-        linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ})
+        linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/vendas/{p.equipamento_id}/pagamentos"})
 
     manutencoes = db.query(Pagamento).options(
         selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),
@@ -3387,7 +3439,7 @@ def _linhas_central_financeiro(db: Session):
             else "atualizado" if integ and integ.enviado_em
             else "novo"
         )
-        linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ})
+        linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/manutencoes/{p.orcamento.manutencao.id}#etapa-4"})
     linhas.sort(key=lambda x: (x["registro"].data, x["registro"].id), reverse=True)
     return linhas
 
@@ -3717,6 +3769,41 @@ async def venda_pagamento_registrar(
         equipamento_id=equipamento_id, data=data_pag, valor=round(valor, 2),
         banco=banco, forma=forma or None, observacao=observacao or None,
     ))
+    db.commit()
+    return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
+
+
+
+@app.post("/organiza/vendas/{equipamento_id}/pagamentos/{pagamento_id}/editar")
+async def venda_pagamento_editar(
+    equipamento_id: int,
+    pagamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    p = db.query(PagamentoVenda).filter(
+        PagamentoVenda.id == pagamento_id,
+        PagamentoVenda.equipamento_id == equipamento_id,
+    ).first()
+    if not p:
+        raise HTTPException(404)
+
+    form = dict(await request.form())
+    valor = moeda_num(form.get("valor"))
+    banco = (form.get("banco") or "").strip()
+    data_pag = data_form(form.get("data") or "")
+    if valor <= 0 or not data_pag or not banco:
+        return RedirectResponse(
+            f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe data, valor e banco válidos.",
+            status_code=303,
+        )
+
+    p.valor = round(valor, 2)
+    p.data = data_pag
+    p.banco = banco
+    p.forma = (form.get("forma") or "").strip() or None
+    p.observacao = (form.get("observacao") or "").strip() or None
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 

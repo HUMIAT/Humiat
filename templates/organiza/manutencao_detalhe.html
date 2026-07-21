@@ -298,6 +298,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
           <div class="manutencao-grid tres">
             <label>Data<input type="date" name="data" required value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
             <label>Valor<input name="valor" required></label>
+            <label>Banco<input name="banco" placeholder="Ex.: Banco Principal" required></label>
             <label>Forma<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
           </div>
           <label>Observação<input name="observacao"></label>
@@ -322,10 +323,33 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
         {% if orcamento.pagamentos %}
           <div class="lista-execucao-aprovada">
             {% for pagamento in orcamento.pagamentos|sort(attribute='data') %}
-              <div class="linha-item cliente">
-                <span>{{ pagamento.data.strftime('%d/%m/%Y') if pagamento.data and pagamento.data.strftime is defined else (pagamento.data or '-') }} · {{ pagamento.forma or 'Não informada' }}{% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}</span>
-                <strong>{{ pagamento.valor|moeda }}</strong>
-              </div>
+              <details class="linha-item cliente" style="display:block;padding:10px 12px">
+                <summary style="display:flex;justify-content:space-between;gap:12px;cursor:pointer;align-items:center">
+                  <span>
+                    {{ pagamento.data.strftime('%d/%m/%Y') if pagamento.data and pagamento.data.strftime is defined else (pagamento.data or '-') }}
+                    · {{ pagamento.banco or 'Banco não informado' }}
+                    · {{ pagamento.forma or 'Não informada' }}
+                    {% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}
+                  </span>
+                  <strong>{{ pagamento.valor|moeda }} · Editar</strong>
+                </summary>
+                <form class="formulario" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamentos/{{ pagamento.id }}/editar" style="margin-top:12px">
+                  <div class="manutencao-grid tres">
+                    <label>Data<input type="date" name="data" required value="{{ pagamento.data.isoformat() if pagamento.data else '' }}"></label>
+                    <label>Valor<input name="valor" required value="{{ '%.2f'|format(pagamento.valor or 0) }}"></label>
+                    <label>Banco<input name="banco" required value="{{ pagamento.banco or '' }}" placeholder="Ex.: Banco Principal"></label>
+                    <label>Forma
+                      <select name="forma">
+                        {% for forma in ['PIX','Dinheiro','Cartão','Transferência','Outro'] %}
+                          <option value="{{ forma }}" {% if pagamento.forma == forma %}selected{% endif %}>{{ forma }}</option>
+                        {% endfor %}
+                      </select>
+                    </label>
+                  </div>
+                  <label>Observação<input name="observacao" value="{{ pagamento.observacao or '' }}"></label>
+                  <button class="botao pequeno" type="submit">Salvar alterações</button>
+                </form>
+              </details>
             {% endfor %}
           </div>
         {% else %}

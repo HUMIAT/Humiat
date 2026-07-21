@@ -62,7 +62,7 @@
               <th style="width:42px">
                 <input type="checkbox" id="selecionar-todos" aria-label="Selecionar todos">
               </th>
-              <th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Valor</th><th>Status Connect</th>
+              <th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Valor</th><th>Status Connect</th><th>Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -94,9 +94,10 @@
                   <span class="pill" style="background:#eaf1ff">Novo</span>
                 {% endif %}
               </td>
+              <td><a class="botao pequeno" href="{{ linha.editar_url }}">Editar pagamento</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="8">Nenhum pagamento registrado ainda.</td></tr>
+            <tr><td colspan="9">Nenhum pagamento registrado ainda.</td></tr>
           {% endfor %}
           </tbody>
         </table>
