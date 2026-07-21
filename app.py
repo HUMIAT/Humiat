@@ -707,9 +707,65 @@ def _contexto_operacao(db: Session):
 
 
 @app.get("/organiza", response_class=HTMLResponse)
-def painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def painel(
+    request: Request,
+    etapa: str = "todos",
+    busca: str = "",
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Central de chamados: todas as etapas e ações em uma única tela.
+
+    O filtro mantém a mesma classificação exclusiva da Central Operacional para
+    que uma manutenção nunca apareça em duas etapas ao mesmo tempo.
+    """
     contexto = _contexto_operacao(db)
-    contexto.update({"request": request, "usuario": usuario, "pagina_inicial": True})
+    etapas_meta = {
+        "atendimento": ("1", "Aguardando atendimento ou entrega"),
+        "orcamentos": ("2", "Fazer orçamento"),
+        "comunicar_orcamentos": ("3", "Comunicar orçamento"),
+        "aprovacoes": ("4", "Aguardando aprovação"),
+        "pagamentos": ("5", "Pagamento, prazo e confirmação"),
+        "execucao": ("6", "Em execução"),
+        "pausados": ("7", "Aguardando item / peça"),
+        "prontos": ("8", "Comunicar equipamento pronto"),
+        "retiradas": ("9", "Aguardando retirada"),
+    }
+    etapa = etapa if etapa in etapas_meta or etapa == "todos" else "todos"
+    termo = (busca or "").strip().lower()
+    selecionadas = []
+    for chave, lista in contexto["filas"].items():
+        if etapa != "todos" and chave != etapa:
+            continue
+        numero, titulo = etapas_meta[chave]
+        for m in lista:
+            texto_busca = " ".join([
+                getattr(m.cliente, "nome", "") or "",
+                rotulo_maquina(m.equipamento) if m.equipamento else "",
+                getattr(m.equipamento, "tipo", "") or "",
+                getattr(m.equipamento, "modelo", "") or "",
+                getattr(m, "defeito", "") or "",
+                str(m.id),
+            ]).lower()
+            if termo and termo not in texto_busca:
+                continue
+            m.central_chave = chave
+            m.central_numero = numero
+            m.central_titulo = titulo
+            selecionadas.append(m)
+
+    # A lista principal é agrupada por cliente, independentemente da etapa.
+    central_grupos = _agrupar_por_cliente(selecionadas)
+    contexto.update({
+        "request": request,
+        "usuario": usuario,
+        "pagina_inicial": True,
+        "etapa_filtro": etapa,
+        "busca": busca,
+        "etapas_meta": etapas_meta,
+        "central_grupos": central_grupos,
+        "central_total": len(selecionadas),
+    })
     return templates.TemplateResponse("organiza/operacao.html", contexto)
 
 
@@ -2441,15 +2497,17 @@ async def manutencao_etapa4_salvar(
     valor_texto = (form.get("valor") or "").strip()
     valor = moeda_num(valor_texto) if valor_texto else 0
     recebido_atual = sum(float(p.valor or 0) for p in o.pagamentos)
+    totais = totais_orcamento(o)
+    total_aprovado = float(totais.get("aprovado", 0) or 0)
+    manutencao_sem_cobranca = total_aprovado <= 0.009
     erros = []
     if not prazo_data:
         erros.append("Informe uma data válida para o prazo prometido.")
-    if recebido_atual <= 0 and valor <= 0:
+    if not manutencao_sem_cobranca and recebido_atual <= 0 and valor <= 0:
         erros.append("Registre ao menos um pagamento antes de avançar.")
     if valor < 0:
         erros.append("O valor do pagamento é inválido.")
 
-    totais = totais_orcamento(o)
     falta = float(totais.get("falta", 0) or 0)
     if valor > falta + 0.01:
         erros.append("O pagamento não pode ser maior que o valor que falta receber.")
@@ -2475,6 +2533,30 @@ async def manutencao_etapa4_salvar(
             banco=banco,
             observacao=observacao,
         ))
+    elif manutencao_sem_cobranca:
+        # Registra a conclusão financeira de R$ 0,00 apenas no Organiza.
+        # O IntegracaoConect correspondente já nasce ignorado, portanto nunca
+        # será enviado para a Central Financeira/Connect.
+        marcador = "SEM COBRANÇA - R$ 0,00"
+        pagamento_zero = next((p for p in o.pagamentos if abs(float(p.valor or 0)) < 0.009 and marcador in (p.observacao or "")), None)
+        if not pagamento_zero:
+            pagamento_zero = Pagamento(
+                orcamento_id=o.id,
+                data=data_form(form.get("data") or "") or date.today(),
+                valor=0.0,
+                forma=None,
+                banco=None,
+                observacao=f"{_obs_pagamento_padrao(m.equipamento, m.cliente)} - {marcador}",
+            )
+            db.add(pagamento_zero)
+            db.flush()
+            db.add(IntegracaoConect(
+                origem="manutencao",
+                registro_id=pagamento_zero.id,
+                id_externo=f"ORGANIZA-MANUTENCAO-PAG-{pagamento_zero.id}",
+                ignorado=1,
+                resposta="Manutenção sem cobrança; pagamento zero não deve ser enviado ao Connect.",
+            ))
 
     m.prazo = prazo_data.strftime("%d/%m/%Y")
     db.commit()
@@ -2495,9 +2577,18 @@ def manutencao_etapa4_avancar(
         raise HTTPException(404)
     o = _orcamento_atual(m)
     recebido = sum(float(p.valor or 0) for p in o.pagamentos) if o else 0
+    totais = totais_orcamento(o) if o else {}
+    total_aprovado = float(totais.get("aprovado", 0) or 0)
+    manutencao_sem_cobranca = total_aprovado <= 0.009
+    pagamento_zero_registrado = bool(o and any(
+        abs(float(p.valor or 0)) < 0.009 and "SEM COBRANÇA" in (p.observacao or "")
+        for p in o.pagamentos
+    ))
     erros = []
-    if recebido <= 0:
+    if not manutencao_sem_cobranca and recebido <= 0:
         erros.append("Registre o pagamento.")
+    if manutencao_sem_cobranca and not pagamento_zero_registrado:
+        erros.append("Confirme o pagamento R$ 0,00 para registrar a manutenção sem cobrança.")
     if not m.prazo:
         erros.append("Informe o prazo prometido.")
     if not m.confirmacao_prazo_em:

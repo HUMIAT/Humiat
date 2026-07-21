@@ -318,11 +318,11 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
 
       <form class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/salvar">
         <h3>Pagamento e prazo</h3>
-        <p class="texto-suave">Registre um novo pagamento quando necessário e defina a data prometida. Um único botão salva os dados da etapa.</p>
+        <p class="texto-suave">Registre um novo pagamento quando necessário e defina a data prometida. Em manutenção sem cobrança, confirme R$ 0,00; esse registro fica somente no Organiza e não é enviado ao Connect.</p>
         <div class="manutencao-grid tres">
           <label>Data do pagamento<input type="date" name="data" value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
-          <label>Valor do pagamento<input name="valor" placeholder="Deixe em branco se já houver pagamento registrado"></label>
-          <label>Banco<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
+          <label>Valor do pagamento<input name="valor" {% if totais.aprovado <= 0 %}value="0,00" readonly{% else %}placeholder="Deixe em branco se já houver pagamento registrado"{% endif %}></label>
+          <label>Banco<select name="forma" {% if totais.aprovado <= 0 %}disabled{% endif %}><option value="">{% if totais.aprovado <= 0 %}Sem cobrança{% else %}Selecione{% endif %}</option><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
         </div>
         <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ m.equipamento|rotulo_maquina }} - {{ m.cliente.nome }} - nome do comprovante (opcional)"></label>
         <label>Data prometida para conclusão
@@ -379,13 +379,13 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
 
       <div class="fluxo-checklist">
         <strong>Para avançar para a Etapa 5:</strong>
-        <p class="{% if totais.recebido > 0 %}feito{% endif %}">{% if totais.recebido > 0 %}✓{% else %}○{% endif %} 1. Pagamento registrado</p>
+        <p class="{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}feito{% endif %}">{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}✓{% else %}○{% endif %} 1. {% if totais.aprovado <= 0 %}Sem cobrança confirmado (R$ 0,00){% else %}Pagamento registrado{% endif %}</p>
         <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} 2. Data prometida informada</p>
         <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} 3. Cliente comunicado no WhatsApp</p>
       </div>
 
       <div class="barra-acoes-etapa padrao-etapa">
-        {% if totais.recebido > 0 and m.prazo %}
+        {% if (totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos)) and m.prazo %}
           <a class="botao whatsapp" target="_blank" href="/organiza/manutencoes/{{ m.id }}/confirmar-prazo-whatsapp">WhatsApp: comunicar cliente</a>
         {% else %}
           <button class="botao whatsapp" disabled title="Salve pagamento e data prometida primeiro.">WhatsApp: comunicar cliente</button>
