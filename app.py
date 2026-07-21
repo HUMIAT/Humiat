@@ -2165,6 +2165,88 @@ def orcamento_excluir_item(manutencao_id: int, orcamento_item_id: int, usuario: 
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 
+
+@app.post("/organiza/manutencoes/{manutencao_id}/etapa-2/salvar")
+async def manutencao_etapa2_salvar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Salva os dados principais do orçamento de uma só vez.
+
+    A inclusão/remoção de itens continua sendo uma ação de lista, mas valor da
+    manutenção, condições e desconto são persistidos em um único salvamento.
+    """
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.orcamentos:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    o = _orcamento_atual(m) or sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+
+    valor_manutencao = max(moeda_num(form.get("valor_manutencao")), 0)
+    forma = (form.get("forma_pagamento_orcamento") or "").strip()
+    try:
+        prazo = int(form.get("prazo_dias_uteis") or 0)
+    except (TypeError, ValueError):
+        prazo = 0
+    desconto = max(moeda_num(form.get("desconto")), 0)
+
+    erros = []
+    if valor_manutencao <= 0:
+        erros.append("Informe o valor da manutenção.")
+    if forma not in ("À vista", "50% de sinal + 50% na entrega"):
+        erros.append("Selecione a forma de pagamento.")
+    if prazo <= 0:
+        erros.append("Informe o prazo em dias úteis.")
+
+    if erros:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_etapa2={quote_plus(' '.join(erros))}#etapa-2",
+            status_code=303,
+        )
+
+    o.valor_manutencao = valor_manutencao
+    o.forma_pagamento_orcamento = forma
+    o.prazo_dias_uteis = prazo
+    subtotal = valor_manutencao + sum(float(i.preco_venda or 0) * int(i.quantidade or 0) for i in o.itens)
+    o.desconto = min(desconto, subtotal)
+    o.desconto_somente_com_opcionais = 1 if form.get("desconto_somente_com_opcionais") else 0
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/manutencoes/{manutencao_id}?salvo_etapa2=1#etapa-2",
+        status_code=303,
+    )
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/etapa-2/avancar")
+async def manutencao_etapa2_avancar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m or not m.orcamentos:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    erros = []
+    if not o or float(o.valor_manutencao or 0) <= 0:
+        erros.append("Informe e salve o valor da manutenção.")
+    if not o or not o.forma_pagamento_orcamento:
+        erros.append("Informe e salve a forma de pagamento.")
+    if not o or not o.prazo_dias_uteis:
+        erros.append("Informe e salve o prazo.")
+    if erros:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_etapa2={quote_plus(' '.join(erros))}#etapa-2",
+            status_code=303,
+        )
+    m.status = "Aguardando aprovação"
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-3", status_code=303)
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/manutencao")
 async def orcamento_salvar_manutencao(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id)
@@ -2333,6 +2415,103 @@ async def manutencao_pagamento_editar(
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-4", status_code=303)
 
 
+
+@app.post("/organiza/manutencoes/{manutencao_id}/etapa-4/salvar")
+async def manutencao_etapa4_salvar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Salva pagamento (quando informado) e prazo prometido em um único formulário."""
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    if not o:
+        raise HTTPException(400, "Orçamento não encontrado.")
+    form = dict(await request.form())
+
+    prazo_texto = (form.get("prazo") or "").strip()
+    try:
+        prazo_data = datetime.strptime(prazo_texto, "%Y-%m-%d").date() if prazo_texto else None
+    except ValueError:
+        prazo_data = None
+
+    valor_texto = (form.get("valor") or "").strip()
+    valor = moeda_num(valor_texto) if valor_texto else 0
+    recebido_atual = sum(float(p.valor or 0) for p in o.pagamentos)
+    erros = []
+    if not prazo_data:
+        erros.append("Informe uma data válida para o prazo prometido.")
+    if recebido_atual <= 0 and valor <= 0:
+        erros.append("Registre ao menos um pagamento antes de avançar.")
+    if valor < 0:
+        erros.append("O valor do pagamento é inválido.")
+
+    totais = totais_orcamento(o)
+    falta = float(totais.get("falta", 0) or 0)
+    if valor > falta + 0.01:
+        erros.append("O pagamento não pode ser maior que o valor que falta receber.")
+
+    if erros:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_etapa4={quote_plus(' '.join(erros))}#etapa-4",
+            status_code=303,
+        )
+
+    if valor > 0:
+        data_pag = data_form(form.get("data") or "") or date.today()
+        banco = (form.get("forma") or "").strip() or None
+        nome_comprovante = (form.get("observacao") or "").strip()
+        prefixo = _obs_pagamento_padrao(m.equipamento, m.cliente)
+        observacao = (nome_comprovante if nome_comprovante.startswith(prefixo)
+                      else _obs_pagamento_padrao(m.equipamento, m.cliente, nome_comprovante)) or None
+        db.add(Pagamento(
+            orcamento_id=o.id,
+            data=data_pag,
+            valor=round(valor, 2),
+            forma=banco,
+            banco=banco,
+            observacao=observacao,
+        ))
+
+    m.prazo = prazo_data.strftime("%d/%m/%Y")
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/manutencoes/{manutencao_id}?salvo_etapa4=1#etapa-4",
+        status_code=303,
+    )
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/etapa-4/avancar")
+def manutencao_etapa4_avancar(
+    manutencao_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    recebido = sum(float(p.valor or 0) for p in o.pagamentos) if o else 0
+    erros = []
+    if recebido <= 0:
+        erros.append("Registre o pagamento.")
+    if not m.prazo:
+        erros.append("Informe o prazo prometido.")
+    if not m.confirmacao_prazo_em:
+        erros.append("Envie a confirmação ao cliente pelo WhatsApp.")
+    if erros:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_etapa4={quote_plus(' '.join(erros))}#etapa-4",
+            status_code=303,
+        )
+    m.status = "Em manutenção"
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-5", status_code=303)
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/prazo")
 async def prazo_salvar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first(); form = dict(await request.form())
@@ -2355,7 +2534,6 @@ def confirmar_prazo_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
     if not o or recebido <= 0 or not m.prazo:
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_prazo", status_code=303)
     m.confirmacao_prazo_em = datetime.now()
-    m.status = "Em manutenção"
     db.commit()
     mensagem = (
         f"Olá, {m.cliente.nome}!\n\n"
@@ -2363,7 +2541,7 @@ def confirmar_prazo_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
         f"Equipamento: {descricao_equipamento(m.equipamento)}\n"
         f"Código técnico: {codigo_tecnico(m.equipamento)}\n"
         f"Prazo previsto: {m.prazo}\n\n"
-        "Agora iniciaremos a execução do serviço.\n\nKaraokê RJ"
+        "Seu pagamento e o prazo foram registrados. Assim que avançarmos o serviço para execução, iniciaremos a manutenção.\n\nKaraokê RJ"
     )
     url = ComunicacaoService.registrar_e_url(db, HistoricoComunicacao, m, usuario, "PRAZO", mensagem)
     return RedirectResponse(url, status_code=303)
@@ -4331,6 +4509,103 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     return templates.TemplateResponse("organiza/agenda.html", {
         "request": request, "usuario": usuario, "eventos": eventos,
     })
+
+
+
+@app.get("/agendamento/{token}/{manutencao_id}", response_class=HTMLResponse)
+def agendamento_cliente_publico(
+    token: str,
+    manutencao_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    m = db.query(Manutencao).filter(
+        Manutencao.id == manutencao_id,
+        Manutencao.cliente_id == cliente.id,
+    ).first()
+    if not m:
+        raise HTTPException(404)
+    return templates.TemplateResponse("organiza/agendamento_cliente_publico.html", {
+        "request": request,
+        "cliente": cliente,
+        "m": m,
+        "erro": request.query_params.get("erro", ""),
+        "ok": request.query_params.get("ok", ""),
+        "hoje": date.today().isoformat(),
+    })
+
+
+@app.post("/agendamento/{token}/{manutencao_id}")
+async def agendamento_cliente_publico_salvar(
+    token: str,
+    manutencao_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    m = db.query(Manutencao).filter(
+        Manutencao.id == manutencao_id,
+        Manutencao.cliente_id == cliente.id,
+    ).first()
+    if not m:
+        raise HTTPException(404)
+    form = await request.form()
+    acao = (form.get("acao") or "reagendar").strip()
+
+    if acao == "cancelar":
+        m.status = "Cancelada"
+        m.entrega_prevista_em = None
+        db.commit()
+        return RedirectResponse(f"/agendamento/{token}/{manutencao_id}?ok=cancelado", status_code=303)
+
+    nova_data = datetime_form(form.get("data_hora") or "")
+    if not nova_data or nova_data < datetime.now():
+        return RedirectResponse(
+            f"/agendamento/{token}/{manutencao_id}?erro=Escolha uma data e horário futuros.",
+            status_code=303,
+        )
+    if horario_atendimento_ocupado(db, nova_data, m.id):
+        return RedirectResponse(
+            f"/agendamento/{token}/{manutencao_id}?erro=Este horário não está disponível. Escolha outro.",
+            status_code=303,
+        )
+    m.entrega_prevista_em = nova_data
+    m.status = "Aguardando equipamento"
+    db.commit()
+    return RedirectResponse(f"/agendamento/{token}/{manutencao_id}?ok=reagendado", status_code=303)
+
+
+@app.get("/organiza/manutencoes/{manutencao_id}/nao-compareceu-whatsapp")
+def manutencao_nao_compareceu_whatsapp(
+    manutencao_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    cliente = m.cliente
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
+    link = f"{PUBLIC_BASE_URL}/agendamento/{cliente.token_ficha}/{m.id}"
+    mensagem = (
+        f"Olá, {cliente.nome}!\\n\\n"
+        "Hoje estava prevista a entrega/atendimento do seu equipamento, mas não conseguimos concluir o recebimento.\\n\\n"
+        f"Equipamento: {descricao_equipamento(m.equipamento)}\\n"
+        f"Ordem de serviço: #{m.id}\\n\\n"
+        "Para não deixar uma pendência em aberto, escolha uma opção no link abaixo:\\n"
+        "• Reagendar uma nova data e horário\\n"
+        "• Cancelar esta solicitação\\n\\n"
+        f"{link}\\n\\nKaraokê RJ"
+    )
+    url = ComunicacaoService.registrar_e_url(db, HistoricoComunicacao, m, usuario, "NAO_COMPARECEU", mensagem)
+    return RedirectResponse(url, status_code=303)
 
 
 @app.post("/organiza/agenda/manutencao/{manutencao_id}/reagendar")

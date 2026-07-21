@@ -95,6 +95,9 @@
           </span>
           <div class="fila-item-acoes">
             <a class="botao secundario pequeno" href="/organiza/manutencoes/{{ m.id }}">Abrir</a>
+            {% if chave == "atendimento" %}
+            <a class="botao whatsapp pequeno" target="_blank" href="/organiza/manutencoes/{{ m.id }}/nao-compareceu-whatsapp">Cliente não veio</a>
+            {% endif %}
             {% if chave in ("atendimento", "aprovacoes") %}
             <button class="botao secundario pequeno acao-encerrar-pendente" type="button"
                     data-id="{{ m.id }}" data-acao="finalizar">Finalizar</button>

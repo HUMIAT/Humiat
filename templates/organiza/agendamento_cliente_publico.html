@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reagendar atendimento | Karaokê RJ</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f3f6fb;font-family:Arial,sans-serif;color:#111827}
+    .wrap{max-width:720px;margin:0 auto;padding:28px 18px}.card{background:#fff;border:1px solid #dbe3ef;border-radius:18px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.06)}
+    h1{margin:6px 0 8px}.tag{font-size:12px;letter-spacing:2px;font-weight:800;color:#0755d9}.muted{color:#667085}
+    .info{background:#f8fafc;border-radius:12px;padding:14px;margin:18px 0}.info strong{display:block;margin-bottom:4px}
+    label{display:block;font-weight:700;margin:18px 0 8px}input{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:10px;font-size:16px}
+    .acoes{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.btn{border:0;border-radius:10px;padding:12px 18px;font-weight:800;cursor:pointer;background:#1264e8;color:#fff}.danger{background:#a51d1d}.sec{background:#e9eef7;color:#172033}
+    .alert{padding:12px;border-radius:10px;margin:12px 0}.erro{background:#fff1f1;color:#8a1717}.ok{background:#ecfdf3;color:#067647}
+  </style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+  <div class="tag">KARAOKÊ RJ</div>
+  <h1>Reagendar ou cancelar atendimento</h1>
+  <p class="muted">Use esta página para atualizar sua solicitação sem deixar uma pendência antiga em aberto.</p>
+  {% if erro %}<div class="alert erro">{{ erro }}</div>{% endif %}
+  {% if ok == 'reagendado' %}<div class="alert ok">Atendimento reagendado com sucesso.</div>{% endif %}
+  {% if ok == 'cancelado' %}<div class="alert ok">Solicitação cancelada com sucesso.</div>{% endif %}
+  <div class="info">
+    <strong>{{ cliente.nome }}</strong>
+    <div>{{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }} {{ m.equipamento.modelo or '' }}</div>
+    <div>Ordem de serviço #{{ m.id }}</div>
+    {% if m.entrega_prevista_em %}<div>Agendamento atual: {{ m.entrega_prevista_em.strftime('%d/%m/%Y %H:%M') }}</div>{% endif %}
+  </div>
+  {% if m.status != 'Cancelada' %}
+  <form method="post">
+    <label>Nova data e horário</label>
+    <input type="datetime-local" name="data_hora" required min="{{ hoje }}T00:00" step="1800">
+    <div class="acoes">
+      <button class="btn" type="submit" name="acao" value="reagendar">Reagendar</button>
+      <button class="btn danger" type="submit" name="acao" value="cancelar" formnovalidate onclick="return confirm('Deseja realmente cancelar esta solicitação?')">Cancelar solicitação</button>
+    </div>
+  </form>
+  {% endif %}
+</div></div>
+</body>
+</html>

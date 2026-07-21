@@ -29,6 +29,10 @@
   </header>
 
   {% if request.query_params.get('erro_encerramento') %}<div class="alerta erro">{{ request.query_params.get('erro_encerramento') }}</div>{% endif %}
+  {% if request.query_params.get('erro_etapa2') %}<div class="alerta erro">{{ request.query_params.get('erro_etapa2') }}</div>{% endif %}
+  {% if request.query_params.get('salvo_etapa2') %}<div class="alerta sucesso">Orçamento salvo. Revise e avance quando estiver pronto.</div>{% endif %}
+  {% if request.query_params.get('erro_etapa4') %}<div class="alerta erro">{{ request.query_params.get('erro_etapa4') }}</div>{% endif %}
+  {% if request.query_params.get('salvo_etapa4') %}<div class="alerta sucesso">Pagamento e prazo salvos.</div>{% endif %}
 
   <details class="cartao manutencao-cliente-resumo">
     <summary><strong>Dados do cliente</strong><span>Consultar cadastro completo</span></summary>
@@ -127,23 +131,30 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
       <span class="pill">{{ orcamento.status }}</span>
     </div>
 
-    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/manutencao">
-      <h3>Valor obrigatório da manutenção</h3>
-      <p class="texto-suave">A manutenção faz parte de todo orçamento. Informe apenas o valor, sem cadastrá-la como item.</p>
-      <div class="manutencao-grid dois">
-        <label>Valor da manutenção<input name="valor_manutencao" required value="{{ '%.2f'|format(orcamento.valor_manutencao or 0) }}" placeholder="0,00"></label>
-        <div class="resumo-financeiro"><div><small>Manutenção</small><strong>{{ totais.manutencao|moeda }}</strong></div></div>
-      </div>
-      <button class="botao" type="submit">Salvar manutenção</button>
-    </form>
+    <div class="manutencao-subcard">
+      <h3>Itens do orçamento</h3>
+      <p class="texto-suave">Pesquise e escolha o item no mesmo campo. Adicione quantos itens forem necessários; o salvamento principal fica no final da etapa.</p>
+    </div>
 
     <div class="manutencao-item-toolbar">
-      <label class="manutencao-busca"><span>Pesquisar item</span><input id="pesquisa-item" type="search" placeholder="Digite nome, código ou categoria"></label>
-      <form class="manutencao-adicionar-item" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/item">
-        <label class="item-select">Item<select id="seletor-item" name="item_id" required><option value="">Selecione</option>{% for i in itens_catalogo if i.nome|lower not in ['manutenção', 'manutencao'] %}<option value="{{ i.id }}" data-busca="{{ (i.codigo or '')|lower }} {{ i.nome|lower }} {{ i.categoria|lower }}">{{ i.codigo or '-' }} · {{ i.nome }} · {{ i.preco_venda|moeda }}</option>{% endfor %}</select></label>
+      <form class="manutencao-adicionar-item item-combobox-form" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/item" onsubmit="return prepararItemOrcamento(this)">
+        <label class="item-select">Pesquisar e selecionar item
+          <input class="combo-pesquisavel" name="item_busca" list="lista-itens-orcamento" autocomplete="off" placeholder="Digite nome, código ou categoria" required>
+          <datalist id="lista-itens-orcamento">
+            {% for i in itens_catalogo if i.nome|lower not in ['manutenção', 'manutencao'] %}
+            <option value="{{ i.codigo or '-' }} · {{ i.nome }} · {{ i.preco_venda|moeda }}" data-id="{{ i.id }}"></option>
+            {% endfor %}
+          </datalist>
+          <select class="mapa-itens" hidden aria-hidden="true">
+            {% for i in itens_catalogo if i.nome|lower not in ['manutenção', 'manutencao'] %}
+            <option value="{{ i.id }}" data-label="{{ i.codigo or '-' }} · {{ i.nome }} · {{ i.preco_venda|moeda }}"></option>
+            {% endfor %}
+          </select>
+          <input type="hidden" name="item_id" value="">
+        </label>
         <label class="item-qtd">Quantidade<input name="quantidade" type="number" min="1" value="1"></label>
         <label class="check item-opcional"><input type="checkbox" name="opcional"> Opcional</label>
-        <button class="botao primario item-botao" type="submit">Adicionar</button>
+        <button class="botao primario item-botao" type="submit">Adicionar item</button>
       </form>
     </div>
 
@@ -184,10 +195,13 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
       {% endfor %}
     </div>
 
-    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/condicoes">
-      <h3>Condições do orçamento</h3>
-      <p class="texto-suave">Essas informações serão exibidas ao cliente junto com os valores.</p>
+    <form class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-2/salvar">
+      <h3>Fechamento do orçamento</h3>
+      <p class="texto-suave">Preencha os dados obrigatórios e salve tudo de uma vez.</p>
       <div class="manutencao-grid dois">
+        <label>Valor da manutenção
+          <input name="valor_manutencao" required value="{{ '%.2f'|format(orcamento.valor_manutencao or 0) }}" placeholder="0,00">
+        </label>
         <label>Forma de pagamento
           <select name="forma_pagamento_orcamento" required>
             <option value="">Selecione</option>
@@ -198,33 +212,29 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
         <label>Prazo após o pagamento
           <span class="campo-com-sufixo"><input type="number" min="1" name="prazo_dias_uteis" required value="{{ orcamento.prazo_dias_uteis or '' }}" placeholder="5"><small>dias úteis</small></span>
         </label>
+        <label>Desconto
+          <input name="desconto" value="{{ '%.2f'|format(orcamento.desconto or 0) }}" placeholder="0,00">
+        </label>
       </div>
-      <button class="botao" type="submit">Salvar condições</button>
+      <label class="desconto-opcional">
+        <input type="checkbox" name="desconto_somente_com_opcionais" value="1" {% if orcamento.desconto_somente_com_opcionais %}checked{% endif %}>
+        <span>
+          <strong>Aplicar desconto somente com todos os opcionais</strong>
+          <small>O desconto só será concedido quando todos os opcionais forem aprovados.</small>
+        </span>
+      </label>
+      <div class="resumo-financeiro">
+        <div><small>Subtotal completo</small><strong>{{ totais.geral_bruto|moeda }}</strong></div>
+        <div><small>Desconto</small><strong>- {{ totais.desconto_informado|moeda }}</strong></div>
+        <div><small>Total com todos os itens</small><strong>{{ totais.geral|moeda }}</strong></div>
+      </div>
+      <div class="barra-acoes-etapa">
+        <button class="botao primario" type="submit">Salvar</button>
+      </div>
     </form>
-
-    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/desconto">
-      <h3>Desconto do orçamento</h3>
-      <div class="manutencao-grid dois">
-        <div>
-          <label>Valor do desconto<input name="desconto" value="{{ '%.2f'|format(orcamento.desconto or 0) }}" placeholder="0,00"></label>
-          <label class="desconto-opcional">
-            <input type="checkbox" name="desconto_somente_com_opcionais" value="1" {% if orcamento.desconto_somente_com_opcionais %}checked{% endif %}>
-            <span>
-              <strong>Aplicar somente com todos os opcionais</strong>
-              <small>Marcado: o desconto só será concedido quando o cliente aprovar os itens obrigatórios e todos os opcionais.</small>
-            </span>
-          </label>
-        </div>
-        <div class="resumo-financeiro">
-          <div><small>Subtotal completo</small><strong>{{ totais.geral_bruto|moeda }}</strong></div>
-          <div><small>Desconto</small><strong>- {{ totais.desconto_informado|moeda }}</strong></div>
-          <div><small>Total com todos os itens</small><strong>{{ totais.geral|moeda }}</strong></div>
-          {% if orcamento.desconto_somente_com_opcionais %}
-          <div><small>Somente obrigatórios</small><strong>{{ totais.obrigatorio|moeda }}</strong></div>
-          {% endif %}
-        </div>
-      </div>
-      <button class="botao" type="submit">Salvar desconto</button>
+    <form method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-2/avancar" class="barra-acoes-etapa avancar-etapa">
+      <span class="texto-suave">Depois de salvar e revisar, avance para comunicar o orçamento ao cliente.</span>
+      <button class="botao primario" type="submit">Avançar para comunicação →</button>
     </form>
   </details>
 
@@ -306,23 +316,22 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
         <p>Registre o pagamento, informe o prazo e envie a confirmação. O envio abre o WhatsApp e inicia a Etapa 5.</p>
       </div>
 
-      <div class="manutencao-pagamento-grid">
-        <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento">
-          <h3>Registrar pagamento</h3>
-          <div class="manutencao-grid tres">
-            <label>Data<input type="date" name="data" required value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
-            <label>Valor<input name="valor" required></label>
-            <label>Banco<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
-          </div>
-          <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ m.equipamento|rotulo_maquina }} - {{ m.cliente.nome }} - nome do comprovante (opcional)"></label>
-          <button class="botao primario" type="submit">Registrar pagamento</button>
-        </form>
-        <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/prazo">
-          <h3>Prazo prometido</h3>
-          <label>Prazo<input name="prazo" value="{{ m.prazo or '' }}" placeholder="Ex.: 20/07/2026"></label>
-          <button class="botao" type="submit">Salvar prazo</button>
-        </form>
-      </div>
+      <form class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/salvar">
+        <h3>Pagamento e prazo</h3>
+        <p class="texto-suave">Registre um novo pagamento quando necessário e defina a data prometida. Um único botão salva os dados da etapa.</p>
+        <div class="manutencao-grid tres">
+          <label>Data do pagamento<input type="date" name="data" value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
+          <label>Valor do pagamento<input name="valor" placeholder="Deixe em branco se já houver pagamento registrado"></label>
+          <label>Banco<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
+        </div>
+        <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ m.equipamento|rotulo_maquina }} - {{ m.cliente.nome }} - nome do comprovante (opcional)"></label>
+        <label>Data prometida para conclusão
+          <input type="date" name="prazo" required value="{% if m.prazo %}{{ m.prazo[6:10] }}-{{ m.prazo[3:5] }}-{{ m.prazo[0:2] }}{% endif %}">
+        </label>
+        <div class="barra-acoes-etapa">
+          <button class="botao primario" type="submit">Salvar</button>
+        </div>
+      </form>
 
       <div class="manutencao-subcard">
         <h3>Resumo financeiro</h3>
@@ -369,21 +378,22 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
       </div>
 
       <div class="fluxo-checklist">
-        <strong>Para passar para a Etapa 5:</strong>
-        <p class="{% if totais.recebido > 0 %}feito{% endif %}">{% if totais.recebido > 0 %}✓{% else %}○{% endif %} 1. Registrar pagamento</p>
-        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} 2. Informar prazo prometido</p>
-        <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} 3. Enviar confirmação no WhatsApp</p>
+        <strong>Para avançar para a Etapa 5:</strong>
+        <p class="{% if totais.recebido > 0 %}feito{% endif %}">{% if totais.recebido > 0 %}✓{% else %}○{% endif %} 1. Pagamento registrado</p>
+        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} 2. Data prometida informada</p>
+        <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} 3. Cliente comunicado no WhatsApp</p>
       </div>
 
-      {% if etapa_atual == 4 %}
+      <div class="barra-acoes-etapa padrao-etapa">
         {% if totais.recebido > 0 and m.prazo %}
-          <a class="botao whatsapp manutencao-whatsapp-largo" href="/organiza/manutencoes/{{ m.id }}/confirmar-prazo-whatsapp">
-            Enviar confirmação no WhatsApp e iniciar serviço
-          </a>
+          <a class="botao whatsapp" target="_blank" href="/organiza/manutencoes/{{ m.id }}/confirmar-prazo-whatsapp">WhatsApp: comunicar cliente</a>
         {% else %}
-          <button class="botao whatsapp manutencao-whatsapp-largo" disabled title="Registre o pagamento e informe o prazo.">Enviar confirmação no WhatsApp e iniciar serviço</button>
+          <button class="botao whatsapp" disabled title="Salve pagamento e data prometida primeiro.">WhatsApp: comunicar cliente</button>
         {% endif %}
-      {% endif %}
+        <form method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/avancar">
+          <button class="botao primario" type="submit">Avançar para execução →</button>
+        </form>
+      </div>
     {% endif %}
   </details>
 
@@ -558,4 +568,21 @@ function confirmarCorrecaoEquipamento(formulario) {
   );
 }
 </script>
+
+<script>
+function prepararItemOrcamento(form) {
+  const busca = form.querySelector('[name="item_busca"]');
+  const hidden = form.querySelector('[name="item_id"]');
+  const options = Array.from(form.querySelectorAll('.mapa-itens option'));
+  const encontrado = options.find(o => o.dataset.label === busca.value);
+  if (!encontrado) {
+    alert('Selecione um item válido da lista.');
+    busca.focus();
+    return false;
+  }
+  hidden.value = encontrado.value;
+  return true;
+}
+</script>
+
 {% endblock %}
