@@ -1803,7 +1803,7 @@ def item_status(item_id: int, usuario: Usuario = Depends(usuario_logado), db: Se
 
 
 @app.get("/organiza/manutencoes", response_class=HTMLResponse)
-def manutencoes_lista(request: Request, status: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def manutencoes_lista(request: Request, status: str = "orcamento", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     """Lista usando a mesma regra operacional do painel.
 
     Evita divergência entre o número exibido no card e os registros encontrados
@@ -2172,6 +2172,9 @@ async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usu
     m = carregar_manutencao(db, manutencao_id); form = dict(await request.form()); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     valor = moeda_num(form.get("valor"))
     forma = (form.get("forma") or "PIX").strip()
+    banco = forma
+    nome_comprovante = (form.get("observacao") or "").strip()
+    observacao = _obs_pagamento_padrao(m.equipamento, m.cliente, nome_comprovante)
     total, recebido, saldo = _saldo_manutencao(m)
     if valor > saldo + 0.009:
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_excedente", status_code=303)
@@ -2181,8 +2184,8 @@ async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usu
             data=data_form(form.get("data") or "") or date.today(),
             valor=valor,
             forma=forma,
-            banco=forma,
-            observacao=(form.get("observacao") or "").strip() or None,
+            banco=banco,
+            observacao=observacao or None,
         ))
         m.status = "Confirmação pendente"; db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
@@ -2211,6 +2214,7 @@ async def manutencao_pagamento_editar(
     form = dict(await request.form())
     valor = moeda_num(form.get("valor"))
     forma = (form.get("forma") or "").strip()
+    banco = forma
     data_pag = data_form(form.get("data") or "")
     if valor <= 0 or not data_pag or not forma:
         return RedirectResponse(
@@ -2231,8 +2235,10 @@ async def manutencao_pagamento_editar(
     p.valor = round(valor, 2)
     p.data = data_pag
     p.forma = forma
-    p.banco = forma
-    p.observacao = (form.get("observacao") or "").strip() or None
+    p.banco = banco
+    nome_comprovante = (form.get("observacao") or "").strip()
+    prefixo = _obs_pagamento_padrao(m.equipamento, m.cliente)
+    p.observacao = (nome_comprovante if nome_comprovante.startswith(prefixo) else _obs_pagamento_padrao(m.equipamento, m.cliente, nome_comprovante)) or None
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-4", status_code=303)
 
@@ -3637,6 +3643,18 @@ def _registro_integracao(db: Session, origem: str, registro_id: int):
     ).first()
 
 
+def _obs_pagamento_padrao(equipamento, cliente, nome_comprovante: str = "") -> str:
+    partes = []
+    if equipamento:
+        partes.append(rotulo_maquina(equipamento))
+    if cliente and getattr(cliente, "nome", None):
+        partes.append(cliente.nome.strip())
+    nome = (nome_comprovante or "").strip()
+    if nome:
+        partes.append(nome)
+    return " - ".join([p for p in partes if p])
+
+
 def _payload_venda(p: PagamentoVenda, db: Session):
     eq = p.equipamento
     cliente = eq.cliente if eq else None
@@ -3659,7 +3677,8 @@ def _payload_venda(p: PagamentoVenda, db: Session):
         "valor": round(float(p.valor or 0), 2),
         "falta_receber": round(falta_receber, 2),
         "data_pagamento": p.data.isoformat(),
-        "banco": p.forma or p.banco or "",
+        "banco": p.banco or p.forma or "",
+        "observacao": p.observacao or "",
     }
 
 
@@ -3682,7 +3701,8 @@ def _payload_manutencao(p: Pagamento, db: Session):
         "valor": round(float(p.valor or 0), 2),
         "falta_receber": round(float(falta_receber or 0), 2),
         "data_pagamento": p.data.isoformat(),
-        "banco": p.forma or p.banco or "",
+        "banco": p.banco or p.forma or "",
+        "observacao": p.observacao or "",
     }
 
 
@@ -4041,6 +4061,7 @@ def venda_pagamentos(
         "request": request, "usuario": usuario, "venda": eq, "pagamentos": pagamentos,
         "total": total, "recebido": recebido, "saldo": max(total - recebido, 0),
         "hoje": date.today().isoformat(), "erro": request.query_params.get("erro", ""),
+        "observacao_padrao": _obs_pagamento_padrao(eq, eq.cliente),
     })
 
 
@@ -4058,7 +4079,10 @@ async def venda_pagamento_registrar(
     valor = moeda_num(form.get("valor"))
     data_pag = data_form(form.get("data")) or date.today()
     forma = (form.get("forma") or "PIX").strip()
-    observacao = (form.get("observacao") or "").strip()
+    banco = forma
+    nome_comprovante = (form.get("observacao") or "").strip()
+    observacao = _obs_pagamento_padrao(eq, eq.cliente, nome_comprovante)
+    nao_enviar_connect = bool(form.get("nao_enviar_connect"))
     if valor <= 0:
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe um valor válido.", status_code=303)
     total = moeda_num(eq.valor)
@@ -4070,10 +4094,18 @@ async def venda_pagamento_registrar(
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Esta venda já está totalmente paga.", status_code=303)
     if valor > saldo + 0.009:
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=O pagamento não pode ser maior que o saldo da venda.", status_code=303)
-    db.add(PagamentoVenda(
+    pagamento = PagamentoVenda(
         equipamento_id=equipamento_id, data=data_pag, valor=round(valor, 2),
-        banco=forma, forma=forma, observacao=observacao or None,
-    ))
+        banco=banco, forma=forma, observacao=observacao or None,
+    )
+    db.add(pagamento)
+    db.flush()
+    if nao_enviar_connect:
+        db.add(IntegracaoConect(
+            origem="venda", registro_id=pagamento.id,
+            id_externo=f"ORGANIZA-VENDA-PAG-{pagamento.id}",
+            ignorado=1,
+        ))
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 
@@ -4097,10 +4129,11 @@ async def venda_pagamento_editar(
     form = dict(await request.form())
     valor = moeda_num(form.get("valor"))
     forma = (form.get("forma") or "").strip()
+    banco = forma
     data_pag = data_form(form.get("data") or "")
     if valor <= 0 or not data_pag or not forma:
         return RedirectResponse(
-            f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe data, valor e forma válidos.",
+            f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe data, valor e banco válidos.",
             status_code=303,
         )
 
@@ -4118,8 +4151,10 @@ async def venda_pagamento_editar(
     p.valor = round(valor, 2)
     p.data = data_pag
     p.forma = forma
-    p.banco = forma
-    p.observacao = (form.get("observacao") or "").strip() or None
+    p.banco = banco
+    nome_comprovante = (form.get("observacao") or "").strip()
+    prefixo = _obs_pagamento_padrao(eq, eq.cliente if eq else None)
+    p.observacao = (nome_comprovante if nome_comprovante.startswith(prefixo) else _obs_pagamento_padrao(eq, eq.cliente if eq else None, nome_comprovante)) or None
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 
@@ -4166,6 +4201,8 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
                 "equipamento": descricao_equipamento(m.equipamento),
                 "link": f"/organiza/manutencoes/{m.id}#etapa-1",
                 "manual": False,
+                "manutencao_id": m.id,
+                "agendamento_tipo": "entrada",
             })
         elif etapa == 6 and m.retirada_em:
             eventos.append({
@@ -4176,6 +4213,8 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
                 "equipamento": descricao_equipamento(m.equipamento),
                 "link": f"/organiza/manutencoes/{m.id}#etapa-6",
                 "manual": False,
+                "manutencao_id": m.id,
+                "agendamento_tipo": "retirada",
             })
 
     for e in db.query(AgendaManual).order_by(AgendaManual.data_hora.asc()).all():
@@ -4187,12 +4226,53 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             "equipamento": e.observacao or "",
             "link": f"/organiza/agenda/manual/{e.id}/editar",
             "manual": True,
+            "evento_id": e.id,
         })
 
     eventos.sort(key=lambda e: (e["data_hora"], e["titulo"]))
     return templates.TemplateResponse("organiza/agenda.html", {
         "request": request, "usuario": usuario, "eventos": eventos,
     })
+
+
+@app.post("/organiza/agenda/manutencao/{manutencao_id}/reagendar")
+async def agenda_manutencao_reagendar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    if not m:
+        raise HTTPException(404)
+    form = await request.form()
+    nova_data = datetime_form(form.get("data_hora") or "")
+    tipo = (form.get("tipo") or "entrada").strip()
+    if not nova_data:
+        return RedirectResponse("/organiza/agenda?erro=Informe uma nova data e horário.", status_code=303)
+    if tipo == "retirada":
+        m.retirada_em = nova_data
+        m.status = "Retirada agendada"
+    else:
+        if horario_atendimento_ocupado(db, nova_data, m.id):
+            return RedirectResponse("/organiza/agenda?erro=Este horário já está ocupado.", status_code=303)
+        m.entrega_prevista_em = nova_data
+        if not m.recebido_em:
+            m.status = "Aguardando equipamento"
+    db.commit()
+    return RedirectResponse("/organiza/agenda", status_code=303)
+
+
+@app.post("/organiza/agenda/manutencao/{manutencao_id}/excluir")
+def agenda_manutencao_excluir(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    if not m:
+        raise HTTPException(404)
+    if etapa_manutencao(m) == 1 and not m.recebido_em:
+        # Cliente não trouxe o equipamento: encerra a pendência sem apagar o histórico.
+        m.status = "Cancelada"
+        m.entrega_prevista_em = None
+    elif etapa_manutencao(m) == 6:
+        # Remove apenas a retirada agendada; a manutenção continua pronta para retirada.
+        m.retirada_em = None
+        m.status = "Pronto para retirada"
+    db.commit()
+    return RedirectResponse("/organiza/agenda", status_code=303)
 
 
 @app.get("/organiza/agenda/manual/novo", response_class=HTMLResponse)

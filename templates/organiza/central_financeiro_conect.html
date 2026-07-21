@@ -75,7 +75,7 @@
               <th style="width:42px">
                 <input type="checkbox" id="selecionar-todos" aria-label="Selecionar todos">
               </th>
-              <th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Valor</th><th>Status Connect</th><th>Ações</th>
+              <th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Obs. / comprovante</th><th>Valor</th><th>Falta receber</th><th>Status Connect</th><th>Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -95,6 +95,7 @@
               <td>{{ linha.payload.cliente or '-' }}</td>
               <td>{{ linha.payload.descricao }}</td>
               <td>{{ linha.payload.banco or 'Não informado' }}</td>
+              <td>{{ linha.payload.observacao or '-' }}</td>
               <td>{{ linha.payload.valor|moeda }}</td>
               <td>{{ linha.payload.falta_receber|moeda }}</td>
               <td>
@@ -111,7 +112,7 @@
               <td><a class="botao pequeno" href="{{ linha.editar_url }}">Editar pagamento</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="9">Nenhum pagamento registrado ainda.</td></tr>
+            <tr><td colspan="11">Nenhum pagamento registrado ainda.</td></tr>
           {% endfor %}
           </tbody>
         </table>

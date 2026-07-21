@@ -26,16 +26,33 @@
           {% set ns.data = data_atual %}
           <h2 class="agenda-dia">{{ data_atual }}</h2>
         {% endif %}
-        <a href="{{ e.link }}" class="agenda-linha {{ e.tipo }}">
+        <div class="agenda-linha {{ e.tipo }}" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center">
           <time>{{ e.data_hora.strftime('%H:%M') }}</time>
-          <div>
-            <small>{{ e.titulo|upper }}</small>
-            <strong>{{ e.cliente }}</strong>
-            {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
+          <a href="{{ e.link }}" style="color:inherit;text-decoration:none;min-width:0">
+            <div>
+              <small>{{ e.titulo|upper }}</small>
+              <strong>{{ e.cliente }}</strong>
+              {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
+            </div>
+          </a>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+            {% if e.manual %}
+              <a class="botao pequeno" href="{{ e.link }}">Editar</a>
+            {% else %}
+              <details style="position:relative">
+                <summary class="botao pequeno" style="cursor:pointer;list-style:none">Reagendar</summary>
+                <form method="post" action="/organiza/agenda/manutencao/{{ e.manutencao_id }}/reagendar" class="cartao" style="position:absolute;right:0;z-index:10;min-width:290px;padding:12px">
+                  <input type="hidden" name="tipo" value="{{ e.agendamento_tipo }}">
+                  <label>Nova data e hora<input type="datetime-local" name="data_hora" required value="{{ e.data_hora.strftime('%Y-%m-%dT%H:%M') }}"></label>
+                  <button class="botao primario pequeno" type="submit">Salvar reagendamento</button>
+                </form>
+              </details>
+              <form method="post" action="/organiza/agenda/manutencao/{{ e.manutencao_id }}/excluir" onsubmit="return confirm('Remover este agendamento? O histórico será preservado.')">
+                <button class="botao pequeno" type="submit">Excluir</button>
+              </form>
+            {% endif %}
           </div>
-          {% if e.manual %}<em>Manual</em>{% endif %}
-          <b>›</b>
-        </a>
+        </div>
       {% endfor %}
     </div>
   {% else %}

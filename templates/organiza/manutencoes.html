@@ -10,6 +10,21 @@
     <a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a>
   </div>
 
+
+  <form method="get" class="cartao" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <label style="min-width:240px">Mostrar
+      <select name="status" onchange="this.form.submit()">
+        <option value="orcamento" {% if filtro_status == 'orcamento' %}selected{% endif %}>Fazer orçamento</option>
+        <option value="entrada" {% if filtro_status == 'entrada' %}selected{% endif %}>Entrada agendada</option>
+        <option value="aceite" {% if filtro_status in ('aceite','aprovacao') %}selected{% endif %}>Aguardando cliente</option>
+        <option value="pagamento" {% if filtro_status == 'pagamento' %}selected{% endif %}>Pagamento / prazo</option>
+        <option value="execucao" {% if filtro_status in ('execucao','producao') %}selected{% endif %}>Em execução</option>
+        <option value="retirada" {% if filtro_status in ('retirada','agenda') %}selected{% endif %}>Pronto / retirada</option>
+        <option value="encerradas" {% if filtro_status == 'encerradas' %}selected{% endif %}>Encerradas</option>
+        <option value="todos" {% if filtro_status == 'todos' %}selected{% endif %}>Todas</option>
+      </select>
+    </label>
+  </form>
   <div class="lista-cards-mobile">
     {% for m in manutencoes %}
       <div class="cliente-card-clean">

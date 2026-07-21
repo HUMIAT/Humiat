@@ -300,9 +300,9 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
           <div class="manutencao-grid tres">
             <label>Data<input type="date" name="data" required value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
             <label>Valor<input name="valor" required></label>
-            <label>Forma<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
+            <label>Banco<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
           </div>
-          <label>Observação<input name="observacao"></label>
+          <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ m.equipamento|rotulo_maquina }} - {{ m.cliente.nome }} - nome do comprovante (opcional)"></label>
           <button class="botao primario" type="submit">Registrar pagamento</button>
         </form>
         <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/prazo">
@@ -328,8 +328,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
                 <summary style="display:flex;justify-content:space-between;gap:12px;cursor:pointer;align-items:center">
                   <span>
                     {{ pagamento.data.strftime('%d/%m/%Y') if pagamento.data and pagamento.data.strftime is defined else (pagamento.data or '-') }}
-                    · {{ pagamento.banco or 'Banco não informado' }}
-                    · {{ pagamento.forma or 'Não informada' }}
+                    · {{ pagamento.forma or pagamento.banco or 'Banco não informado' }}
                     {% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}
                   </span>
                   <strong>{{ pagamento.valor|moeda }} · Editar</strong>
@@ -338,7 +337,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
                   <div class="manutencao-grid tres">
                     <label>Data<input type="date" name="data" required value="{{ pagamento.data.isoformat() if pagamento.data else '' }}"></label>
                     <label>Valor<input name="valor" required value="{{ '%.2f'|format(pagamento.valor or 0) }}"></label>
-                    <label>Forma
+                    <label>Banco
                       <select name="forma">
                         {% for forma in ['PIX','Dinheiro','Cartão','Transferência','Outro'] %}
                           <option value="{{ forma }}" {% if pagamento.forma == forma %}selected{% endif %}>{{ forma }}</option>
@@ -346,7 +345,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
                       </select>
                     </label>
                   </div>
-                  <label>Observação<input name="observacao" value="{{ pagamento.observacao or '' }}"></label>
+                  <label>Obs. / nome do comprovante<input name="observacao" value="{{ pagamento.observacao or '' }}"></label>
                   <button class="botao pequeno" type="submit">Salvar alterações</button>
                 </form>
               </details>
