@@ -1933,6 +1933,119 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
     return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
 
 
+@app.get("/organiza/manutencoes/{manutencao_id}/relatorio.pdf")
+def manutencao_relatorio_pdf(
+    manutencao_id: int,
+    mostrar_valores: int = 1,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Relatório técnico da manutenção, com opção de exibir ou ocultar valores."""
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    orcamento = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    exibir_valores = bool(mostrar_valores)
+
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    fonte_regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    fonte_negrito = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    nome_fonte, nome_fonte_bold = "Helvetica", "Helvetica-Bold"
+    if os.path.exists(fonte_regular) and os.path.exists(fonte_negrito):
+        nome_fonte, nome_fonte_bold = "DejaVu", "DejaVu-Bold"
+        if nome_fonte not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(nome_fonte, fonte_regular))
+            pdfmetrics.registerFont(TTFont(nome_fonte_bold, fonte_negrito))
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=14*mm, leftMargin=14*mm,
+                            topMargin=12*mm, bottomMargin=14*mm,
+                            title=f"Relatório de Manutenção #{m.id}")
+    styles = getSampleStyleSheet()
+    corpo = ParagraphStyle("RelatorioCorpo", parent=styles["BodyText"], fontName=nome_fonte, fontSize=9, leading=12)
+    pequeno = ParagraphStyle("RelatorioPequeno", parent=corpo, fontSize=8, leading=10)
+    titulo = ParagraphStyle("RelatorioTitulo", parent=styles["Title"], fontName=nome_fonte_bold, fontSize=14, leading=17, alignment=TA_CENTER)
+    secao = ParagraphStyle("RelatorioSecao", parent=corpo, fontName=nome_fonte_bold, fontSize=10.5, leading=13, spaceBefore=7, spaceAfter=5)
+
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo-karaoke-rj.png")
+    if not os.path.exists(logo_path):
+        logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "karaoke-rj-garantia.jpeg")
+    logo = Image(logo_path, width=30*mm, height=22*mm) if os.path.exists(logo_path) else Spacer(30*mm, 22*mm)
+    empresa = Paragraph(
+        "<b>KARAOKE &amp; GAMES RJ</b><br/>CNPJ: 35.458.112/0001-75 · IM: 1213508-4<br/>"
+        "Rua João Romariz, 313 - Ramos - Rio de Janeiro/RJ - CEP: 21031-700<br/>"
+        "WhatsApp: (21) 99507-9690 / (21) 99650-4516<br/>www.karaokerj.com.br · contato@karaokerj.com.br", pequeno)
+    header = Table([[logo, empresa]], colWidths=[35*mm, 145*mm])
+    header.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LINEBELOW",(0,0),(-1,-1),0.8,colors.HexColor("#555555")),
+                                ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+
+    def ptxt(v):
+        return Paragraph(str(v or "-"), corpo)
+    def dt(v):
+        return v.strftime("%d/%m/%Y %H:%M") if v else "-"
+
+    eq = m.equipamento
+    cliente = m.cliente
+    story = [header, Spacer(1,7), Paragraph(f"RELATÓRIO DE MANUTENÇÃO Nº {m.id}", titulo), Spacer(1,7)]
+    dados = [
+        [Paragraph("<b>Cliente</b>", corpo), ptxt(cliente.nome), Paragraph("<b>WhatsApp</b>", corpo), ptxt(formatar_telefone(cliente.telefone) if cliente.telefone else "-")],
+        [Paragraph("<b>Equipamento</b>", corpo), ptxt(f"{rotulo_maquina(eq)} · {eq.tipo or ''} {eq.modelo or ''}".strip()), Paragraph("<b>Cód. técnico</b>", corpo), ptxt(codigo_tecnico(eq))],
+        [Paragraph("<b>Entrada</b>", corpo), ptxt(dt(m.recebido_em or m.criado_em)), Paragraph("<b>Status</b>", corpo), ptxt(m.status)],
+    ]
+    tab = Table(dados, colWidths=[24*mm, 68*mm, 24*mm, 64*mm])
+    tab.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#bbbbbb")),("VALIGN",(0,0),(-1,-1),"TOP"),
+                             ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#f2f2f2")),("BACKGROUND",(2,0),(2,-1),colors.HexColor("#f2f2f2")),
+                             ("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    story += [tab, Paragraph("Problema informado", secao), ptxt(m.defeito), Paragraph("Diagnóstico técnico", secao), ptxt(m.diagnostico or "Não informado")]
+
+    if orcamento:
+        story.append(Paragraph("Serviços e itens", secao))
+        if exibir_valores:
+            linhas = [[ptxt("Descrição"), ptxt("Qtd."), ptxt("Valor unit."), ptxt("Total")]]
+            if float(orcamento.valor_manutencao or 0) > 0:
+                linhas.append([ptxt("Serviço de manutenção"), ptxt("1"), ptxt(formatar_moeda(orcamento.valor_manutencao)), ptxt(formatar_moeda(orcamento.valor_manutencao))])
+            for item in orcamento.itens:
+                linhas.append([ptxt(item.descricao + (" (opcional)" if item.opcional else "")), ptxt(item.quantidade), ptxt(formatar_moeda(item.preco_venda)), ptxt(formatar_moeda(item.preco_venda * item.quantidade))])
+            tabela_itens = Table(linhas, colWidths=[92*mm, 16*mm, 34*mm, 38*mm], repeatRows=1)
+        else:
+            linhas = [[ptxt("Descrição"), ptxt("Qtd.")]]
+            if float(orcamento.valor_manutencao or 0) > 0:
+                linhas.append([ptxt("Serviço de manutenção"), ptxt("1")])
+            for item in orcamento.itens:
+                linhas.append([ptxt(item.descricao + (" (opcional)" if item.opcional else "")), ptxt(item.quantidade)])
+            tabela_itens = Table(linhas, colWidths=[155*mm, 25*mm], repeatRows=1)
+        tabela_itens.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#eeeeee")),("FONTNAME",(0,0),(-1,0),nome_fonte_bold),
+                                          ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#bbbbbb")),("VALIGN",(0,0),(-1,-1),"TOP"),
+                                          ("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+        story.append(tabela_itens)
+        if exibir_valores:
+            totais = totais_orcamento(orcamento)
+            story += [Spacer(1,5), Paragraph(f"<b>Total do orçamento: {formatar_moeda(totais.get('total_aprovado', totais.get('total', 0)))}</b>", corpo)]
+            if float(totais.get("desconto_informado", 0) or 0) > 0:
+                story.append(Paragraph(f"Desconto informado: {formatar_moeda(totais['desconto_informado'])}", corpo))
+        if orcamento.forma_pagamento_orcamento:
+            story.append(Paragraph(f"<b>Condição de pagamento:</b> {orcamento.forma_pagamento_orcamento}", corpo))
+        if orcamento.prazo_dias_uteis:
+            story.append(Paragraph(f"<b>Prazo:</b> {orcamento.prazo_dias_uteis} dias úteis após a confirmação do pagamento", corpo))
+
+    if m.observacao:
+        story += [Paragraph("Observações", secao), ptxt(m.observacao)]
+    story += [Spacer(1,18), Table([["____________________________________________"],["Responsável / Karaokê RJ"]], colWidths=[90*mm],
+                                  style=TableStyle([("ALIGN",(0,0),(-1,-1),"CENTER"),("FONTNAME",(0,0),(-1,-1),nome_fonte),("FONTSIZE",(0,0),(-1,-1),8)]))]
+    doc.build(story)
+    nome = _nome_arquivo(cliente.nome)
+    sufixo = "com_valores" if exibir_valores else "sem_valores"
+    return Response(buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="manutencao_{m.id}_{nome}_{sufixo}.pdf"'})
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item")
 async def orcamento_adicionar_item(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id); form = dict(await request.form())

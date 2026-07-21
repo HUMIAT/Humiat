@@ -12,6 +12,8 @@
       <span class="pill {{ etapa_info_atual.classe }}">{{ etapa_info_atual.rotulo }}</span>
       <a class="botao" href="/organiza/clientes/{{ m.cliente.id }}">Cadastro do cliente</a>
       <a class="botao whatsapp" target="_blank" rel="noopener" href="{{ whatsapp_url(m.cliente) }}">WhatsApp</a>
+      <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=1">PDF com valores</a>
+      <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=0">PDF sem valores</a>
       <a class="botao" href="/organiza/manutencoes">Voltar</a>
     </div>
   </header>
