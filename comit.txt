@@ -16,5 +16,5 @@ git commit -m "Adiciona agrupamento de lancamentos para envio ao Connect"
 git push origin main
 
 git add .
-git commit -m "Adiciona banco e edicao nos pagamentos do Organiza"
+git commit -m "Envia saldo a receber nas integracoes com Connect"
 git push origin main

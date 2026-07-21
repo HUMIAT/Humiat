@@ -48,3 +48,22 @@ Exemplo: três manutenções do mesmo cliente de R$ 30,00 + R$ 100,00 + R$ 50,00
 com a mesma data e banco, são enviadas ao Connect como um único lançamento de R$ 180,00.
 
 Os registros originais continuam separados no Organiza e ficam marcados individualmente como enviados.
+
+## Forma como origem bancária
+
+O Organiza não exige cadastro ou validação de banco do Connect.
+O campo **Forma** (`PIX`, `Transferência`, `Cartão`, etc.) é enviado no campo `banco` da integração.
+
+O Connect é responsável por associar essa origem à conta financeira correta.
+Exemplo: `Transferência` pode ser vinculada uma vez a `Banco Principal` no Connect.
+
+A edição dos pagamentos continua disponível no Organiza.
+
+
+## Saldo a receber informativo
+
+Cada lançamento envia também `falta_receber`.
+
+Esse valor informa quanto ainda falta receber da venda ou manutenção depois de considerar todos os pagamentos registrados no Organiza.
+
+Ele é apenas informativo: não cria um novo pagamento e não altera o valor do lançamento enviado.

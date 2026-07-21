@@ -24,7 +24,6 @@
       <div class="form-grid">
         <label>Valor<input name="valor" inputmode="decimal" placeholder="0,00" required></label>
         <label>Data do pagamento<input type="date" name="data" value="{{ hoje }}" required></label>
-        <label>Banco<input name="banco" placeholder="Ex.: Banco Principal" required></label>
         <label>Forma
           <select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select>
         </label>
@@ -38,7 +37,7 @@
     <h2>Pagamentos registrados</h2>
     <div class="table-wrap" style="margin-top:12px">
       <table class="data-table">
-        <thead><tr><th>Data</th><th>Banco</th><th>Forma</th><th>Valor</th><th></th></tr></thead>
+        <thead><tr><th>Data</th><th>Forma</th><th>Valor</th><th></th></tr></thead>
         <tbody>
         {% for p in pagamentos %}
           <tr>
@@ -55,7 +54,6 @@
                   <div class="form-grid">
                     <label>Data<input type="date" name="data" required value="{{ p.data.isoformat() if p.data else '' }}"></label>
                     <label>Valor<input name="valor" required value="{{ '%.2f'|format(p.valor or 0) }}"></label>
-                    <label>Banco<input name="banco" required value="{{ p.banco or '' }}"></label>
                     <label>Forma
                       <select name="forma">
                         {% for forma in ['PIX','Dinheiro','Cartão','Transferência','Outro'] %}

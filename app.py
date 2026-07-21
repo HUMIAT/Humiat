@@ -1972,19 +1972,14 @@ async def aprovar_manual(
 async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id); form = dict(await request.form()); o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
     valor = moeda_num(form.get("valor"))
-    banco = (form.get("banco") or "").strip()
+    forma = (form.get("forma") or "PIX").strip()
     if valor > 0:
-        if not banco:
-            return RedirectResponse(
-                f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=banco_pagamento",
-                status_code=303,
-            )
         db.add(Pagamento(
             orcamento_id=o.id,
             data=data_form(form.get("data") or "") or date.today(),
             valor=valor,
-            forma=(form.get("forma") or "PIX").strip(),
-            banco=banco,
+            forma=forma,
+            banco=forma,
             observacao=(form.get("observacao") or "").strip() or None,
         ))
         m.status = "Confirmação pendente"; db.commit()
@@ -2013,9 +2008,9 @@ async def manutencao_pagamento_editar(
 
     form = dict(await request.form())
     valor = moeda_num(form.get("valor"))
-    banco = (form.get("banco") or "").strip()
+    forma = (form.get("forma") or "").strip()
     data_pag = data_form(form.get("data") or "")
-    if valor <= 0 or not data_pag or not banco:
+    if valor <= 0 or not data_pag or not forma:
         return RedirectResponse(
             f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=edicao_pagamento",
             status_code=303,
@@ -2023,8 +2018,8 @@ async def manutencao_pagamento_editar(
 
     p.valor = round(valor, 2)
     p.data = data_pag
-    p.banco = banco
-    p.forma = (form.get("forma") or "").strip() or None
+    p.forma = forma
+    p.banco = forma
     p.observacao = (form.get("observacao") or "").strip() or None
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-4", status_code=303)
@@ -3254,7 +3249,7 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
     valor = moeda_num(form.get("valor")) if saldo_total > 0.009 else 0
     data_pagamento = data_form(form.get("data")) or date.today()
     forma = (form.get("forma") or "").strip()
-    banco = (form.get("banco") or "").strip()
+    banco = forma
     observacao = (form.get("observacao") or "").strip()
 
     if saldo_total > 0.009 and valor <= 0:
@@ -3376,35 +3371,52 @@ def _registro_integracao(db: Session, origem: str, registro_id: int):
     ).first()
 
 
-def _payload_venda(p: PagamentoVenda):
+def _payload_venda(p: PagamentoVenda, db: Session):
     eq = p.equipamento
     cliente = eq.cliente if eq else None
     descricao = f"Venda {rotulo_maquina(eq)}" if eq else f"Venda #{p.equipamento_id}"
+
+    total_operacao = moeda_num(eq.valor) if eq else 0.0
+    total_recebido = sum(
+        float(v or 0)
+        for (v,) in db.query(PagamentoVenda.valor)
+        .filter(PagamentoVenda.equipamento_id == p.equipamento_id)
+        .all()
+    )
+    falta_receber = max(float(total_operacao) - total_recebido, 0.0)
+
     return {
         "id_externo": f"ORGANIZA-VENDA-PAG-{p.id}",
         "tipo": "venda",
         "cliente": cliente.nome if cliente else "",
         "descricao": descricao,
         "valor": round(float(p.valor or 0), 2),
+        "falta_receber": round(falta_receber, 2),
         "data_pagamento": p.data.isoformat(),
-        "banco": p.banco or "",
+        "banco": p.forma or p.banco or "",
     }
 
 
-def _payload_manutencao(p: Pagamento):
+def _payload_manutencao(p: Pagamento, db: Session):
     o = p.orcamento
     m = o.manutencao if o else None
     cliente = m.cliente if m else None
     equipamento = m.equipamento if m else None
     descricao = f"Manutenção {rotulo_maquina(equipamento)}" if equipamento else f"Manutenção #{getattr(m, 'id', p.id)}"
+
+    falta_receber = 0.0
+    if m:
+        _, _, falta_receber = _saldo_manutencao(m)
+
     return {
         "id_externo": f"ORGANIZA-MANUTENCAO-PAG-{p.id}",
         "tipo": "manutencao",
         "cliente": cliente.nome if cliente else "",
         "descricao": descricao,
         "valor": round(float(p.valor or 0), 2),
+        "falta_receber": round(float(falta_receber or 0), 2),
         "data_pagamento": p.data.isoformat(),
-        "banco": p.banco or "",
+        "banco": p.forma or p.banco or "",
     }
 
 
@@ -3414,7 +3426,7 @@ def _linhas_central_financeiro(db: Session):
         selectinload(PagamentoVenda.equipamento).selectinload(Equipamento.cliente)
     ).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
     for p in vendas:
-        payload = _payload_venda(p)
+        payload = _payload_venda(p, db)
         integ = _registro_integracao(db, "venda", p.id)
         hash_atual = _payload_hash(payload)
         status = (
@@ -3423,14 +3435,14 @@ def _linhas_central_financeiro(db: Session):
             else "atualizado" if integ and integ.enviado_em
             else "novo"
         )
-        linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/vendas/{p.equipamento_id}/pagamentos"})
+        linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/vendas/{p.equipamento_id}/pagamentos", "operacao_chave": f"venda:{p.equipamento_id}"})
 
     manutencoes = db.query(Pagamento).options(
         selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),
         selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento),
     ).order_by(Pagamento.data.desc(), Pagamento.id.desc()).all()
     for p in manutencoes:
-        payload = _payload_manutencao(p)
+        payload = _payload_manutencao(p, db)
         integ = _registro_integracao(db, "manutencao", p.id)
         hash_atual = _payload_hash(payload)
         status = (
@@ -3439,7 +3451,7 @@ def _linhas_central_financeiro(db: Session):
             else "atualizado" if integ and integ.enviado_em
             else "novo"
         )
-        linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/manutencoes/{p.orcamento.manutencao.id}#etapa-4"})
+        linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/manutencoes/{p.orcamento.manutencao.id}#etapa-4", "operacao_chave": f"manutencao:{p.orcamento.manutencao_id}"})
     linhas.sort(key=lambda x: (x["registro"].data, x["registro"].id), reverse=True)
     return linhas
 
@@ -3588,6 +3600,14 @@ def _payload_grupo_connect(grupo):
     quantidade = len(grupo)
     valor_total = round(sum(float(l["payload"].get("valor") or 0) for l in grupo), 2)
 
+    # O saldo é apenas informativo. Pagamentos da mesma operação
+    # contam o saldo dessa operação uma única vez.
+    saldos_por_operacao = {}
+    for linha in grupo:
+        chave_operacao = linha.get("operacao_chave") or _chave_linha_connect(linha)
+        saldos_por_operacao[chave_operacao] = float(linha["payload"].get("falta_receber") or 0)
+    falta_receber = round(sum(saldos_por_operacao.values()), 2)
+
     rotulo_tipo = "Venda" if tipo == "venda" else "Manutenção"
     descricao = f"{rotulo_tipo} agrupada - {quantidade} lançamento(s)"
     if cliente:
@@ -3599,6 +3619,7 @@ def _payload_grupo_connect(grupo):
         "cliente": cliente,
         "descricao": descricao,
         "valor": valor_total,
+        "falta_receber": falta_receber,
         "data_pagamento": primeiro["data_pagamento"],
         "banco": primeiro.get("banco") or "",
     }
@@ -3758,16 +3779,13 @@ async def venda_pagamento_registrar(
     form = dict(await request.form())
     valor = moeda_num(form.get("valor"))
     data_pag = data_form(form.get("data")) or date.today()
-    banco = (form.get("banco") or "").strip()
-    forma = (form.get("forma") or "").strip()
+    forma = (form.get("forma") or "PIX").strip()
     observacao = (form.get("observacao") or "").strip()
     if valor <= 0:
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe um valor válido.", status_code=303)
-    if not banco:
-        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe o banco.", status_code=303)
     db.add(PagamentoVenda(
         equipamento_id=equipamento_id, data=data_pag, valor=round(valor, 2),
-        banco=banco, forma=forma or None, observacao=observacao or None,
+        banco=forma, forma=forma, observacao=observacao or None,
     ))
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
@@ -3791,18 +3809,18 @@ async def venda_pagamento_editar(
 
     form = dict(await request.form())
     valor = moeda_num(form.get("valor"))
-    banco = (form.get("banco") or "").strip()
+    forma = (form.get("forma") or "").strip()
     data_pag = data_form(form.get("data") or "")
-    if valor <= 0 or not data_pag or not banco:
+    if valor <= 0 or not data_pag or not forma:
         return RedirectResponse(
-            f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe data, valor e banco válidos.",
+            f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe data, valor e forma válidos.",
             status_code=303,
         )
 
     p.valor = round(valor, 2)
     p.data = data_pag
-    p.banco = banco
-    p.forma = (form.get("forma") or "").strip() or None
+    p.forma = forma
+    p.banco = forma
     p.observacao = (form.get("observacao") or "").strip() or None
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)

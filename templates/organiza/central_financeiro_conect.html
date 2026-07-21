@@ -83,6 +83,7 @@
               <td>{{ linha.payload.descricao }}</td>
               <td>{{ linha.payload.banco or 'Não informado' }}</td>
               <td>{{ linha.payload.valor|moeda }}</td>
+              <td>{{ linha.payload.falta_receber|moeda }}</td>
               <td>
                 {% if linha.status_sync == 'enviado' %}
                   <span class="pill" style="background:#e9f9ef">Enviado</span>

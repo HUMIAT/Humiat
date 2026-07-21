@@ -298,7 +298,6 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
           <div class="manutencao-grid tres">
             <label>Data<input type="date" name="data" required value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
             <label>Valor<input name="valor" required></label>
-            <label>Banco<input name="banco" placeholder="Ex.: Banco Principal" required></label>
             <label>Forma<select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
           </div>
           <label>Observação<input name="observacao"></label>
@@ -337,7 +336,6 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
                   <div class="manutencao-grid tres">
                     <label>Data<input type="date" name="data" required value="{{ pagamento.data.isoformat() if pagamento.data else '' }}"></label>
                     <label>Valor<input name="valor" required value="{{ '%.2f'|format(pagamento.valor or 0) }}"></label>
-                    <label>Banco<input name="banco" required value="{{ pagamento.banco or '' }}" placeholder="Ex.: Banco Principal"></label>
                     <label>Forma
                       <select name="forma">
                         {% for forma in ['PIX','Dinheiro','Cartão','Transferência','Outro'] %}
