@@ -1,0 +1,61 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">Venda · {{ venda|rotulo_maquina }}</p>
+      <h1>Registrar pagamento</h1>
+      <p class="texto-suave">{{ venda.cliente.nome }} · cada pagamento pode ter data e banco diferentes.</p>
+    </div>
+    <a class="botao" href="/organiza/vendas">← Vendas</a>
+  </div>
+
+  {% if erro %}<div class="cartao" style="margin-bottom:14px;border-color:#f3b5b5">{{ erro }}</div>{% endif %}
+
+  <div class="venda-card-dados" style="margin-bottom:16px">
+    <div><small>Total da venda</small><strong>{{ total|moeda }}</strong></div>
+    <div><small>Registrado</small><strong>{{ recebido|moeda }}</strong></div>
+    <div class="saldo"><small>Saldo</small><strong>{{ saldo|moeda }}</strong></div>
+  </div>
+
+  <article class="cartao" style="margin-bottom:16px">
+    <h2>Novo pagamento</h2>
+    <form method="post" style="margin-top:14px">
+      <div class="form-grid">
+        <label>Valor<input name="valor" inputmode="decimal" placeholder="0,00" required></label>
+        <label>Data do pagamento<input type="date" name="data" value="{{ hoje }}" required></label>
+        <label>Banco<input name="banco" placeholder="Ex.: Banco Principal" required></label>
+        <label>Forma
+          <select name="forma"><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select>
+        </label>
+      </div>
+      <label>Observação<input name="observacao" placeholder="Opcional"></label>
+      <div style="margin-top:14px"><button class="botao primario" type="submit">Registrar pagamento</button></div>
+    </form>
+  </article>
+
+  <article class="cartao">
+    <h2>Pagamentos registrados</h2>
+    <div class="table-wrap" style="margin-top:12px">
+      <table class="data-table">
+        <thead><tr><th>Data</th><th>Banco</th><th>Forma</th><th>Valor</th><th></th></tr></thead>
+        <tbody>
+        {% for p in pagamentos %}
+          <tr>
+            <td>{{ p.data|data_br }}</td>
+            <td>{{ p.banco }}</td>
+            <td>{{ p.forma or '-' }}</td>
+            <td>{{ p.valor|moeda }}</td>
+            <td>
+              <form method="post" action="/organiza/vendas/{{ venda.id }}/pagamentos/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este pagamento?')">
+                <button class="botao pequeno" type="submit">Excluir</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}<tr><td colspan="5">Nenhum pagamento registrado.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

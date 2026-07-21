@@ -11,6 +11,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 import unicodedata
+import urllib.request
+import urllib.error
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 from urllib.parse import quote
@@ -316,9 +318,37 @@ class Pagamento(Base):
     data = Column(Date, nullable=False, default=date.today)
     valor = Column(Float, nullable=False)
     forma = Column(String(40), nullable=True)
+    banco = Column(String(120), nullable=True)
     observacao = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     orcamento = relationship("Orcamento", back_populates="pagamentos")
+
+
+class PagamentoVenda(Base):
+    """Recebimentos de venda. Uma venda pode ter vários pagamentos, bancos e datas."""
+    __tablename__ = "venda_pagamentos"
+    id = Column(Integer, primary_key=True)
+    equipamento_id = Column(Integer, ForeignKey("equipamentos.id"), nullable=False, index=True)
+    data = Column(Date, nullable=False, default=date.today)
+    valor = Column(Float, nullable=False)
+    banco = Column(String(120), nullable=False)
+    forma = Column(String(40), nullable=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    equipamento = relationship("Equipamento")
+
+
+class IntegracaoConect(Base):
+    """Controle idempotente do que já foi enviado ao Connect."""
+    __tablename__ = "integracao_conect"
+    id = Column(Integer, primary_key=True)
+    origem = Column(String(30), nullable=False)  # venda | manutencao
+    registro_id = Column(Integer, nullable=False)
+    id_externo = Column(String(120), unique=True, nullable=False, index=True)
+    hash_conteudo = Column(String(64), nullable=True)
+    enviado_em = Column(DateTime, nullable=True)
+    resposta = Column(Text, nullable=True)
 
 
 def limpar_telefone(valor: str) -> str:
@@ -529,6 +559,11 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN forma_pagamento_orcamento VARCHAR(80)"))
             if "prazo_dias_uteis" not in existentes_orcamento:
                 conn.execute(text("ALTER TABLE assistencia_orcamentos ADD COLUMN prazo_dias_uteis INTEGER"))
+    if "assistencia_pagamentos" in insp.get_table_names():
+        existentes_pagamentos = {c["name"] for c in insp.get_columns("assistencia_pagamentos")}
+        with engine.begin() as conn:
+            if "banco" not in existentes_pagamentos:
+                conn.execute(text("ALTER TABLE assistencia_pagamentos ADD COLUMN banco VARCHAR(120)"))
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
@@ -3160,6 +3195,7 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
     valor = moeda_num(form.get("valor")) if saldo_total > 0.009 else 0
     data_pagamento = data_form(form.get("data")) or date.today()
     forma = (form.get("forma") or "").strip()
+    banco = (form.get("banco") or "").strip()
     observacao = (form.get("observacao") or "").strip()
 
     if saldo_total > 0.009 and valor <= 0:
@@ -3177,6 +3213,7 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
             data=data_pagamento,
             valor=round(aplicado, 2),
             forma=forma or None,
+            banco=banco or None,
             observacao=(f"Pagamento agrupado. {observacao}".strip()),
         ))
         restante -= aplicado
@@ -3226,6 +3263,245 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
 
     url = ComunicacaoService.url_whatsapp(selecionadas[0].cliente, mensagem)
     return RedirectResponse(url, status_code=303)
+
+
+
+# ---------------------------------------------------------
+# CENTRAL FINANCEIRO -> CONNECT
+# ---------------------------------------------------------
+
+def _connect_configurado():
+    return bool((os.getenv("CONNECT_API_URL") or "").strip())
+
+
+def _connect_endpoint():
+    base = (os.getenv("CONNECT_API_URL") or "").strip().rstrip("/")
+    if base.endswith("/api/integracoes/organiza/lancamentos"):
+        return base
+    return base + "/api/integracoes/organiza/lancamentos"
+
+
+def _payload_hash(payload: dict) -> str:
+    bruto = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(bruto.encode("utf-8")).hexdigest()
+
+
+def _enviar_para_connect(payload: dict):
+    if not _connect_configurado():
+        raise RuntimeError("CONNECT_API_URL não configurada.")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    chave = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    if chave:
+        headers["X-API-Key"] = chave
+    req = urllib.request.Request(
+        _connect_endpoint(),
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            corpo = resp.read().decode("utf-8", errors="replace")
+            return json.loads(corpo) if corpo else {"ok": True}
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Connect respondeu HTTP {exc.code}: {detalhe[:500]}")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Não foi possível acessar o Connect: {exc.reason}")
+
+
+def _registro_integracao(db: Session, origem: str, registro_id: int):
+    return db.query(IntegracaoConect).filter(
+        IntegracaoConect.origem == origem,
+        IntegracaoConect.registro_id == registro_id,
+    ).first()
+
+
+def _payload_venda(p: PagamentoVenda):
+    eq = p.equipamento
+    cliente = eq.cliente if eq else None
+    descricao = f"Venda {rotulo_maquina(eq)}" if eq else f"Venda #{p.equipamento_id}"
+    return {
+        "id_externo": f"ORGANIZA-VENDA-PAG-{p.id}",
+        "tipo": "venda",
+        "cliente": cliente.nome if cliente else "",
+        "descricao": descricao,
+        "valor": round(float(p.valor or 0), 2),
+        "data_pagamento": p.data.isoformat(),
+        "banco": p.banco or "",
+    }
+
+
+def _payload_manutencao(p: Pagamento):
+    o = p.orcamento
+    m = o.manutencao if o else None
+    cliente = m.cliente if m else None
+    equipamento = m.equipamento if m else None
+    descricao = f"Manutenção {rotulo_maquina(equipamento)}" if equipamento else f"Manutenção #{getattr(m, 'id', p.id)}"
+    return {
+        "id_externo": f"ORGANIZA-MANUTENCAO-PAG-{p.id}",
+        "tipo": "manutencao",
+        "cliente": cliente.nome if cliente else "",
+        "descricao": descricao,
+        "valor": round(float(p.valor or 0), 2),
+        "data_pagamento": p.data.isoformat(),
+        "banco": p.banco or "",
+    }
+
+
+def _linhas_central_financeiro(db: Session):
+    linhas = []
+    vendas = db.query(PagamentoVenda).options(
+        selectinload(PagamentoVenda.equipamento).selectinload(Equipamento.cliente)
+    ).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
+    for p in vendas:
+        payload = _payload_venda(p)
+        integ = _registro_integracao(db, "venda", p.id)
+        hash_atual = _payload_hash(payload)
+        status = "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em else ("atualizado" if integ and integ.enviado_em else "novo")
+        linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ})
+
+    manutencoes = db.query(Pagamento).options(
+        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),
+        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento),
+    ).order_by(Pagamento.data.desc(), Pagamento.id.desc()).all()
+    for p in manutencoes:
+        payload = _payload_manutencao(p)
+        integ = _registro_integracao(db, "manutencao", p.id)
+        hash_atual = _payload_hash(payload)
+        status = "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em else ("atualizado" if integ and integ.enviado_em else "novo")
+        linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ})
+    linhas.sort(key=lambda x: (x["registro"].data, x["registro"].id), reverse=True)
+    return linhas
+
+
+@app.get("/organiza/financeiro/conect", response_class=HTMLResponse)
+def central_financeiro_conect(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    linhas = _linhas_central_financeiro(db)
+    pendentes = sum(1 for l in linhas if l["status_sync"] != "enviado")
+    return templates.TemplateResponse("organiza/central_financeiro_conect.html", {
+        "request": request,
+        "usuario": usuario,
+        "linhas": linhas,
+        "pendentes": pendentes,
+        "connect_configurado": _connect_configurado(),
+        "sucesso": request.query_params.get("sucesso", ""),
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/organiza/financeiro/conect/enviar")
+def central_financeiro_conect_enviar(
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not _connect_configurado():
+        return RedirectResponse("/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.", status_code=303)
+
+    linhas = _linhas_central_financeiro(db)
+    enviar = [l for l in linhas if l["status_sync"] != "enviado"]
+    enviados = 0
+    erros = []
+    for linha in enviar:
+        payload = linha["payload"]
+        try:
+            resposta = _enviar_para_connect(payload)
+            origem = "venda" if linha["origem"] == "Venda" else "manutencao"
+            integ = _registro_integracao(db, origem, linha["registro"].id)
+            if not integ:
+                integ = IntegracaoConect(
+                    origem=origem,
+                    registro_id=linha["registro"].id,
+                    id_externo=payload["id_externo"],
+                )
+                db.add(integ)
+            integ.hash_conteudo = _payload_hash(payload)
+            integ.enviado_em = datetime.now()
+            integ.resposta = json.dumps(resposta, ensure_ascii=False)[:4000]
+            db.commit()
+            enviados += 1
+        except Exception as exc:
+            db.rollback()
+            erros.append(f'{payload["id_externo"]}: {str(exc)}')
+            break
+
+    if erros:
+        msg = quote_plus(f"{enviados} enviado(s). Erro: {erros[0]}")
+        return RedirectResponse(f"/organiza/financeiro/conect?erro={msg}", status_code=303)
+    msg = quote_plus(f"{enviados} lançamento(s) enviado(s) ao Connect." if enviados else "Tudo já estava sincronizado.")
+    return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
+
+
+@app.get("/organiza/vendas/{equipamento_id}/pagamentos", response_class=HTMLResponse)
+def venda_pagamentos(
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq or not equipamento_eh_venda(eq):
+        raise HTTPException(404)
+    pagamentos = db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == equipamento_id).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
+    total = moeda_num(eq.valor)
+    recebido = sum(float(p.valor or 0) for p in pagamentos)
+    return templates.TemplateResponse("organiza/venda_pagamentos.html", {
+        "request": request, "usuario": usuario, "venda": eq, "pagamentos": pagamentos,
+        "total": total, "recebido": recebido, "saldo": max(total - recebido, 0),
+        "hoje": date.today().isoformat(), "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/organiza/vendas/{equipamento_id}/pagamentos")
+async def venda_pagamento_registrar(
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
+    if not eq or not equipamento_eh_venda(eq):
+        raise HTTPException(404)
+    form = dict(await request.form())
+    valor = moeda_num(form.get("valor"))
+    data_pag = data_form(form.get("data")) or date.today()
+    banco = (form.get("banco") or "").strip()
+    forma = (form.get("forma") or "").strip()
+    observacao = (form.get("observacao") or "").strip()
+    if valor <= 0:
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe um valor válido.", status_code=303)
+    if not banco:
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe o banco.", status_code=303)
+    db.add(PagamentoVenda(
+        equipamento_id=equipamento_id, data=data_pag, valor=round(valor, 2),
+        banco=banco, forma=forma or None, observacao=observacao or None,
+    ))
+    db.commit()
+    return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
+
+
+@app.post("/organiza/vendas/{equipamento_id}/pagamentos/{pagamento_id}/excluir")
+def venda_pagamento_excluir(
+    equipamento_id: int,
+    pagamento_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    p = db.query(PagamentoVenda).filter(PagamentoVenda.id == pagamento_id, PagamentoVenda.equipamento_id == equipamento_id).first()
+    if not p:
+        raise HTTPException(404)
+    integ = _registro_integracao(db, "venda", p.id)
+    if integ and integ.enviado_em:
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Pagamento já enviado ao Connect. Ajuste o registro em vez de excluir.", status_code=303)
+    if integ:
+        db.delete(integ)
+    db.delete(p)
+    db.commit()
+    return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)

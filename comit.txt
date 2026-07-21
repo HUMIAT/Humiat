@@ -1,0 +1,3 @@
+git add .
+git commit -m "Integra central financeiro do Organiza com Connect"
+git push origin main

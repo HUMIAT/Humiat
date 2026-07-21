@@ -1,0 +1,63 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">Central financeiro</p>
+      <h1>Enviar para o Connect</h1>
+      <p class="texto-suave">Um único lugar para enviar vendas e manutenções novas ou alteradas.</p>
+    </div>
+    <form method="post" action="/organiza/financeiro/conect/enviar">
+      <button class="botao primario" type="submit" {% if not connect_configurado %}disabled{% endif %}>
+        Enviar tudo{% if pendentes %} · {{ pendentes }}{% endif %}
+      </button>
+    </form>
+  </div>
+
+  {% if sucesso %}<div class="cartao" style="margin-bottom:14px;border-color:#b9e8c8">{{ sucesso }}</div>{% endif %}
+  {% if erro %}<div class="cartao" style="margin-bottom:14px;border-color:#f3b5b5">{{ erro }}</div>{% endif %}
+  {% if not connect_configurado %}
+  <div class="cartao" style="margin-bottom:14px">
+    <strong>Integração ainda não configurada.</strong>
+    <p class="texto-suave">No Render, configure <code>CONNECT_API_URL</code> com a URL do Connect e <code>CONNECT_API_KEY</code> com a mesma chave usada no Connect.</p>
+  </div>
+  {% endif %}
+
+  <article class="cartao">
+    <div class="titulo-linha" style="margin-bottom:12px">
+      <div>
+        <h2>Lançamentos</h2>
+        <p class="texto-suave">{{ linhas|length }} registro(s) · {{ pendentes }} aguardando envio/atualização</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Descrição</th><th>Banco</th><th>Valor</th><th>Status Connect</th></tr></thead>
+        <tbody>
+        {% for linha in linhas %}
+          <tr>
+            <td>{{ linha.payload.data_pagamento }}</td>
+            <td><span class="pill">{{ linha.origem }}</span></td>
+            <td>{{ linha.payload.cliente or '-' }}</td>
+            <td>{{ linha.payload.descricao }}</td>
+            <td>{{ linha.payload.banco or 'Não informado' }}</td>
+            <td>{{ linha.payload.valor|moeda }}</td>
+            <td>
+              {% if linha.status_sync == 'enviado' %}
+                <span class="pill" style="background:#e9f9ef">Enviado</span>
+              {% elif linha.status_sync == 'atualizado' %}
+                <span class="pill" style="background:#fff4d8">Atualizado · reenviar</span>
+              {% else %}
+                <span class="pill" style="background:#eaf1ff">Novo</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7">Nenhum pagamento registrado ainda.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}
