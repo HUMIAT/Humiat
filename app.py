@@ -3741,6 +3741,40 @@ def operacao_comunicacoes_enviar(ids: str, tipo: str = "", usuario: Usuario = De
     return RedirectResponse(ComunicacaoService.url_whatsapp(cliente, mensagem), status_code=303)
 
 
+
+def _mensagem_central_generica(cliente, manutencoes, tipo):
+    nome = (cliente.nome or "cliente").strip().split()[0]
+    itens = "\n".join(f"• {rotulo_maquina(m.equipamento)} - {(m.equipamento.modelo or m.equipamento.tipo or 'equipamento')}" for m in manutencoes)
+    cab = f"Olá, {nome}! Aqui é da Karaoke RJ."
+    mensagens = {
+        "lembrete": f"{cab}\n\nEstamos lembrando do atendimento/entrega dos equipamentos abaixo:\n{itens}\n\nCaso precise alterar a data, fale conosco.",
+        "cobranca": f"{cab}\n\nSegue um lembrete sobre o pagamento da manutenção dos equipamentos abaixo:\n{itens}\n\nApós o pagamento, envie o comprovante por aqui.",
+        "previsao": f"{cab}\n\nAtualização da manutenção dos equipamentos abaixo:\n{itens}\n\nEm caso de dúvida sobre o prazo, fale conosco.",
+    }
+    return mensagens.get(tipo, f"{cab}\n\nAtualização sobre:\n{itens}")
+
+
+@app.get("/organiza/central/comunicar")
+def central_comunicar(ids: str, tipo: str, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    try:
+        manutencao_ids = sorted({int(x) for x in ids.split(",") if x.strip()})
+    except ValueError:
+        raise HTTPException(400, "Seleção inválida.")
+    selecionadas = [m for m in _manutencoes_operacao(db) if m.id in manutencao_ids]
+    if not selecionadas:
+        raise HTTPException(404, "Nenhum chamado encontrado.")
+    if len({m.cliente_id for m in selecionadas}) != 1:
+        raise HTTPException(400, "Selecione equipamentos do mesmo cliente.")
+    if tipo in ("orcamento", "pronto"):
+        return operacao_comunicacoes_enviar(ids=ids, tipo=tipo, usuario=usuario, db=db)
+    if tipo not in ("lembrete", "cobranca", "previsao"):
+        raise HTTPException(400, "Tipo de comunicação inválido.")
+    cliente = selecionadas[0].cliente
+    mensagem = _mensagem_central_generica(cliente, selecionadas, tipo)
+    for manutencao in selecionadas:
+        ComunicacaoService.registrar(db, HistoricoComunicacao, manutencao, usuario, tipo.upper(), mensagem=mensagem)
+    return RedirectResponse(ComunicacaoService.url_whatsapp(cliente, mensagem), status_code=303)
+
 @app.get("/acompanhar/{token}", response_class=HTMLResponse)
 def acompanhamento_cliente(token: str, request: Request, db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
