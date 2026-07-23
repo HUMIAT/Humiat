@@ -17,7 +17,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Header
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -25,7 +25,7 @@ from starlette.requests import ClientDisconnect
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_, inspect, text
 from sqlalchemy.orm import Session, relationship, selectinload
 
-from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL
+from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL, LOKAFEST_API_TOKEN
 from database import Base, SessionLocal, engine, get_db
 from services.comunicacao import (
     ComunicacaoService, PAISES, formatar_telefone as formatar_telefone_internacional,
@@ -786,6 +786,138 @@ def central_operacional(
         "central_grupos": central_grupos, "central_total": len(selecionadas),
     })
     return templates.TemplateResponse("organiza/operacao.html", contexto)
+
+
+
+def _lokafest_digitos(valor: str) -> str:
+    return re.sub(r"\D", "", valor or "")
+
+
+def _lokafest_token_valido(authorization: str | None) -> bool:
+    if not LOKAFEST_API_TOKEN:
+        return False
+    recebido = (authorization or "").strip()
+    if recebido.lower().startswith("bearer "):
+        recebido = recebido[7:].strip()
+    return secrets.compare_digest(recebido, LOKAFEST_API_TOKEN)
+
+
+def _lokafest_cliente_por_identificador(db: Session, cpf: str = "", whatsapp: str = ""):
+    cpf_limpo = _lokafest_digitos(cpf)
+    whats_limpo = _lokafest_digitos(whatsapp)
+
+    candidatos = db.query(Cliente).options(selectinload(Cliente.equipamentos)).all()
+
+    if cpf_limpo:
+        for cliente in candidatos:
+            if _lokafest_digitos(cliente.documento) == cpf_limpo:
+                return cliente
+
+    if whats_limpo:
+        # Aceita número com/sem DDI 55, mas exige os últimos 10/11 dígitos iguais.
+        alvo = whats_limpo[-11:] if len(whats_limpo) >= 11 else whats_limpo
+        for cliente in candidatos:
+            telefone = _lokafest_digitos(cliente.telefone)
+            completo = _lokafest_digitos(cliente.whatsapp_completo())
+            comparaveis = {telefone, completo}
+            comparaveis |= {x[-11:] for x in list(comparaveis) if len(x) >= 11}
+            if alvo in comparaveis or whats_limpo in comparaveis:
+                return cliente
+
+    return None
+
+
+def _lokafest_tipo_modelo(eq: Equipamento) -> str | None:
+    tipo = tipo_equipamento_padrao(eq.tipo or "")
+    modelo = unicodedata.normalize("NFKD", (eq.modelo or "").upper()).encode("ascii", "ignore").decode("ascii")
+
+    if tipo == "JUKEBOX" or "JUKEBOX" in modelo:
+        return "jukebox"
+    if tipo in {"MALETA", "PORTATIL"} or "PORTATIL" in modelo or "MALETA" in modelo:
+        return "portatil"
+    if tipo == "IPHONE" or "IPHONE" in modelo:
+        return "iphone"
+    return None
+
+
+@app.get("/api/integracoes/lokafest/cliente")
+def api_lokafest_cliente(
+    cpf: str = "",
+    whatsapp: str = "",
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint privado consumido pelo LokaFest.
+
+    Busca cliente por CPF ou WhatsApp e devolve somente equipamentos
+    Karaoke RJ dos tipos Jukebox, Portátil/Maleta e iPhone.
+
+    Header obrigatório:
+        Authorization: Bearer <LOKAFEST_API_TOKEN>
+    """
+    if not _lokafest_token_valido(authorization):
+        raise HTTPException(status_code=401, detail="Token de integração inválido.")
+
+    if not _lokafest_digitos(cpf) and not _lokafest_digitos(whatsapp):
+        raise HTTPException(status_code=400, detail="Informe CPF ou WhatsApp.")
+
+    cliente = _lokafest_cliente_por_identificador(db, cpf, whatsapp)
+    if not cliente:
+        return {
+            "encontrado": False,
+            "cliente_id": None,
+            "cpf": _lokafest_digitos(cpf),
+            "atualizacao": obter_pacote_atual(db),
+            "equipamentos": {"jukebox": 0, "portatil": 0, "iphone": 0},
+            "detalhes": [],
+        }
+
+    pacote_obrigatorio = obter_pacote_atual(db)
+    contagem = {"jukebox": 0, "portatil": 0, "iphone": 0}
+    detalhes = []
+
+    for eq in cliente.equipamentos:
+        if (eq.status or "").strip().lower() != "ativo":
+            continue
+        if (eq.fabricante or "").strip().upper() != "KARAOKERJ":
+            continue
+
+        classe = _lokafest_tipo_modelo(eq)
+        if not classe:
+            continue
+
+        contagem[classe] += 1
+        pacote_instalado = (eq.pacote or "").strip() or None
+        falta = calcular_falta_pacote(pacote_instalado, pacote_obrigatorio)
+
+        detalhes.append({
+            "id": eq.id,
+            "tipo": classe,
+            "tipo_origem": eq.tipo,
+            "modelo": eq.modelo,
+            "identificacao": rotulo_maquina(eq),
+            "numero_maquina": eq.maquina,
+            "numero_cliente": eq.numero_maquina_cliente,
+            "pacote": pacote_instalado,
+            "pacote_obrigatorio": pacote_obrigatorio,
+            "falta_pacote": falta,
+            "atualizado": bool(pacote_instalado and pacote_instalado == pacote_obrigatorio),
+        })
+
+    # Campo resumido mantido para compatibilidade com o LokaFest atual.
+    # Representa o pacote obrigatório vigente no Organiza.
+    return {
+        "encontrado": True,
+        "cliente_id": str(cliente.id),
+        "nome": cliente.nome,
+        "cpf": _lokafest_digitos(cliente.documento),
+        "whatsapp": cliente.whatsapp_completo(),
+        "atualizacao": pacote_obrigatorio,
+        "equipamentos": contagem,
+        "detalhes": detalhes,
+    }
+
 
 
 @app.get("/organiza/clientes", response_class=HTMLResponse)

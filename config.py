@@ -21,3 +21,6 @@ def usando_sqlite() -> bool:
 
 def usando_postgres() -> bool:
     return DATABASE_URL.startswith("postgresql")
+
+# Token privado para integração LokaFest -> Organiza
+LOKAFEST_API_TOKEN = os.getenv("LOKAFEST_API_TOKEN", "").strip()
