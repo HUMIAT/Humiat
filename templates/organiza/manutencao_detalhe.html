@@ -7,24 +7,27 @@
       <h1>{{ m.cliente.nome }}</h1>
       <p class="texto-suave"><strong>{{ m.equipamento|rotulo_maquina }}</strong> · {{ m.equipamento.tipo }}{% if m.equipamento.modelo %} · {{ m.equipamento.modelo }}{% endif %}<br><small>Código técnico: {{ m.equipamento|codigo_tecnico }}</small></p>
     </div>
-    <div class="manutencao-header-acoes">
+    <div class="manutencao-header-acoes manutencao-topo-acoes">
       {% set etapa_info_atual = ETAPAS_MANUTENCAO[etapa_atual] %}
-      <span class="pill {{ etapa_info_atual.classe }}">{{ etapa_info_atual.rotulo }}</span>
-      <a class="botao" href="/organiza/clientes/{{ m.cliente.id }}">Cadastro do cliente</a>
-      <a class="botao whatsapp" target="_blank" rel="noopener" href="{{ whatsapp_url(m.cliente) }}">WhatsApp</a>
-      <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=1">PDF com valores</a>
-      <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=0">PDF sem valores</a>
-      {% if etapa_atual <= 3 %}
-      <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar-pendente" onsubmit="return confirm(this.dataset.msg);" data-msg="Finalizar esta manutenção e retirar todas as pendências? O histórico será preservado.">
-        <input type="hidden" name="acao" value="finalizar">
-        <button class="botao secundario" type="submit">Finalizar</button>
-      </form>
-      <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar-pendente" onsubmit="return confirm(this.dataset.msg);" data-msg="Excluir esta pendência? A manutenção será cancelada e o histórico ficará preservado.">
-        <input type="hidden" name="acao" value="cancelar">
-        <button class="botao perigo" type="submit">Excluir</button>
-      </form>
-      {% endif %}
-      <a class="botao" href="/organiza/manutencoes">Voltar</a>
+      <div class="topo-status-card">
+        <small>STATUS DO EQUIPAMENTO</small>
+        <strong>{{ m.equipamento.status or 'Ativo' }}</strong>
+        <span>{{ etapa_info_atual.rotulo }}</span>
+      </div>
+      <a class="topo-pagamento-card" href="#pagamento-independente">
+        <small>REGISTRAR PAGAMENTO</small>
+        <strong>＋ Novo lançamento</strong>
+        <span>Independente da etapa</span>
+      </a>
+      <details class="topo-mais-acoes">
+        <summary>Mais ações</summary>
+        <div>
+          <a class="botao" href="/organiza/clientes/{{ m.cliente.id }}">Cadastro do cliente</a>
+          <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=1">PDF com valores</a>
+          <a class="botao" target="_blank" href="/organiza/manutencoes/{{ m.id }}/relatorio.pdf?mostrar_valores=0">PDF sem valores</a>
+          <a class="botao" href="/organiza/manutencoes">Voltar</a>
+        </div>
+      </details>
     </div>
   </header>
 
@@ -32,7 +35,7 @@
   {% if request.query_params.get('erro_etapa2') %}<div class="alerta erro">{{ request.query_params.get('erro_etapa2') }}</div>{% endif %}
   {% if request.query_params.get('salvo_etapa2') %}<div class="alerta sucesso">Orçamento salvo. Revise e avance quando estiver pronto.</div>{% endif %}
   {% if request.query_params.get('erro_etapa4') %}<div class="alerta erro">{{ request.query_params.get('erro_etapa4') }}</div>{% endif %}
-  {% if request.query_params.get('salvo_etapa4') %}<div class="alerta sucesso">Pagamento e prazo salvos.</div>{% endif %}
+  {% if request.query_params.get('salvo_etapa4') %}<div class="alerta sucesso">Prazo do serviço salvo.</div>{% endif %}
 
   <details class="cartao manutencao-cliente-resumo">
     <summary><strong>Dados do cliente</strong><span>Consultar cadastro completo</span></summary>
@@ -63,10 +66,10 @@
       <span class="pill {{ ETAPAS_MANUTENCAO[etapa_atual].classe }}">{{ ETAPAS_MANUTENCAO[etapa_atual].responsavel }}</span>
     </div>
     <div class="painel-pendencias">
-      <strong>O que falta nesta etapa</strong>
+      <strong>O que falta para avançar?</strong>
       {% if etapa_atual == 1 %}
         <p class="{% if m.defeito %}feito{% endif %}">{% if m.defeito %}✓{% else %}○{% endif %} Problema informado</p>
-        <p class="{% if m.recebido_em %}feito{% endif %}">{% if m.recebido_em %}✓{% else %}○{% endif %} Confirmar recebimento/início do atendimento</p>
+        <p class="{% if m.recebido_em %}feito{% endif %}">{% if m.recebido_em %}✓{% else %}○{% endif %} Confirmar entrada do equipamento</p>
       {% elif etapa_atual == 2 %}
         <p class="{% if orcamento.valor_manutencao and orcamento.valor_manutencao > 0 %}feito{% endif %}">{% if orcamento.valor_manutencao and orcamento.valor_manutencao > 0 %}✓{% else %}○{% endif %} Valor da manutenção</p>
         <p class="{% if orcamento.forma_pagamento_orcamento %}feito{% endif %}">{% if orcamento.forma_pagamento_orcamento %}✓{% else %}○{% endif %} Forma de pagamento</p>
@@ -75,9 +78,8 @@
         <p class="{% if orcamento.status in ['Enviado','Aguardando aprovação'] or orcamento.aprovado_em %}feito{% endif %}">{% if orcamento.status in ['Enviado','Aguardando aprovação'] or orcamento.aprovado_em %}✓{% else %}○{% endif %} Comunicar orçamento ao cliente</p>
         <p class="{% if orcamento.aprovado_em %}feito{% endif %}">{% if orcamento.aprovado_em %}✓{% else %}○{% endif %} Registrar aceite do cliente</p>
       {% elif etapa_atual == 4 %}
-        <p class="{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}feito{% endif %}">{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}✓{% else %}○{% endif %} Registrar pagamento</p>
-        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} Informar data prometida</p>
-        <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} Comunicar prazo ao cliente</p>
+        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} Informar previsão de conclusão</p>
+        <p class="feito">✓ Comunicação com o cliente é opcional nesta etapa</p>
       {% elif etapa_atual == 5 %}
         <p class="{% if m.diagnostico %}feito{% endif %}">{% if m.diagnostico %}✓{% else %}○{% endif %} Preencher diagnóstico final</p>
         <p class="{% if not m.servico_pausado_em %}feito{% endif %}">{% if not m.servico_pausado_em %}✓{% else %}○{% endif %} Resolver eventual pendência de compra</p>
@@ -97,19 +99,9 @@
       <div><p class="tag">Etapa 1</p><h2>Equipamento e entrada</h2></div>
       {% if not m.recebido_em %}
       <form method="post" action="/organiza/manutencoes/{{ m.id }}/receber">
-        <button class="botao primario" type="submit">Confirmar equipamento recebido</button>
+        <button class="botao primario" type="submit">Confirmar entrada do equipamento</button>
       </form>
       {% endif %}
-      {% if m.recebido_em %}<a class="botao whatsapp" target="_blank" rel="noopener" href="{{ whatsapp_url(m.cliente) }}?text={{ ('Olá, '~m.cliente.nome~'!
-
-✅ Recebemos seu equipamento.
-
-Equipamento: '~m.equipamento.tipo~' '~(m.equipamento.modelo or '')~'
-Ordem de serviço: #'~m.id~'
-
-Agora faremos a análise e enviaremos o orçamento para sua aprovação.
-
-Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: atendimento iniciado{% else %}WhatsApp: equipamento recebido{% endif %}</a>{% endif %}
     </div>
     {% if request.query_params.get('erro_equipamento') %}<div class="alerta erro">Selecione um equipamento válido deste cliente.</div>{% endif %}
     {% if request.query_params.get('erro_agendamento') %}<div class="alerta erro">Não foi possível alterar o agendamento. O diagnóstico e as observações podem ser salvos sem mudar a previsão de entrada.</div>{% endif %}
@@ -150,7 +142,12 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
         <label>Cliente<input value="{{ m.cliente.nome }}" disabled></label>
         <label>WhatsApp<input value="{{ m.cliente.telefone|telefone }}" disabled></label>
         <label>Tipo de atendimento<select name="tipo_atendimento" id="tipo-atendimento-editar"><option value="loja" {% if m.tipo_atendimento != 'online' %}selected{% endif %}>Atendimento na loja</option><option value="online" {% if m.tipo_atendimento == 'online' %}selected{% endif %}>Atendimento via WhatsApp / online</option></select></label>
-        <label>{% if m.tipo_atendimento == 'online' %}Data e horário do atendimento{% else %}Previsão para trazer{% endif %}<input type="datetime-local" name="entrega_prevista_em" step="1800" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
+        <div class="info-herdada">
+          <small>{% if m.tipo_atendimento == 'online' %}Horário informado pelo cliente{% else %}Previsão informada pelo cliente{% endif %}</small>
+          <strong>{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%d/%m/%Y às %H:%M') }}{% else %}Não informado{% endif %}</strong>
+          <span>Informação registrada na abertura do chamado.</span>
+          <input type="hidden" name="entrega_prevista_em" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+        </div>
       </div>
       <label>Problema informado<textarea name="defeito" required>{{ m.defeito }}</textarea></label>
       <input type="hidden" name="diagnostico" value="{{ m.diagnostico or '' }}">
@@ -341,93 +338,34 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
   </details>
 
   <details id="etapa-4" class="cartao manutencao-card {% if etapa_atual == 4 %}destaque-etapa{% endif %} {% if etapa_atual < 4 %}etapa-desabilitada{% endif %}" data-etapa="4" {% if etapa_atual == 4 %}open{% endif %}>
-    <summary class="manutencao-etapa-summary"><span><b>Etapa 4</b> · Pagamento e prazo</span><small>{% if etapa_atual == 4 %}Etapa atual{% elif etapa_atual > 4 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
+    <summary class="manutencao-etapa-summary"><span><b>Etapa 4</b> · Prazo do serviço</span><small>{% if etapa_atual == 4 %}Etapa atual{% elif etapa_atual > 4 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
     {% if etapa_atual < 4 %}
-      <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Conclua a etapa anterior para continuar.</p></div>
+      <div class="fluxo-bloqueado"><strong>Etapa bloqueada</strong><p>Conclua o aceite do orçamento para continuar.</p></div>
     {% else %}
-      <div class="manutencao-card-header"><div><p class="tag">Etapa 4</p><h2>Pagamento e prazo</h2></div></div>
-      <div class="proximo-passo">
-        <strong>Próximo passo</strong>
-        <p>Registre o pagamento, informe o prazo e envie a confirmação. O envio abre o WhatsApp e inicia a Etapa 5.</p>
-      </div>
+      <div class="manutencao-card-header"><div><p class="tag">Etapa 4</p><h2>Planejamento do serviço</h2><p class="texto-suave">Defina apenas o prazo operacional. Pagamentos ficam fora do fluxo e podem ser registrados a qualquer momento.</p></div></div>
 
-      <form class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/salvar">
-        <h3>Pagamento e prazo</h3>
-        <p class="texto-suave">Registre um novo pagamento quando necessário e defina a data prometida. Em manutenção sem cobrança, confirme R$ 0,00; esse registro fica somente no Organiza e não é enviado ao Connect.</p>
-        <div class="manutencao-grid tres">
-          <label>Data do pagamento<input type="date" name="data" value="{{ m.criado_em.strftime('%Y-%m-%d') }}"></label>
-          <label>Valor do pagamento<input name="valor" {% if totais.aprovado <= 0 %}value="0,00" readonly{% else %}placeholder="Deixe em branco se já houver pagamento registrado"{% endif %}></label>
-          <label>Banco<select name="forma" {% if totais.aprovado <= 0 %}disabled{% endif %}><option value="">{% if totais.aprovado <= 0 %}Sem cobrança{% else %}Selecione{% endif %}</option><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option></select></label>
-        </div>
-        <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ m.equipamento|rotulo_maquina }} - {{ m.cliente.nome }} - nome do comprovante (opcional)"></label>
+      <form id="form-etapa-4" class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/salvar">
+        <h3>Previsão de conclusão</h3>
         <label>Data prometida para conclusão
           <input type="date" name="prazo" required value="{% if m.prazo %}{{ m.prazo[6:10] }}-{{ m.prazo[3:5] }}-{{ m.prazo[0:2] }}{% endif %}">
         </label>
-        <div class="barra-acoes-etapa">
-          <button class="botao primario" type="submit">Salvar</button>
+        <div class="painel-acoes-interno">
+          <div><strong>Ações desta etapa</strong><small>Salve primeiro. Abaixo você verá exatamente o que ainda falta.</small></div>
+          <div class="painel-acoes-botoes">
+            <button class="botao primario" type="submit">Salvar</button>
+            {% if m.prazo %}<a class="botao whatsapp" target="_blank" href="/organiza/manutencoes/{{ m.id }}/confirmar-prazo-whatsapp">Comunicar prazo</a>{% else %}<button class="botao" disabled>Comunicar prazo</button>{% endif %}
+            <form method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/avancar">
+              <button class="botao primario" type="submit" {% if not m.prazo %}disabled{% endif %}>Próxima etapa</button>
+            </form>
+          </div>
         </div>
       </form>
 
-      <div class="manutencao-subcard">
-        <h3>Resumo financeiro</h3>
-        <div class="manutencao-grid tres">
-          <div><small>Total aprovado</small><strong>{{ totais.aprovado|moeda }}</strong></div>
-          <div><small>Total recebido</small><strong>{{ totais.recebido|moeda }}</strong></div>
-          <div><small>Falta receber</small><strong>{{ totais.falta|moeda }}</strong></div>
-        </div>
-
-        <h3>Pagamentos registrados</h3>
-        {% if orcamento.pagamentos %}
-          <div class="lista-execucao-aprovada">
-            {% for pagamento in orcamento.pagamentos|sort(attribute='data') %}
-              <details class="linha-item cliente" style="display:block;padding:10px 12px">
-                <summary style="display:flex;justify-content:space-between;gap:12px;cursor:pointer;align-items:center">
-                  <span>
-                    {{ pagamento.data.strftime('%d/%m/%Y') if pagamento.data and pagamento.data.strftime is defined else (pagamento.data or '-') }}
-                    · {{ pagamento.forma or pagamento.banco or 'Banco não informado' }}
-                    {% if pagamento.observacao %} · {{ pagamento.observacao }}{% endif %}
-                  </span>
-                  <strong>{{ pagamento.valor|moeda }} · Editar</strong>
-                </summary>
-                <form class="formulario" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamentos/{{ pagamento.id }}/editar" style="margin-top:12px">
-                  <div class="manutencao-grid tres">
-                    <label>Data<input type="date" name="data" required value="{{ pagamento.data.isoformat() if pagamento.data else '' }}"></label>
-                    <label>Valor<input name="valor" required value="{{ '%.2f'|format(pagamento.valor or 0) }}"></label>
-                    <label>Banco
-                      <select name="forma">
-                        {% for forma in ['PIX','Dinheiro','Cartão','Transferência','Outro'] %}
-                          <option value="{{ forma }}" {% if pagamento.forma == forma %}selected{% endif %}>{{ forma }}</option>
-                        {% endfor %}
-                      </select>
-                    </label>
-                  </div>
-                  <label>Obs. / nome do comprovante<input name="observacao" value="{{ pagamento.observacao or '' }}"></label>
-                  <button class="botao pequeno" type="submit">Salvar alterações</button>
-                </form>
-              </details>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="texto-suave">Nenhum pagamento registrado.</p>
-        {% endif %}
-      </div>
-
-      <div class="fluxo-checklist">
-        <strong>Para avançar para a Etapa 5:</strong>
-        <p class="{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}feito{% endif %}">{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}✓{% else %}○{% endif %} 1. {% if totais.aprovado <= 0 %}Sem cobrança confirmado (R$ 0,00){% else %}Pagamento registrado{% endif %}</p>
-        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} 2. Data prometida informada</p>
-        <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} 3. Cliente comunicado no WhatsApp</p>
-      </div>
-
-      <div class="barra-acoes-etapa padrao-etapa">
-        {% if (totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos)) and m.prazo %}
-          <a class="botao whatsapp" target="_blank" href="/organiza/manutencoes/{{ m.id }}/confirmar-prazo-whatsapp">WhatsApp: comunicar cliente</a>
-        {% else %}
-          <button class="botao whatsapp" disabled title="Salve pagamento e data prometida primeiro.">WhatsApp: comunicar cliente</button>
-        {% endif %}
-        <form method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-4/avancar">
-          <button class="botao primario" type="submit">Avançar para execução →</button>
-        </form>
+      <div class="painel-falta-inline">
+        <strong>O que falta para avançar?</strong>
+        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} Informar e salvar a previsão de conclusão</p>
+        <p class="feito">✓ Comunicar o prazo é opcional, use somente quando fizer sentido</p>
+        <small>Pagamento não faz parte desta validação e nunca bloqueia o avanço.</small>
       </div>
     {% endif %}
   </details>
@@ -435,7 +373,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
   <details id="etapa-5" class="cartao manutencao-card {% if etapa_atual == 5 %}destaque-etapa{% endif %} {% if etapa_atual < 5 %}etapa-desabilitada{% endif %}" data-etapa="5" {% if etapa_atual == 5 %}open{% endif %}>
     <summary class="manutencao-etapa-summary"><span><b>Etapa 5</b> · Execução do serviço</span><small>{% if etapa_atual == 5 %}Etapa atual{% elif etapa_atual > 5 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
     {% if etapa_atual < 5 %}
-      <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Envie a confirmação da Etapa 4 para iniciar o serviço.</p></div>
+      <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Conclua o planejamento da Etapa 4 para iniciar o serviço.</p></div>
     {% else %}
       <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Execução do serviço</h2></div></div>
       <div class="proximo-passo">
@@ -549,6 +487,30 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
     {% if etapa_atual < 7 %}<div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Confirme a entrega do equipamento para encerrar.</p></div>
     {% else %}<div class="proximo-passo"><strong>✓ Manutenção encerrada</strong><p>O equipamento foi entregue e não há mais pendências.</p></div>{% endif %}
   </details>
+
+
+  <details id="pagamento-independente" class="cartao manutencao-card pagamento-independente">
+    <summary class="manutencao-etapa-summary"><span><b>Financeiro</b> · Registrar pagamento</span><small>Independente do fluxo</small></summary>
+    <div class="manutencao-card-header"><div><h2>Registrar pagamento</h2><p class="texto-suave">Use quando houver pagamento. Este registro não muda a etapa da manutenção e não bloqueia o serviço.</p></div></div>
+    {% if request.query_params.get('erro_pagamento') %}<div class="alerta erro">{{ request.query_params.get('erro_pagamento') }}</div>{% endif %}
+    {% if request.query_params.get('pagamento_salvo') %}<div class="alerta sucesso">Pagamento registrado com sucesso.</div>{% endif %}
+    {% if orcamento %}
+    <div class="resumo-financeiro">
+      <div><small>Total aprovado</small><strong>{{ totais.aprovado|moeda }}</strong></div>
+      <div><small>Recebido</small><strong>{{ totais.recebido|moeda }}</strong></div>
+      <div><small>Falta receber</small><strong>{{ totais.falta|moeda }}</strong></div>
+    </div>
+    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento/registrar">
+      <div class="manutencao-grid tres">
+        <label>Data<input type="date" name="data" value="{{ m.criado_em.strftime('%Y-%m-%d') }}" required></label>
+        <label>Valor<input name="valor" placeholder="0,00" required></label>
+        <label>Forma / banco<select name="forma" required><option value="">Selecione</option><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select></label>
+      </div>
+      <label>Observação / comprovante<input name="observacao" placeholder="Opcional"></label>
+      <button class="botao primario" type="submit">Registrar pagamento</button>
+    </form>
+    {% else %}<p class="texto-suave">O pagamento poderá ser registrado depois que existir um orçamento.</p>{% endif %}
+  </details>
 </section>
 
 
@@ -594,6 +556,16 @@ button[disabled]{opacity:.45;cursor:not-allowed}
   .equipamento-alteracao-grid{grid-template-columns:1fr}
   .equipamento-alteracao-acao .botao{width:100%}
 }
+
+.manutencao-topo-acoes{display:grid!important;grid-template-columns:minmax(190px,1fr) minmax(210px,1fr) auto;align-items:stretch!important;gap:10px!important}
+.topo-status-card,.topo-pagamento-card{border:1px solid #cfd9e8;border-radius:12px;padding:12px 14px;background:#fff;display:flex;flex-direction:column;gap:4px;text-decoration:none;color:inherit;min-width:190px}
+.topo-status-card small,.topo-pagamento-card small{font-size:.72rem;font-weight:800}.topo-status-card strong{color:#15803d}.topo-pagamento-card{border-color:#86d5a0;background:#f5fff8}.topo-pagamento-card strong{color:#15803d}.topo-status-card span,.topo-pagamento-card span{font-size:.8rem;color:#64748b}
+.topo-mais-acoes{position:relative;align-self:center}.topo-mais-acoes summary{cursor:pointer;font-weight:700}.topo-mais-acoes>div{position:absolute;right:0;z-index:20;min-width:220px;background:white;border:1px solid #dbe3ef;border-radius:12px;padding:10px;box-shadow:0 12px 30px #0002;display:grid;gap:6px}
+.info-herdada{border:1px solid #cfe0ff;border-radius:12px;background:#f7fbff;padding:11px 13px;display:flex;flex-direction:column;gap:4px}.info-herdada small{font-weight:800;color:#2563eb}.info-herdada span{font-size:.8rem;color:#64748b}
+.painel-acao-etapa{display:grid;grid-template-columns:minmax(0,1fr);box-shadow:0 6px 18px #0f172a0d}.painel-regra{background:#f8fafc;padding:10px 12px!important;border-radius:10px}.painel-pendencias p{background:#fff!important;border-color:#e2e8f0!important}.painel-pendencias p:not(.feito){border-color:#fecaca!important;background:#fff7f7!important}.painel-pendencias p.feito{background:#f0fdf4!important}
+.painel-acoes-interno{margin-top:16px;border:1px solid #cfe0ff;border-radius:14px;padding:14px;display:flex;justify-content:space-between;gap:14px;align-items:center;background:#fbfdff}.painel-acoes-interno>div:first-child{display:flex;flex-direction:column;gap:4px}.painel-acoes-interno small{color:#64748b}.painel-acoes-botoes{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.painel-acoes-botoes form{margin:0}.painel-falta-inline{margin-top:12px;border:1px solid #fecaca;border-radius:14px;padding:14px;background:#fffafa}.painel-falta-inline p{margin:7px 0}.painel-falta-inline .feito{color:#15803d}.pagamento-independente{margin-top:20px;border-color:#86d5a0!important}
+.manutencao-card{overflow:hidden}.manutencao-card>.manutencao-card-header{margin-top:0}.manutencao-card[open]{padding-bottom:18px}.manutencao-card[open]>*:not(summary){margin-left:18px;margin-right:18px}.manutencao-card[open]>.manutencao-card-header{padding-top:14px}
+@media(max-width:900px){.manutencao-topo-acoes{grid-template-columns:1fr!important}.painel-acoes-interno{flex-direction:column;align-items:stretch}.painel-acoes-botoes>*{flex:1}.topo-mais-acoes>div{position:static}}
 </style>
 <script>
 document.querySelectorAll('.manutencao-etapas a').forEach(link=>{

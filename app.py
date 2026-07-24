@@ -451,12 +451,10 @@ def datetime_form(valor: str):
 def etapa_manutencao(m):
     """Fonte única de verdade para a etapa operacional.
 
-    Um equipamento só entra em execução depois de:
-    1) ter sido recebido/iniciado;
-    2) ter orçamento aprovado;
-    3) possuir pagamento registrado;
-    4) possuir prazo;
-    5) ter a confirmação de prazo enviada.
+    O pagamento é independente do fluxo da manutenção: pode ocorrer antes,
+    durante, no final ou nem existir. Para entrar em execução é necessário
+    apenas recebimento, orçamento aprovado, prazo operacional e, quando
+    aplicável, a comunicação desse prazo ao cliente.
     """
     status = (m.status or "").strip()
     if status in {"Encerrada", "Cancelada"} or m.entregue_em:
@@ -476,8 +474,7 @@ def etapa_manutencao(m):
         return 1
 
     if aprovado:
-        recebido_valor = sum(float(p.valor or 0) for p in o.pagamentos) if o else 0
-        pronto_execucao = bool(recebido_valor > 0 and (m.prazo or "").strip() and m.confirmacao_prazo_em)
+        pronto_execucao = bool((m.prazo or "").strip())
         if pronto_execucao:
             return 5
         return 4
@@ -490,7 +487,7 @@ ETAPAS_MANUTENCAO = {
     1: {"rotulo": "Aguardando equipamento", "titulo": "Entrada", "classe": "status-cliente", "responsavel": "Cliente"},
     2: {"rotulo": "Orçamento pendente", "titulo": "Orçamento", "classe": "status-equipe", "responsavel": "Equipe"},
     3: {"rotulo": "Aguardando aceite", "titulo": "Aceite", "classe": "status-cliente", "responsavel": "Cliente"},
-    4: {"rotulo": "Pagamento e prazo", "titulo": "Pagamento e prazo", "classe": "status-cliente", "responsavel": "Cliente"},
+    4: {"rotulo": "Planejamento do serviço", "titulo": "Prazo do serviço", "classe": "status-equipe", "responsavel": "Equipe"},
     5: {"rotulo": "Execução do serviço", "titulo": "Execução do serviço", "classe": "status-equipe", "responsavel": "Equipe"},
     6: {"rotulo": "Aguardando retirada", "titulo": "Aguardando retirada", "classe": "status-cliente", "responsavel": "Cliente"},
     7: {"rotulo": "Encerrado", "titulo": "Encerrado", "classe": "status-finalizado", "responsavel": "Finalizado"},
@@ -2653,6 +2650,38 @@ async def manutencao_pagamento_editar(
 
 
 
+@app.post("/organiza/manutencoes/{manutencao_id}/pagamento/registrar")
+async def manutencao_pagamento_registrar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Registra pagamento sem alterar ou bloquear a etapa operacional."""
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    if not o:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_pagamento=Orçamento ainda não disponível#pagamento-independente", status_code=303)
+    form = dict(await request.form())
+    valor = moeda_num((form.get("valor") or "").strip())
+    data_pag = data_form(form.get("data") or "") or date.today()
+    forma = (form.get("forma") or "").strip()
+    if valor <= 0 or not forma:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_pagamento=Informe valor e forma de pagamento#pagamento-independente", status_code=303)
+    totais = totais_orcamento(o)
+    falta = float(totais.get("falta", 0) or 0)
+    if valor > falta + 0.01:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_pagamento=O pagamento não pode ser maior que o saldo a receber#pagamento-independente", status_code=303)
+    nome_comprovante = (form.get("observacao") or "").strip()
+    prefixo = _obs_pagamento_padrao(m.equipamento, m.cliente)
+    observacao = (nome_comprovante if nome_comprovante.startswith(prefixo) else _obs_pagamento_padrao(m.equipamento, m.cliente, nome_comprovante)) or None
+    db.add(Pagamento(orcamento_id=o.id, data=data_pag, valor=round(valor, 2), forma=forma, banco=forma, observacao=observacao))
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?pagamento_salvo=1#pagamento-independente", status_code=303)
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/etapa-4/salvar")
 async def manutencao_etapa4_salvar(
     manutencao_id: int,
@@ -2684,8 +2713,6 @@ async def manutencao_etapa4_salvar(
     erros = []
     if not prazo_data:
         erros.append("Informe uma data válida para o prazo prometido.")
-    if not manutencao_sem_cobranca and recebido_atual <= 0 and valor <= 0:
-        erros.append("Registre ao menos um pagamento antes de avançar.")
     if valor < 0:
         erros.append("O valor do pagamento é inválido.")
 
@@ -2714,30 +2741,7 @@ async def manutencao_etapa4_salvar(
             banco=banco,
             observacao=observacao,
         ))
-    elif manutencao_sem_cobranca:
-        # Registra a conclusão financeira de R$ 0,00 apenas no Organiza.
-        # O IntegracaoConect correspondente já nasce ignorado, portanto nunca
-        # será enviado para a Central Financeira/Connect.
-        marcador = "SEM COBRANÇA - R$ 0,00"
-        pagamento_zero = next((p for p in o.pagamentos if abs(float(p.valor or 0)) < 0.009 and marcador in (p.observacao or "")), None)
-        if not pagamento_zero:
-            pagamento_zero = Pagamento(
-                orcamento_id=o.id,
-                data=data_form(form.get("data") or "") or date.today(),
-                valor=0.0,
-                forma=None,
-                banco=None,
-                observacao=f"{_obs_pagamento_padrao(m.equipamento, m.cliente)} - {marcador}",
-            )
-            db.add(pagamento_zero)
-            db.flush()
-            db.add(IntegracaoConect(
-                origem="manutencao",
-                registro_id=pagamento_zero.id,
-                id_externo=f"ORGANIZA-MANUTENCAO-PAG-{pagamento_zero.id}",
-                ignorado=1,
-                resposta="Manutenção sem cobrança; pagamento zero não deve ser enviado ao Connect.",
-            ))
+
 
     m.prazo = prazo_data.strftime("%d/%m/%Y")
     db.commit()
@@ -2757,23 +2761,9 @@ def manutencao_etapa4_avancar(
     if not m:
         raise HTTPException(404)
     o = _orcamento_atual(m)
-    recebido = sum(float(p.valor or 0) for p in o.pagamentos) if o else 0
-    totais = totais_orcamento(o) if o else {}
-    total_aprovado = float(totais.get("aprovado", 0) or 0)
-    manutencao_sem_cobranca = total_aprovado <= 0.009
-    pagamento_zero_registrado = bool(o and any(
-        abs(float(p.valor or 0)) < 0.009 and "SEM COBRANÇA" in (p.observacao or "")
-        for p in o.pagamentos
-    ))
     erros = []
-    if not manutencao_sem_cobranca and recebido <= 0:
-        erros.append("Registre o pagamento.")
-    if manutencao_sem_cobranca and not pagamento_zero_registrado:
-        erros.append("Confirme o pagamento R$ 0,00 para registrar a manutenção sem cobrança.")
     if not m.prazo:
         erros.append("Informe o prazo prometido.")
-    if not m.confirmacao_prazo_em:
-        erros.append("Envie a confirmação ao cliente pelo WhatsApp.")
     if erros:
         return RedirectResponse(
             f"/organiza/manutencoes/{manutencao_id}?erro_etapa4={quote_plus(' '.join(erros))}#etapa-4",
@@ -2802,18 +2792,17 @@ def confirmar_prazo_whatsapp(manutencao_id: int, usuario: Usuario = Depends(usua
     if not m:
         raise HTTPException(404)
     o = _orcamento_atual(m)
-    recebido = sum(p.valor for p in o.pagamentos) if o else 0
-    if not o or recebido <= 0 or not m.prazo:
-        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_prazo", status_code=303)
+    if not o or not m.prazo:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=prazo", status_code=303)
     m.confirmacao_prazo_em = datetime.now()
     db.commit()
     mensagem = (
         f"Olá, {m.cliente.nome}!\n\n"
-        "✅ Pagamento e prazo confirmados.\n\n"
+        "✅ Prazo do serviço confirmado.\n\n"
         f"Equipamento: {descricao_equipamento(m.equipamento)}\n"
         f"Código técnico: {codigo_tecnico(m.equipamento)}\n"
         f"Prazo previsto: {m.prazo}\n\n"
-        "Seu pagamento e o prazo foram registrados. Assim que avançarmos o serviço para execução, iniciaremos a manutenção.\n\nKaraokê RJ"
+        "O prazo foi registrado. O pagamento é tratado separadamente e não interfere no andamento da manutenção.\n\nKaraokê RJ"
     )
     url = ComunicacaoService.registrar_e_url(db, HistoricoComunicacao, m, usuario, "PRAZO", mensagem)
     return RedirectResponse(url, status_code=303)
