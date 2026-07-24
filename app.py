@@ -2976,12 +2976,36 @@ def manutencao_pronto(manutencao_id: int, usuario: Usuario = Depends(usuario_log
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/retirada")
-async def retirada_agendar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first(); form = dict(await request.form())
-    m.retirada_em = datetime_form(form.get("retirada_em") or "")
-    if m.retirada_em and m.retirada_em.weekday() < 5 and time(14,0) <= m.retirada_em.time() <= time(17,0): m.status = "Retirada agendada"
-    else: m.retirada_em = None
-    db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+async def retirada_agendar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Agenda a retirada e mantém a manutenção na Etapa 6.
+
+    O lançamento interno não deve apagar silenciosamente horários fora da janela
+    pública de retirada. Depois de salvo, o agendamento libera a ação Entregar.
+    """
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    if not m:
+        raise HTTPException(404)
+
+    form = dict(await request.form())
+    retirada_em = datetime_form(form.get("retirada_em") or "")
+    if not retirada_em:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_retirada=Informe uma data e hora válidas.#etapa-6",
+            status_code=303,
+        )
+
+    m.retirada_em = retirada_em
+    m.status = "Retirada agendada"
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/manutencoes/{manutencao_id}?retirada_salva=1#etapa-6",
+        status_code=303,
+    )
 
 
 
@@ -3151,11 +3175,38 @@ def pagamento_excluir(manutencao_id: int, pagamento_id: int, usuario: Usuario = 
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 @app.post("/organiza/manutencoes/{manutencao_id}/encerrar")
-def manutencao_encerrar(manutencao_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    m=db.query(Manutencao).filter(Manutencao.id==manutencao_id).first()
-    if not m or not m.retirada_em: raise HTTPException(400, "Agende a retirada antes de encerrar")
-    m.entregue_em=datetime.now(); m.status="Encerrada"; db.commit()
-    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+def manutencao_encerrar(
+    manutencao_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Confirma a entrega e encerra todas as pendências operacionais da OS."""
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    if not m.retirada_em:
+        return RedirectResponse(
+            f"/organiza/manutencoes/{manutencao_id}?erro_retirada=Salve a data e hora da retirada antes de entregar.#etapa-6",
+            status_code=303,
+        )
+
+    agora = datetime.now()
+    m.entregue_em = agora
+    m.status = "Encerrada"
+    m.servico_pausado_em = None
+
+    # O equipamento volta imediatamente ao estoque operacional.
+    if m.equipamento:
+        m.equipamento.status = "Ativo"
+
+    # A agenda é derivada da própria manutenção e deixa de exibir a OS assim
+    # que entregue_em/status Encerrada são gravados. Mantemos retirada_em como
+    # histórico do agendamento que levou à entrega.
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/manutencoes/{manutencao_id}?entregue=1#etapa-7",
+        status_code=303,
+    )
 
 
 def _manutencoes_operacao(db: Session):

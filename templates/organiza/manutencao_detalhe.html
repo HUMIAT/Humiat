@@ -469,15 +469,23 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
     {% if etapa_atual < 6 %}
       <div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Conclua e comunique o serviço na Etapa 5.</p></div>
     {% else %}
-      <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Aguardando retirada</h2><p class="texto-suave">O cliente pode usar o link recebido para escolher o horário.</p></div></div>
+      <div class="manutencao-card-header"><div><p class="tag">Etapa 6</p><h2>Aguardando retirada</h2><p class="texto-suave">Salve a data e hora combinadas. Depois disso, o botão Entregar será liberado.</p></div></div>
+      {% if request.query_params.get('erro_retirada') %}<div class="alerta erro">{{ request.query_params.get('erro_retirada') }}</div>{% endif %}
+      {% if request.query_params.get('retirada_salva') %}<div class="alerta sucesso">Retirada salva na agenda. A entrega já pode ser confirmada.</div>{% endif %}
       {% if orcamento %}<a class="botao" target="_blank" href="/garantia-servico/{{ orcamento.token }}.pdf">Abrir garantia de 30 dias</a>{% endif %}
       <form class="formulario manutencao-retirada" method="post" action="/organiza/manutencoes/{{ m.id }}/retirada">
-        <label>Data e hora<input type="datetime-local" name="retirada_em" value="{% if m.retirada_em %}{{ m.retirada_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
+        <label>Data e hora<input type="datetime-local" name="retirada_em" value="{% if m.retirada_em %}{{ m.retirada_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" required></label>
         <button class="botao primario" type="submit">Salvar na agenda</button>
       </form>
+      <div class="fluxo-checklist">
+        <strong>Para entregar:</strong>
+        <p class="{% if m.retirada_em %}feito{% endif %}">{% if m.retirada_em %}✓{% else %}○{% endif %} Salvar a data e hora da retirada na agenda</p>
+      </div>
       {% if m.retirada_em %}
         <p><strong>Agendado:</strong> {{ m.retirada_em.strftime('%d/%m/%Y às %H:%M') }}</p>
-        <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar"><button class="botao primario" type="submit">Equipamento entregue — encerrar</button></form>
+        <form method="post" action="/organiza/manutencoes/{{ m.id }}/encerrar"><button class="botao primario" type="submit">Entregar</button></form>
+      {% else %}
+        <button class="botao primario" type="button" disabled title="Salve primeiro a data e hora da retirada.">Entregar</button>
       {% endif %}
     {% endif %}
   </details>
@@ -485,7 +493,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
   <details id="etapa-7" class="cartao manutencao-card {% if etapa_atual == 7 %}destaque-etapa{% endif %} {% if etapa_atual < 7 %}etapa-desabilitada{% endif %}" data-etapa="7" {% if etapa_atual == 7 %}open{% endif %}>
     <summary class="manutencao-etapa-summary"><span><b>Etapa 7</b> · Encerrado</span><small>{% if etapa_atual == 7 %}Concluída{% else %}Bloqueada{% endif %}</small></summary>
     {% if etapa_atual < 7 %}<div class="fluxo-bloqueado"><strong>🔒 Etapa bloqueada</strong><p>Confirme a entrega do equipamento para encerrar.</p></div>
-    {% else %}<div class="proximo-passo"><strong>✓ Manutenção encerrada</strong><p>O equipamento foi entregue e não há mais pendências.</p></div>{% endif %}
+    {% else %}<div class="proximo-passo"><strong>✓ Manutenção encerrada</strong><p>Equipamento entregue, status retornado para Ativo e a OS removida das filas e da agenda.</p></div>{% endif %}
   </details>
 
 
