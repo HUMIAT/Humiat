@@ -5,9 +5,12 @@
     <div>
       <p class="tag">CENTRAL OPERACIONAL</p>
       <h1>Manutenções em um só lugar</h1>
-      <p class="texto-suave">Primeiro filtre a etapa. Depois escolha a ação e selecione um ou vários chamados.</p>
+      <p class="texto-suave">Trabalhe as manutenções por etapa. Pagamentos são tratados separadamente na Central Financeira.</p>
     </div>
-    <a class="botao primario" href="/organiza/manutencoes/nova">+ Nova manutenção</a>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <a class="botao" href="/organiza/manutencoes/nova">+ Nova manutenção</a>
+      <a class="botao primario" href="/organiza/financeiro/conect">Central Financeira</a>
+    </div>
   </div>
 
   <section class="central-resumo">
@@ -137,28 +140,28 @@
       mais:[['Editar orçamento','editar',2],['Visualizar PDF','pdf'],['Finalizar','finalizar'],['Excluir','excluir']]
     },
     pagamentos: {
-      principal:['Registrar pagamento e prazo','editar',4],
-      comunicar:[['Reenviar orçamento','orcamento'],['Enviar cobrança','cobranca']],
-      mais:[['Abrir / editar','editar',4],['Finalizar','finalizar']]
+      principal:['Definir prazo do serviço','editar',4],
+      comunicar:[['Reenviar orçamento','orcamento']],
+      mais:[['Abrir / editar prazo','editar',4],['Finalizar','finalizar']]
     },
     execucao: {
       principal:['Concluir serviço','editar',5],
-      comunicar:[['Reenviar orçamento','orcamento'],['Reenviar cobrança','cobranca'],['Comunicar previsão','previsao']],
+      comunicar:[['Reenviar orçamento','orcamento'],['Comunicar previsão','previsao']],
       mais:[['Editar diagnóstico / itens','editar',5],['Relatório PDF','pdf'],['Finalizar','finalizar']]
     },
     pausados: {
       principal:['Confirmar peça / voltar à execução','editar',5],
-      comunicar:[['Reenviar orçamento','orcamento'],['Reenviar cobrança','cobranca'],['Comunicar previsão','previsao']],
+      comunicar:[['Reenviar orçamento','orcamento'],['Comunicar previsão','previsao']],
       mais:[['Abrir / editar','editar',5],['Relatório PDF','pdf'],['Finalizar','finalizar']]
     },
     prontos: {
       principal:['Comunicar equipamento pronto','comunicar','pronto'],
-      comunicar:[['Reenviar orçamento','orcamento'],['Reenviar cobrança','cobranca'],['Recomunicar pronto','pronto']],
+      comunicar:[['Reenviar orçamento','orcamento'],['Recomunicar pronto','pronto']],
       mais:[['Relatório PDF','pdf'],['Garantia','garantia'],['Abrir / editar','editar',6],['Finalizar','finalizar']]
     },
     retiradas: {
       principal:['Confirmar retirada','editar',7],
-      comunicar:[['Reenviar orçamento','orcamento'],['Reenviar cobrança','cobranca'],['Recomunicar pronto','pronto']],
+      comunicar:[['Reenviar orçamento','orcamento'],['Recomunicar pronto','pronto']],
       mais:[['Reagendar retirada','editar',7],['Relatório PDF','pdf'],['Garantia','garantia'],['Finalizar','finalizar']]
     }
   }[etapa];

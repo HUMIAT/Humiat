@@ -718,7 +718,7 @@ def painel(
         {"numero": "1", "nome": "Entrada", "chaves": ["atendimento"], "filtro": "atendimento"},
         {"numero": "2", "nome": "Orçamento", "chaves": ["orcamentos", "comunicar_orcamentos"], "filtro": "orcamentos"},
         {"numero": "3", "nome": "Aceite", "chaves": ["aprovacoes"], "filtro": "aprovacoes"},
-        {"numero": "4", "nome": "Pagamento", "chaves": ["pagamentos"], "filtro": "pagamentos"},
+        {"numero": "4", "nome": "Prazo", "chaves": ["pagamentos"], "filtro": "pagamentos"},
         {"numero": "5", "nome": "Execução", "chaves": ["execucao", "pausados", "prontos"], "filtro": "execucao"},
         {"numero": "6", "nome": "Retirada", "chaves": ["retiradas"], "filtro": "retiradas"},
     ]
@@ -746,7 +746,7 @@ def central_operacional(
         "orcamentos": ("2", "Orçamento", "Fazer orçamento"),
         "comunicar_orcamentos": ("3", "Comunicar", "Comunicar orçamento"),
         "aprovacoes": ("4", "Aceite", "Aguardando aprovação"),
-        "pagamentos": ("5", "Pagamento", "Pagamento, prazo e confirmação"),
+        "pagamentos": ("5", "Prazo", "Definir prazo do serviço"),
         "execucao": ("6", "Execução", "Em execução"),
         "pausados": ("7", "Peças", "Aguardando item / peça"),
         "prontos": ("8", "Pronto", "Comunicar equipamento pronto"),
