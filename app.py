@@ -2996,6 +2996,24 @@ async def retirada_agendar(manutencao_id: int, request: Request, usuario: Usuari
 
 
 
+@app.post("/organiza/manutencoes/{manutencao_id}/diagnostico")
+async def manutencao_diagnostico_salvar(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Salva o diagnóstico final dentro da etapa de execução, sem alterar dados da entrada."""
+    m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    if not m:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    m.diagnostico = (form.get("diagnostico") or "").strip() or None
+    m.observacao = (form.get("observacao") or m.observacao or "").strip() or None
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?diagnostico_salvo=1#etapa-5", status_code=303)
+
+
 @app.post("/organiza/manutencoes/{manutencao_id}/editar")
 async def manutencao_editar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = db.query(Manutencao).filter(Manutencao.id == manutencao_id).first()

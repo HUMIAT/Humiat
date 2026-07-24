@@ -56,6 +56,41 @@
     {% endfor %}
   </nav>
 
+  {% if etapa_atual < 7 %}
+  <section class="painel-acao-etapa" aria-label="Ações da etapa atual">
+    <div class="painel-acao-cabecalho">
+      <div><small>ETAPA ATUAL</small><h2>{{ etapa_atual }}. {{ ETAPAS_MANUTENCAO[etapa_atual].titulo }}</h2></div>
+      <span class="pill {{ ETAPAS_MANUTENCAO[etapa_atual].classe }}">{{ ETAPAS_MANUTENCAO[etapa_atual].responsavel }}</span>
+    </div>
+    <div class="painel-pendencias">
+      <strong>O que falta nesta etapa</strong>
+      {% if etapa_atual == 1 %}
+        <p class="{% if m.defeito %}feito{% endif %}">{% if m.defeito %}✓{% else %}○{% endif %} Problema informado</p>
+        <p class="{% if m.recebido_em %}feito{% endif %}">{% if m.recebido_em %}✓{% else %}○{% endif %} Confirmar recebimento/início do atendimento</p>
+      {% elif etapa_atual == 2 %}
+        <p class="{% if orcamento.valor_manutencao and orcamento.valor_manutencao > 0 %}feito{% endif %}">{% if orcamento.valor_manutencao and orcamento.valor_manutencao > 0 %}✓{% else %}○{% endif %} Valor da manutenção</p>
+        <p class="{% if orcamento.forma_pagamento_orcamento %}feito{% endif %}">{% if orcamento.forma_pagamento_orcamento %}✓{% else %}○{% endif %} Forma de pagamento</p>
+        <p class="{% if orcamento.prazo_dias_uteis %}feito{% endif %}">{% if orcamento.prazo_dias_uteis %}✓{% else %}○{% endif %} Prazo em dias úteis</p>
+      {% elif etapa_atual == 3 %}
+        <p class="{% if orcamento.status in ['Enviado','Aguardando aprovação'] or orcamento.aprovado_em %}feito{% endif %}">{% if orcamento.status in ['Enviado','Aguardando aprovação'] or orcamento.aprovado_em %}✓{% else %}○{% endif %} Comunicar orçamento ao cliente</p>
+        <p class="{% if orcamento.aprovado_em %}feito{% endif %}">{% if orcamento.aprovado_em %}✓{% else %}○{% endif %} Registrar aceite do cliente</p>
+      {% elif etapa_atual == 4 %}
+        <p class="{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}feito{% endif %}">{% if totais.recebido > 0 or (totais.aprovado <= 0 and orcamento.pagamentos) %}✓{% else %}○{% endif %} Registrar pagamento</p>
+        <p class="{% if m.prazo %}feito{% endif %}">{% if m.prazo %}✓{% else %}○{% endif %} Informar data prometida</p>
+        <p class="{% if m.confirmacao_prazo_em %}feito{% endif %}">{% if m.confirmacao_prazo_em %}✓{% else %}○{% endif %} Comunicar prazo ao cliente</p>
+      {% elif etapa_atual == 5 %}
+        <p class="{% if m.diagnostico %}feito{% endif %}">{% if m.diagnostico %}✓{% else %}○{% endif %} Preencher diagnóstico final</p>
+        <p class="{% if not m.servico_pausado_em %}feito{% endif %}">{% if not m.servico_pausado_em %}✓{% else %}○{% endif %} Resolver eventual pendência de compra</p>
+        <p class="{% if m.conclusao_comunicada_em %}feito{% endif %}">{% if m.conclusao_comunicada_em %}✓{% else %}○{% endif %} Comunicar conclusão ao cliente</p>
+      {% elif etapa_atual == 6 %}
+        <p class="{% if m.retirada_em %}feito{% endif %}">{% if m.retirada_em %}✓{% else %}○{% endif %} Agendar retirada</p>
+        <p>○ Confirmar entrega para encerrar</p>
+      {% endif %}
+    </div>
+    <p class="painel-regra">Nesta etapa, use somente as ações necessárias: <strong>Salvar/Editar</strong>, <strong>Próxima etapa</strong> e <strong>Comunicar</strong> quando houver comunicação com o cliente.</p>
+  </section>
+  {% endif %}
+
   <details id="etapa-1" class="cartao manutencao-card {% if etapa_atual == 1 %}destaque-etapa{% endif %}" data-etapa="1" {% if etapa_atual == 1 %}open{% endif %}>
     <summary class="manutencao-etapa-summary"><span><b>Etapa 1</b> · Equipamento e entrada</span><small>{% if etapa_atual == 1 %}Etapa atual{% else %}Consultar{% endif %}</small></summary>
     <div class="manutencao-card-header">
@@ -118,7 +153,7 @@ Karaokê RJ')|urlencode }}">{% if m.tipo_atendimento == 'online' %}WhatsApp: ate
         <label>{% if m.tipo_atendimento == 'online' %}Data e horário do atendimento{% else %}Previsão para trazer{% endif %}<input type="datetime-local" name="entrega_prevista_em" step="1800" value="{% if m.entrega_prevista_em %}{{ m.entrega_prevista_em.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"></label>
       </div>
       <label>Problema informado<textarea name="defeito" required>{{ m.defeito }}</textarea></label>
-      <label>Diagnóstico<textarea name="diagnostico">{{ m.diagnostico or '' }}</textarea></label>
+      <input type="hidden" name="diagnostico" value="{{ m.diagnostico or '' }}">
       <label>Observação interna<textarea name="observacao">{{ m.observacao or '' }}</textarea></label>
       <div class="manutencao-form-acoes"><button class="botao primario" type="submit">Salvar alterações</button></div>
     </form>
@@ -405,8 +440,18 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
       <div class="manutencao-card-header"><div><p class="tag">Etapa 5</p><h2>Execução do serviço</h2></div></div>
       <div class="proximo-passo">
         <strong>Próximo passo</strong>
-        <p>Execute somente os itens autorizados abaixo. Caso precise comprar algo, pause e comunique o cliente. Quando terminar, preencha o diagnóstico final e conclua.</p>
+        <p>Execute somente os itens autorizados abaixo. Caso precise comprar algo, pause e comunique o cliente. Quando terminar, registre o diagnóstico final e conclua.</p>
       </div>
+      {% if request.query_params.get('diagnostico_salvo') %}<div class="alerta sucesso">Diagnóstico final salvo.</div>{% endif %}
+      {% if etapa_atual == 5 %}
+      <form class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/diagnostico">
+        <h3>Diagnóstico final</h3>
+        <p class="texto-suave">Registre aqui o que foi encontrado e o serviço executado. Este campo é obrigatório para concluir.</p>
+        <label>Diagnóstico / solução executada<textarea name="diagnostico" required>{{ m.diagnostico or '' }}</textarea></label>
+        <label>Observação interna<textarea name="observacao">{{ m.observacao or '' }}</textarea></label>
+        <div class="barra-acoes-etapa"><button class="botao primario" type="submit">Salvar</button></div>
+      </form>
+      {% endif %}
 
       {% set itens_aprovados = orcamento.itens|selectattr('aprovado','equalto',1)|list %}
       {% set itens_nao_aprovados = orcamento.itens|selectattr('aprovado','equalto',0)|list %}
@@ -461,7 +506,7 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
 
         <div class="fluxo-checklist">
           <strong>Para passar para a Etapa 6:</strong>
-          <p class="{% if m.diagnostico %}feito{% endif %}">{% if m.diagnostico %}✓{% else %}○{% endif %} 1. Preencher o diagnóstico final na Etapa 1</p>
+          <p class="{% if m.diagnostico %}feito{% endif %}">{% if m.diagnostico %}✓{% else %}○{% endif %} 1. Preencher e salvar o diagnóstico final nesta etapa</p>
           <p class="{% if not m.servico_pausado_em %}feito{% endif %}">{% if not m.servico_pausado_em %}✓{% else %}○{% endif %} 2. Serviço não pode estar pausado</p>
           <p class="{% if m.conclusao_comunicada_em %}feito{% endif %}">{% if m.conclusao_comunicada_em %}✓{% else %}○{% endif %} 3. Comunicar o serviço concluído no WhatsApp</p>
         </div>
@@ -524,6 +569,13 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
 })();
 </script>
 <style>
+.painel-acao-etapa{border:2px solid var(--borda,#d8e0ec);border-radius:16px;padding:18px;margin:18px 0;background:#fff}
+.painel-acao-cabecalho{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:1px solid var(--borda,#e5e7eb);padding-bottom:12px;margin-bottom:12px}
+.painel-acao-cabecalho small{font-weight:800;letter-spacing:.08em}.painel-acao-cabecalho h2{margin:3px 0 0}
+.painel-pendencias{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 14px;padding:4px 0}
+.painel-pendencias>strong{grid-column:1/-1}.painel-pendencias p{margin:0;padding:9px 10px;border-radius:9px;background:#fff7ed;border:1px solid #fed7aa}
+.painel-pendencias p.feito{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+.painel-regra{margin:12px 0 0;padding-top:12px;border-top:1px solid var(--borda,#e5e7eb);font-size:.92rem}
 .manutencao-etapa-summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:18px 20px;font-weight:700}
 .manutencao-etapa-summary small{font-weight:500}
 details.manutencao-card:not([open]){padding:0}
