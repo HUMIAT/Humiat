@@ -828,12 +828,22 @@ def _lokafest_tipo_modelo(eq: Equipamento) -> str | None:
     tipo = tipo_equipamento_padrao(eq.tipo or "")
     modelo = unicodedata.normalize("NFKD", (eq.modelo or "").upper()).encode("ascii", "ignore").decode("ascii")
 
-    if tipo == "JUKEBOX" or "JUKEBOX" in modelo:
-        return "jukebox"
-    if tipo in {"MALETA", "PORTATIL"} or "PORTATIL" in modelo or "MALETA" in modelo:
-        return "portatil"
-    if tipo == "IPHONE" or "IPHONE" in modelo:
+    # O tipo cadastrado é a fonte principal da classificação.
+    # Isso evita que um IPHONE com modelo "JUKEBOX IPHONE..." seja contado como Jukebox.
+    if tipo == "IPHONE":
         return "iphone"
+    if tipo in {"MALETA", "PORTATIL"}:
+        return "portatil"
+    if tipo == "JUKEBOX":
+        return "jukebox"
+
+    # Compatibilidade com cadastros antigos ou sem tipo padronizado.
+    if "IPHONE" in modelo:
+        return "iphone"
+    if "PORTATIL" in modelo or "MALETA" in modelo:
+        return "portatil"
+    if "JUKEBOX" in modelo:
+        return "jukebox"
     return None
 
 
