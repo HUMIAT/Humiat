@@ -3660,3 +3660,7 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 
 /* Ícones padronizados da navegação */
 .nav-icon{display:inline-grid;place-items:center;width:18px;height:18px;flex:0 0 18px}.nav-icon svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.side-nav a,.side-bottom a{position:relative;z-index:2}
+
+/* Identidade oficial do Organiza */
+.organiza-brand-icon{width:34px;height:34px;border-radius:9px;object-fit:cover;box-shadow:0 5px 14px rgba(0,0,0,.25);flex:0 0 auto}
+.login-brand>img{width:48px;height:48px;border-radius:14px;object-fit:cover;box-shadow:0 8px 24px rgba(0,0,0,.28)}
