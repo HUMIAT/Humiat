@@ -3,8 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ titulo or 'Organiza | Karaokê RJ' }}</title>
-  <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+  <title>{{ titulo or 'Organiza' }}</title>
+  <link rel="icon" href="/static/icons/organiza/favicon.ico?v=20260805-1" sizes="any">
+  <link rel="icon" href="/static/icons/organiza/favicon-32.png?v=20260805-1" type="image/png" sizes="32x32">
+  <link rel="icon" href="/static/icons/organiza/favicon-16.png?v=20260805-1" type="image/png" sizes="16x16">
+  <link rel="apple-touch-icon" href="/static/icons/organiza/apple-touch-icon.png?v=20260805-1">
+  <link rel="manifest" href="/static/organiza.webmanifest?v=20260805-1">
+  <meta name="application-name" content="Organiza">
+  <meta name="apple-mobile-web-app-title" content="Organiza">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#15803d">
   <link rel="stylesheet" href="/static/css/estilo.css">
   <link rel="stylesheet" href="/static/css/organiza.css">
 </head>
@@ -70,6 +79,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/organiza-sw.js", { scope: "/organiza" }).catch(() => {});
+  });
+}
 </script>
 </body>
 </html>

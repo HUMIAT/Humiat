@@ -703,6 +703,14 @@ def _contexto_operacao(db: Session):
     }
 
 
+
+@app.get("/organiza-sw.js", include_in_schema=False)
+def organiza_service_worker():
+    resposta = FileResponse("static/organiza-sw.js", media_type="application/javascript")
+    resposta.headers["Service-Worker-Allowed"] = "/organiza"
+    resposta.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resposta
+
 @app.get("/organiza", response_class=HTMLResponse)
 def painel(
     request: Request,
