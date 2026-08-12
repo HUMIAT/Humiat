@@ -27,6 +27,8 @@ from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL, LOKAFEST_API_TOKEN
 from database import Base, SessionLocal, engine, get_db
+from humiat_id import router as humiat_router, seed_humiat_id, humiat_usuario_da_requisicao, TIPO_ADMIN_HUMIAT
+
 from services.comunicacao import (
     ComunicacaoService, PAISES, formatar_telefone as formatar_telefone_internacional,
     normalizar_contato, numero_internacional, telefone_valido as telefone_internacional_valido,
@@ -35,6 +37,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+app.include_router(humiat_router)
 
 PREFIXOS_EQUIPAMENTO = {
     "JUKEBOX": "JUK",
@@ -424,9 +427,19 @@ def usuario_cookie(request: Request) -> Optional[str]:
 def usuario_logado(request: Request, db: Session = Depends(get_db)) -> Usuario:
     nome = usuario_cookie(request)
     usuario = db.query(Usuario).filter(Usuario.nome == nome, Usuario.ativo == 1).first() if nome else None
-    if not usuario:
-        raise HTTPException(status_code=303, headers={"Location": "/area-restrita/login"})
-    return usuario
+    if usuario:
+        return usuario
+
+    # Humiat ID: permite abrir o Organiza sem uma segunda tela de login quando
+    # o usuário Humiat está explicitamente mapeado a um usuário do Organiza.
+    hu = humiat_usuario_da_requisicao(request, db)
+    if hu:
+        legado = (hu.organiza_usuario or (ADMIN_NOME if hu.tipo == TIPO_ADMIN_HUMIAT else "")).strip()
+        if legado:
+            usuario = db.query(Usuario).filter(Usuario.nome == legado, Usuario.ativo == 1).first()
+            if usuario:
+                return usuario
+    raise HTTPException(status_code=303, headers={"Location": "/entrar"})
 
 
 def exigir_admin(usuario: Usuario):
@@ -525,6 +538,7 @@ templates.env.globals["codigo_tecnico"] = codigo_tecnico
 @app.on_event("startup")
 def iniciar_banco():
     Base.metadata.create_all(bind=engine)
+    seed_humiat_id()
     # Migração leve para bancos já existentes (SQLite e PostgreSQL)
     insp = inspect(engine)
     if "assistencias" in insp.get_table_names():
@@ -644,7 +658,9 @@ def saude():
 
 @app.get("/area-restrita/login", response_class=HTMLResponse)
 def login(request: Request, erro: str = ""):
-    return templates.TemplateResponse("organiza/login.html", {"request": request, "erro": erro})
+    # Compatibilidade com favoritos/atalhos antigos. A autenticação oficial é Humiat ID.
+    destino = "/entrar" + (("?erro=" + quote(erro)) if erro else "")
+    return RedirectResponse(destino, status_code=303)
 
 
 @app.post("/area-restrita/login")
@@ -659,7 +675,7 @@ def entrar(usuario: str = Form(...), senha: str = Form(...), db: Session = Depen
 
 @app.get("/area-restrita/sair")
 def sair():
-    resposta = RedirectResponse("/area-restrita/login", status_code=303)
+    resposta = RedirectResponse("/sair", status_code=303)
     resposta.delete_cookie("humiat_sessao")
     return resposta
 
