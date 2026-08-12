@@ -56,3 +56,10 @@ A emissão SSO já está preparada. O receptor de cada produto será implantado 
 - **Área do Cliente** → `/entrar` (Humiat ID).
 - **Área Restrita** → `/area-restrita/login` (login tradicional do Organiza).
 - Os dois logins permanecem independentes nesta fase.
+
+## Fase 1.0.4
+- Remove o campo "Usuário Organiza" do cadastro Humiat ID.
+- Usuários do Organiza continuam independentes e usam o login tradicional do Organiza.
+- Adiciona edição de usuário Humiat: nome, e-mail, perfil, empresa e status.
+- Administrador da Empresa passa a exigir empresa no cadastro e na edição, evitando usuários sem vínculo.
+- Administrador Humiat não precisa de empresa.

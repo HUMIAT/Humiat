@@ -369,14 +369,16 @@ def criar_empresa_humiat(request: Request, nome: str = Form(...), slug: str = Fo
 
 
 @router.post("/admin-humiat/usuarios")
-def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...), tipo: str = Form(TIPO_ADMIN_EMPRESA), empresa_id: str = Form(""), organiza_usuario: str = Form(""), usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db)):
+def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...), tipo: str = Form(TIPO_ADMIN_EMPRESA), empresa_id: str = Form(""), usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db)):
     email = email.strip().lower()
     if db.query(HumiatUsuario).filter(HumiatUsuario.email == email).first():
         return RedirectResponse("/admin-humiat?erro=E-mail já cadastrado", status_code=303)
     tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_ADMIN_EMPRESA} else TIPO_ADMIN_EMPRESA
-    novo = HumiatUsuario(nome=nome.strip(), email=email, senha_hash=gerar_hash_senha_id(senha), tipo=tipo, ativo=1, organiza_usuario=(organiza_usuario.strip() or None))
+    if tipo == TIPO_ADMIN_EMPRESA and not empresa_id.strip().isdigit():
+        return RedirectResponse("/admin-humiat?erro=Selecione a empresa para o Administrador da Empresa", status_code=303)
+    novo = HumiatUsuario(nome=nome.strip(), email=email, senha_hash=gerar_hash_senha_id(senha), tipo=tipo, ativo=1, organiza_usuario=None)
     db.add(novo); db.flush()
-    if tipo == TIPO_ADMIN_EMPRESA and empresa_id.strip().isdigit():
+    if tipo == TIPO_ADMIN_EMPRESA:
         db.add(HumiatUsuarioEmpresa(usuario_id=novo.id, empresa_id=int(empresa_id)))
     _auditar(db, request, "CRIAR_USUARIO", usuario.id, int(empresa_id) if empresa_id.strip().isdigit() else None, email)
     db.commit()
@@ -392,6 +394,49 @@ def alternar_produto(empresa_id: int, produto_id: int, request: Request, usuario
         item = HumiatEmpresaProduto(empresa_id=empresa_id, produto_id=produto_id, ativo=1)
         db.add(item)
     _auditar(db, request, "ALTERAR_PRODUTO_EMPRESA", usuario.id, empresa_id, f"produto={produto_id}; ativo={item.ativo}")
+    db.commit()
+    return RedirectResponse("/admin-humiat", status_code=303)
+
+
+@router.post("/admin-humiat/usuario/{usuario_id}/editar")
+def editar_usuario_humiat(
+    usuario_id: int,
+    request: Request,
+    nome: str = Form(...),
+    email: str = Form(...),
+    tipo: str = Form(TIPO_ADMIN_EMPRESA),
+    empresa_id: str = Form(""),
+    ativo: str = Form("1"),
+    admin: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
+    alvo = db.query(HumiatUsuario).filter(HumiatUsuario.id == usuario_id).first()
+    if not alvo:
+        raise HTTPException(status_code=404)
+
+    email = email.strip().lower()
+    existente = db.query(HumiatUsuario).filter(HumiatUsuario.email == email, HumiatUsuario.id != usuario_id).first()
+    if existente:
+        return RedirectResponse("/admin-humiat?erro=E-mail já utilizado por outro usuário", status_code=303)
+
+    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_ADMIN_EMPRESA} else TIPO_ADMIN_EMPRESA
+    if tipo == TIPO_ADMIN_EMPRESA and not empresa_id.strip().isdigit():
+        return RedirectResponse("/admin-humiat?erro=Administrador da Empresa precisa estar vinculado a uma empresa", status_code=303)
+
+    alvo.nome = nome.strip()
+    alvo.email = email
+    alvo.tipo = tipo
+    alvo.ativo = 1 if ativo == "1" else 0
+    # Campo legado mantido apenas no banco por compatibilidade; não faz parte do Humiat ID.
+    alvo.organiza_usuario = None
+
+    db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario_id).delete(synchronize_session=False)
+    empresa_auditoria = None
+    if tipo == TIPO_ADMIN_EMPRESA:
+        empresa_auditoria = int(empresa_id)
+        db.add(HumiatUsuarioEmpresa(usuario_id=usuario_id, empresa_id=empresa_auditoria))
+
+    _auditar(db, request, "EDITAR_USUARIO", admin.id, empresa_auditoria, f"usuario={alvo.email}; tipo={tipo}; ativo={alvo.ativo}")
     db.commit()
     return RedirectResponse("/admin-humiat", status_code=303)
 
