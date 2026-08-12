@@ -656,6 +656,12 @@ def saude():
     return {"status": "ok", "versao": ORGANIZA_VERSAO}
 
 
+@app.get("/acesso", response_class=HTMLResponse)
+def escolher_acesso(request: Request):
+    """Tela única de escolha entre o Humiat ID e o acesso interno do Organiza."""
+    return templates.TemplateResponse("humiat/acesso.html", {"request": request})
+
+
 @app.get("/area-restrita/login", response_class=HTMLResponse)
 def login(request: Request, erro: str = ""):
     # Login tradicional do Organiza permanece independente do Humiat ID.

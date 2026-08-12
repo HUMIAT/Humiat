@@ -49,3 +49,10 @@ Sem pedir outra senha.
 
 ## Connect e LokaFest
 A emissão SSO já está preparada. O receptor de cada produto será implantado quando atualizarmos o projeto correspondente.
+
+
+## Entrada única do site
+- `/acesso` é a tela aberta pelo botão **Entrar** do site institucional.
+- **Área do Cliente** → `/entrar` (Humiat ID).
+- **Área Restrita** → `/area-restrita/login` (login tradicional do Organiza).
+- Os dois logins permanecem independentes nesta fase.
