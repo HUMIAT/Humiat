@@ -170,8 +170,29 @@ def seed_humiat_id():
         admin_nome = os.getenv("HUMIAT_ADMIN_NOME", ADMIN_NOME).strip() or "Administrador"
         admin = db.query(HumiatUsuario).filter(HumiatUsuario.email == admin_email).first()
         if not admin and admin_senha:
-            db.add(HumiatUsuario(nome=admin_nome, email=admin_email, senha_hash=gerar_hash_senha_id(admin_senha), tipo=TIPO_ADMIN_HUMIAT, ativo=1, organiza_usuario=ADMIN_NOME))
-        elif not admin and not admin_senha:
+            db.add(HumiatUsuario(
+                nome=admin_nome,
+                email=admin_email,
+                senha_hash=gerar_hash_senha_id(admin_senha),
+                tipo=TIPO_ADMIN_HUMIAT,
+                ativo=1,
+                organiza_usuario=ADMIN_NOME,
+            ))
+            print(f"[HUMIAT ID] Administrador inicial criado: {admin_email}")
+        elif admin:
+            # O e-mail de bootstrap pode já existir de um deploy anterior.
+            # Nesse caso, as variáveis do Render devem conseguir recuperar o acesso
+            # sem exigir edição manual no banco. Sincronizamos nome/tipo/status e,
+            # quando HUMIAT_ADMIN_SENHA estiver definida, sincronizamos a senha.
+            admin.nome = admin_nome
+            admin.tipo = TIPO_ADMIN_HUMIAT
+            admin.ativo = 1
+            if not (admin.organiza_usuario or "").strip():
+                admin.organiza_usuario = ADMIN_NOME
+            if admin_senha and not verificar_senha_id(admin_senha, admin.senha_hash):
+                admin.senha_hash = gerar_hash_senha_id(admin_senha)
+                print(f"[HUMIAT ID] Senha do administrador bootstrap sincronizada: {admin_email}")
+        elif not admin_senha:
             print("[HUMIAT ID] Administrador inicial não criado: configure HUMIAT_ADMIN_SENHA no ambiente.")
         db.commit()
     finally:
