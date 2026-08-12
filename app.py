@@ -658,9 +658,8 @@ def saude():
 
 @app.get("/area-restrita/login", response_class=HTMLResponse)
 def login(request: Request, erro: str = ""):
-    # Compatibilidade com favoritos/atalhos antigos. A autenticação oficial é Humiat ID.
-    destino = "/entrar" + (("?erro=" + quote(erro)) if erro else "")
-    return RedirectResponse(destino, status_code=303)
+    # Login tradicional do Organiza permanece independente do Humiat ID.
+    return templates.TemplateResponse("organiza/login.html", {"request": request, "erro": erro})
 
 
 @app.post("/area-restrita/login")
@@ -675,7 +674,8 @@ def entrar(usuario: str = Form(...), senha: str = Form(...), db: Session = Depen
 
 @app.get("/area-restrita/sair")
 def sair():
-    resposta = RedirectResponse("/sair", status_code=303)
+    # Logout do Organiza volta para o login do próprio Organiza.
+    resposta = RedirectResponse("/area-restrita/login", status_code=303)
     resposta.delete_cookie("humiat_sessao")
     return resposta
 
