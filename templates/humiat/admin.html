@@ -1,8 +1,444 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Humiat</title><link rel="stylesheet" href="/static/css/humiat-id.css"><style>
-.user-table article{display:block!important;padding:20px 0!important}.user-main{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;width:100%}.user-meta{display:flex!important;flex-direction:column;gap:4px;min-width:0}.user-meta strong{font-size:1rem}.user-meta span{overflow-wrap:anywhere}.user-actions{display:block!important}.user-actions form{display:grid!important;grid-template-columns:minmax(180px,240px) auto!important;gap:8px!important;min-width:0!important}.user-actions input{min-width:0}.edit-user{display:block;width:100%;margin-top:16px;padding-top:14px;border-top:1px solid rgba(148,163,184,.18)}.edit-user summary{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:800;color:#7dd3fc;list-style:none;padding:7px 0}.edit-user summary::before{content:'✎';font-size:.9rem}.edit-user[open] summary::before{content:'×'}.edit-user summary::-webkit-details-marker{display:none}.edit-grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px!important;margin-top:14px;min-width:0!important}.edit-grid label{display:flex;flex-direction:column;gap:6px;min-width:0}.edit-grid input,.edit-grid select{min-width:0;width:100%}.edit-actions{display:flex;align-items:end}.edit-actions button{width:100%}.company-tag{display:inline-flex;align-items:center;width:max-content;max-width:100%;margin-top:4px;padding:4px 8px;border-radius:999px;background:rgba(56,189,248,.10);border:1px solid rgba(56,189,248,.25);font-size:12px}.status-off{opacity:.58}.hint{font-size:12px;color:#94a3b8;margin-top:4px}@media(max-width:760px){.user-main{grid-template-columns:1fr;gap:14px;align-items:start}.user-actions{width:100%}.user-actions form{grid-template-columns:minmax(0,1fr) auto!important;width:100%}.edit-grid{grid-template-columns:1fr!important}}@media(max-width:480px){.user-actions form{grid-template-columns:1fr!important}.user-actions button{width:100%}}
-</style></head><body class="portal-body"><header class="portal-top"><a class="portal-logo" href="/painel"><img src="/static/img/logo-humiat.svg"></a><div class="portal-user"><a href="/painel">Painel</a><span>{{ usuario.nome }}</span><a href="/sair">Sair</a></div></header><main class="admin-main"><section class="portal-hello"><p class="eyebrow">Admin Humiat</p><h1>Empresas, usuários e produtos.</h1><p>Administração central da plataforma Humiat.</p></section>
-{% if request.query_params.get('erro') %}<div class="id-alert">{{ request.query_params.get('erro') }}</div>{% endif %}
-<div class="admin-grid"><section class="admin-box"><h2>Nova empresa</h2><form method="post" action="/admin-humiat/empresas"><label>Nome<input name="nome" required></label><label>Slug<input name="slug" required placeholder="minha-empresa"></label><button>Criar empresa</button></form></section><section class="admin-box"><h2>Novo usuário</h2><form method="post" action="/admin-humiat/usuarios"><label>Nome<input name="nome" required></label><label>E-mail<input type="email" name="email" required></label><label>Senha inicial<input type="password" name="senha" required minlength="8"></label><label>Perfil<select name="tipo"><option value="ADMIN_EMPRESA">Administrador da Empresa</option><option value="ADMIN_HUMIAT">Administrador Humiat</option></select></label><label>Empresa<select name="empresa_id"><option value="">— selecione —</option>{% for e in empresas %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}</select></label><p class="hint">A empresa é obrigatória somente para Administrador da Empresa.</p><button>Criar usuário</button></form></section></div>
-<section class="admin-box wide"><h2>Empresas e produtos</h2><div class="company-admin-list">{% for e in empresas %}<article><div><strong>{{ e.nome }}</strong><small>/{{ e.slug }}</small></div><div class="product-toggles">{% for p in produtos %}{% set ativo = namespace(v=false) %}{% for ep in empresa_produtos %}{% if ep.empresa_id==e.id and ep.produto_id==p.id and ep.ativo %}{% set ativo.v=true %}{% endif %}{% endfor %}<form method="post" action="/admin-humiat/empresa/{{ e.id }}/produto/{{ p.id }}"><button class="toggle {% if ativo.v %}on{% endif %}">{{ p.nome }} · {% if ativo.v %}ON{% else %}OFF{% endif %}</button></form>{% endfor %}</div></article>{% endfor %}</div></section>
-<section class="admin-box wide"><h2>Usuários</h2><p class="hint">Clique em <strong>Editar usuário</strong> para corrigir empresa, perfil, nome, e-mail ou status.</p><div class="user-table">{% for u in usuarios %}{% set empresa_atual = namespace(id='', nome='Sem empresa') %}{% for v in vinculos %}{% if v.usuario_id == u.id %}{% for e in empresas %}{% if e.id == v.empresa_id %}{% set empresa_atual.id=e.id %}{% set empresa_atual.nome=e.nome %}{% endif %}{% endfor %}{% endif %}{% endfor %}<article class="{% if not u.ativo %}status-off{% endif %}"><div class="user-main"><div class="user-meta"><strong>{{ u.nome }}</strong><span>{{ u.email }}</span><small>{% if u.tipo == 'ADMIN_HUMIAT' %}Administrador Humiat{% else %}Administrador da Empresa{% endif %}</small>{% if u.tipo == 'ADMIN_EMPRESA' %}<span class="company-tag">{{ empresa_atual.nome }}</span>{% endif %}{% if not u.ativo %}<span class="company-tag">Inativo</span>{% endif %}</div><div class="user-actions"><form method="post" action="/admin-humiat/usuario/{{ u.id }}/senha"><input type="password" name="senha" required minlength="8" placeholder="Nova senha"><button>Redefinir</button></form></div></div>
-<details class="edit-user"><summary>Editar usuário</summary><form method="post" action="/admin-humiat/usuario/{{ u.id }}/editar" class="edit-grid"><label>Nome<input name="nome" value="{{ u.nome }}" required></label><label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label><label>Perfil<select name="tipo"><option value="ADMIN_EMPRESA" {% if u.tipo=='ADMIN_EMPRESA' %}selected{% endif %}>Administrador da Empresa</option><option value="ADMIN_HUMIAT" {% if u.tipo=='ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option></select></label><label>Empresa<select name="empresa_id"><option value="">— sem empresa —</option>{% for e in empresas %}<option value="{{ e.id }}" {% if empresa_atual.id==e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></label><label>Status<select name="ativo"><option value="1" {% if u.ativo %}selected{% endif %}>Ativo</option><option value="0" {% if not u.ativo %}selected{% endif %}>Inativo</option></select></label><div class="edit-actions"><button type="submit">Salvar alterações</button></div></form></details></article>{% endfor %}</div></section></main></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin Humiat</title>
+  <link rel="icon" href="/static/icons/humiat/favicon.ico">
+  <link rel="stylesheet" href="/static/css/humiat-id.css">
+</head>
+<body class="portal-body admin-unified-body">
+<header class="portal-top">
+  <a class="portal-logo" href="/painel"><img src="/static/img/logo-humiat.svg" alt="Humiat"></a>
+  <div class="portal-user"><strong>Admin Humiat</strong><span>{{ usuario.nome }}</span><a href="/sair">Sair</a></div>
+</header>
+
+<main class="admin-unified">
+  <section class="admin-unified-head">
+    <div>
+      <p class="eyebrow">Admin Humiat</p>
+      <h1>Empresas</h1>
+      <p>Selecione uma empresa e administre tudo sem sair desta tela.</p>
+    </div>
+    <div class="admin-head-actions">
+      <button type="button" class="btn-secondary" data-dialog-open="novo-usuario">+ Novo usuário</button>
+      <button type="button" class="btn-primary" data-dialog-open="nova-empresa">+ Nova empresa</button>
+    </div>
+  </section>
+
+  {% if request.query_params.get('erro') %}
+  <div class="id-alert admin-alert">{{ request.query_params.get('erro') }}</div>
+  {% endif %}
+  {% if request.query_params.get('ok') %}
+  <div class="id-success admin-alert">
+    {% set ok = request.query_params.get('ok') %}
+    {% if ok == 'empresa_clonada' %}Empresa clonada. Ela nasceu inativa para você revisar antes de publicar.
+    {% elif ok == 'empresa_criada' %}Empresa criada com sucesso.
+    {% elif ok == 'usuario_criado' %}Usuário criado com sucesso.
+    {% elif ok == 'usuario_atualizado' %}Usuário atualizado.
+    {% elif ok == 'senha_redefinida' %}Senha redefinida.
+    {% elif ok == 'produto_atualizado' %}Acesso ao produto atualizado.
+    {% elif ok == 'status_atualizado' %}Status da empresa atualizado.
+    {% elif ok == 'cores_salvas' %}Identidade visual do SolVoz atualizada.
+    {% else %}Alteração salva com sucesso.{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="admin-workbench">
+    <aside class="company-rail">
+      <div class="rail-head">
+        <div>
+          <span class="rail-label">Empresas</span>
+          <strong>{{ empresas|length }}</strong>
+        </div>
+        <button type="button" class="icon-btn" title="Nova empresa" data-dialog-open="nova-empresa">+</button>
+      </div>
+      <label class="company-search">
+        <span>Buscar</span>
+        <input id="companySearch" type="search" placeholder="Nome ou slug">
+      </label>
+      <nav class="company-list" id="companyList">
+        {% for e in empresas %}
+        <a href="/painel?empresa_id={{ e.id }}" class="company-row {% if empresa and empresa.id == e.id %}active{% endif %} {% if not e.ativo %}is-inactive{% endif %}" data-company-search="{{ e.nome }} {{ e.slug }}">
+          <span class="company-dot {% if e.ativo %}on{% endif %}"></span>
+          <span class="company-row-copy">
+            <strong>{{ e.nome }}</strong>
+            <small>/{{ e.slug }}</small>
+          </span>
+          {% if not e.ativo %}<span class="mini-status">Revisão</span>{% endif %}
+        </a>
+        {% else %}
+        <div class="rail-empty">Nenhuma empresa cadastrada.</div>
+        {% endfor %}
+      </nav>
+      <button type="button" class="rail-users-link" data-dialog-open="todos-usuarios">Gerenciar todos os usuários <span>→</span></button>
+    </aside>
+
+    <section class="company-workspace">
+      {% if empresa %}
+      <header class="workspace-head">
+        <div>
+          <div class="workspace-kicker">
+            <span class="status-badge {% if empresa.ativo %}active{% else %}review{% endif %}">
+              {% if empresa.ativo %}Ativa{% else %}Em revisão{% endif %}
+            </span>
+            <span>/{{ empresa.slug }}</span>
+          </div>
+          <h2>{{ empresa.nome }}</h2>
+          <p>Todas as ações abaixo pertencem a esta empresa.</p>
+        </div>
+        <div class="workspace-actions">
+          {% if solvoz_habilitado and empresa.ativo %}
+          <a class="btn-primary" href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}">Abrir e editar SolVoz</a>
+          {% elif solvoz_habilitado %}
+          <button class="btn-primary" type="button" disabled title="Ative a empresa antes de abrir para o cliente">Abrir SolVoz</button>
+          {% endif %}
+          <button type="button" class="btn-secondary" data-dialog-open="clonar-empresa">⧉ Clonar empresa</button>
+          <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/status">
+            <button class="btn-ghost {% if empresa.ativo %}danger-soft{% endif %}" type="submit">
+              {% if empresa.ativo %}Colocar em revisão{% else %}Ativar empresa{% endif %}
+            </button>
+          </form>
+        </div>
+      </header>
+
+      <div class="workspace-grid">
+        <article class="workspace-card products-card">
+          <div class="card-title-row">
+            <div><span class="card-kicker">Acessos</span><h3>Produtos</h3></div>
+            <span class="card-hint">Clique para ligar/desligar</span>
+          </div>
+          <div class="product-switch-grid">
+            {% for p in produtos %}
+            {% set ativo = status_produtos.get(p.id, false) %}
+            <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/produto/{{ p.id }}">
+              <button class="product-switch {% if ativo %}on{% endif %}" type="submit">
+                <span class="switch-name">{{ p.nome }}</span>
+                <span class="switch-state">{% if ativo %}ON{% else %}OFF{% endif %}</span>
+              </button>
+            </form>
+            {% endfor %}
+          </div>
+        </article>
+
+        <article class="workspace-card qr-card">
+          <div class="card-title-row">
+            <div><span class="card-kicker">Cliente</span><h3>QR Code</h3></div>
+          </div>
+          {% if solvoz_habilitado %}
+            {% if empresa.ativo %}
+            <div class="qr-compact">
+              <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
+              <div>
+                <strong>Catálogo do cliente</strong>
+                <small>{{ solvoz_base_url }}/{{ empresa.slug }}/catalogo</small>
+                <div class="qr-actions">
+                  <button type="button" class="text-btn" data-dialog-open="qr-empresa">Ampliar</button>
+                  <a class="text-btn" href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar PNG</a>
+                </div>
+              </div>
+            </div>
+            {% else %}
+            <p class="muted-copy">Ative a empresa para liberar o QR Code ao cliente.</p>
+            {% endif %}
+          {% else %}
+          <p class="muted-copy">Habilite o SolVoz para gerar o QR Code do catálogo.</p>
+          {% endif %}
+        </article>
+      </div>
+
+      {% if solvoz_habilitado %}
+      <article class="workspace-card identity-card">
+        <div class="card-title-row">
+          <div><span class="card-kicker">SolVoz</span><h3>Identidade e cores</h3></div>
+          {% if solvoz and solvoz.empresa %}
+          <span class="status-badge {% if solvoz.empresa.ativo %}active{% else %}review{% endif %}">
+            Site {% if solvoz.empresa.ativo %}publicado{% else %}em revisão{% endif %}
+          </span>
+          {% endif %}
+        </div>
+        {% if solvoz and solvoz.empresa %}
+        <form class="identity-form" method="post" action="/admin-humiat/empresa/{{ empresa.id }}/solvoz/identidade">
+          <label class="theme-field">Tema
+            <select name="tema">
+              {% for t in solvoz.temas %}
+              <option value="{{ t.id }}"
+                data-brand="{{ t.cores.brand }}"
+                data-brand-2="{{ t.cores.brand_2 }}"
+                data-brand-dark="{{ t.cores.brand_dark }}"
+                data-accent="{{ t.cores.accent }}"
+                data-bg="{{ t.cores.bg }}"
+                data-surface="{{ t.cores.surface }}"
+                data-surface-2="{{ t.cores.surface_2 }}"
+                data-text="{{ t.cores.text }}"
+                data-muted="{{ t.cores.muted }}"
+                {% if t.id == solvoz.empresa.tema %}selected{% endif %}>{{ t.icone }} {{ t.nome }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="color-grid">
+            {% set c = solvoz.empresa.cores %}
+            <label>Principal <span><input type="color" name="brand" value="{{ c.brand }}"><code>{{ c.brand }}</code></span></label>
+            <label>Secundária <span><input type="color" name="brand_2" value="{{ c.brand_2 }}"><code>{{ c.brand_2 }}</code></span></label>
+            <label>Destaque <span><input type="color" name="accent" value="{{ c.accent }}"><code>{{ c.accent }}</code></span></label>
+            <label>Fundo <span><input type="color" name="bg" value="{{ c.bg }}"><code>{{ c.bg }}</code></span></label>
+            <label>Superfície <span><input type="color" name="surface" value="{{ c.surface }}"><code>{{ c.surface }}</code></span></label>
+            <label>Texto <span><input type="color" name="text" value="{{ c.text }}"><code>{{ c.text }}</code></span></label>
+          </div>
+          <input type="hidden" name="brand_dark" value="{{ c.brand_dark }}">
+          <input type="hidden" name="surface_2" value="{{ c.surface_2 }}">
+          <input type="hidden" name="muted" value="{{ c.muted }}">
+          <div class="identity-actions">
+            <button class="btn-primary" type="submit">Salvar cores</button>
+            {% if solvoz.empresa.url_inicio %}<a class="btn-ghost" href="{{ solvoz.empresa.url_inicio }}" target="_blank" rel="noopener">Ver início ↗</a>{% endif %}
+            {% if solvoz.empresa.url_catalogo %}<a class="btn-ghost" href="{{ solvoz.empresa.url_catalogo }}" target="_blank" rel="noopener">Ver catálogo ↗</a>{% endif %}
+          </div>
+        </form>
+        {% else %}
+        <div class="integration-error">
+          <strong>Não consegui carregar a configuração do SolVoz.</strong>
+          <span>{{ solvoz_erro or 'Verifique a integração entre Humiat e SolVoz.' }}</span>
+        </div>
+        {% endif %}
+      </article>
+      {% endif %}
+
+      <article class="workspace-card users-card">
+        <div class="card-title-row">
+          <div><span class="card-kicker">Acesso</span><h3>Usuários desta empresa</h3></div>
+          <button type="button" class="btn-secondary compact" data-dialog-open="novo-usuario">+ Adicionar usuário</button>
+        </div>
+        <div class="company-users">
+          {% for u in usuarios_empresa %}
+          <details class="company-user {% if not u.ativo %}is-inactive{% endif %}">
+            <summary>
+              <div class="avatar">{{ (u.nome or 'U')[0]|upper }}</div>
+              <div class="user-summary-copy">
+                <strong>{{ u.nome }}</strong>
+                <small>{{ u.email }}</small>
+              </div>
+              <span class="user-role">{% if u.tipo == 'ADMIN_HUMIAT' %}Admin Humiat{% else %}Admin da empresa{% endif %}</span>
+              <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
+              <span class="chevron">⌄</span>
+            </summary>
+            <div class="user-edit-panel">
+              <form method="post" action="/admin-humiat/usuario/{{ u.id }}/editar" class="edit-user-form">
+                <input type="hidden" name="retorno_empresa_id" value="{{ empresa.id }}">
+                <label>Nome<input name="nome" value="{{ u.nome }}" required></label>
+                <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
+                <label>Perfil
+                  <select name="tipo">
+                    <option value="ADMIN_EMPRESA" {% if u.tipo=='ADMIN_EMPRESA' %}selected{% endif %}>Administrador da Empresa</option>
+                    <option value="ADMIN_HUMIAT" {% if u.tipo=='ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option>
+                  </select>
+                </label>
+                <label>Empresa
+                  <select name="empresa_id">
+                    <option value="">— sem empresa —</option>
+                    {% for e in empresas %}<option value="{{ e.id }}" {% if e.id == empresa.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
+                  </select>
+                </label>
+                <label>Status
+                  <select name="ativo"><option value="1" {% if u.ativo %}selected{% endif %}>Ativo</option><option value="0" {% if not u.ativo %}selected{% endif %}>Inativo</option></select>
+                </label>
+                <button class="btn-primary" type="submit">Salvar usuário</button>
+              </form>
+              <form method="post" action="/admin-humiat/usuario/{{ u.id }}/senha" class="password-form">
+                <input type="hidden" name="retorno_empresa_id" value="{{ empresa.id }}">
+                <label>Redefinir senha<input type="password" name="senha" minlength="8" required placeholder="Nova senha"></label>
+                <button class="btn-secondary" type="submit">Redefinir senha</button>
+              </form>
+            </div>
+          </details>
+          {% else %}
+          <div class="empty-inline">Nenhum usuário vinculado a esta empresa. <button type="button" class="text-btn" data-dialog-open="novo-usuario">Criar agora</button></div>
+          {% endfor %}
+        </div>
+      </article>
+      {% else %}
+      <div class="workspace-empty">
+        <h2>Nenhuma empresa selecionada</h2>
+        <p>Crie a primeira empresa para começar.</p>
+        <button type="button" class="btn-primary" data-dialog-open="nova-empresa">+ Nova empresa</button>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</main>
+
+<dialog class="admin-dialog" id="nova-empresa">
+  <form method="post" action="/admin-humiat/empresas" class="dialog-card">
+    <div class="dialog-head"><div><span class="card-kicker">Cadastro</span><h2>Nova empresa</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <p class="dialog-copy">Cria uma empresa nova, sem copiar dados de outro cliente.</p>
+    <label>Nome<input name="nome" id="novaEmpresaNome" required autocomplete="off" placeholder="Ex.: Karaokê da Serra"></label>
+    <label>Slug<input name="slug" id="novaEmpresaSlug" required autocomplete="off" placeholder="karaoke-da-serra"><small>Será usado nos endereços públicos.</small></label>
+    <label class="check-row"><input type="checkbox" name="criar_solvoz" value="1" checked><span><strong>Criar também no SolVoz</strong><small>Estrutura em branco, pronta para configurar.</small></span></label>
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Criar empresa</button></div>
+  </form>
+</dialog>
+
+{% if empresa %}
+<dialog class="admin-dialog" id="clonar-empresa">
+  <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/clonar" class="dialog-card dialog-wide">
+    <div class="dialog-head"><div><span class="card-kicker">Cópia</span><h2>Clonar {{ empresa.nome }}</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <p class="dialog-copy">A empresa atual será usada como modelo. O clone nasce <strong>inativo</strong> para revisão. Usuários não são copiados.</p>
+    <div class="dialog-two">
+      <label>Nome da nova empresa<input name="nome" id="cloneEmpresaNome" required autocomplete="off" placeholder="Nome da nova empresa"></label>
+      <label>Slug<input name="slug" id="cloneEmpresaSlug" required autocomplete="off" placeholder="novo-slug"></label>
+    </div>
+    {% if solvoz_habilitado %}
+    <fieldset class="clone-options">
+      <legend>Copiar do SolVoz</legend>
+      <label class="check-row"><input type="checkbox" name="copiar_inicio" value="1" checked><span><strong>Início do App</strong><small>Textos, ícones e configurações visuais.</small></span></label>
+      <label class="check-row"><input type="checkbox" name="copiar_home" value="1" checked><span><strong>Home e seções</strong><small>Seções, cards, imagens e estrutura.</small></span></label>
+      <label class="check-row"><input type="checkbox" name="copiar_redes" value="1" checked><span><strong>Redes sociais</strong></span></label>
+      <label class="check-row"><input type="checkbox" name="copiar_logo" value="1" checked><span><strong>Logo</strong></span></label>
+      <label class="check-row"><input type="checkbox" name="copiar_cores" value="1" checked><span><strong>Tema e cores</strong></span></label>
+    </fieldset>
+    {% else %}
+    <div class="integration-note">O SolVoz está OFF nesta empresa. Serão copiados somente o cadastro Humiat e os acessos aos produtos.</div>
+    {% endif %}
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Clonar empresa</button></div>
+  </form>
+</dialog>
+
+<dialog class="admin-dialog qr-dialog" id="qr-empresa">
+  <div class="dialog-card qr-dialog-card">
+    <div class="dialog-head"><div><span class="card-kicker">Cliente</span><h2>QR Code — {{ empresa.nome }}</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    {% if solvoz_habilitado and empresa.ativo %}
+    <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
+    <code>{{ solvoz_base_url }}/{{ empresa.slug }}/catalogo</code>
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button><a class="btn-primary" href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar PNG</a></div>
+    {% endif %}
+  </div>
+</dialog>
+{% endif %}
+
+<dialog class="admin-dialog" id="novo-usuario">
+  <form method="post" action="/admin-humiat/usuarios" class="dialog-card">
+    <div class="dialog-head"><div><span class="card-kicker">Acesso</span><h2>Novo usuário</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    {% if empresa %}<p class="dialog-copy">Empresa atual: <strong>{{ empresa.nome }}</strong>. Você pode alterar abaixo.</p>{% endif %}
+    <label>Nome<input name="nome" required></label>
+    <label>E-mail<input type="email" name="email" required></label>
+    <label>Senha inicial<input type="password" name="senha" required minlength="8"></label>
+    <label>Perfil<select name="tipo" id="novoUsuarioTipo"><option value="ADMIN_EMPRESA">Administrador da Empresa</option><option value="ADMIN_HUMIAT">Administrador Humiat</option></select></label>
+    <label id="novoUsuarioEmpresaLabel">Empresa
+      <select name="empresa_id">
+        <option value="">— selecione —</option>
+        {% for e in empresas %}<option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Criar usuário</button></div>
+  </form>
+</dialog>
+
+<dialog class="admin-dialog" id="todos-usuarios">
+  <div class="dialog-card dialog-wide">
+    <div class="dialog-head"><div><span class="card-kicker">Acessos</span><h2>Todos os usuários</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <div class="all-users-list">
+      {% for u in usuarios %}
+      {% set eid = empresa_por_usuario.get(u.id) %}
+      {% set empresa_nome = namespace(v='Sem empresa') %}
+      {% for e in empresas %}{% if e.id == eid %}{% set empresa_nome.v = e.nome %}{% endif %}{% endfor %}
+      <div class="all-user-row {% if not u.ativo %}is-inactive{% endif %}">
+        <div class="avatar">{{ (u.nome or 'U')[0]|upper }}</div>
+        <div><strong>{{ u.nome }}</strong><small>{{ u.email }}</small></div>
+        <span>{{ empresa_nome.v }}</span>
+        <span>{% if u.tipo == 'ADMIN_HUMIAT' %}Admin Humiat{% else %}Admin da empresa{% endif %}</span>
+        <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
+        {% if eid %}<a class="text-btn" href="/painel?empresa_id={{ eid }}">Abrir empresa</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button><button type="button" class="btn-primary" data-dialog-open="novo-usuario">+ Novo usuário</button></div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const openDialog = id => {
+    const el = document.getElementById(id);
+    if (el && typeof el.showModal === 'function') el.showModal();
+  };
+  document.addEventListener('click', e => {
+    const opener = e.target.closest('[data-dialog-open]');
+    if (opener) {
+      const current = opener.closest('dialog');
+      if (current && current.open) current.close();
+      openDialog(opener.dataset.dialogOpen);
+      return;
+    }
+    if (e.target.closest('[data-dialog-close]')) {
+      const dialog = e.target.closest('dialog');
+      if (dialog) dialog.close();
+    }
+  });
+  document.querySelectorAll('dialog').forEach(dialog => {
+    dialog.addEventListener('click', e => {
+      if (e.target === dialog) dialog.close();
+    });
+  });
+
+  const search = document.getElementById('companySearch');
+  if (search) search.addEventListener('input', () => {
+    const value = search.value.trim().toLowerCase();
+    document.querySelectorAll('[data-company-search]').forEach(row => {
+      row.hidden = !row.dataset.companySearch.toLowerCase().includes(value);
+    });
+  });
+
+  function slugify(value) {
+    return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+  [['novaEmpresaNome','novaEmpresaSlug'],['cloneEmpresaNome','cloneEmpresaSlug']].forEach(([nameId, slugId]) => {
+    const name = document.getElementById(nameId), slug = document.getElementById(slugId);
+    if (!name || !slug) return;
+    let manual = false;
+    slug.addEventListener('input', () => manual = slug.value.trim() !== '' && slug.value !== slugify(name.value));
+    name.addEventListener('input', () => { if (!manual) slug.value = slugify(name.value); });
+  });
+
+  const tipo = document.getElementById('novoUsuarioTipo');
+  const empresaLabel = document.getElementById('novoUsuarioEmpresaLabel');
+  if (tipo && empresaLabel) {
+    const sync = () => empresaLabel.classList.toggle('field-muted', tipo.value === 'ADMIN_HUMIAT');
+    tipo.addEventListener('change', sync); sync();
+  }
+
+  document.querySelectorAll('.color-grid input[type=color]').forEach(input => {
+    const code = input.parentElement.querySelector('code');
+    input.addEventListener('input', () => { if (code) code.textContent = input.value; });
+  });
+
+  const themeSelect = document.querySelector('.identity-form select[name="tema"]');
+  if (themeSelect) {
+    const datasetMap = {
+      brand: 'brand',
+      brand_2: 'brand2',
+      brand_dark: 'brandDark',
+      accent: 'accent',
+      bg: 'bg',
+      surface: 'surface',
+      surface_2: 'surface2',
+      text: 'text',
+      muted: 'muted'
+    };
+    themeSelect.addEventListener('change', () => {
+      const opt = themeSelect.options[themeSelect.selectedIndex];
+      Object.entries(datasetMap).forEach(([name, dataKey]) => {
+        const value = opt.dataset[dataKey];
+        const input = document.querySelector('.identity-form [name="' + name + '"]');
+        if (!value || !input) return;
+        input.value = value;
+        if (input.type === 'color') {
+          const code = input.parentElement.querySelector('code');
+          if (code) code.textContent = value;
+        }
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -15,8 +15,8 @@ Produtos cadastrados automaticamente:
 
 ## Rotas
 - `/entrar` — login Humiat ID
-- `/painel` — painel central
-- `/admin-humiat` — administração central (somente ADMIN_HUMIAT)
+- `/painel` — painel único; para `ADMIN_HUMIAT` abre a administração completa e para `ADMIN_EMPRESA` abre somente a própria empresa
+- `/admin-humiat` — compatibilidade: redireciona o Administrador Humiat para `/painel`
 - `/sair` — encerra a sessão
 - `/api/humiat/sso/validar` — validação servidor-servidor de ticket SSO
 
@@ -63,3 +63,29 @@ A emissão SSO já está preparada. O receptor de cada produto será implantado 
 - Adiciona edição de usuário Humiat: nome, e-mail, perfil, empresa e status.
 - Administrador da Empresa passa a exigir empresa no cadastro e na edição, evitando usuários sem vínculo.
 - Administrador Humiat não precisa de empresa.
+
+
+## Fase 1.0.5 — ADM unificado
+- O Administrador Humiat passa a trabalhar em uma única tela em `/painel`.
+- A empresa selecionada fica na lateral e todas as ações da direita pertencem a ela.
+- `Nova empresa` e `Clonar empresa` são operações separadas e explícitas.
+- A clonagem central copia os acessos Humiat e, quando SolVoz está ativo, clona também Início, Home, redes, logo e cores no SolVoz.
+- O clone nasce inativo para revisão; ao ativar no Humiat, o status de publicação do SolVoz é sincronizado.
+- Ativar SolVoz em uma empresa garante automaticamente a existência do cadastro correspondente no produto.
+- Cores e tema do SolVoz podem ser ajustados pelo painel Humiat.
+- O QR Code do catálogo aparece para o Administrador Humiat e também para o usuário da empresa.
+- Criação/edição de usuários continua no mesmo painel, sem abrir uma área administrativa separada.
+
+### Integração administrativa SolVoz
+A clonagem, criação, cores e status usam chamadas servidor-servidor protegidas por `HUMIAT_SSO_SECRET`.
+O mesmo valor precisa estar configurado no Humiat e no SolVoz.
+
+Variáveis recomendadas:
+
+```text
+HUMIAT_SOLVOZ_URL=https://www.solvoz.com.br
+HUMIAT_SOLVOZ_SSO_URL=https://www.solvoz.com.br/_sv/sso/humiat
+HUMIAT_SOLVOZ_API_TIMEOUT=8
+```
+
+Para publicar esta fase, implante primeiro o SolVoz 2.3.6 e depois o Humiat ID 1.0.5.
