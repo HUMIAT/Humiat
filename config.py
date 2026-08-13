@@ -1,6 +1,6 @@
 import os
 
-ORGANIZA_VERSAO = "8.1"
+ORGANIZA_VERSAO = "8.2"
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://humiat.com.br").rstrip("/")
 
 # Render/Neon: configure DATABASE_URL nas variáveis de ambiente.
@@ -24,3 +24,6 @@ def usando_postgres() -> bool:
 
 # Token privado para integração LokaFest -> Organiza
 LOKAFEST_API_TOKEN = os.getenv("LOKAFEST_API_TOKEN", "").strip()
+
+# Token privado para futura sincronização Organiza -> SolVoz
+SOLVOZ_API_TOKEN = os.getenv("SOLVOZ_API_TOKEN", "").strip()

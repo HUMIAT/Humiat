@@ -1,0 +1,88 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">Integração</p>
+      <h1>Empresas SolVoz</h1>
+      <p class="texto-suave">Cadastre as empresas públicas usadas pelos equipamentos. O domínio é definido automaticamente pelo slug.</p>
+    </div>
+  </div>
+
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo">
+      <span>1</span>
+      <div>
+        <h2>Nova empresa SolVoz</h2>
+        <p>Use o mesmo nome e slug cadastrados no SolVoz.</p>
+      </div>
+    </div>
+    <form method="post" action="/organiza/configuracoes/solvoz-empresas">
+      <div class="form-grid-organizada dois-colunas">
+        <label>Nome da empresa *
+          <input name="nome" required placeholder="Ex.: Karaokê do Bonito">
+        </label>
+        <label>Slug *
+          <input name="slug" id="novo-solvoz-slug" required placeholder="karaokedobonito">
+          <small>Sem espaços. Ex.: karaokedobonito</small>
+        </label>
+        <label class="campo-duplo">Domínio gerado
+          <input id="novo-solvoz-dominio" readonly aria-readonly="true" value="https://www.solvoz.com.br/">
+          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br.</small>
+        </label>
+      </div>
+      <button class="botao primario" type="submit">Cadastrar empresa</button>
+    </form>
+  </section>
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo">
+      <span>2</span>
+      <div>
+        <h2>Empresas cadastradas</h2>
+        <p>Essas opções aparecem no cadastro de cada equipamento.</p>
+      </div>
+    </div>
+    {% if empresas %}
+    <div class="manutencao-registros">
+      {% for empresa in empresas %}
+      <div class="linha-item" style="align-items:center; gap:16px;">
+        <div style="flex:1; min-width:0;">
+          <strong>{{ empresa.nome }}</strong>
+          <small style="display:block;">{{ empresa.slug }} · {{ empresa.dominio }}</small>
+        </div>
+        <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/status">
+          <input type="hidden" name="ativo" value="{{ 0 if empresa.ativo else 1 }}">
+          <button class="botao" type="submit">{{ 'Desativar' if empresa.ativo else 'Ativar' }}</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="texto-suave">Nenhuma empresa SolVoz cadastrada.</p>
+    {% endif %}
+  </section>
+</section>
+<script>
+(() => {
+  const slug = document.getElementById("novo-solvoz-slug");
+  const dominio = document.getElementById("novo-solvoz-dominio");
+  if (!slug || !dominio) return;
+  function normalizar(v) {
+    return (v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+  function atualizar() {
+    const s = normalizar(slug.value);
+    dominio.value = s === "karaokerj"
+      ? "https://www.karaokerj.com.br"
+      : "https://www.solvoz.com.br/" + s;
+  }
+  slug.addEventListener("input", atualizar);
+  atualizar();
+})();
+</script>
+{% endblock %}

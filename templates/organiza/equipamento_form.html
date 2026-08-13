@@ -36,17 +36,53 @@
       </div>
     </section>
 
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo">
+        <span>{% if equipamento and equipamento.id %}3{% else %}2{% endif %}</span>
+        <div>
+          <h2>SolVoz</h2>
+          <p>Defina a empresa pública do catálogo. O domínio é preenchido automaticamente pelo cadastro da empresa.</p>
+        </div>
+      </div>
+      <div class="form-grid-organizada tres-colunas">
+        <label>Empresa SolVoz
+          <select name="solvoz_empresa_id" id="solvoz-empresa">
+            <option value="">Selecione...</option>
+            {% for empresa_sv in solvoz_empresas or [] %}
+            <option value="{{ empresa_sv.id }}"
+                    data-dominio="{{ empresa_sv.dominio }}"
+                    {% if equipamento and equipamento.solvoz_empresa_id == empresa_sv.id %}selected{% endif %}>
+              {{ empresa_sv.nome }}
+            </option>
+            {% endfor %}
+          </select>
+          <small>Cadastro administrado em Configurações → Empresas SolVoz.</small>
+        </label>
+        <label>Catálogo online
+          <select name="catalogo_online" id="catalogo-online">
+            <option value="0" {% if not equipamento or not equipamento.catalogo_online %}selected{% endif %}>Não — QR padrão da empresa</option>
+            <option value="1" {% if equipamento and equipamento.catalogo_online %}selected{% endif %}>Sim — conectar esta máquina</option>
+          </select>
+          <small>Offline continua gerando QR normalmente; apenas não envia máquina e plano na URL.</small>
+        </label>
+        <label>Domínio do catálogo
+          <input id="solvoz-dominio" value="" readonly aria-readonly="true" placeholder="Selecione a empresa">
+          <small>Automático: Karaokê RJ usa domínio próprio; demais usam solvoz.com.br/slug.</small>
+        </label>
+      </div>
+    </section>
+
     {% if equipamento and equipamento.id %}
     <section class="cartao secao-form">
       <div class="secao-form-titulo">
-        <span>3</span>
+        <span>4</span>
         <div>
           <h2>Licença e QR Code</h2>
-          <p>Gere os arquivos usando o NR máquina, NR HD e plano informados acima.</p>
+          <p>Valida NR máquina, NR HD, plano e Empresa SolVoz antes de gerar. O QR usa o domínio configurado acima.</p>
         </div>
       </div>
 
-      {% if equipamento.numero_hd %}
+      {% if equipamento.numero_hd and equipamento.solvoz_empresa_id %}
       <button class="botao primario botao-cheio" type="submit"
               formaction="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/gerar-licenca"
               formmethod="post">
@@ -54,14 +90,14 @@
       </button>
       {% else %}
       <button class="botao botao-cheio" type="button" disabled>
-        Informe o NR HD para gerar a licença
+        Informe o NR HD e selecione a Empresa SolVoz para gerar
       </button>
       {% endif %}
     </section>
     {% endif %}
 
     <section class="cartao secao-form">
-      <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}4{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
+      <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}5{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
       <label class="campo-largo"><textarea name="observacao">{{ equipamento.observacao if equipamento and equipamento.observacao else '' }}</textarea></label>
     </section>
     {% if confirmar_duplicado %}
@@ -74,7 +110,7 @@
 
   {% if equipamento and equipamento.id %}
   <section class="cartao secao-form transferencia-equipamento">
-    <div class="secao-form-titulo"><span>5</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
+    <div class="secao-form-titulo"><span>6</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/transferir" onsubmit="return confirm('Confirma a transferência deste equipamento para outro cliente?')">
       <div class="form-grid-organizada dois-colunas">
         <label>Novo cliente *<select name="cliente_destino_id" required><option value="">Selecione...</option>{% for c in clientes_transferencia %}<option value="{{ c.id }}">{{ c.nome }} · {{ c.telefone|telefone }}</option>{% endfor %}</select></label>
@@ -123,6 +159,20 @@
 
   pacote.addEventListener("change", atualizarFaltaPacote);
   atualizarFaltaPacote();
+})();
+</script>
+
+<script>
+(() => {
+  const empresa = document.getElementById("solvoz-empresa");
+  const dominio = document.getElementById("solvoz-dominio");
+  if (!empresa || !dominio) return;
+  function atualizarDominio() {
+    const opt = empresa.options[empresa.selectedIndex];
+    dominio.value = (opt && opt.dataset.dominio) || "";
+  }
+  empresa.addEventListener("change", atualizarDominio);
+  atualizarDominio();
 })();
 </script>
 

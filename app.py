@@ -75,6 +75,35 @@ templates.env.filters["descricao_equipamento"] = descricao_equipamento
 templates.env.filters["codigo_tecnico"] = codigo_tecnico
 
 
+def normalizar_slug_solvoz(valor: str) -> str:
+    slug = unicodedata.normalize("NFKD", (valor or "").strip().lower()).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+    return slug
+
+
+def dominio_solvoz_por_slug(slug: str) -> str:
+    slug = normalizar_slug_solvoz(slug)
+    if slug == "karaokerj":
+        return "https://www.karaokerj.com.br"
+    return f"https://www.solvoz.com.br/{slug}" if slug else "https://www.solvoz.com.br"
+
+
+def montar_url_qr_solvoz(empresa, maquina: str, plano: str, catalogo_online: bool) -> str:
+    """Monta a URL pública do QR sem duplicar regras no restante do sistema."""
+    base = (getattr(empresa, "dominio", None) or dominio_solvoz_por_slug(getattr(empresa, "slug", ""))).rstrip("/")
+    # Domínios raiz usam barra explícita para manter o padrão dos QR atuais.
+    if re.fullmatch(r"https?://[^/]+", base):
+        base += "/"
+    if not catalogo_online:
+        return base
+    separador = "&" if "?" in base else "?"
+    return f"{base}{separador}maquina={quote(maquina)}&plano={quote(plano.upper())}"
+
+
+def empresas_solvoz_ativas(db: Session):
+    return db.query(SolVozEmpresa).filter(SolVozEmpresa.ativo == 1).order_by(SolVozEmpresa.nome.asc()).all()
+
+
 STATUS_EQUIPE = {"Aguardando equipamento", "Recebida", "Orçamento em elaboração", "Confirmação pendente", "Em manutenção", "Aguardando peça"}
 STATUS_CLIENTE = {"Aguardando aprovação", "Aprovado", "Pronto para retirada", "Retirada agendada"}
 STATUS_FINAL = {"Encerrada", "Cancelada"}
@@ -167,6 +196,23 @@ class Cliente(Base):
         return formatar_telefone_internacional(self.pais, self.telefone)
 
 
+
+class SolVozEmpresa(Base):
+    """Empresas públicas do SolVoz conhecidas pelo Organiza.
+
+    O domínio é derivado do slug para evitar digitação divergente na implantação:
+    karaokerj -> https://www.karaokerj.com.br
+    demais    -> https://www.solvoz.com.br/<slug>
+    """
+    __tablename__ = "solvoz_empresas"
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(140), nullable=False)
+    slug = Column(String(100), nullable=False, unique=True)
+    dominio = Column(String(255), nullable=False)
+    ativo = Column(Integer, nullable=False, default=1)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
 class Equipamento(Base):
     __tablename__ = "equipamentos"
     id = Column(Integer, primary_key=True)
@@ -193,8 +239,13 @@ class Equipamento(Base):
     numero_hd = Column(String(160), nullable=True)
     numero_maquina_cliente = Column(Integer, nullable=True)
     fabricante = Column(String(80), nullable=False, default="KARAOKERJ")
+    # Integração opcional com o catálogo online SolVoz.
+    # O plano já existe no equipamento e continua sendo a fonte oficial.
+    solvoz_empresa_id = Column(Integer, ForeignKey("solvoz_empresas.id"), nullable=True)
+    catalogo_online = Column(Integer, nullable=False, default=0)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
+    solvoz_empresa = relationship("SolVozEmpresa")
 
 
 class TransferenciaEquipamento(Base):
@@ -606,8 +657,22 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_hd VARCHAR(160)"))
             if "numero_maquina_cliente" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN numero_maquina_cliente INTEGER"))
+            if "solvoz_empresa_id" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN solvoz_empresa_id INTEGER"))
+            if "catalogo_online" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_online INTEGER NOT NULL DEFAULT 0"))
     db = SessionLocal()
     try:
+        # Preserva o comportamento histórico do QR sem exigir configuração manual
+        # no primeiro deploy. As demais empresas são cadastradas pelo ADM do Organiza.
+        if not db.query(SolVozEmpresa).filter(SolVozEmpresa.slug == "karaokerj").first():
+            db.add(SolVozEmpresa(
+                nome="Karaokê RJ",
+                slug="karaokerj",
+                dominio=dominio_solvoz_por_slug("karaokerj"),
+                ativo=1,
+            ))
+            db.commit()
         if not db.query(Usuario).filter(Usuario.nome == ADMIN_NOME).first():
             db.add(Usuario(nome=ADMIN_NOME, senha_hash=gerar_hash_senha(ADMIN_SENHA), is_admin=1, ativo=1, cargo="Administrador"))
             db.commit()
@@ -1130,6 +1195,12 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     # Este valor é derivado do pacote instalado e nunca é informado manualmente.
     eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
     eq.plano = (form.get("plano") or "").strip() or None
+    try:
+        solvoz_empresa_id = int(form.get("solvoz_empresa_id") or 0)
+    except (TypeError, ValueError):
+        solvoz_empresa_id = 0
+    eq.solvoz_empresa_id = solvoz_empresa_id or None
+    eq.catalogo_online = 1 if str(form.get("catalogo_online") or "").strip().lower() in ("1", "true", "on", "sim") else 0
     eq.valor = (form.get("valor") or "").strip() or None
     eq.preco_custo = (form.get("preco_custo") or "").strip() or None
     eq.preco_venda = (form.get("preco_venda") or "").strip() or None
@@ -1297,6 +1368,7 @@ def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depen
         "proxima_maquina": proximo_codigo_maquina(db),
         "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
         "pacote_atual": obter_pacote_atual(db),
+        "solvoz_empresas": empresas_solvoz_ativas(db),
     })
 
 
@@ -1313,6 +1385,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
             "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes,
             "proxima_maquina": proximo_codigo_maquina(db),
             "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
+            "solvoz_empresas": empresas_solvoz_ativas(db),
         }, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
@@ -1332,6 +1405,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
             "proxima_maquina": eq.maquina,
             "proximo_numero_cliente": eq.numero_maquina_cliente,
             "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
+            "solvoz_empresas": empresas_solvoz_ativas(db),
         }, status_code=400)
     db.add(eq)
     db.commit()
@@ -1346,7 +1420,7 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     tipos, pacotes = opcoes_equipamentos(db)
     clientes_transferencia = db.query(Cliente).filter(Cliente.id != cliente_id).order_by(Cliente.nome.asc()).all()
     transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "clientes_transferencia": clientes_transferencia, "transferencias": transferencias})
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db)})
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar")
@@ -1374,11 +1448,134 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
             "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
             "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
             "clientes_transferencia": clientes_transferencia, "transferencias": transferencias,
-            "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado)
+            "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
+            "solvoz_empresas": empresas_solvoz_ativas(db)
         }, status_code=400)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
+
+
+# ---------------------------------------------------------
+# EMPRESAS SOLVOZ
+# Cadastro operacional no Organiza. Não replica usuários do SolVoz.
+# ---------------------------------------------------------
+
+@app.get("/organiza/configuracoes/solvoz-empresas", response_class=HTMLResponse)
+def solvoz_empresas_lista(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    empresas = db.query(SolVozEmpresa).order_by(SolVozEmpresa.nome.asc()).all()
+    return templates.TemplateResponse("organiza/solvoz_empresas.html", {
+        "request": request,
+        "usuario": usuario,
+        "empresas": empresas,
+        "erro": request.query_params.get("erro", ""),
+        "sucesso": request.query_params.get("sucesso", ""),
+    })
+
+
+@app.post("/organiza/configuracoes/solvoz-empresas")
+async def solvoz_empresa_salvar(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    slug = normalizar_slug_solvoz(form.get("slug") or nome)
+    if not nome or not slug:
+        return RedirectResponse("/organiza/configuracoes/solvoz-empresas?erro=Informe+nome+e+slug", status_code=303)
+    existente = db.query(SolVozEmpresa).filter(SolVozEmpresa.slug == slug).first()
+    if existente:
+        return RedirectResponse("/organiza/configuracoes/solvoz-empresas?erro=Este+slug+já+está+cadastrado", status_code=303)
+    db.add(SolVozEmpresa(
+        nome=nome,
+        slug=slug,
+        dominio=dominio_solvoz_por_slug(slug),
+        ativo=1,
+    ))
+    db.commit()
+    return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+cadastrada", status_code=303)
+
+
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/status")
+async def solvoz_empresa_status(
+    empresa_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    empresa.ativo = 1 if str(form.get("ativo") or "0") == "1" else 0
+    db.commit()
+    return RedirectResponse("/organiza/configuracoes/solvoz-empresas", status_code=303)
+
+
+def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
+    esperado = (os.getenv("SOLVOZ_API_TOKEN") or "").strip()
+    if not esperado:
+        raise HTTPException(503, "Integração SolVoz ainda não configurada.")
+    recebido = (x_solvoz_token or "").strip()
+    if not recebido or not hmac.compare_digest(recebido, esperado):
+        raise HTTPException(401, "Token SolVoz inválido.")
+
+
+@app.get("/api/integracoes/solvoz/maquinas")
+def api_solvoz_maquinas(
+    empresa: str = "",
+    x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
+    db: Session = Depends(get_db),
+):
+    """Snapshot das máquinas implantadas para futura sincronização com o SolVoz.
+
+    O uso em tempo real deve acontecer no banco do SolVoz; esta rota é de implantação/sincronização.
+    """
+    _validar_token_solvoz(x_solvoz_token)
+    consulta = (
+        db.query(Equipamento)
+        .options(selectinload(Equipamento.solvoz_empresa), selectinload(Equipamento.cliente))
+        .filter(
+            Equipamento.catalogo_online == 1,
+            Equipamento.solvoz_empresa_id.isnot(None),
+        )
+    )
+    slug = normalizar_slug_solvoz(empresa)
+    if slug:
+        consulta = consulta.join(SolVozEmpresa).filter(SolVozEmpresa.slug == slug)
+    equipamentos = consulta.order_by(Equipamento.maquina.asc()).all()
+    return {
+        "total": len(equipamentos),
+        "maquinas": [
+            {
+                "codigo": (eq.maquina or "").upper(),
+                "numero_hd": (eq.numero_hd or "").upper(),
+                "identificacao": rotulo_maquina(eq),
+                "empresa": eq.solvoz_empresa.slug if eq.solvoz_empresa else None,
+                "empresa_nome": eq.solvoz_empresa.nome if eq.solvoz_empresa else None,
+                "dominio": eq.solvoz_empresa.dominio if eq.solvoz_empresa else None,
+                "plano": normalizar_plano_qr(eq.plano),
+                "pacote": eq.pacote,
+                "catalogo_online": bool(eq.catalogo_online),
+                "status": eq.status,
+                "cliente_id": eq.cliente_id,
+                "cliente_nome": eq.cliente.nome if eq.cliente else None,
+                "atualizado_em": datetime.now().isoformat(timespec="seconds"),
+            }
+            for eq in equipamentos
+        ],
+    }
 
 
 PASTA_LICENCAS = Path(os.getenv("PASTA_LICENCAS", Path(__file__).resolve().parent / "licencas_geradas"))
@@ -1389,17 +1586,31 @@ def normalizar_plano_qr(plano: Optional[str]) -> str:
     return "BASICO" if valor == "BASICO" else "PLUS"
 
 
-def validar_dados_licenca(equipamento: Equipamento):
+def validar_dados_licenca(equipamento: Equipamento, db: Session):
+    """Mantém as validações existentes e acrescenta somente o vínculo SolVoz."""
     maquina = re.sub(r"[^A-Z0-9]", "", (equipamento.maquina or "").upper())
     numero_hd = re.sub(r"[^A-Z0-9]", "", (equipamento.numero_hd or "").upper())
     if not re.fullmatch(r"KRJ\d{5}", maquina):
         raise HTTPException(400, "O número da máquina deve seguir o padrão KRJ00040.")
     if not numero_hd.startswith("KRJHD"):
         raise HTTPException(400, "O campo NR HD deve conter o código completo iniciado por KRJHD.")
-    return maquina, numero_hd, normalizar_plano_qr(equipamento.plano)
+
+    empresa = None
+    if equipamento.solvoz_empresa_id:
+        empresa = db.query(SolVozEmpresa).filter(
+            SolVozEmpresa.id == equipamento.solvoz_empresa_id,
+            SolVozEmpresa.ativo == 1,
+        ).first()
+    if not empresa:
+        raise HTTPException(400, "Selecione a Empresa SolVoz antes de gerar a licença e o QR Code.")
+
+    plano = normalizar_plano_qr(equipamento.plano)
+    if not equipamento.plano:
+        raise HTTPException(400, "Selecione o plano do equipamento antes de gerar a licença e o QR Code.")
+    return maquina, numero_hd, plano, empresa
 
 
-def criar_arte_qr(maquina: str, plano: str, destino: Path):
+def criar_arte_qr(maquina: str, plano: str, url: str, destino: Path):
     """Reproduz a arte do gerador AU3: 900x1100, textos e QR centralizado."""
     try:
         import qrcode
@@ -1410,7 +1621,6 @@ def criar_arte_qr(maquina: str, plano: str, destino: Path):
             "Dependências do QR ausentes. Execute: pip install qrcode[pil] Pillow"
         ) from exc
 
-    url = f"https://www.karaokerj.com.br/catalogo?m={maquina}&plano={plano.lower()}"
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=12, border=4)
     qr.add_data(url)
     qr.make(fit=True)
@@ -1443,19 +1653,26 @@ def criar_arte_qr(maquina: str, plano: str, destino: Path):
     arte.save(destino, "PNG")
 
 
-def gerar_pasta_licenca(equipamento: Equipamento) -> tuple[Path, Path]:
-    maquina, numero_hd, plano = validar_dados_licenca(equipamento)
+def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Path]:
+    maquina, numero_hd, plano, empresa = validar_dados_licenca(equipamento, db)
+    url_qr = montar_url_qr_solvoz(
+        empresa,
+        maquina,
+        plano,
+        bool(equipamento.catalogo_online),
+    )
     pasta = PASTA_LICENCAS / maquina
     pasta.mkdir(parents=True, exist_ok=True)
 
     (pasta / "MAQUINA_KRJ.txt").write_text(maquina, encoding="utf-8")
     (pasta / "LICENCA_HD_KRJ.txt").write_text(numero_hd, encoding="utf-8")
     png = pasta / f"QR_{maquina}_{plano}.png"
-    criar_arte_qr(maquina, plano, png)
+    criar_arte_qr(maquina, plano, url_qr, png)
+    (pasta / "URL_CATALOGO.txt").write_text(url_qr, encoding="utf-8")
 
     zip_path = PASTA_LICENCAS / f"{maquina}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as pacote:
-        for arquivo in [pasta / "MAQUINA_KRJ.txt", pasta / "LICENCA_HD_KRJ.txt", png]:
+        for arquivo in [pasta / "MAQUINA_KRJ.txt", pasta / "LICENCA_HD_KRJ.txt", pasta / "URL_CATALOGO.txt", png]:
             pacote.write(arquivo, arcname=f"{maquina}/{arquivo.name}")
     return pasta, zip_path
 
@@ -1475,7 +1692,7 @@ async def equipamento_gerar_licenca(cliente_id: int, equipamento_id: int, reques
     preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
     db.commit()
-    _, zip_path = gerar_pasta_licenca(eq)
+    _, zip_path = gerar_pasta_licenca(eq, db)
     return FileResponse(
         path=zip_path,
         media_type="application/zip",
