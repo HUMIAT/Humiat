@@ -205,3 +205,14 @@
 .client-qr-actions a{padding:8px 10px;border:1px solid rgba(54,229,255,.25);border-radius:10px;color:#c9f8ff;font-weight:800;font-size:.76rem}
 @media(max-width:820px){.client-company-head{grid-template-columns:1fr}.client-qr-card{max-width:520px}}
 @media(max-width:480px){.client-qr-card{grid-template-columns:86px minmax(0,1fr)}.client-qr-card img{width:86px;height:86px}}
+
+/* Máquinas Organiza dentro do ADM unificado */
+.machines-card .card-title-row{align-items:center;gap:16px}
+.machine-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}
+.machine-stat{border:1px solid rgba(130,160,200,.22);border-radius:14px;padding:14px 16px;background:rgba(255,255,255,.025)}
+.machine-stat strong{display:block;font-size:1.45rem;line-height:1.1}
+.machine-stat span{display:block;margin-top:5px;color:var(--muted,#9fb0c6);font-size:.84rem}
+@media (max-width:760px){
+  .machine-summary-grid{grid-template-columns:1fr}
+  .machines-card .card-title-row{align-items:flex-start;flex-direction:column}
+}

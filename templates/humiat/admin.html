@@ -40,6 +40,7 @@
     {% elif ok == 'produto_atualizado' %}Acesso ao produto atualizado.
     {% elif ok == 'status_atualizado' %}Status da empresa atualizado.
     {% elif ok == 'cores_salvas' %}Identidade visual do SolVoz atualizada.
+    {% elif ok == 'maquinas_sincronizadas' %}Máquinas do Organiza sincronizadas: {{ request.query_params.get('qtd', '0') }} importada(s).
     {% else %}Alteração salva com sucesso.{% endif %}
   </div>
   {% endif %}
@@ -199,6 +200,44 @@
           <strong>Não consegui carregar a configuração do SolVoz.</strong>
           <span>{{ solvoz_erro or 'Verifique a integração entre Humiat e SolVoz.' }}</span>
         </div>
+        {% endif %}
+      </article>
+      {% endif %}
+
+      {% if solvoz_habilitado %}
+      <article class="workspace-card machines-card">
+        <div class="card-title-row">
+          <div>
+            <span class="card-kicker">SolVoz + Organiza</span>
+            <h3>Máquinas do Organiza</h3>
+          </div>
+          <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/solvoz/maquinas/sincronizar">
+            <button class="btn-primary" type="submit">Sincronizar Organiza</button>
+          </form>
+        </div>
+
+        {% if solvoz and solvoz.maquinas %}
+        <div class="machine-summary-grid">
+          <div class="machine-stat">
+            <strong>{{ solvoz.maquinas.ativas or 0 }}</strong>
+            <span>máquinas ativas</span>
+          </div>
+          <div class="machine-stat">
+            <strong>{{ solvoz.maquinas.online or 0 }}</strong>
+            <span>online agora</span>
+          </div>
+          <div class="machine-stat">
+            <strong>{{ solvoz.maquinas.total or 0 }}</strong>
+            <span>registros no SolVoz</span>
+          </div>
+        </div>
+        {% if solvoz.maquinas.ultima_sincronizacao %}
+        <p class="muted-copy">Última sincronização: {{ solvoz.maquinas.ultima_sincronizacao }}</p>
+        {% else %}
+        <p class="muted-copy">Ainda não houve sincronização desta empresa com o Organiza.</p>
+        {% endif %}
+        {% else %}
+        <p class="muted-copy">Sincronize para trazer as máquinas implantadas no Organiza para esta empresa.</p>
         {% endif %}
       </article>
       {% endif %}

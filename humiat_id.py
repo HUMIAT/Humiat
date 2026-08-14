@@ -752,6 +752,45 @@ def salvar_identidade_solvoz(
     return RedirectResponse(f"/painel?empresa_id={empresa_id}&ok=cores_salvas", status_code=303)
 
 
+@router.post("/admin-humiat/empresa/{empresa_id}/solvoz/maquinas/sincronizar")
+def sincronizar_maquinas_solvoz(
+    empresa_id: int,
+    request: Request,
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
+    """Aciona pelo ADM unificado a sincronização Organiza -> SolVoz."""
+    empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404)
+    if not _empresa_tem_produto(db, empresa_id, "SOLVOZ"):
+        return RedirectResponse(
+            f"/painel?empresa_id={empresa_id}&erro={urllib.parse.quote('SolVoz não está habilitado para esta empresa')}",
+            status_code=303,
+        )
+    try:
+        retorno = _solvoz_api(
+            f"/_sv/api/humiat/empresa/{urllib.parse.quote(empresa.slug)}/maquinas/sincronizar",
+            metodo="POST",
+            dados={},
+        )
+        sync = retorno.get("sincronizacao") or {}
+        qtd = int(sync.get("importadas") or 0)
+    except Exception as exc:
+        msg = urllib.parse.quote("Falha ao sincronizar máquinas do Organiza: " + str(exc))
+        return RedirectResponse(f"/painel?empresa_id={empresa_id}&erro={msg}", status_code=303)
+
+    _auditar(
+        db, request, "SINCRONIZAR_MAQUINAS_ORGANIZA", usuario.id, empresa_id,
+        f"importadas={qtd}",
+    )
+    db.commit()
+    return RedirectResponse(
+        f"/painel?empresa_id={empresa_id}&ok=maquinas_sincronizadas&qtd={qtd}",
+        status_code=303,
+    )
+
+
 @router.get("/painel/empresa/{empresa_id}/qr.png")
 def qr_empresa_humiat(
     empresa_id: int,
