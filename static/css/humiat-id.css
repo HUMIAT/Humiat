@@ -112,6 +112,20 @@
 .color-grid label>span{display:flex;align-items:center;gap:7px}
 .color-grid input[type=color]{width:38px;height:38px;border:0;border-radius:9px;background:none;padding:0;cursor:pointer}
 .color-grid code{font-size:.68rem;color:#aebbd0;overflow:hidden}
+.theme-source-note{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:11px 12px;
+  border:1px solid rgba(54,229,255,.14);
+  border-radius:11px;
+  background:rgba(54,229,255,.035);
+}
+.theme-source-note strong{color:#eaf7ff;font-size:.82rem}
+.theme-source-note span{color:var(--muted);font-size:.75rem;line-height:1.45}
+.color-grid--semantic label{gap:6px}
+.color-grid--semantic label>b{font-size:.78rem;color:#eaf2ff}
+.color-grid--semantic label>small{min-height:30px;color:var(--muted);font-size:.67rem;line-height:1.35;font-weight:600}
 .integration-error,.integration-note{display:flex;flex-direction:column;gap:5px;padding:13px;border:1px solid rgba(255,208,117,.22);border-radius:12px;background:rgba(255,208,117,.05);color:#ffe4ae}
 .integration-error span,.integration-note{font-size:.8rem}
 .integration-error span{color:#c9b98f}

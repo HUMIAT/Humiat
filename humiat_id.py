@@ -747,13 +747,10 @@ def salvar_identidade_solvoz(
     tema: str = Form("party"),
     brand: str = Form("#ff3fb4"),
     brand_2: str = Form("#35c7ff"),
-    brand_dark: str = Form("#44116d"),
     accent: str = Form("#ffe44c"),
     bg: str = Form("#fff7ff"),
     surface: str = Form("#ffffff"),
-    surface_2: str = Form("#fff0fb"),
     text: str = Form("#1a1230"),
-    muted: str = Form("#6e6380"),
     usuario: HumiatUsuario = Depends(exigir_admin_humiat),
     db: Session = Depends(get_db),
 ):
@@ -770,13 +767,10 @@ def salvar_identidade_solvoz(
                 "tema": tema,
                 "brand": brand,
                 "brand_2": brand_2,
-                "brand_dark": brand_dark,
                 "accent": accent,
                 "bg": bg,
                 "surface": surface,
-                "surface_2": surface_2,
                 "text": text,
-                "muted": muted,
             },
         )
     except Exception as exc:

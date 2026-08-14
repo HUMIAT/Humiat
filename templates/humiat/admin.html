@@ -167,29 +167,47 @@
               <option value="{{ t.id }}"
                 data-brand="{{ t.cores.brand }}"
                 data-brand-2="{{ t.cores.brand_2 }}"
-                data-brand-dark="{{ t.cores.brand_dark }}"
                 data-accent="{{ t.cores.accent }}"
                 data-bg="{{ t.cores.bg }}"
                 data-surface="{{ t.cores.surface }}"
-                data-surface-2="{{ t.cores.surface_2 }}"
                 data-text="{{ t.cores.text }}"
-                data-muted="{{ t.cores.muted }}"
                 {% if t.id == solvoz.empresa.tema %}selected{% endif %}>{{ t.icone }} {{ t.nome }}</option>
               {% endfor %}
             </select>
           </label>
-          <div class="color-grid">
-            {% set c = solvoz.empresa.cores %}
-            <label>Principal <span><input type="color" name="brand" value="{{ c.brand }}"><code>{{ c.brand }}</code></span></label>
-            <label>Secundária <span><input type="color" name="brand_2" value="{{ c.brand_2 }}"><code>{{ c.brand_2 }}</code></span></label>
-            <label>Destaque <span><input type="color" name="accent" value="{{ c.accent }}"><code>{{ c.accent }}</code></span></label>
-            <label>Fundo <span><input type="color" name="bg" value="{{ c.bg }}"><code>{{ c.bg }}</code></span></label>
-            <label>Superfície <span><input type="color" name="surface" value="{{ c.surface }}"><code>{{ c.surface }}</code></span></label>
-            <label>Texto <span><input type="color" name="text" value="{{ c.text }}"><code>{{ c.text }}</code></span></label>
+
+          <div class="theme-source-note">
+            <strong>Estas 6 cores controlam todo o app.</strong>
+            <span>Início, Catálogo, PDFs, modais, cards, botões e navegação usam esta mesma identidade. Tons auxiliares são calculados automaticamente.</span>
           </div>
-          <input type="hidden" name="brand_dark" value="{{ c.brand_dark }}">
-          <input type="hidden" name="surface_2" value="{{ c.surface_2 }}">
-          <input type="hidden" name="muted" value="{{ c.muted }}">
+
+          <div class="color-grid color-grid--semantic">
+            {% set c = solvoz.empresa.cores %}
+            <label>
+              <b>Principal</b><small>Ações principais e seleção</small>
+              <span><input type="color" name="brand" value="{{ c.brand }}"><code>{{ c.brand }}</code></span>
+            </label>
+            <label>
+              <b>Secundária</b><small>Apoio visual e bordas</small>
+              <span><input type="color" name="brand_2" value="{{ c.brand_2 }}"><code>{{ c.brand_2 }}</code></span>
+            </label>
+            <label>
+              <b>Destaque</b><small>Enviar, foco e elementos especiais</small>
+              <span><input type="color" name="accent" value="{{ c.accent }}"><code>{{ c.accent }}</code></span>
+            </label>
+            <label>
+              <b>Fundo</b><small>Fundo de todas as telas do app</small>
+              <span><input type="color" name="bg" value="{{ c.bg }}"><code>{{ c.bg }}</code></span>
+            </label>
+            <label>
+              <b>Superfície</b><small>Cards, modais, campos e painéis</small>
+              <span><input type="color" name="surface" value="{{ c.surface }}"><code>{{ c.surface }}</code></span>
+            </label>
+            <label>
+              <b>Texto</b><small>Texto principal; tons suaves são derivados</small>
+              <span><input type="color" name="text" value="{{ c.text }}"><code>{{ c.text }}</code></span>
+            </label>
+          </div>
           <div class="identity-actions">
             <button class="btn-primary" type="submit">Salvar cores</button>
             {% if solvoz.empresa.url_inicio %}<a class="btn-ghost" href="{{ solvoz.empresa.url_inicio }}" target="_blank" rel="noopener">Ver início ↗</a>{% endif %}
@@ -206,7 +224,7 @@
       {% endif %}
 
       {% if solvoz_habilitado %}
-      <article class="workspace-card machines-card">
+      <article class="workspace-card machines-card" id="maquinas">
         <div class="card-title-row">
           <div>
             <span class="card-kicker">SolVoz + Organiza</span>
@@ -232,6 +250,36 @@
         <p class="muted-copy">Última sincronização: {{ solvoz.maquinas.ultima_sincronizacao_br or solvoz.maquinas.ultima_sincronizacao }}</p>
         {% else %}
         <p class="muted-copy">Ainda não houve sincronização desta empresa com o Organiza.</p>
+        {% endif %}
+
+        {% if solvoz.maquinas.lista %}
+        <div style="display:grid;gap:10px;margin-top:16px">
+          {% for m in solvoz.maquinas.lista %}
+          <details style="border:1px solid rgba(148,163,184,.22);border-radius:14px;background:rgba(7,17,31,.55);padding:0 14px">
+            <summary style="display:grid;grid-template-columns:minmax(110px,1fr) auto auto;gap:10px;align-items:center;cursor:pointer;padding:13px 0;list-style:none">
+              <div>
+                <strong>{{ m.codigo }}</strong>
+                <small style="display:block;opacity:.7;margin-top:2px">{{ m.plano or 'PLUS' }}{% if m.pacote %} • {{ m.pacote }}{% endif %}</small>
+              </div>
+              <span style="font-size:12px;opacity:.75">
+                {% if m.ultima_comunicacao %}última comunicação: {{ m.segundos_sem_atualizar or 0 }}s{% else %}sem comunicação{% endif %}
+              </span>
+              <span class="status-badge {% if m.online %}active{% else %}review{% endif %}">
+                {% if m.online %}ONLINE{% else %}OFFLINE{% endif %}
+              </span>
+            </summary>
+            <div style="padding:0 0 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+              <div><small style="opacity:.65">Fila real</small><strong style="display:block">{{ m.fila_qtd or 0 }} música(s)</strong></div>
+              <div><small style="opacity:.65">Pedidos pendentes</small><strong style="display:block">{{ m.pendentes or 0 }}</strong></div>
+              <div><small style="opacity:.65">Último pedido</small><strong style="display:block">{% if m.ultimo_pedido %}{{ '%05d'|format(m.ultimo_pedido.codigo|int) }} • {{ m.ultimo_pedido.status }}{% else %}—{% endif %}</strong></div>
+              <div><small style="opacity:.65">Identificação</small><strong style="display:block">{{ m.identificacao or m.cliente_nome or '—' }}</strong></div>
+            </div>
+          </details>
+          {% endfor %}
+        </div>
+        <div style="margin-top:12px">
+          <a class="btn-ghost" href="/painel?empresa_id={{ empresa.id }}#maquinas">↻ Atualizar status</a>
+        </div>
         {% endif %}
         {% else %}
         <p class="muted-copy">Sincronize para trazer as máquinas implantadas no Organiza para esta empresa.</p>
@@ -452,13 +500,10 @@
     const datasetMap = {
       brand: 'brand',
       brand_2: 'brand2',
-      brand_dark: 'brandDark',
       accent: 'accent',
       bg: 'bg',
       surface: 'surface',
-      surface_2: 'surface2',
-      text: 'text',
-      muted: 'muted'
+      text: 'text'
     };
     themeSelect.addEventListener('change', () => {
       const opt = themeSelect.options[themeSelect.selectedIndex];
