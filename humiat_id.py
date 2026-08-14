@@ -7,7 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -29,6 +29,7 @@ SSO_MINUTES = int(os.getenv("HUMIAT_SSO_MINUTES", "2"))
 SSO_SECRET = os.getenv("HUMIAT_SSO_SECRET", "").strip()
 SOLVOZ_BASE_URL = os.getenv("HUMIAT_SOLVOZ_URL", "https://www.solvoz.com.br").strip().rstrip("/")
 SOLVOZ_API_TIMEOUT = float(os.getenv("HUMIAT_SOLVOZ_API_TIMEOUT", "8") or "8")
+SOLVOZ_DIAGNOSTICS_PATH = os.getenv("HUMIAT_SOLVOZ_DIAGNOSTICS_PATH", "/_sv/uso/7f29c4b8").strip() or "/_sv/uso/7f29c4b8"
 
 TIPO_ADMIN_HUMIAT = "ADMIN_HUMIAT"
 TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"
@@ -189,9 +190,31 @@ def _solvoz_api(caminho: str, *, metodo: str = "GET", dados: dict | None = None)
         raise RuntimeError(f"Não foi possível comunicar com o SolVoz: {exc}") from exc
 
 
+def _formatar_data_br(valor) -> str:
+    """Formata timestamps técnicos do SolVoz para o painel humano do ADM."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+    try:
+        # Aceita o formato vindo de SQLite/Postgres e também ISO 8601.
+        iso = texto.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(iso)
+        # CURRENT_TIMESTAMP no banco é UTC. Quando vier sem fuso, tratamos como UTC.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(timezone(timedelta(hours=-3)))
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return texto
+
+
 def _solvoz_resumo(slug: str) -> tuple[dict | None, str]:
     try:
         dados = _solvoz_api(f"/_sv/api/humiat/empresa/{urllib.parse.quote(_slug(slug))}")
+        if dados.get("ok") and isinstance(dados.get("maquinas"), dict):
+            dados["maquinas"]["ultima_sincronizacao_br"] = _formatar_data_br(
+                dados["maquinas"].get("ultima_sincronizacao")
+            )
         return dados if dados.get("ok") else None, ""
     except Exception as exc:
         return None, str(exc)
@@ -369,6 +392,7 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "solvoz_habilitado": solvoz_habilitado,
         "status_produtos": status_produtos,
         "solvoz_base_url": SOLVOZ_BASE_URL,
+        "solvoz_diagnostics_url": f"{SOLVOZ_BASE_URL}{SOLVOZ_DIAGNOSTICS_PATH}",
         "admin_humiat": True,
     }
 
@@ -484,6 +508,17 @@ def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Heade
     item.usado_em = datetime.utcnow()
     db.commit()
     return {"ok": True, "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo}, "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None), "produto": item.produto_codigo}
+
+
+@router.get("/admin-humiat/diagnosticos-solvoz")
+def diagnosticos_solvoz(
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+):
+    """Atalho protegido do ADM Humiat para o painel técnico do SolVoz/Render."""
+    return RedirectResponse(
+        f"{SOLVOZ_BASE_URL}{SOLVOZ_DIAGNOSTICS_PATH}",
+        status_code=303,
+    )
 
 
 @router.get("/admin-humiat", response_class=HTMLResponse)

@@ -94,6 +94,7 @@
           {% elif solvoz_habilitado %}
           <button class="btn-primary" type="button" disabled title="Ative a empresa antes de abrir para o cliente">Abrir SolVoz</button>
           {% endif %}
+          <a class="btn-secondary" href="/admin-humiat/diagnosticos-solvoz" target="_blank" rel="noopener">Diagnósticos</a>
           <button type="button" class="btn-secondary" data-dialog-open="clonar-empresa">⧉ Clonar empresa</button>
           <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/status">
             <button class="btn-ghost {% if empresa.ativo %}danger-soft{% endif %}" type="submit">
@@ -217,14 +218,10 @@
         </div>
 
         {% if solvoz and solvoz.maquinas %}
-        <div class="machine-summary-grid">
+        <div class="machine-summary-grid machine-summary-grid--compact">
           <div class="machine-stat">
             <strong>{{ solvoz.maquinas.ativas or 0 }}</strong>
-            <span>máquinas ativas</span>
-          </div>
-          <div class="machine-stat">
-            <strong>{{ solvoz.maquinas.online or 0 }}</strong>
-            <span>online agora</span>
+            <span>máquinas vinculadas</span>
           </div>
           <div class="machine-stat">
             <strong>{{ solvoz.maquinas.total or 0 }}</strong>
@@ -232,7 +229,7 @@
           </div>
         </div>
         {% if solvoz.maquinas.ultima_sincronizacao %}
-        <p class="muted-copy">Última sincronização: {{ solvoz.maquinas.ultima_sincronizacao }}</p>
+        <p class="muted-copy">Última sincronização: {{ solvoz.maquinas.ultima_sincronizacao_br or solvoz.maquinas.ultima_sincronizacao }}</p>
         {% else %}
         <p class="muted-copy">Ainda não houve sincronização desta empresa com o Organiza.</p>
         {% endif %}
