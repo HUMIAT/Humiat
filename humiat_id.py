@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
@@ -188,6 +188,69 @@ def _solvoz_api(caminho: str, *, metodo: str = "GET", dados: dict | None = None)
         raise RuntimeError(f"SolVoz respondeu HTTP {exc.code}: {detalhe or exc.reason}") from exc
     except Exception as exc:
         raise RuntimeError(f"Não foi possível comunicar com o SolVoz: {exc}") from exc
+
+
+def _solvoz_api_arquivo(
+    caminho: str,
+    *,
+    nome_arquivo: str,
+    conteudo: bytes,
+    content_type: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    dados: dict | None = None,
+) -> dict:
+    if not SSO_SECRET:
+        raise RuntimeError("HUMIAT_SSO_SECRET não configurado")
+
+    boundary = "----HumiatSolVoz" + secrets.token_hex(16)
+    partes = []
+    for chave, valor in (dados or {}).items():
+        partes.append(f"--{boundary}\r\n".encode("ascii"))
+        partes.append(f'Content-Disposition: form-data; name="{chave}"\r\n\r\n'.encode("utf-8"))
+        partes.append(("" if valor is None else str(valor)).encode("utf-8"))
+        partes.append(b"\r\n")
+
+    safe_name = (nome_arquivo or "catalogo.xlsx").replace('"', "")
+    partes.append(f"--{boundary}\r\n".encode("ascii"))
+    partes.append(f'Content-Disposition: form-data; name="arquivo"; filename="{safe_name}"\r\n'.encode("utf-8"))
+    partes.append(f"Content-Type: {content_type}\r\n\r\n".encode("ascii"))
+    partes.append(conteudo)
+    partes.append(b"\r\n")
+    partes.append(f"--{boundary}--\r\n".encode("ascii"))
+    corpo = b"".join(partes)
+
+    req = urllib.request.Request(
+        f"{SOLVOZ_BASE_URL}{caminho}",
+        data=corpo,
+        method="POST",
+        headers={
+            "X-Humiat-SSO-Secret": SSO_SECRET,
+            "Accept": "application/json",
+            "User-Agent": "Humiat-ID-SolVoz-Admin/1.0",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(corpo)),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=max(SOLVOZ_API_TIMEOUT,120)) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        detalhe = ""
+        try:
+            detalhe = exc.read().decode("utf-8", errors="replace")
+            parsed = json.loads(detalhe)
+            detalhe = parsed.get("detail") or parsed.get("erro") or detalhe
+        except Exception:
+            pass
+        raise RuntimeError(f"SolVoz respondeu HTTP {exc.code}: {detalhe or exc.reason}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Não foi possível comunicar com o SolVoz: {exc}") from exc
+
+
+def _solvoz_catalogo_resumo() -> tuple[dict | None, str]:
+    try:
+        return _solvoz_api("/_sv/api/humiat/catalogo/resumo"), ""
+    except Exception as exc:
+        return None, str(exc)
 
 
 def _formatar_data_br(valor) -> str:
@@ -375,6 +438,8 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
     if solvoz_habilitado:
         solvoz, solvoz_erro = _solvoz_resumo(empresa.slug)
 
+    catalogo_solvoz, catalogo_solvoz_erro = _solvoz_catalogo_resumo()
+
     return {
         "request": request,
         "usuario": usuario,
@@ -390,6 +455,8 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "solvoz": solvoz,
         "solvoz_erro": solvoz_erro,
         "solvoz_habilitado": solvoz_habilitado,
+        "catalogo_solvoz": catalogo_solvoz,
+        "catalogo_solvoz_erro": catalogo_solvoz_erro,
         "status_produtos": status_produtos,
         "solvoz_base_url": SOLVOZ_BASE_URL,
         "solvoz_diagnostics_url": f"{SOLVOZ_BASE_URL}{SOLVOZ_DIAGNOSTICS_PATH}",
@@ -508,6 +575,62 @@ def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Heade
     item.usado_em = datetime.utcnow()
     db.commit()
     return {"ok": True, "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo}, "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None), "produto": item.produto_codigo}
+
+
+
+@router.post("/admin-humiat/solvoz/catalogo/importar")
+async def importar_catalogo_solvoz(
+    request: Request,
+    arquivo: UploadFile = File(...),
+    empresa_id: int | None = Form(None),
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
+    nome = (arquivo.filename or "").strip()
+    if not nome.lower().endswith(".xlsx"):
+        msg = urllib.parse.quote("Selecione uma planilha Excel .xlsx.")
+        destino = f"/painel?erro={msg}" + (f"&empresa_id={empresa_id}" if empresa_id else "")
+        return RedirectResponse(destino, status_code=303)
+
+    dados = await arquivo.read()
+    if not dados:
+        msg = urllib.parse.quote("A planilha selecionada está vazia.")
+        destino = f"/painel?erro={msg}" + (f"&empresa_id={empresa_id}" if empresa_id else "")
+        return RedirectResponse(destino, status_code=303)
+    if len(dados) > 30*1024*1024:
+        msg = urllib.parse.quote("A planilha ultrapassa o limite de 30 MB.")
+        destino = f"/painel?erro={msg}" + (f"&empresa_id={empresa_id}" if empresa_id else "")
+        return RedirectResponse(destino, status_code=303)
+
+    try:
+        retorno = _solvoz_api_arquivo(
+            "/_sv/api/humiat/catalogo/importar",
+            nome_arquivo=nome,
+            conteudo=dados,
+            content_type=arquivo.content_type or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            dados={},
+        )
+    except Exception as exc:
+        _auditar(db, request, "IMPORTAR_CATALOGO_SOLVOZ_FALHOU", usuario.id, detalhe=str(exc))
+        db.commit()
+        msg = urllib.parse.quote(str(exc))
+        destino = f"/painel?erro={msg}" + (f"&empresa_id={empresa_id}" if empresa_id else "")
+        return RedirectResponse(destino, status_code=303)
+
+    _auditar(db, request, "IMPORTAR_CATALOGO_SOLVOZ", usuario.id,
+             detalhe=f"arquivo={nome};modo=upsert;total={retorno.get('total')};tempo={retorno.get('com_tempo')}")
+    db.commit()
+
+    params = {
+        "ok": "catalogo_importado",
+        "total": retorno.get("total", 0),
+        "novos": retorno.get("novos", 0),
+        "atualizados": retorno.get("atualizados", 0),
+        "tempo": retorno.get("com_tempo", 0),
+    }
+    if empresa_id:
+        params["empresa_id"]=empresa_id
+    return RedirectResponse("/painel?"+urllib.parse.urlencode(params),status_code=303)
 
 
 @router.get("/admin-humiat/diagnosticos-solvoz")

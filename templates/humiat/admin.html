@@ -41,9 +41,54 @@
     {% elif ok == 'status_atualizado' %}Status da empresa atualizado.
     {% elif ok == 'cores_salvas' %}Identidade visual do SolVoz atualizada.
     {% elif ok == 'maquinas_sincronizadas' %}Máquinas do Organiza sincronizadas: {{ request.query_params.get('qtd', '0') }} importada(s).
+    {% elif ok == 'catalogo_importado' %}Banco de músicas atualizado: {{ request.query_params.get('total', '0') }} processadas, {{ request.query_params.get('novos', '0') }} novas e {{ request.query_params.get('atualizados', '0') }} atualizadas.
     {% else %}Alteração salva com sucesso.{% endif %}
   </div>
   {% endif %}
+
+
+  <article class="workspace-card" style="margin-bottom:18px">
+    <div class="card-title-row">
+      <div>
+        <span class="card-kicker">SolVoz • Banco de músicas</span>
+        <h3>Atualizar músicas pelo Excel</h3>
+      </div>
+      {% if catalogo_solvoz and catalogo_solvoz.ok %}
+      <span class="status-badge active">{{ catalogo_solvoz.total or 0 }} músicas</span>
+      {% endif %}
+    </div>
+
+    {% if catalogo_solvoz and catalogo_solvoz.ok %}
+    <div class="machine-summary-grid machine-summary-grid--compact" style="margin-bottom:14px">
+      <div class="machine-stat"><strong>{{ catalogo_solvoz.total or 0 }}</strong><span>músicas no banco</span></div>
+      <div class="machine-stat"><strong>{{ catalogo_solvoz.com_tempo or 0 }}</strong><span>com duração</span></div>
+      <div class="machine-stat"><strong>{{ catalogo_solvoz.sem_tempo or 0 }}</strong><span>sem duração</span></div>
+    </div>
+    {% elif catalogo_solvoz_erro %}
+    <div class="integration-error" style="margin-bottom:14px">
+      <strong>Não consegui consultar o catálogo do SolVoz.</strong>
+      <span>{{ catalogo_solvoz_erro }}</span>
+    </div>
+    {% endif %}
+
+    <form method="post" action="/admin-humiat/solvoz/catalogo/importar" enctype="multipart/form-data"
+          onsubmit="return confirm('Confirma adicionar/atualizar as músicas desta planilha? Nenhum código existente será removido.');"
+          style="display:grid;grid-template-columns:minmax(280px,1fr) auto;gap:12px;align-items:end">
+      {% if empresa %}<input type="hidden" name="empresa_id" value="{{ empresa.id }}">{% endif %}
+      <label>
+        <span style="display:block;font-weight:800;margin-bottom:6px">Selecione a planilha Excel</span>
+        <input type="file" name="arquivo" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+        <small style="display:block;margin-top:5px;opacity:.7">Pode ser a planilha completa ou uma atualização. O código identifica a música.</small>
+      </label>
+
+      <button class="btn-primary" type="submit">Atualizar banco</button>
+    </form>
+
+    <p class="muted-copy" style="margin-top:12px">
+      Código novo é incluído; código existente é atualizado; músicas que não estiverem na planilha não são apagadas.
+      A versão continua sendo individual de cada música. Se houver <b>TEMPO</b>, ele é salvo em segundos.
+    </p>
+  </article>
 
   <div class="admin-workbench">
     <aside class="company-rail">
