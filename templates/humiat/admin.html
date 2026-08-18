@@ -268,11 +268,95 @@
                 {% if m.online %}ONLINE{% else %}OFFLINE{% endif %}
               </span>
             </summary>
-            <div style="padding:0 0 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
-              <div><small style="opacity:.65">Fila real</small><strong style="display:block">{{ m.fila_qtd or 0 }} música(s)</strong></div>
-              <div><small style="opacity:.65">Pedidos pendentes</small><strong style="display:block">{{ m.pendentes or 0 }}</strong></div>
-              <div><small style="opacity:.65">Último pedido</small><strong style="display:block">{% if m.ultimo_pedido %}{{ '%05d'|format(m.ultimo_pedido.codigo|int) }} • {{ m.ultimo_pedido.status }}{% else %}—{% endif %}</strong></div>
-              <div><small style="opacity:.65">Identificação</small><strong style="display:block">{{ m.identificacao or m.cliente_nome or '—' }}</strong></div>
+            <div style="padding:0 0 14px">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+                <div>
+                  <small style="opacity:.65">Fila real</small>
+                  <strong style="display:block">{{ m.fila_qtd or 0 }} música(s)</strong>
+                </div>
+                <div>
+                  <small style="opacity:.65">Pedidos pendentes</small>
+                  <strong style="display:block">{{ m.pendentes or 0 }}</strong>
+                </div>
+                <div>
+                  <small style="opacity:.65">Último pedido</small>
+                  <strong style="display:block">
+                    {% if m.ultimo_pedido %}
+                      {{ '%05d'|format(m.ultimo_pedido.codigo|int) }} • {{ m.ultimo_pedido.status }}
+                    {% else %}—{% endif %}
+                  </strong>
+                  {% if m.ultimo_pedido and m.ultimo_pedido.nome %}
+                  <small style="display:block;margin-top:3px;opacity:.8">Cantor: {{ m.ultimo_pedido.nome }}</small>
+                  {% endif %}
+                </div>
+                <div>
+                  <small style="opacity:.65">Notas recebidas</small>
+                  <strong style="display:block">{{ m.ranking_total or 0 }}</strong>
+                  <small style="display:block;margin-top:3px;opacity:.72">
+                    {% if m.ranking_total %}monitor alimentando ranking{% else %}aguardando primeira nota{% endif %}
+                  </small>
+                </div>
+                <div>
+                  <small style="opacity:.65">Identificação</small>
+                  <strong style="display:block">{{ m.identificacao or m.cliente_nome or '—' }}</strong>
+                </div>
+              </div>
+
+              {% if m.pedidos_pendentes or m.ranking_top or m.ranking_ultimas %}
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:14px">
+
+                <div style="border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;background:rgba(2,10,20,.22)">
+                  <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
+                    <strong>Pedidos aguardando</strong>
+                    <span class="mini-status">{{ m.pedidos_pendentes|length if m.pedidos_pendentes else 0 }}</span>
+                  </div>
+                  {% if m.pedidos_pendentes %}
+                    {% for p in m.pedidos_pendentes %}
+                    <div style="display:grid;grid-template-columns:32px 68px 1fr;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.14)">
+                      <small style="opacity:.6">{{ loop.index }}</small>
+                      <strong>{{ '%05d'|format(p.codigo|int) }}</strong>
+                      <span>{{ p.nome or 'Sem nome' }}</span>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <small style="opacity:.68">Nenhum pedido aguardando o monitor.</small>
+                  {% endif %}
+                </div>
+
+                <div style="border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;background:rgba(2,10,20,.22)">
+                  <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
+                    <strong>🏆 Top 10</strong>
+                    <span class="mini-status">{{ m.ranking_total or 0 }} notas</span>
+                  </div>
+                  {% if m.ranking_top %}
+                    {% for r in m.ranking_top %}
+                    <div style="display:grid;grid-template-columns:36px 1fr 48px;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.14)">
+                      <strong>{{ loop.index }}º</strong>
+                      <span>{{ r.nome or 'Cantor' }}</span>
+                      <strong style="text-align:right;font-size:17px">{{ r.nota or 0 }}</strong>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <small style="opacity:.68">Nenhuma nota recebida do monitor ainda.</small>
+                  {% endif %}
+                </div>
+
+                <div style="border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;background:rgba(2,10,20,.22)">
+                  <strong style="display:block;margin-bottom:8px">Últimas notas do monitor</strong>
+                  {% if m.ranking_ultimas %}
+                    {% for r in m.ranking_ultimas %}
+                    <div style="display:grid;grid-template-columns:1fr 48px;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.14)">
+                      <span>{{ r.nome or 'Cantor' }}</span>
+                      <strong style="text-align:right">{{ r.nota or 0 }}</strong>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <small style="opacity:.68">Nenhuma apresentação registrada.</small>
+                  {% endif %}
+                </div>
+
+              </div>
+              {% endif %}
             </div>
           </details>
           {% endfor %}
