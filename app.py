@@ -37,7 +37,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.0.3"
+ORGANIZA_VERSION = "1.0.5"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
@@ -1693,7 +1693,7 @@ def criar_arte_qr(maquina: str, plano: str, url: str, destino: Path):
 
 
 def criar_qr_id_equipamento(maquina: str, destino: Path):
-    """Gera arte 500x500 com o codigo da maquina no centro e QR contendo somente esse codigo."""
+    """Gera arte 500x500 compacta: QR legivel e codigo imediatamente abaixo, sem margens extras."""
     try:
         import qrcode
         from PIL import Image, ImageDraw, ImageFont
@@ -1703,12 +1703,12 @@ def criar_qr_id_equipamento(maquina: str, destino: Path):
             "Dependencia do QR ausente. Execute: pip install qrcode[pil] Pillow"
         ) from exc
 
-    # O conteudo codificado continua sendo SOMENTE o numero da maquina.
-    # Correcao alta permite a faixa branca central sem comprometer a leitura.
+    # Conteudo do QR: SOMENTE o numero da maquina.
+    # Mantemos 1 modulo de quiet zone, minimo tecnico para preservar a leitura.
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=18,
+        box_size=20,
         border=1,
     )
     qr.add_data(maquina)
@@ -1716,9 +1716,6 @@ def criar_qr_id_equipamento(maquina: str, destino: Path):
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
     arte = Image.new("RGB", (500, 500), "white")
-    x_qr = (500 - qr_img.width) // 2
-    y_qr = (500 - qr_img.height) // 2
-    arte.paste(qr_img, (x_qr, y_qr))
     desenho = ImageDraw.Draw(arte)
 
     def fonte_codigo(tamanho: int):
@@ -1731,27 +1728,20 @@ def criar_qr_id_equipamento(maquina: str, destino: Path):
                 return ImageFont.truetype(caminho, tamanho)
         return ImageFont.load_default()
 
-    # Faixa central pequena para reduzir espaco branco e manter boa leitura.
-    f = fonte_codigo(54)
+    # QR de 460x460 no topo. Nao ha espaco branco extra acima ou abaixo dele.
+    x_qr = (500 - qr_img.width) // 2
+    arte.paste(qr_img, (x_qr, 0))
+
+    # Codigo imediatamente abaixo do QR, com somente 1 px de separacao visual.
+    f = fonte_codigo(36)
     caixa = desenho.textbbox((0, 0), maquina, font=f)
     largura_texto = caixa[2] - caixa[0]
     altura_texto = caixa[3] - caixa[1]
-    padding_x = 24
-    padding_y = 14
-    faixa_largura = largura_texto + (padding_x * 2)
-    faixa_altura = altura_texto + (padding_y * 2)
-    x_faixa = (500 - faixa_largura) // 2
-    y_faixa = (500 - faixa_altura) // 2
-    desenho.rounded_rectangle(
-        [x_faixa, y_faixa, x_faixa + faixa_largura, y_faixa + faixa_altura],
-        radius=10,
-        fill="white",
-    )
     x_texto = (500 - largura_texto) // 2
-    y_texto = (500 - altura_texto) // 2 - caixa[1]
+    y_texto = 461 - caixa[1]
     desenho.text((x_texto, y_texto), maquina, fill="black", font=f)
-    arte.save(destino, "PNG")
 
+    arte.save(destino, "PNG")
 
 def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Path]:
     maquina, numero_hd, plano, empresa = validar_dados_licenca(equipamento, db)

@@ -1,1 +1,1 @@
-Organiza v1.0.3 - QR ID 500x500 com codigo central no QR
+Organiza v1.0.5 - compacta QR ID e aproxima codigo da maquina
