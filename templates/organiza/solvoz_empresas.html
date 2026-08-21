@@ -31,7 +31,7 @@
         </label>
         <label class="campo-duplo">Domínio gerado
           <input id="novo-solvoz-dominio" readonly aria-readonly="true" value="https://www.solvoz.com.br/">
-          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br.</small>
+          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br/catalogo.</small>
         </label>
       </div>
       <button class="botao primario" type="submit">Cadastrar empresa</button>
@@ -58,7 +58,7 @@
         </label>
         <label class="campo-duplo">Domínio gerado
           <input id="editar-solvoz-dominio" readonly aria-readonly="true" value="{{ editar.dominio }}">
-          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br.</small>
+          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br/catalogo.</small>
         </label>
       </div>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -112,7 +112,7 @@
   function atualizar() {
     const s = normalizar(slug.value);
     dominio.value = s === "karaokerj"
-      ? "https://www.karaokerj.com.br"
+      ? "https://www.karaokerj.com.br/catalogo"
       : "https://www.solvoz.com.br/" + s;
   }
   slug.addEventListener("input", atualizar);
@@ -124,7 +124,7 @@
     function atualizarEdicao() {
       const s = normalizar(editarSlug.value);
       editarDominio.value = s === "karaokerj"
-        ? "https://www.karaokerj.com.br"
+        ? "https://www.karaokerj.com.br/catalogo"
         : "https://www.solvoz.com.br/" + s;
     }
     editarSlug.addEventListener("input", atualizarEdicao);

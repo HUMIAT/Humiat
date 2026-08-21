@@ -84,7 +84,7 @@ def normalizar_slug_solvoz(valor: str) -> str:
 def dominio_solvoz_por_slug(slug: str) -> str:
     slug = normalizar_slug_solvoz(slug)
     if slug == "karaokerj":
-        return "https://www.karaokerj.com.br"
+        return "https://www.karaokerj.com.br/catalogo"
     return f"https://www.solvoz.com.br/{slug}" if slug else "https://www.solvoz.com.br"
 
 
@@ -201,7 +201,7 @@ class SolVozEmpresa(Base):
     """Empresas públicas do SolVoz conhecidas pelo Organiza.
 
     O domínio é derivado do slug para evitar digitação divergente na implantação:
-    karaokerj -> https://www.karaokerj.com.br
+    karaokerj -> https://www.karaokerj.com.br/catalogo
     demais    -> https://www.solvoz.com.br/<slug>
     """
     __tablename__ = "solvoz_empresas"
