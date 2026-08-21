@@ -1470,10 +1470,18 @@ def solvoz_empresas_lista(
     if not usuario.is_admin:
         raise HTTPException(403)
     empresas = db.query(SolVozEmpresa).order_by(SolVozEmpresa.nome.asc()).all()
+    editar = None
+    try:
+        editar_id = int(request.query_params.get("editar") or 0)
+    except (TypeError, ValueError):
+        editar_id = 0
+    if editar_id:
+        editar = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == editar_id).first()
     return templates.TemplateResponse("organiza/solvoz_empresas.html", {
         "request": request,
         "usuario": usuario,
         "empresas": empresas,
+        "editar": editar,
         "erro": request.query_params.get("erro", ""),
         "sucesso": request.query_params.get("sucesso", ""),
     })
@@ -1503,6 +1511,35 @@ async def solvoz_empresa_salvar(
     ))
     db.commit()
     return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+cadastrada", status_code=303)
+
+
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/editar")
+async def solvoz_empresa_editar(
+    empresa_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    slug = normalizar_slug_solvoz(form.get("slug") or nome)
+    if not nome or not slug:
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Informe+nome+e+slug", status_code=303)
+    existente = db.query(SolVozEmpresa).filter(
+        SolVozEmpresa.slug == slug, SolVozEmpresa.id != empresa_id
+    ).first()
+    if existente:
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Este+slug+já+está+cadastrado", status_code=303)
+    empresa.nome = nome
+    empresa.slug = slug
+    empresa.dominio = dominio_solvoz_por_slug(slug)
+    db.commit()
+    return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+atualizada", status_code=303)
 
 
 @app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/status")

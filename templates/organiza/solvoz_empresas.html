@@ -38,9 +38,40 @@
     </form>
   </section>
 
-  <section class="cartao secao-form">
+  {% if editar %}
+  <section class="cartao secao-form" id="editar-empresa">
     <div class="secao-form-titulo">
       <span>2</span>
+      <div>
+        <h2>Editar empresa SolVoz</h2>
+        <p>Altere o nome ou o slug. O domínio será recalculado automaticamente.</p>
+      </div>
+    </div>
+    <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ editar.id }}/editar">
+      <div class="form-grid-organizada dois-colunas">
+        <label>Nome da empresa *
+          <input name="nome" required value="{{ editar.nome }}">
+        </label>
+        <label>Slug *
+          <input name="slug" id="editar-solvoz-slug" required value="{{ editar.slug }}">
+          <small>Sem espaços.</small>
+        </label>
+        <label class="campo-duplo">Domínio gerado
+          <input id="editar-solvoz-dominio" readonly aria-readonly="true" value="{{ editar.dominio }}">
+          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br.</small>
+        </label>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="botao primario" type="submit">Salvar alterações</button>
+        <a class="botao" href="/organiza/configuracoes/solvoz-empresas">Cancelar</a>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo">
+      <span>{{ 3 if editar else 2 }}</span>
       <div>
         <h2>Empresas cadastradas</h2>
         <p>Essas opções aparecem no cadastro de cada equipamento.</p>
@@ -54,10 +85,13 @@
           <strong>{{ empresa.nome }}</strong>
           <small style="display:block;">{{ empresa.slug }} · {{ empresa.dominio }}</small>
         </div>
-        <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/status">
-          <input type="hidden" name="ativo" value="{{ 0 if empresa.ativo else 1 }}">
-          <button class="botao" type="submit">{{ 'Desativar' if empresa.ativo else 'Ativar' }}</button>
-        </form>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <a class="botao" href="/organiza/configuracoes/solvoz-empresas?editar={{ empresa.id }}#editar-empresa">Editar</a>
+          <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/status" style="margin:0;">
+            <input type="hidden" name="ativo" value="{{ 0 if empresa.ativo else 1 }}">
+            <button class="botao" type="submit">{{ 'Desativar' if empresa.ativo else 'Ativar' }}</button>
+          </form>
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -83,6 +117,19 @@
   }
   slug.addEventListener("input", atualizar);
   atualizar();
+
+  const editarSlug = document.getElementById("editar-solvoz-slug");
+  const editarDominio = document.getElementById("editar-solvoz-dominio");
+  if (editarSlug && editarDominio) {
+    function atualizarEdicao() {
+      const s = normalizar(editarSlug.value);
+      editarDominio.value = s === "karaokerj"
+        ? "https://www.karaokerj.com.br"
+        : "https://www.solvoz.com.br/" + s;
+    }
+    editarSlug.addEventListener("input", atualizarEdicao);
+    atualizarEdicao();
+  }
 })();
 </script>
 {% endblock %}
