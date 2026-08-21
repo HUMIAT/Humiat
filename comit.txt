@@ -1,1 +1,1 @@
-Organiza v1.0.7 - QR URL 500x500 ajustado e legivel
+Organiza v1.0.8 - QR URL 200x220 sem margens extras
