@@ -37,7 +37,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.0.5"
+ORGANIZA_VERSION = "1.0.6"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
@@ -1692,8 +1692,8 @@ def criar_arte_qr(maquina: str, plano: str, url: str, destino: Path):
     arte.save(destino, "PNG")
 
 
-def criar_qr_id_equipamento(maquina: str, destino: Path):
-    """Gera arte 500x500 compacta: QR legivel e codigo imediatamente abaixo, sem margens extras."""
+def criar_qr_id_equipamento(maquina: str, url: str, destino: Path):
+    """Gera arte 500x500 compacta: QR legivel apontando para a URL e codigo da maquina imediatamente abaixo."""
     try:
         import qrcode
         from PIL import Image, ImageDraw, ImageFont
@@ -1703,7 +1703,7 @@ def criar_qr_id_equipamento(maquina: str, destino: Path):
             "Dependencia do QR ausente. Execute: pip install qrcode[pil] Pillow"
         ) from exc
 
-    # Conteudo do QR: SOMENTE o numero da maquina.
+    # Conteudo do QR: URL completa do catalogo/equipamento.
     # Mantemos 1 modulo de quiet zone, minimo tecnico para preservar a leitura.
     qr = qrcode.QRCode(
         version=None,
@@ -1711,7 +1711,7 @@ def criar_qr_id_equipamento(maquina: str, destino: Path):
         box_size=20,
         border=1,
     )
-    qr.add_data(maquina)
+    qr.add_data(url)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
@@ -1759,7 +1759,7 @@ def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Pa
     png = pasta / f"QR_{maquina}_{plano}.png"
     criar_arte_qr(maquina, plano, url_qr, png)
     qr_id = pasta / f"QR_ID_{maquina}_500x500.png"
-    criar_qr_id_equipamento(maquina, qr_id)
+    criar_qr_id_equipamento(maquina, url_qr, qr_id)
     (pasta / "URL_CATALOGO.txt").write_text(url_qr, encoding="utf-8")
 
     zip_path = PASTA_LICENCAS / f"{maquina}.zip"

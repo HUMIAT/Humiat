@@ -1,1 +1,1 @@
-Organiza v1.0.5 - compacta QR ID e aproxima codigo da maquina
+Organiza v1.0.6 - QR compacto aponta para URL do catalogo
