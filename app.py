@@ -37,7 +37,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.0.0"
+ORGANIZA_VERSION = "1.0.1"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
@@ -1692,6 +1692,29 @@ def criar_arte_qr(maquina: str, plano: str, url: str, destino: Path):
     arte.save(destino, "PNG")
 
 
+def criar_qr_id_equipamento(maquina: str, destino: Path):
+    """Gera QR Code 500x500 contendo somente o numero do equipamento."""
+    try:
+        import qrcode
+    except ImportError as exc:
+        raise HTTPException(
+            500,
+            "Dependencia do QR ausente. Execute: pip install qrcode[pil] Pillow"
+        ) from exc
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(maquina)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    qr_img = qr_img.resize((500, 500))
+    qr_img.save(destino, "PNG")
+
+
 def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Path]:
     maquina, numero_hd, plano, empresa = validar_dados_licenca(equipamento, db)
     url_qr = montar_url_qr_solvoz(
@@ -1707,11 +1730,13 @@ def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Pa
     (pasta / "LICENCA_HD_KRJ.txt").write_text(numero_hd, encoding="utf-8")
     png = pasta / f"QR_{maquina}_{plano}.png"
     criar_arte_qr(maquina, plano, url_qr, png)
+    qr_id = pasta / f"QR_ID_{maquina}_500x500.png"
+    criar_qr_id_equipamento(maquina, qr_id)
     (pasta / "URL_CATALOGO.txt").write_text(url_qr, encoding="utf-8")
 
     zip_path = PASTA_LICENCAS / f"{maquina}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as pacote:
-        for arquivo in [pasta / "MAQUINA_KRJ.txt", pasta / "LICENCA_HD_KRJ.txt", pasta / "URL_CATALOGO.txt", png]:
+        for arquivo in [pasta / "MAQUINA_KRJ.txt", pasta / "LICENCA_HD_KRJ.txt", pasta / "URL_CATALOGO.txt", png, qr_id]:
             pacote.write(arquivo, arcname=f"{maquina}/{arquivo.name}")
     return pasta, zip_path
 
