@@ -37,7 +37,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.0.6"
+ORGANIZA_VERSION = "1.0.7"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
@@ -1704,12 +1704,26 @@ def criar_qr_id_equipamento(maquina: str, url: str, destino: Path):
         ) from exc
 
     # Conteudo do QR: URL completa do catalogo/equipamento.
-    # Mantemos 1 modulo de quiet zone, minimo tecnico para preservar a leitura.
+    # Calcula o tamanho dos modulos dinamicamente para o QR caber em 500x500
+    # sem distorcao e deixando apenas o espaco necessario para o codigo da maquina.
+    border = 1
+    altura_qr_disponivel = 460
+    qr_teste = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=10,
+        border=border,
+    )
+    qr_teste.add_data(url)
+    qr_teste.make(fit=True)
+    modulos = len(qr_teste.get_matrix())
+    box_size = max(1, altura_qr_disponivel // modulos)
+
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=20,
-        border=1,
+        box_size=box_size,
+        border=border,
     )
     qr.add_data(url)
     qr.make(fit=True)
@@ -1728,17 +1742,22 @@ def criar_qr_id_equipamento(maquina: str, url: str, destino: Path):
                 return ImageFont.truetype(caminho, tamanho)
         return ImageFont.load_default()
 
-    # QR de 460x460 no topo. Nao ha espaco branco extra acima ou abaixo dele.
+    # QR centralizado horizontalmente e encostado no topo.
     x_qr = (500 - qr_img.width) // 2
     arte.paste(qr_img, (x_qr, 0))
 
-    # Codigo imediatamente abaixo do QR, com somente 1 px de separacao visual.
-    f = fonte_codigo(36)
-    caixa = desenho.textbbox((0, 0), maquina, font=f)
-    largura_texto = caixa[2] - caixa[0]
+    # Codigo imediatamente abaixo do QR, sem sobrepor os modulos.
+    tamanho_fonte = 36
+    while tamanho_fonte > 10:
+        f = fonte_codigo(tamanho_fonte)
+        caixa = desenho.textbbox((0, 0), maquina, font=f)
+        largura_texto = caixa[2] - caixa[0]
+        if largura_texto <= 490:
+            break
+        tamanho_fonte -= 1
     altura_texto = caixa[3] - caixa[1]
     x_texto = (500 - largura_texto) // 2
-    y_texto = 461 - caixa[1]
+    y_texto = min(500 - altura_texto - 1, qr_img.height + 1 - caixa[1])
     desenho.text((x_texto, y_texto), maquina, fill="black", font=f)
 
     arte.save(destino, "PNG")
