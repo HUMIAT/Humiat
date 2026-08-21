@@ -37,6 +37,8 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+ORGANIZA_VERSION = "1.0.0"
+templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
 PREFIXOS_EQUIPAMENTO = {

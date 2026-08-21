@@ -21,7 +21,7 @@
 {% if usuario %}
 <div class="app-shell humiat-clean">
   <aside class="app-sidebar">
-    <a class="side-logo" href="/organiza"><img class="organiza-brand-icon" src="/static/icons/organiza/icon-192.png?v=20260805-2" alt="Organiza"><div><strong>ORGANIZA</strong><small>Sistema de Gestão</small></div></a>
+    <a class="side-logo" href="/organiza"><img class="organiza-brand-icon" src="/static/icons/organiza/icon-192.png?v=20260805-2" alt="Organiza"><div><strong>ORGANIZA</strong><small>Sistema de Gestão • v{{ ORGANIZA_VERSION }}</small></div></a>
     <nav class="side-nav">
       <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z"/><path d="M9 21v-7h6v7"/></svg></span> Dashboard</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Clientes</a>
