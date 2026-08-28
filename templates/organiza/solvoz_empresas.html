@@ -1,135 +1,41 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean">
-  <div class="titulo-linha">
-    <div>
-      <p class="tag">Integração</p>
-      <h1>Empresas SolVoz</h1>
-      <p class="texto-suave">Cadastre as empresas públicas usadas pelos equipamentos. O domínio é definido automaticamente pelo slug.</p>
-    </div>
-  </div>
-
+  <div class="titulo-linha"><div><p class="tag">Integração</p><h1>Empresas SolVoz</h1><p class="texto-suave">As empresas são criadas aqui automaticamente quando você clona uma empresa no SolVoz. Depois, vincule os equipamentos normalmente e gere o acesso do cliente a partir dos dados já cadastrados no Organiza.</p></div></div>
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
 
-  <section class="cartao secao-form">
-    <div class="secao-form-titulo">
-      <span>1</span>
-      <div>
-        <h2>Nova empresa SolVoz</h2>
-        <p>Use o mesmo nome e slug cadastrados no SolVoz.</p>
-      </div>
-    </div>
-    <form method="post" action="/organiza/configuracoes/solvoz-empresas">
-      <div class="form-grid-organizada dois-colunas">
-        <label>Nome da empresa *
-          <input name="nome" required placeholder="Ex.: Karaokê do Bonito">
-        </label>
-        <label>Slug *
-          <input name="slug" id="novo-solvoz-slug" required placeholder="karaokedobonito">
-          <small>Sem espaços. Ex.: karaokedobonito</small>
-        </label>
-        <label class="campo-duplo">Domínio gerado
-          <input id="novo-solvoz-dominio" readonly aria-readonly="true" value="https://www.solvoz.com.br/">
-          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br/catalogo.</small>
-        </label>
-      </div>
-      <button class="botao primario" type="submit">Cadastrar empresa</button>
-    </form>
-  </section>
-
   {% if editar %}
   <section class="cartao secao-form" id="editar-empresa">
-    <div class="secao-form-titulo">
-      <span>2</span>
-      <div>
-        <h2>Editar empresa SolVoz</h2>
-        <p>Altere o nome ou o slug. O domínio será recalculado automaticamente.</p>
-      </div>
-    </div>
+    <div class="secao-form-titulo"><span>1</span><div><h2>Editar referência SolVoz</h2><p>Use somente quando precisar corrigir nome ou slug.</p></div></div>
     <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ editar.id }}/editar">
-      <div class="form-grid-organizada dois-colunas">
-        <label>Nome da empresa *
-          <input name="nome" required value="{{ editar.nome }}">
-        </label>
-        <label>Slug *
-          <input name="slug" id="editar-solvoz-slug" required value="{{ editar.slug }}">
-          <small>Sem espaços.</small>
-        </label>
-        <label class="campo-duplo">Domínio gerado
-          <input id="editar-solvoz-dominio" readonly aria-readonly="true" value="{{ editar.dominio }}">
-          <small>O slug <strong>karaokerj</strong> usa automaticamente https://www.karaokerj.com.br/catalogo.</small>
-        </label>
-      </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button class="botao primario" type="submit">Salvar alterações</button>
-        <a class="botao" href="/organiza/configuracoes/solvoz-empresas">Cancelar</a>
-      </div>
+      <div class="form-grid-organizada dois-colunas"><label>Nome da empresa *<input name="nome" required value="{{ editar.nome }}"></label><label>Slug *<input name="slug" id="editar-solvoz-slug" required value="{{ editar.slug }}"></label><label class="campo-duplo">Domínio<input id="editar-solvoz-dominio" readonly value="{{ editar.dominio }}"></label></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="botao primario" type="submit">Salvar alterações</button><a class="botao" href="/organiza/configuracoes/solvoz-empresas">Cancelar</a></div>
     </form>
   </section>
   {% endif %}
 
   <section class="cartao secao-form">
-    <div class="secao-form-titulo">
-      <span>{{ 3 if editar else 2 }}</span>
-      <div>
-        <h2>Empresas cadastradas</h2>
-        <p>Essas opções aparecem no cadastro de cada equipamento.</p>
-      </div>
-    </div>
-    {% if empresas %}
-    <div class="manutencao-registros">
-      {% for empresa in empresas %}
-      <div class="linha-item" style="align-items:center; gap:16px;">
-        <div style="flex:1; min-width:0;">
-          <strong>{{ empresa.nome }}</strong>
-          <small style="display:block;">{{ empresa.slug }} · {{ empresa.dominio }}</small>
+    <div class="secao-form-titulo"><span>{{ 2 if editar else 1 }}</span><div><h2>Empresas sincronizadas</h2><p>O acesso é criado somente para o SolVoz. O cliente não recebe acesso ao Organiza.</p></div></div>
+    {% if linhas_empresas %}<div class="manutencao-registros">
+      {% for linha in linhas_empresas %}{% set empresa=linha.empresa %}
+      <div class="linha-item" style="align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:260px"><strong>{{ empresa.nome }}</strong><small style="display:block">{{ empresa.slug }} · {{ empresa.dominio }}</small>
+          {% if linha.clientes %}
+            <div style="margin-top:8px"><small><strong>Cliente vinculado pelos equipamentos:</strong></small>
+            {% for c in linha.clientes %}<small style="display:block">{{ c.nome }} · {{ c.email or 'sem e-mail' }}{% if c.email and c.email|lower in linha.emails_acesso %} · <strong>acesso criado</strong>{% endif %}</small>{% endfor %}</div>
+          {% else %}<small style="display:block;margin-top:8px">Nenhum cliente encontrado. Vincule um equipamento desta empresa a um cliente.</small>{% endif %}
         </div>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          {% if linha.clientes %}<form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/criar-acesso" style="display:flex;gap:8px;align-items:center;margin:0">
+            {% if linha.clientes|length > 1 %}<select name="cliente_id" required><option value="">Selecione o cliente</option>{% for c in linha.clientes %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}</select>{% else %}<input type="hidden" name="cliente_id" value="{{ linha.clientes[0].id }}">{% endif %}
+            <button class="botao primario" type="submit">Criar / reenviar acesso</button></form>{% endif %}
           <a class="botao" href="/organiza/configuracoes/solvoz-empresas?editar={{ empresa.id }}#editar-empresa">Editar</a>
-          <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/status" style="margin:0;">
-            <input type="hidden" name="ativo" value="{{ 0 if empresa.ativo else 1 }}">
-            <button class="botao" type="submit">{{ 'Desativar' if empresa.ativo else 'Ativar' }}</button>
-          </form>
+          <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/status" style="margin:0"><input type="hidden" name="ativo" value="{{ 0 if empresa.ativo else 1 }}"><button class="botao" type="submit">{{ 'Desativar' if empresa.ativo else 'Ativar' }}</button></form>
         </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="texto-suave">Nenhuma empresa SolVoz cadastrada.</p>
-    {% endif %}
+      </div>{% endfor %}
+    </div>{% else %}<p class="texto-suave">Nenhuma empresa sincronizada. Clone uma empresa no SolVoz para ela aparecer aqui automaticamente.</p>{% endif %}
   </section>
 </section>
-<script>
-(() => {
-  const slug = document.getElementById("novo-solvoz-slug");
-  const dominio = document.getElementById("novo-solvoz-dominio");
-  if (!slug || !dominio) return;
-  function normalizar(v) {
-    return (v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  }
-  function atualizar() {
-    const s = normalizar(slug.value);
-    dominio.value = s === "karaokerj"
-      ? "https://www.karaokerj.com.br/catalogo"
-      : "https://www.solvoz.com.br/" + s;
-  }
-  slug.addEventListener("input", atualizar);
-  atualizar();
-
-  const editarSlug = document.getElementById("editar-solvoz-slug");
-  const editarDominio = document.getElementById("editar-solvoz-dominio");
-  if (editarSlug && editarDominio) {
-    function atualizarEdicao() {
-      const s = normalizar(editarSlug.value);
-      editarDominio.value = s === "karaokerj"
-        ? "https://www.karaokerj.com.br/catalogo"
-        : "https://www.solvoz.com.br/" + s;
-    }
-    editarSlug.addEventListener("input", atualizarEdicao);
-    atualizarEdicao();
-  }
-})();
-</script>
+<script>(()=>{const s=document.getElementById('editar-solvoz-slug'),d=document.getElementById('editar-solvoz-dominio');if(!s||!d)return;const n=v=>(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');const a=()=>{const x=n(s.value);d.value=x==='karaokerj'?'https://www.karaokerj.com.br/catalogo':'https://www.solvoz.com.br/'+x};s.addEventListener('input',a);a()})();</script>
 {% endblock %}

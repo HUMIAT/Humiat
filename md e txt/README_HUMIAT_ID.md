@@ -5,7 +5,7 @@ Um único login em `humiat.com.br` para abrir os produtos Humiat autorizados por
 
 Perfis iniciais:
 - `ADMIN_HUMIAT`: pode administrar todas as empresas, usuários e produtos.
-- `ADMIN_EMPRESA`: enxerga apenas as empresas vinculadas a ele e seus produtos ativos.
+- `CLIENTE_EMPRESA`: enxerga apenas as empresas vinculadas a ele e seus produtos ativos.
 
 Produtos cadastrados automaticamente:
 - Connect
@@ -15,7 +15,7 @@ Produtos cadastrados automaticamente:
 
 ## Rotas
 - `/entrar` — login Humiat ID
-- `/painel` — painel único; para `ADMIN_HUMIAT` abre a administração completa e para `ADMIN_EMPRESA` abre somente a própria empresa
+- `/painel` — painel único; para `ADMIN_HUMIAT` abre a administração completa e para `CLIENTE_EMPRESA` abre somente os produtos da própria empresa
 - `/admin-humiat` — compatibilidade: redireciona o Administrador Humiat para `/painel`
 - `/sair` — encerra a sessão
 - `/api/humiat/sso/validar` — validação servidor-servidor de ticket SSO
@@ -61,7 +61,7 @@ A emissão SSO já está preparada. O receptor de cada produto será implantado 
 - Remove o campo "Usuário Organiza" do cadastro Humiat ID.
 - Usuários do Organiza continuam independentes e usam o login tradicional do Organiza.
 - Adiciona edição de usuário Humiat: nome, e-mail, perfil, empresa e status.
-- Administrador da Empresa passa a exigir empresa no cadastro e na edição, evitando usuários sem vínculo.
+- Acesso da Empresa passa a exigir empresa no cadastro e na edição, evitando usuários sem vínculo.
 - Administrador Humiat não precisa de empresa.
 
 

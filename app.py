@@ -27,7 +27,12 @@ from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL, LOKAFEST_API_TOKEN
 from database import Base, SessionLocal, engine, get_db
-from humiat_id import router as humiat_router, seed_humiat_id, humiat_usuario_da_requisicao, TIPO_ADMIN_HUMIAT
+from humiat_id import (
+    router as humiat_router, seed_humiat_id, migrar_humiat_id_schema,
+    humiat_usuario_da_requisicao, TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA,
+    HumiatEmpresa, HumiatUsuario, HumiatUsuarioEmpresa, HumiatEmpresaProduto, HumiatProduto,
+    garantir_empresa_solvoz_humiat, provisionar_acesso_solvoz_cliente,
+)
 
 from services.comunicacao import (
     ComunicacaoService, PAISES, formatar_telefone as formatar_telefone_internacional,
@@ -37,7 +42,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.0"
+ORGANIZA_VERSION = "1.1.1"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
@@ -591,6 +596,7 @@ templates.env.globals["codigo_tecnico"] = codigo_tecnico
 @app.on_event("startup")
 def iniciar_banco():
     Base.metadata.create_all(bind=engine)
+    migrar_humiat_id_schema(engine)
     seed_humiat_id()
     # Migração leve para bancos já existentes (SQLite e PostgreSQL)
     insp = inspect(engine)
@@ -1492,6 +1498,30 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
 # Cadastro operacional no Organiza. Não replica usuários do SolVoz.
 # ---------------------------------------------------------
 
+def _clientes_vinculados_empresa_solvoz(db: Session, empresa_id: int):
+    return (
+        db.query(Cliente)
+        .join(Equipamento, Equipamento.cliente_id == Cliente.id)
+        .filter(Equipamento.solvoz_empresa_id == empresa_id)
+        .distinct()
+        .order_by(Cliente.nome.asc())
+        .all()
+    )
+
+
+def _emails_com_acesso_solvoz(db: Session, slug: str) -> set[str]:
+    h_empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == normalizar_slug_solvoz(slug)).first()
+    if not h_empresa:
+        return set()
+    linhas = (
+        db.query(HumiatUsuario.email)
+        .join(HumiatUsuarioEmpresa, HumiatUsuarioEmpresa.usuario_id == HumiatUsuario.id)
+        .filter(HumiatUsuarioEmpresa.empresa_id == h_empresa.id, HumiatUsuario.ativo == 1)
+        .all()
+    )
+    return {(x[0] or "").strip().lower() for x in linhas if x[0]}
+
+
 @app.get("/organiza/configuracoes/solvoz-empresas", response_class=HTMLResponse)
 def solvoz_empresas_lista(
     request: Request,
@@ -1501,6 +1531,14 @@ def solvoz_empresas_lista(
     if not usuario.is_admin:
         raise HTTPException(403)
     empresas = db.query(SolVozEmpresa).order_by(SolVozEmpresa.nome.asc()).all()
+    linhas_empresas = []
+    for empresa in empresas:
+        clientes = _clientes_vinculados_empresa_solvoz(db, empresa.id)
+        linhas_empresas.append({
+            "empresa": empresa,
+            "clientes": clientes,
+            "emails_acesso": _emails_com_acesso_solvoz(db, empresa.slug),
+        })
     editar = None
     try:
         editar_id = int(request.query_params.get("editar") or 0)
@@ -1512,6 +1550,7 @@ def solvoz_empresas_lista(
         "request": request,
         "usuario": usuario,
         "empresas": empresas,
+        "linhas_empresas": linhas_empresas,
         "editar": editar,
         "erro": request.query_params.get("erro", ""),
         "sucesso": request.query_params.get("sucesso", ""),
@@ -1573,6 +1612,60 @@ async def solvoz_empresa_editar(
     return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+atualizada", status_code=303)
 
 
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/criar-acesso")
+async def solvoz_empresa_criar_acesso(
+    empresa_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
+    if not empresa:
+        raise HTTPException(404)
+    clientes = _clientes_vinculados_empresa_solvoz(db, empresa.id)
+    if not clientes:
+        msg = quote_plus("Vincule primeiro pelo menos um equipamento desta empresa a um cliente.")
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={msg}", status_code=303)
+    form = dict(await request.form())
+    cliente = None
+    informado = str(form.get("cliente_id") or "").strip()
+    if informado.isdigit():
+        cid = int(informado)
+        cliente = next((c for c in clientes if c.id == cid), None)
+    elif len(clientes) == 1:
+        cliente = clientes[0]
+    if not cliente:
+        msg = quote_plus("Selecione o cliente que receberá o acesso ao SolVoz.")
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={msg}", status_code=303)
+    try:
+        resultado = provisionar_acesso_solvoz_cliente(
+            db,
+            empresa_nome=empresa.nome,
+            empresa_slug=empresa.slug,
+            cliente_nome=cliente.nome,
+            cliente_email=cliente.email or "",
+            cliente_documento=cliente.documento or "",
+            cliente_telefone=cliente.telefone or "",
+            request=request,
+            enviar_email=True,
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/organiza/configuracoes/solvoz-empresas?erro={quote_plus(str(exc))}", status_code=303
+        )
+    if resultado.get("email_enviado"):
+        msg = f"Acesso SolVoz criado para {cliente.nome}. O e-mail para definir a senha foi enviado."
+        chave = "sucesso"
+    else:
+        msg = f"Acesso criado para {cliente.nome}, mas o e-mail não foi enviado: {resultado.get('email_erro') or 'verifique a configuração de e-mail.'}"
+        chave = "erro"
+    return RedirectResponse(
+        f"/organiza/configuracoes/solvoz-empresas?{chave}={quote_plus(msg)}", status_code=303
+    )
+
+
 @app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/status")
 async def solvoz_empresa_status(
     empresa_id: int,
@@ -1598,6 +1691,48 @@ def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
     recebido = (x_solvoz_token or "").strip()
     if not recebido or not hmac.compare_digest(recebido, esperado):
         raise HTTPException(401, "Token SolVoz inválido.")
+
+
+@app.post("/api/integracoes/solvoz/empresas")
+def api_solvoz_empresa_criar(
+    nome: str = Form(...),
+    slug: str = Form(...),
+    x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
+    db: Session = Depends(get_db),
+):
+    """Cria/garante no Organiza a empresa clonada no SolVoz (idempotente)."""
+    _validar_token_solvoz(x_solvoz_token)
+    nome_n = (nome or "").strip()
+    slug_n = normalizar_slug_solvoz(slug or nome_n)
+    if not nome_n or not slug_n:
+        raise HTTPException(400, "Nome e slug são obrigatórios.")
+    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.slug == slug_n).first()
+    criada = False
+    if not empresa:
+        empresa = SolVozEmpresa(
+            nome=nome_n,
+            slug=slug_n,
+            dominio=dominio_solvoz_por_slug(slug_n),
+            ativo=1,
+        )
+        db.add(empresa)
+        db.flush()
+        criada = True
+    else:
+        empresa.nome = nome_n
+        empresa.dominio = dominio_solvoz_por_slug(slug_n)
+        # Preserve o status existente; esta integração não reativa decisão manual.
+    h_empresa = garantir_empresa_solvoz_humiat(db, nome_n, slug_n, ativo=1)
+    db.commit()
+    return {
+        "ok": True,
+        "criada": criada,
+        "empresa_id": empresa.id,
+        "humiat_empresa_id": h_empresa.id,
+        "nome": empresa.nome,
+        "slug": empresa.slug,
+        "dominio": empresa.dominio,
+    }
 
 
 @app.get("/api/integracoes/solvoz/maquinas")

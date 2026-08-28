@@ -441,7 +441,7 @@
                 <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
                 <label>Perfil
                   <select name="tipo">
-                    <option value="ADMIN_EMPRESA" {% if u.tipo=='ADMIN_EMPRESA' %}selected{% endif %}>Administrador da Empresa</option>
+                    <option value="CLIENTE_EMPRESA" {% if u.tipo=='CLIENTE_EMPRESA' %}selected{% endif %}>Acesso da Empresa</option>
                     <option value="ADMIN_HUMIAT" {% if u.tipo=='ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option>
                   </select>
                 </label>
@@ -534,7 +534,7 @@
     <label>Nome<input name="nome" required></label>
     <label>E-mail<input type="email" name="email" required></label>
     <label>Senha inicial<input type="password" name="senha" required minlength="8"></label>
-    <label>Perfil<select name="tipo" id="novoUsuarioTipo"><option value="ADMIN_EMPRESA">Administrador da Empresa</option><option value="ADMIN_HUMIAT">Administrador Humiat</option></select></label>
+    <label>Perfil<select name="tipo" id="novoUsuarioTipo"><option value="CLIENTE_EMPRESA">Acesso da Empresa</option><option value="ADMIN_HUMIAT">Administrador Humiat</option></select></label>
     <label id="novoUsuarioEmpresaLabel">Empresa
       <select name="empresa_id">
         <option value="">— selecione —</option>
@@ -575,7 +575,7 @@
     <label>Nome<input name="nome" value="{{ u.nome }}" required></label>
     <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
     <label>Nova senha <small style="display:block;color:var(--muted);margin-top:4px">Deixe em branco para manter a senha atual.</small><input type="password" name="senha" minlength="8" placeholder="Manter senha atual"></label>
-    <label>Perfil<select name="tipo" class="editarUsuarioTipo" data-empresa-label="editarUsuarioEmpresaLabel{{ u.id }}"><option value="ADMIN_EMPRESA" {% if u.tipo != 'ADMIN_HUMIAT' %}selected{% endif %}>Administrador da Empresa</option><option value="ADMIN_HUMIAT" {% if u.tipo == 'ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option></select></label>
+    <label>Perfil<select name="tipo" class="editarUsuarioTipo" data-empresa-label="editarUsuarioEmpresaLabel{{ u.id }}"><option value="CLIENTE_EMPRESA" {% if u.tipo != 'ADMIN_HUMIAT' %}selected{% endif %}>Acesso da Empresa</option><option value="ADMIN_HUMIAT" {% if u.tipo == 'ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option></select></label>
     <label id="editarUsuarioEmpresaLabel{{ u.id }}">Empresa
       <select name="empresa_id">
         <option value="">— selecione —</option>

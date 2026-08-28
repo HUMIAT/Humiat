@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func, inspect, text
 from sqlalchemy.orm import Session, relationship
 
 from database import Base, SessionLocal, get_db
@@ -37,7 +37,10 @@ EMAIL_FROM = os.getenv("HUMIAT_EMAIL_FROM", "").strip()
 RESEND_API_URL = os.getenv("HUMIAT_RESEND_API_URL", "https://api.resend.com/emails").strip()
 
 TIPO_ADMIN_HUMIAT = "ADMIN_HUMIAT"
-TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"
+# APP 8.6 — clientes deixam de ser tratados como administradores.
+# O valor legado ADMIN_EMPRESA é migrado automaticamente para CLIENTE_EMPRESA.
+TIPO_CLIENTE_EMPRESA = "CLIENTE_EMPRESA"
+TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"  # legado, somente para migração/compatibilidade
 
 
 class HumiatEmpresa(Base):
@@ -55,9 +58,11 @@ class HumiatUsuario(Base):
     nome = Column(String(120), nullable=False)
     email = Column(String(180), unique=True, nullable=False)
     senha_hash = Column(String(255), nullable=False)
-    tipo = Column(String(30), nullable=False, default=TIPO_ADMIN_EMPRESA)
+    tipo = Column(String(30), nullable=False, default=TIPO_CLIENTE_EMPRESA)
     ativo = Column(Integer, nullable=False, default=1)
     organiza_usuario = Column(String(80), nullable=True)
+    documento = Column(String(30), nullable=True)
+    telefone = Column(String(40), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
 
 
@@ -162,6 +167,200 @@ def _ip(request: Request) -> str:
 
 def _auditar(db: Session, request: Request, acao: str, usuario_id: int | None = None, empresa_id: int | None = None, detalhe: str = ""):
     db.add(HumiatAuditoria(usuario_id=usuario_id, empresa_id=empresa_id, acao=acao, detalhe=detalhe[:3000], ip=_ip(request)))
+
+
+
+def migrar_humiat_id_schema(engine) -> None:
+    """Migração aditiva do Humiat ID, sem apagar nem recriar usuários existentes."""
+    insp = inspect(engine)
+    if "humiat_usuarios" not in insp.get_table_names():
+        return
+    existentes = {c["name"] for c in insp.get_columns("humiat_usuarios")}
+    with engine.begin() as conn:
+        if "documento" not in existentes:
+            conn.execute(text("ALTER TABLE humiat_usuarios ADD COLUMN documento VARCHAR(30)"))
+        if "telefone" not in existentes:
+            conn.execute(text("ALTER TABLE humiat_usuarios ADD COLUMN telefone VARCHAR(40)"))
+        # Usuários de empresa antigos continuam com o mesmo vínculo, apenas deixam
+        # de carregar o rótulo/permissão de administrador.
+        conn.execute(text("UPDATE humiat_usuarios SET tipo='CLIENTE_EMPRESA' WHERE tipo='ADMIN_EMPRESA'"))
+
+
+def _novo_token_reset(db: Session, usuario: HumiatUsuario, request: Request | None = None) -> str:
+    token = secrets.token_urlsafe(40)
+    db.add(HumiatSenhaReset(
+        token_hash=_hash_token(token),
+        usuario_id=usuario.id,
+        expira_em=datetime.utcnow() + timedelta(minutes=RESET_MINUTES),
+        ip=_ip(request) if request else "",
+    ))
+    if request:
+        _auditar(db, request, "ACESSO_SOLVOZ_TOKEN_CRIADO", usuario_id=usuario.id)
+    db.flush()
+    return token
+
+
+def _enviar_email_primeiro_acesso(destino: str, nome: str, empresa_nome: str, link: str) -> None:
+    """E-mail de ativação do acesso SolVoz; não envia senha temporária."""
+    if not RESEND_API_KEY:
+        raise RuntimeError("HUMIAT_RESEND_API_KEY não configurada no servidor")
+    if not EMAIL_FROM:
+        raise RuntimeError("HUMIAT_EMAIL_FROM não configurado no servidor")
+    nome_exibicao = (nome or "cliente").strip()
+    empresa_exibicao = (empresa_nome or "sua empresa").strip()
+    texto_msg = (
+        f"Olá, {nome_exibicao}.\n\n"
+        f"Seu acesso ao SolVoz da empresa {empresa_exibicao} foi criado.\n"
+        f"Crie sua senha neste link em até {RESET_MINUTES} minutos:\n{link}\n\n"
+        "Este acesso é exclusivo ao SolVoz e não libera acesso ao Organiza.\n"
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
+      <h2 style="margin-bottom:8px">Seu acesso ao SolVoz</h2>
+      <p>Olá, {nome_exibicao}.</p>
+      <p>O acesso da empresa <strong>{empresa_exibicao}</strong> foi criado.</p>
+      <p>Defina sua senha pelo botão abaixo. O link é válido por <strong>{RESET_MINUTES} minutos</strong> e só pode ser usado uma vez.</p>
+      <p style="margin:28px 0"><a href="{link}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar minha senha</a></p>
+      <p style="font-size:13px;color:#475569">Este acesso é exclusivo ao SolVoz e não dá acesso ao Organiza.</p>
+      <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{link}</p>
+    </div>
+    """
+    payload = json.dumps({
+        "from": EMAIL_FROM,
+        "to": [destino],
+        "subject": f"SolVoz - acesso da {empresa_exibicao}",
+        "text": texto_msg,
+        "html": html,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        RESEND_API_URL,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Humiat-ID-SolVoz/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status < 200 or resp.status >= 300:
+                raise RuntimeError(f"Resend retornou HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Falha Resend HTTP {exc.code}: {detalhe[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
+
+
+def garantir_empresa_solvoz_humiat(db: Session, nome: str, slug: str, ativo: int = 1) -> HumiatEmpresa:
+    slug_n = _slug(slug)
+    empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == slug_n).first()
+    if not empresa:
+        empresa = HumiatEmpresa(nome=(nome or slug_n).strip(), slug=slug_n, ativo=1 if ativo else 0)
+        db.add(empresa)
+        db.flush()
+    else:
+        if nome and nome.strip():
+            empresa.nome = nome.strip()
+        # Não reativa uma empresa já desativada por decisão administrativa.
+    produto = _produto_solvoz(db)
+    if produto:
+        item = db.query(HumiatEmpresaProduto).filter(
+            HumiatEmpresaProduto.empresa_id == empresa.id,
+            HumiatEmpresaProduto.produto_id == produto.id,
+        ).first()
+        if item:
+            item.ativo = 1
+        else:
+            db.add(HumiatEmpresaProduto(empresa_id=empresa.id, produto_id=produto.id, ativo=1))
+    db.flush()
+    return empresa
+
+
+def provisionar_acesso_solvoz_cliente(
+    db: Session,
+    *,
+    empresa_nome: str,
+    empresa_slug: str,
+    cliente_nome: str,
+    cliente_email: str,
+    cliente_documento: str = "",
+    cliente_telefone: str = "",
+    request: Request | None = None,
+    enviar_email: bool = True,
+) -> dict:
+    """Cria/vincula um acesso de cliente apenas ao SolVoz e envia ativação."""
+    email = (cliente_email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("O cliente precisa ter um e-mail válido no Organiza.")
+    empresa = garantir_empresa_solvoz_humiat(db, empresa_nome, empresa_slug, ativo=1)
+    usuario = db.query(HumiatUsuario).filter(HumiatUsuario.email == email).first()
+    criado = False
+    if not usuario:
+        usuario = HumiatUsuario(
+            nome=(cliente_nome or empresa_nome or email).strip()[:120],
+            email=email,
+            senha_hash=gerar_hash_senha_id(secrets.token_urlsafe(32)),
+            tipo=TIPO_CLIENTE_EMPRESA,
+            ativo=1,
+            organiza_usuario=None,
+            documento=(cliente_documento or "").strip()[:30] or None,
+            telefone=(cliente_telefone or "").strip()[:40] or None,
+        )
+        db.add(usuario)
+        db.flush()
+        criado = True
+    elif usuario.tipo != TIPO_ADMIN_HUMIAT:
+        usuario.nome = (cliente_nome or usuario.nome or empresa_nome).strip()[:120]
+        usuario.tipo = TIPO_CLIENTE_EMPRESA
+        usuario.ativo = 1
+        usuario.organiza_usuario = None
+        usuario.documento = (cliente_documento or usuario.documento or "").strip()[:30] or None
+        usuario.telefone = (cliente_telefone or usuario.telefone or "").strip()[:40] or None
+
+    vinculo = db.query(HumiatUsuarioEmpresa).filter(
+        HumiatUsuarioEmpresa.usuario_id == usuario.id,
+        HumiatUsuarioEmpresa.empresa_id == empresa.id,
+    ).first()
+    if not vinculo:
+        db.add(HumiatUsuarioEmpresa(usuario_id=usuario.id, empresa_id=empresa.id))
+
+    token = _novo_token_reset(db, usuario, request=request)
+    link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
+    if request:
+        _auditar(
+            db, request, "PROVISIONAR_ACESSO_SOLVOZ", usuario_id=usuario.id,
+            empresa_id=empresa.id,
+            detalhe=f"email={email}; criado={int(criado)}; slug={empresa.slug}",
+        )
+    db.commit()
+
+    email_enviado = False
+    email_erro = ""
+    if enviar_email:
+        try:
+            _enviar_email_primeiro_acesso(email, usuario.nome, empresa.nome, link)
+            email_enviado = True
+            if request:
+                _auditar(db, request, "ACESSO_SOLVOZ_EMAIL_ENVIADO", usuario_id=usuario.id, empresa_id=empresa.id)
+                db.commit()
+        except Exception as exc:
+            email_erro = str(exc)
+            if request:
+                _auditar(db, request, "ACESSO_SOLVOZ_EMAIL_ERRO", usuario_id=usuario.id, empresa_id=empresa.id, detalhe=email_erro)
+                db.commit()
+    return {
+        "ok": True,
+        "usuario_id": usuario.id,
+        "empresa_id": empresa.id,
+        "email": email,
+        "criado": criado,
+        "email_enviado": email_enviado,
+        "email_erro": email_erro,
+        "link_ativacao": link if not enviar_email else "",
+    }
 
 
 def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
@@ -379,6 +578,7 @@ def seed_humiat_id():
     """Cria estrutura lógica inicial sem destruir dados existentes."""
     db = SessionLocal()
     try:
+        db.query(HumiatUsuario).filter(HumiatUsuario.tipo == TIPO_ADMIN_EMPRESA).update({HumiatUsuario.tipo: TIPO_CLIENTE_EMPRESA}, synchronize_session=False)
         produtos = [
             ("CONNECT", "Connect", "Contratos, agenda, operação, rotas e financeiro.", os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br"), os.getenv("HUMIAT_CONNECT_SSO_URL", ""), "connect"),
             ("LOKAFEST", "LokaFest", "Indicações e oportunidades para festas.", os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br"), os.getenv("HUMIAT_LOKAFEST_SSO_URL", ""), "lokafest"),
@@ -536,10 +736,11 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
 
 
 @router.get("/entrar", response_class=HTMLResponse)
-def login_humiat(request: Request, erro: str = "", db: Session = Depends(get_db)):
+def login_humiat(request: Request, erro: str = "", next: str = "", db: Session = Depends(get_db)):
+    destino = next if next.startswith("/") and not next.startswith("//") else "/painel"
     if humiat_usuario_da_requisicao(request, db):
-        return RedirectResponse("/painel", status_code=303)
-    return templates.TemplateResponse("humiat/login.html", {"request": request, "erro": erro})
+        return RedirectResponse(destino, status_code=303)
+    return templates.TemplateResponse("humiat/login.html", {"request": request, "erro": erro, "next": destino})
 
 
 @router.get("/esqueci-senha", response_class=HTMLResponse)
@@ -607,19 +808,21 @@ def concluir_reset_humiat(request: Request, token: str = Form(...), senha: str =
 
 
 @router.post("/entrar")
-def entrar_humiat(request: Request, email: str = Form(...), senha: str = Form(...), db: Session = Depends(get_db)):
+def entrar_humiat(request: Request, email: str = Form(...), senha: str = Form(...), next: str = Form(""), db: Session = Depends(get_db)):
     login = email.strip().lower()
     usuario = db.query(HumiatUsuario).filter(HumiatUsuario.email == login, HumiatUsuario.ativo == 1).first()
     if not usuario or not verificar_senha_id(senha, usuario.senha_hash):
         _auditar(db, request, "LOGIN_FALHOU", detalhe=login)
         db.commit()
-        return RedirectResponse("/entrar?erro=E-mail ou senha inválidos", status_code=303)
+        destino_erro = "/entrar?" + urllib.parse.urlencode({"erro": "E-mail ou senha inválidos", "next": next or "/painel"})
+        return RedirectResponse(destino_erro, status_code=303)
 
     token = secrets.token_urlsafe(40)
     db.add(HumiatSessao(token_hash=_hash_token(token), usuario_id=usuario.id, expira_em=datetime.utcnow() + timedelta(days=SESSION_DAYS), ultimo_acesso=datetime.utcnow(), ip=_ip(request), user_agent=request.headers.get("user-agent", "")[:300]))
     _auditar(db, request, "LOGIN_OK", usuario_id=usuario.id)
     db.commit()
-    resposta = RedirectResponse("/painel", status_code=303)
+    destino = next if next.startswith("/") and not next.startswith("//") else "/painel"
+    resposta = RedirectResponse(destino, status_code=303)
     resposta.set_cookie(COOKIE_NAME, token, httponly=True, secure=PUBLIC_BASE_URL.startswith("https://"), samesite="lax", max_age=SESSION_DAYS * 86400, path="/")
     return resposta
 
@@ -656,6 +859,10 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
         empresa = empresas[0]
 
     produtos = produtos_da_empresa(db, empresa.id) if empresa else []
+    # APP 8.6: cliente de empresa criado a partir do Organiza enxerga somente
+    # o SolVoz, mesmo que futuramente a empresa tenha outros produtos Humiat.
+    if usuario.tipo == TIPO_CLIENTE_EMPRESA:
+        produtos = [p for p in produtos if (p.codigo or "").upper() == "SOLVOZ"]
     return templates.TemplateResponse(
         "humiat/painel.html",
         {"request": request, "usuario": usuario, "empresas": empresas, "empresa": empresa, "produtos": produtos, "admin_humiat": False},
@@ -665,6 +872,8 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
 @router.get("/painel/produto/{codigo}")
 def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)):
     codigo = codigo.strip().upper()
+    if usuario.tipo == TIPO_CLIENTE_EMPRESA and codigo != "SOLVOZ":
+        raise HTTPException(status_code=403, detail="Este acesso é exclusivo do SolVoz")
     produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == codigo, HumiatProduto.ativo == 1).first()
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
@@ -698,6 +907,41 @@ def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, 
     raise HTTPException(status_code=503, detail="Produto sem URL configurada")
 
 
+
+@router.get("/acessar/solvoz/{empresa_slug}")
+def acessar_solvoz_empresa(empresa_slug: str, request: Request, db: Session = Depends(get_db)):
+    """Entrada curta usada pelo cadeado da empresa no SolVoz."""
+    slug_n = _slug(empresa_slug)
+    usuario = humiat_usuario_da_requisicao(request, db)
+    if not usuario:
+        destino = f"/acessar/solvoz/{urllib.parse.quote(slug_n)}"
+        return RedirectResponse("/entrar?" + urllib.parse.urlencode({"next": destino}), status_code=303)
+    empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == slug_n, HumiatEmpresa.ativo == 1).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    if usuario.tipo != TIPO_ADMIN_HUMIAT:
+        permitido = db.query(HumiatUsuarioEmpresa).filter(
+            HumiatUsuarioEmpresa.usuario_id == usuario.id,
+            HumiatUsuarioEmpresa.empresa_id == empresa.id,
+        ).first()
+        if not permitido:
+            raise HTTPException(status_code=403, detail="Empresa não autorizada para este usuário")
+    if not _empresa_tem_produto(db, empresa.id, "SOLVOZ"):
+        raise HTTPException(status_code=403, detail="SolVoz não habilitado para esta empresa")
+    produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == "SOLVOZ", HumiatProduto.ativo == 1).first()
+    if not produto or not produto.url_sso:
+        raise HTTPException(status_code=503, detail="SolVoz sem SSO configurado")
+    token = secrets.token_urlsafe(40)
+    db.add(HumiatSSOTicket(
+        token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=empresa.id,
+        produto_codigo="SOLVOZ", expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES),
+    ))
+    _auditar(db, request, "ABRIR_SOLVOZ_EMPRESA", usuario_id=usuario.id, empresa_id=empresa.id)
+    db.commit()
+    sep = "&" if "?" in produto.url_sso else "?"
+    return RedirectResponse(f"{produto.url_sso}{sep}{urlencode({'humiat_ticket': token})}", status_code=303)
+
+
 @router.post("/api/humiat/sso/validar")
 def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Header(default=""), db: Session = Depends(get_db)):
     if not SSO_SECRET or not hmac.compare_digest(x_humiat_sso_secret, SSO_SECRET):
@@ -709,7 +953,7 @@ def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Heade
     empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.id == item.empresa_id).first() if item.empresa_id else None
     item.usado_em = datetime.utcnow()
     db.commit()
-    return {"ok": True, "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo}, "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None), "produto": item.produto_codigo}
+    return {"ok": True, "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo, "documento": usuario.documento or "", "telefone": usuario.telefone or ""}, "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None), "produto": item.produto_codigo}
 
 
 
@@ -888,11 +1132,24 @@ def clonar_empresa_humiat(
             msg = urllib.parse.quote("Falha ao clonar no SolVoz: " + str(exc))
             return RedirectResponse(f"/painel?empresa_id={empresa_id}&erro={msg}", status_code=303)
 
-    nova = HumiatEmpresa(nome=nome_n, slug=slug_n, ativo=0)
-    db.add(nova)
-    db.flush()
+    # O clone no SolVoz já pode ter criado esta empresa automaticamente no Organiza/Humiat.
+    # Reutilize-a para não duplicar o cadastro central.
+    nova = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == slug_n).first()
+    if not nova:
+        nova = HumiatEmpresa(nome=nome_n, slug=slug_n, ativo=0)
+        db.add(nova)
+        db.flush()
+    else:
+        nova.nome = nome_n
     for item in acessos:
-        db.add(HumiatEmpresaProduto(empresa_id=nova.id, produto_id=item.produto_id, ativo=item.ativo))
+        existente_item = db.query(HumiatEmpresaProduto).filter(
+            HumiatEmpresaProduto.empresa_id == nova.id,
+            HumiatEmpresaProduto.produto_id == item.produto_id,
+        ).first()
+        if existente_item:
+            existente_item.ativo = item.ativo
+        else:
+            db.add(HumiatEmpresaProduto(empresa_id=nova.id, produto_id=item.produto_id, ativo=item.ativo))
 
     _auditar(
         db,
@@ -938,16 +1195,16 @@ def alternar_status_empresa(
 
 
 @router.post("/admin-humiat/usuarios")
-def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...), tipo: str = Form(TIPO_ADMIN_EMPRESA), empresa_id: str = Form(""), usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db)):
+def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...), tipo: str = Form(TIPO_CLIENTE_EMPRESA), empresa_id: str = Form(""), usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db)):
     email = email.strip().lower()
     if db.query(HumiatUsuario).filter(HumiatUsuario.email == email).first():
         return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&erro=E-mail já cadastrado", status_code=303)
-    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_ADMIN_EMPRESA} else TIPO_ADMIN_EMPRESA
-    if tipo == TIPO_ADMIN_EMPRESA and not empresa_id.strip().isdigit():
-        return RedirectResponse("/painel?erro=Selecione a empresa para o Administrador da Empresa", status_code=303)
+    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA} else TIPO_CLIENTE_EMPRESA
+    if tipo == TIPO_CLIENTE_EMPRESA and not empresa_id.strip().isdigit():
+        return RedirectResponse("/painel?erro=Selecione a empresa para o acesso da empresa", status_code=303)
     novo = HumiatUsuario(nome=nome.strip(), email=email, senha_hash=gerar_hash_senha_id(senha), tipo=tipo, ativo=1, organiza_usuario=None)
     db.add(novo); db.flush()
-    if tipo == TIPO_ADMIN_EMPRESA:
+    if tipo == TIPO_CLIENTE_EMPRESA:
         db.add(HumiatUsuarioEmpresa(usuario_id=novo.id, empresa_id=int(empresa_id)))
     _auditar(db, request, "CRIAR_USUARIO", usuario.id, int(empresa_id) if empresa_id.strip().isdigit() else None, email)
     db.commit()
@@ -961,7 +1218,7 @@ def editar_usuario_humiat(
     nome: str = Form(...),
     email: str = Form(...),
     senha: str = Form(""),
-    tipo: str = Form(TIPO_ADMIN_EMPRESA),
+    tipo: str = Form(TIPO_CLIENTE_EMPRESA),
     empresa_id: str = Form(""),
     ativo: str = Form("0"),
     usuario: HumiatUsuario = Depends(exigir_admin_humiat),
@@ -979,9 +1236,9 @@ def editar_usuario_humiat(
     if duplicado:
         return RedirectResponse("/painel?erro=E-mail já cadastrado por outro usuário", status_code=303)
 
-    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_ADMIN_EMPRESA} else TIPO_ADMIN_EMPRESA
-    if tipo == TIPO_ADMIN_EMPRESA and not empresa_id.strip().isdigit():
-        return RedirectResponse("/painel?erro=Selecione a empresa para o Administrador da Empresa", status_code=303)
+    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA} else TIPO_CLIENTE_EMPRESA
+    if tipo == TIPO_CLIENTE_EMPRESA and not empresa_id.strip().isdigit():
+        return RedirectResponse("/painel?erro=Selecione a empresa para o acesso da empresa", status_code=303)
 
     # Evita o administrador derrubar a própria sessão por engano.
     novo_ativo = 1 if ativo == "1" else 0
@@ -999,7 +1256,7 @@ def editar_usuario_humiat(
 
     db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == alvo.id).delete(synchronize_session=False)
     empresa_auditoria = None
-    if tipo == TIPO_ADMIN_EMPRESA:
+    if tipo == TIPO_CLIENTE_EMPRESA:
         empresa_auditoria = int(empresa_id)
         db.add(HumiatUsuarioEmpresa(usuario_id=alvo.id, empresa_id=empresa_auditoria))
 
@@ -1178,7 +1435,7 @@ def editar_usuario_humiat(
     request: Request,
     nome: str = Form(...),
     email: str = Form(...),
-    tipo: str = Form(TIPO_ADMIN_EMPRESA),
+    tipo: str = Form(TIPO_CLIENTE_EMPRESA),
     empresa_id: str = Form(""),
     ativo: str = Form("1"),
     retorno_empresa_id: str = Form(""),
@@ -1194,9 +1451,9 @@ def editar_usuario_humiat(
     if existente:
         return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&erro=E-mail já utilizado por outro usuário", status_code=303)
 
-    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_ADMIN_EMPRESA} else TIPO_ADMIN_EMPRESA
-    if tipo == TIPO_ADMIN_EMPRESA and not empresa_id.strip().isdigit():
-        return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&erro=Administrador da Empresa precisa estar vinculado a uma empresa", status_code=303)
+    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA} else TIPO_CLIENTE_EMPRESA
+    if tipo == TIPO_CLIENTE_EMPRESA and not empresa_id.strip().isdigit():
+        return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&erro=O acesso da empresa precisa estar vinculado a uma empresa", status_code=303)
 
     alvo.nome = nome.strip()
     alvo.email = email
@@ -1207,7 +1464,7 @@ def editar_usuario_humiat(
 
     db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario_id).delete(synchronize_session=False)
     empresa_auditoria = None
-    if tipo == TIPO_ADMIN_EMPRESA:
+    if tipo == TIPO_CLIENTE_EMPRESA:
         empresa_auditoria = int(empresa_id)
         db.add(HumiatUsuarioEmpresa(usuario_id=usuario_id, empresa_id=empresa_auditoria))
 
