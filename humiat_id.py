@@ -205,7 +205,7 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "Humiat-ID/1.0.7",
+            "User-Agent": "Humiat-ID/1.0.8",
         },
     )
     try:
@@ -952,6 +952,60 @@ def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = F
     _auditar(db, request, "CRIAR_USUARIO", usuario.id, int(empresa_id) if empresa_id.strip().isdigit() else None, email)
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_criado", status_code=303)
+
+
+@router.post("/admin-humiat/usuarios/{usuario_id}/editar")
+def editar_usuario_humiat(
+    usuario_id: int,
+    request: Request,
+    nome: str = Form(...),
+    email: str = Form(...),
+    senha: str = Form(""),
+    tipo: str = Form(TIPO_ADMIN_EMPRESA),
+    empresa_id: str = Form(""),
+    ativo: str = Form("0"),
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
+    alvo = db.query(HumiatUsuario).filter(HumiatUsuario.id == usuario_id).first()
+    if not alvo:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    email_normalizado = email.strip().lower()
+    duplicado = db.query(HumiatUsuario).filter(
+        HumiatUsuario.email == email_normalizado,
+        HumiatUsuario.id != usuario_id,
+    ).first()
+    if duplicado:
+        return RedirectResponse("/painel?erro=E-mail já cadastrado por outro usuário", status_code=303)
+
+    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_ADMIN_EMPRESA} else TIPO_ADMIN_EMPRESA
+    if tipo == TIPO_ADMIN_EMPRESA and not empresa_id.strip().isdigit():
+        return RedirectResponse("/painel?erro=Selecione a empresa para o Administrador da Empresa", status_code=303)
+
+    # Evita o administrador derrubar a própria sessão por engano.
+    novo_ativo = 1 if ativo == "1" else 0
+    if alvo.id == usuario.id and not novo_ativo:
+        return RedirectResponse("/painel?erro=Você não pode desativar o seu próprio usuário", status_code=303)
+
+    alvo.nome = nome.strip()
+    alvo.email = email_normalizado
+    alvo.tipo = tipo
+    alvo.ativo = novo_ativo
+    if senha.strip():
+        if len(senha.strip()) < 8:
+            return RedirectResponse("/painel?erro=A nova senha deve ter pelo menos 8 caracteres", status_code=303)
+        alvo.senha_hash = gerar_hash_senha_id(senha.strip())
+
+    db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == alvo.id).delete(synchronize_session=False)
+    empresa_auditoria = None
+    if tipo == TIPO_ADMIN_EMPRESA:
+        empresa_auditoria = int(empresa_id)
+        db.add(HumiatUsuarioEmpresa(usuario_id=alvo.id, empresa_id=empresa_auditoria))
+
+    _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}")
+    db.commit()
+    return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_atualizado", status_code=303)
 
 
 @router.post("/admin-humiat/empresa/{empresa_id}/produto/{produto_id}")

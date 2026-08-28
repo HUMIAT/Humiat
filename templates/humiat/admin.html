@@ -559,13 +559,34 @@
         <span>{{ empresa_nome.v }}</span>
         <span>{% if u.tipo == 'ADMIN_HUMIAT' %}Admin Humiat{% else %}Admin da empresa{% endif %}</span>
         <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
-        {% if eid %}<a class="text-btn" href="/painel?empresa_id={{ eid }}">Abrir empresa</a>{% endif %}
+        <button type="button" class="text-btn" data-dialog-open="editar-usuario-{{ u.id }}">Editar</button>{% if eid %}<a class="text-btn" href="/painel?empresa_id={{ eid }}">Abrir empresa</a>{% endif %}
       </div>
       {% endfor %}
     </div>
     <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button><button type="button" class="btn-primary" data-dialog-open="novo-usuario">+ Novo usuário</button></div>
   </div>
 </dialog>
+
+{% for u in usuarios %}
+{% set eid = empresa_por_usuario.get(u.id) %}
+<dialog class="admin-dialog" id="editar-usuario-{{ u.id }}">
+  <form method="post" action="/admin-humiat/usuarios/{{ u.id }}/editar" class="dialog-card">
+    <div class="dialog-head"><div><span class="card-kicker">Acesso</span><h2>Editar usuário</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <label>Nome<input name="nome" value="{{ u.nome }}" required></label>
+    <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
+    <label>Nova senha <small style="display:block;color:var(--muted);margin-top:4px">Deixe em branco para manter a senha atual.</small><input type="password" name="senha" minlength="8" placeholder="Manter senha atual"></label>
+    <label>Perfil<select name="tipo" class="editarUsuarioTipo" data-empresa-label="editarUsuarioEmpresaLabel{{ u.id }}"><option value="ADMIN_EMPRESA" {% if u.tipo != 'ADMIN_HUMIAT' %}selected{% endif %}>Administrador da Empresa</option><option value="ADMIN_HUMIAT" {% if u.tipo == 'ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option></select></label>
+    <label id="editarUsuarioEmpresaLabel{{ u.id }}">Empresa
+      <select name="empresa_id">
+        <option value="">— selecione —</option>
+        {% for e in empresas %}<option value="{{ e.id }}" {% if eid == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
+      </select>
+    </label>
+    <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="ativo" value="1" {% if u.ativo %}checked{% endif %} style="width:auto"> Usuário ativo</label>
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Salvar alterações</button></div>
+  </form>
+</dialog>
+{% endfor %}
 
 <script>
 (() => {
@@ -618,6 +639,13 @@
     const sync = () => empresaLabel.classList.toggle('field-muted', tipo.value === 'ADMIN_HUMIAT');
     tipo.addEventListener('change', sync); sync();
   }
+
+  document.querySelectorAll('.editarUsuarioTipo').forEach(sel => {
+    const label = document.getElementById(sel.dataset.empresaLabel);
+    if (!label) return;
+    const sync = () => label.classList.toggle('field-muted', sel.value === 'ADMIN_HUMIAT');
+    sel.addEventListener('change', sync); sync();
+  });
 
   document.querySelectorAll('.color-grid input[type=color]').forEach(input => {
     const code = input.parentElement.querySelector('code');
