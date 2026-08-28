@@ -32,7 +32,15 @@
         <label>Preço de venda unitário<input name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}"></label>
         <label>Valor total<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}"></label>
         <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" value="{{ equipamento.pago if equipamento and equipamento.pago else '' }}"></label>
-        <label>Garantia (meses)<input type="number" min="0" name="garantia_meses" value="{{ equipamento.garantia_meses if equipamento and equipamento.garantia_meses is not none else 3 }}"></label><label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="{{ equipamento.falta|moeda if equipamento else 'R$ 0,00' }}"></label>
+        <div class="garantia-recibo">
+          <label>Garantia (meses)<input type="number" min="0" name="garantia_meses" value="{{ equipamento.garantia_meses if equipamento and equipamento.garantia_meses is not none else 3 }}"></label>
+          {% if equipamento and equipamento.id %}
+          <a class="btn-recibo" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/recibo" target="_blank" rel="noopener">Gerar recibo</a>
+          {% else %}
+          <button class="btn-recibo" type="button" disabled title="Salve o equipamento antes de gerar o recibo.">Gerar recibo</button>
+          {% endif %}
+        </div>
+        <label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="{{ equipamento.falta|moeda if equipamento else 'R$ 0,00' }}"></label>
       </div>
     </section>
 
@@ -177,3 +185,10 @@
 </script>
 
 {% endblock %}
+
+<style>
+.garantia-recibo{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.garantia-recibo label{min-width:0}.btn-recibo{height:46px;display:flex;align-items:center;justify-content:center;border:1px solid #2563eb;border-radius:12px;background:#2563eb;color:#fff!important;text-decoration:none;font-weight:800;cursor:pointer;padding:0 16px;box-sizing:border-box}
+.btn-recibo:hover{background:#1d4ed8}
+.btn-recibo:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:760px){.garantia-recibo{grid-template-columns:1fr}.btn-recibo{width:100%}}
+</style>

@@ -1425,6 +1425,35 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db)})
 
 
+
+@app.get("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/recibo", response_class=HTMLResponse)
+def equipamento_recibo(
+    cliente_id: int,
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Recibo imprimível vinculado ao cliente e ao equipamento."""
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    eq = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.cliente_id == cliente_id,
+    ).first()
+    if not cliente or not eq:
+        raise HTTPException(404)
+
+    valor_recebido = moeda_num(eq.pago)
+    return templates.TemplateResponse("organiza/equipamento_recibo.html", {
+        "request": request,
+        "usuario": usuario,
+        "cliente": cliente,
+        "equipamento": eq,
+        "valor_recebido": valor_recebido,
+        "data_recibo": date.today(),
+    })
+
+
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/editar")
 async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()

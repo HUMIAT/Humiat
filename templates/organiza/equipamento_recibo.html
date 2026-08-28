@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Recibo — {{ cliente.nome }}</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;background:#e5e7eb;font-family:Arial,Helvetica,sans-serif;color:#111}
+    .acoes{width:794px;max-width:calc(100% - 24px);margin:18px auto 0;display:flex;justify-content:flex-end;gap:10px}
+    .acoes a,.acoes button{border:0;border-radius:9px;padding:11px 18px;font-weight:700;cursor:pointer;text-decoration:none;font-size:14px}
+    .voltar{background:#fff;color:#1f2937}.imprimir{background:#2563eb;color:#fff}
+    .folha{width:794px;min-height:1123px;margin:14px auto 30px;background:#fff;padding:38px 40px 55px;box-shadow:0 2px 12px #0002}
+    .cabecalho{display:grid;grid-template-columns:205px 1fr 260px;align-items:start;border-bottom:1px solid #777;padding-bottom:14px;color:#666;font-family:"Times New Roman",serif;font-size:13px;line-height:1.2}
+    .logo{width:155px;height:auto;margin:0 auto}
+    .empresa strong{font-size:16px}.direita{padding-top:26px}
+    .data{text-align:right;margin-top:38px;font-family:"Times New Roman",serif;font-size:16px}
+    h1{text-align:center;font-family:"Times New Roman",serif;font-size:40px;margin:68px 0 86px}
+    .texto{font-size:24px;line-height:1.18;margin:0 5px}
+    .texto strong{text-decoration:none}.sublinhado{text-decoration:underline}
+    .assinatura{margin:95px 5px 0;font-family:"Segoe Script","Brush Script MT",cursive;font-size:22px}
+    .empresa-assinatura{margin:28px 5px 0;font-size:20px}
+    .aviso-zero{margin:55px 5px 0;padding:14px;border:1px solid #f0b429;background:#fff8e1;border-radius:8px;font-size:14px}
+    @media(max-width:820px){.folha{width:100%;min-height:auto;margin:10px 0;padding:24px}.acoes{width:auto}.cabecalho{grid-template-columns:140px 1fr}.direita{grid-column:2;padding-top:8px}.logo{width:120px}.texto{font-size:19px}h1{margin:45px 0;font-size:34px}}
+    @media print{
+      @page{size:A4;margin:0}
+      body{background:#fff}
+      .acoes,.aviso-zero{display:none!important}
+      .folha{width:210mm;min-height:297mm;margin:0;box-shadow:none;padding:10mm 11mm 14mm}
+    }
+  </style>
+</head>
+<body>
+  <div class="acoes">
+    <a class="voltar" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/editar">Voltar</a>
+    <button class="imprimir" onclick="window.print()">Imprimir / salvar PDF</button>
+  </div>
+  <main class="folha">
+    <header class="cabecalho">
+      <div><img class="logo" src="/static/img/logo-karaoke-rj.png" alt="Karaokê RJ"></div>
+      <div class="empresa">
+        <strong>EMPRESA KARAOKE &amp; GAMES RJ-</strong><br>
+        CNPJ: 35.458.112/0001-75<br>
+        Rua João Romariz. 313<br><br>
+        Bairro: Ramos<br>
+        Tel/Whatsapp: 21 99507-9690<br>
+        www.facebook.com.br/karaokerj
+      </div>
+      <div class="direita">
+        IM: 1213508-4<br>
+        I.E: 1414886-8<br>
+        Rio de Janeiro – RJ<br>
+        CEP: 21031-700<br>
+        Tel/Whatsapp: 21 99650-4516<br>
+        e-mail: a.videokerj@gmail.com
+      </div>
+    </header>
+
+    <div class="data">Rio de Janeiro, {{ data_recibo.strftime('%d/%m/%Y') }}</div>
+    <h1>RECIBO</h1>
+
+    <p class="texto">
+      Recebemos de <strong class="sublinhado">{{ cliente.nome }}</strong>{% if cliente.documento %},
+      inscrito no CPF/CNPJ <strong>{{ cliente.documento }}</strong>{% endif %}
+      a importância de <strong>{{ valor_recebido|moeda }}</strong>,
+      referente a <strong class="sublinhado">{{ equipamento.modelo or equipamento.tipo or 'equipamento' }}</strong>.
+    </p>
+
+    <div class="assinatura">Karaokê &amp; Games RJ</div>
+    <div class="empresa-assinatura">Karaokê &amp; Games RJ</div>
+
+    {% if valor_recebido <= 0 %}
+    <div class="aviso-zero">O valor recebido deste equipamento está zerado. Atualize e salve o equipamento antes de emitir o recibo.</div>
+    {% endif %}
+  </main>
+</body>
+</html>
