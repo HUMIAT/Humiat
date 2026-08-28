@@ -1,1 +1,1 @@
-Organiza v1.0.8 - QR URL 200x220 sem margens extras
+Organiza v1.1.0 - recibo por equipamento na ficha do cliente
