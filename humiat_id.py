@@ -37,10 +37,28 @@ EMAIL_FROM = os.getenv("HUMIAT_EMAIL_FROM", "").strip()
 RESEND_API_URL = os.getenv("HUMIAT_RESEND_API_URL", "https://api.resend.com/emails").strip()
 
 TIPO_ADMIN_HUMIAT = "ADMIN_HUMIAT"
-# APP 8.6 — clientes deixam de ser tratados como administradores.
-# O valor legado ADMIN_EMPRESA é migrado automaticamente para CLIENTE_EMPRESA.
+# APP 8.7 — o acesso é decidido pelo vínculo com empresa.
+# Sem vínculo = equipe interna/perfil completo. Com vínculo = Área da Empresa.
+# O campo tipo continua apenas por compatibilidade com dados antigos.
 TIPO_CLIENTE_EMPRESA = "CLIENTE_EMPRESA"
 TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"  # legado, somente para migração/compatibilidade
+
+# Usuários internos legados do Organiza. O vínculo (ou ausência dele) continua
+# sendo a regra final; esta lista serve somente para limpar vínculos antigos
+# criados por versões anteriores. Pode ser ampliada no Render sem novo deploy.
+_EQUIPE_INTERNA_PADRAO = {"junior", "debora", "luiz"}
+_EQUIPE_INTERNA_EMAILS_PADRAO = {"jr.delphi@gmail.com", "deborapavonerabello@gmail.com"}
+
+def _norm_identidade(valor: str | None) -> str:
+    return (valor or "").strip().lower()
+
+def _equipe_interna_usuarios_configurados() -> set[str]:
+    extra = os.getenv("HUMIAT_EQUIPE_INTERNA_USUARIOS", "")
+    return _EQUIPE_INTERNA_PADRAO | {_norm_identidade(x) for x in extra.split(",") if _norm_identidade(x)}
+
+def _equipe_interna_emails_configurados() -> set[str]:
+    extra = os.getenv("HUMIAT_EQUIPE_INTERNA_EMAILS", "")
+    return _EQUIPE_INTERNA_EMAILS_PADRAO | {_norm_identidade(x) for x in extra.split(",") if _norm_identidade(x)}
 
 
 class HumiatEmpresa(Base):
@@ -312,7 +330,24 @@ def provisionar_acesso_solvoz_cliente(
         db.add(usuario)
         db.flush()
         criado = True
-    elif usuario.tipo != TIPO_ADMIN_HUMIAT:
+    else:
+        # Regra 8.7: uma conta existente SEM qualquer empresa vinculada pertence
+        # à equipe interna. A automação nunca transforma Junior/Debora/Luiz em
+        # cliente só porque o e-mail deles aparece no cadastro do Organiza.
+        if not _usuario_tem_empresa_vinculada(db, usuario.id):
+            usuario.ativo = 1
+            db.commit()
+            return {
+                "ok": True,
+                "usuario_id": usuario.id,
+                "empresa_id": empresa.id,
+                "email": email,
+                "criado": False,
+                "email_enviado": False,
+                "email_erro": "",
+                "link_ativacao": "",
+                "acesso_interno": True,
+            }
         usuario.nome = (cliente_nome or usuario.nome or empresa_nome).strip()[:120]
         usuario.tipo = TIPO_CLIENTE_EMPRESA
         usuario.ativo = 1
@@ -574,11 +609,47 @@ def _usuario_empresa_id(db: Session, usuario_id: int) -> int | None:
     return int(vinculo.empresa_id) if vinculo else None
 
 
+def _usuario_tem_empresa_vinculada(db: Session, usuario_id: int) -> bool:
+    return db.query(HumiatUsuarioEmpresa.id).filter(HumiatUsuarioEmpresa.usuario_id == usuario_id).first() is not None
+
+
+def _usuario_acesso_interno(db: Session, usuario: HumiatUsuario) -> bool:
+    """Regra 8.7: sem empresa vinculada = perfil completo interno."""
+    return not _usuario_tem_empresa_vinculada(db, int(usuario.id))
+
+
+def _limpar_vinculos_equipe_interna_legada(db: Session) -> int:
+    """Remove vínculos indevidos da equipe interna criados por versões antigas.
+
+    Junior, Debora e Luiz eram usuários operacionais do Organiza antes da Área
+    da Empresa existir. Se algum deles ganhou vínculo por engano, volta a ficar
+    sem empresa e, portanto, com o perfil completo conforme a regra 8.7.
+    """
+    nomes = _equipe_interna_usuarios_configurados()
+    emails = _equipe_interna_emails_configurados()
+    alterados = 0
+    for usuario in db.query(HumiatUsuario).all():
+        eh_legado = _norm_identidade(usuario.organiza_usuario) in nomes
+        eh_email = _norm_identidade(usuario.email) in emails
+        if not (eh_legado or eh_email):
+            continue
+        qtd = db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario.id).delete(synchronize_session=False)
+        if qtd:
+            alterados += int(qtd)
+        # Mantido apenas por compatibilidade; a autorização real usa o vínculo.
+        usuario.tipo = TIPO_ADMIN_HUMIAT
+        usuario.ativo = 1
+    return alterados
+
+
 def seed_humiat_id():
     """Cria estrutura lógica inicial sem destruir dados existentes."""
     db = SessionLocal()
     try:
         db.query(HumiatUsuario).filter(HumiatUsuario.tipo == TIPO_ADMIN_EMPRESA).update({HumiatUsuario.tipo: TIPO_CLIENTE_EMPRESA}, synchronize_session=False)
+        removidos = _limpar_vinculos_equipe_interna_legada(db)
+        if removidos:
+            print(f"[HUMIAT ID] APP 8.7: {removidos} vínculo(s) antigo(s) removido(s) da equipe interna.")
         produtos = [
             ("CONNECT", "Connect", "Contratos, agenda, operação, rotas e financeiro.", os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br"), os.getenv("HUMIAT_CONNECT_SSO_URL", ""), "connect"),
             ("LOKAFEST", "LokaFest", "Indicações e oportunidades para festas.", os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br"), os.getenv("HUMIAT_LOKAFEST_SSO_URL", ""), "lokafest"),
@@ -655,14 +726,16 @@ def exigir_humiat_login(request: Request, db: Session = Depends(get_db)) -> Humi
     return usuario
 
 
-def exigir_admin_humiat(usuario: HumiatUsuario = Depends(exigir_humiat_login)) -> HumiatUsuario:
-    if usuario.tipo != TIPO_ADMIN_HUMIAT:
-        raise HTTPException(status_code=403, detail="Acesso exclusivo do Administrador Humiat")
+def exigir_admin_humiat(usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)) -> HumiatUsuario:
+    # Nome legado da dependência. A partir da 8.7 não existe "cargo admin" como
+    # critério: usuário sem empresa vinculada é equipe interna e recebe o painel completo.
+    if not _usuario_acesso_interno(db, usuario):
+        raise HTTPException(status_code=403, detail="Acesso exclusivo da equipe interna")
     return usuario
 
 
 def empresas_do_usuario(db: Session, usuario: HumiatUsuario):
-    if usuario.tipo == TIPO_ADMIN_HUMIAT:
+    if _usuario_acesso_interno(db, usuario):
         return db.query(HumiatEmpresa).filter(HumiatEmpresa.ativo == 1).order_by(HumiatEmpresa.nome).all()
     ids = [x.empresa_id for x in db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario.id).all()]
     if not ids:
@@ -844,7 +917,7 @@ def sair_humiat(request: Request, db: Session = Depends(get_db)):
 def painel_humiat(request: Request, empresa_id: int | None = None, usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)):
     # O Administrador Humiat trabalha em uma única tela. A rota /admin-humiat
     # continua existindo somente por compatibilidade e redireciona para cá.
-    if usuario.tipo == TIPO_ADMIN_HUMIAT:
+    if _usuario_acesso_interno(db, usuario):
         return templates.TemplateResponse("humiat/admin.html", _contexto_admin_humiat(request, usuario, db, empresa_id))
 
     empresas = empresas_do_usuario(db, usuario)
@@ -859,9 +932,9 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
         empresa = empresas[0]
 
     produtos = produtos_da_empresa(db, empresa.id) if empresa else []
-    # APP 8.6: cliente de empresa criado a partir do Organiza enxerga somente
-    # o SolVoz, mesmo que futuramente a empresa tenha outros produtos Humiat.
-    if usuario.tipo == TIPO_CLIENTE_EMPRESA:
+    # APP 8.7: qualquer usuário com empresa vinculada é cliente daquela empresa
+    # e enxerga somente o SolVoz, independentemente do valor legado de `tipo`.
+    if not _usuario_acesso_interno(db, usuario):
         produtos = [p for p in produtos if (p.codigo or "").upper() == "SOLVOZ"]
     return templates.TemplateResponse(
         "humiat/painel.html",
@@ -872,7 +945,8 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
 @router.get("/painel/produto/{codigo}")
 def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)):
     codigo = codigo.strip().upper()
-    if usuario.tipo == TIPO_CLIENTE_EMPRESA and codigo != "SOLVOZ":
+    acesso_interno = _usuario_acesso_interno(db, usuario)
+    if not acesso_interno and codigo != "SOLVOZ":
         raise HTTPException(status_code=403, detail="Este acesso é exclusivo do SolVoz")
     produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == codigo, HumiatProduto.ativo == 1).first()
     if not produto:
@@ -880,7 +954,7 @@ def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, 
 
     empresas = empresas_do_usuario(db, usuario)
     empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else (empresas[0] if len(empresas) == 1 else None)
-    if usuario.tipo != TIPO_ADMIN_HUMIAT:
+    if not acesso_interno:
         if not empresa:
             raise HTTPException(status_code=400, detail="Selecione a empresa")
         permitidos = {p.codigo for p in produtos_da_empresa(db, empresa.id)}
@@ -896,7 +970,10 @@ def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, 
 
     if produto.url_sso:
         token = secrets.token_urlsafe(40)
-        db.add(HumiatSSOTicket(token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=empresa.id if empresa else None, produto_codigo=codigo, expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)))
+        # Para equipe interna o ticket vai sem empresa. Isso permite ao SolVoz
+        # reconhecer o perfil completo apenas pela ausência de vínculo.
+        ticket_empresa_id = None if acesso_interno else (empresa.id if empresa else None)
+        db.add(HumiatSSOTicket(token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id, produto_codigo=codigo, expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)))
         db.commit()
         sep = "&" if "?" in produto.url_sso else "?"
         return RedirectResponse(f"{produto.url_sso}{sep}{urlencode({'humiat_ticket': token})}", status_code=303)
@@ -919,7 +996,8 @@ def acessar_solvoz_empresa(empresa_slug: str, request: Request, db: Session = De
     empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == slug_n, HumiatEmpresa.ativo == 1).first()
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
-    if usuario.tipo != TIPO_ADMIN_HUMIAT:
+    acesso_interno = _usuario_acesso_interno(db, usuario)
+    if not acesso_interno:
         permitido = db.query(HumiatUsuarioEmpresa).filter(
             HumiatUsuarioEmpresa.usuario_id == usuario.id,
             HumiatUsuarioEmpresa.empresa_id == empresa.id,
@@ -933,7 +1011,7 @@ def acessar_solvoz_empresa(empresa_slug: str, request: Request, db: Session = De
         raise HTTPException(status_code=503, detail="SolVoz sem SSO configurado")
     token = secrets.token_urlsafe(40)
     db.add(HumiatSSOTicket(
-        token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=empresa.id,
+        token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=None if acesso_interno else empresa.id,
         produto_codigo="SOLVOZ", expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES),
     ))
     _auditar(db, request, "ABRIR_SOLVOZ_EMPRESA", usuario_id=usuario.id, empresa_id=empresa.id)
@@ -953,7 +1031,13 @@ def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Heade
     empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.id == item.empresa_id).first() if item.empresa_id else None
     item.usado_em = datetime.utcnow()
     db.commit()
-    return {"ok": True, "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo, "documento": usuario.documento or "", "telefone": usuario.telefone or ""}, "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None), "produto": item.produto_codigo}
+    return {
+        "ok": True,
+        "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo, "documento": usuario.documento or "", "telefone": usuario.telefone or ""},
+        "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None),
+        "produto": item.produto_codigo,
+        "acesso": "EMPRESA" if empresa else "INTERNO",
+    }
 
 
 
@@ -1199,13 +1283,14 @@ def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = F
     email = email.strip().lower()
     if db.query(HumiatUsuario).filter(HumiatUsuario.email == email).first():
         return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&erro=E-mail já cadastrado", status_code=303)
-    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA} else TIPO_CLIENTE_EMPRESA
-    if tipo == TIPO_CLIENTE_EMPRESA and not empresa_id.strip().isdigit():
-        return RedirectResponse("/painel?erro=Selecione a empresa para o acesso da empresa", status_code=303)
+    empresa_vinculada = int(empresa_id) if empresa_id.strip().isdigit() else None
+    # APP 8.7: não há seletor de cargo. Empresa preenchida = Área da Empresa;
+    # sem empresa = equipe interna/perfil completo. `tipo` fica só no banco legado.
+    tipo = TIPO_CLIENTE_EMPRESA if empresa_vinculada else TIPO_ADMIN_HUMIAT
     novo = HumiatUsuario(nome=nome.strip(), email=email, senha_hash=gerar_hash_senha_id(senha), tipo=tipo, ativo=1, organiza_usuario=None)
     db.add(novo); db.flush()
-    if tipo == TIPO_CLIENTE_EMPRESA:
-        db.add(HumiatUsuarioEmpresa(usuario_id=novo.id, empresa_id=int(empresa_id)))
+    if empresa_vinculada:
+        db.add(HumiatUsuarioEmpresa(usuario_id=novo.id, empresa_id=empresa_vinculada))
     _auditar(db, request, "CRIAR_USUARIO", usuario.id, int(empresa_id) if empresa_id.strip().isdigit() else None, email)
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_criado", status_code=303)
@@ -1236,14 +1321,15 @@ def editar_usuario_humiat(
     if duplicado:
         return RedirectResponse("/painel?erro=E-mail já cadastrado por outro usuário", status_code=303)
 
-    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA} else TIPO_CLIENTE_EMPRESA
-    if tipo == TIPO_CLIENTE_EMPRESA and not empresa_id.strip().isdigit():
-        return RedirectResponse("/painel?erro=Selecione a empresa para o acesso da empresa", status_code=303)
+    empresa_vinculada = int(empresa_id) if empresa_id.strip().isdigit() else None
+    tipo = TIPO_CLIENTE_EMPRESA if empresa_vinculada else TIPO_ADMIN_HUMIAT
 
-    # Evita o administrador derrubar a própria sessão por engano.
+    # Evita o usuário interno derrubar a própria sessão ou se vincular por engano.
     novo_ativo = 1 if ativo == "1" else 0
     if alvo.id == usuario.id and not novo_ativo:
         return RedirectResponse("/painel?erro=Você não pode desativar o seu próprio usuário", status_code=303)
+    if alvo.id == usuario.id and empresa_vinculada:
+        return RedirectResponse("/painel?erro=Você não pode vincular seu próprio usuário a uma empresa", status_code=303)
 
     alvo.nome = nome.strip()
     alvo.email = email_normalizado
@@ -1255,10 +1341,9 @@ def editar_usuario_humiat(
         alvo.senha_hash = gerar_hash_senha_id(senha.strip())
 
     db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == alvo.id).delete(synchronize_session=False)
-    empresa_auditoria = None
-    if tipo == TIPO_CLIENTE_EMPRESA:
-        empresa_auditoria = int(empresa_id)
-        db.add(HumiatUsuarioEmpresa(usuario_id=alvo.id, empresa_id=empresa_auditoria))
+    empresa_auditoria = empresa_vinculada
+    if empresa_vinculada:
+        db.add(HumiatUsuarioEmpresa(usuario_id=alvo.id, empresa_id=empresa_vinculada))
 
     _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}")
     db.commit()
@@ -1401,7 +1486,7 @@ def qr_empresa_humiat(
     if not empresa:
         raise HTTPException(status_code=404)
 
-    if usuario.tipo != TIPO_ADMIN_HUMIAT:
+    if not _usuario_acesso_interno(db, usuario):
         if not empresa.ativo:
             raise HTTPException(status_code=404)
         permitidos = {e.id for e in empresas_do_usuario(db, usuario)}
@@ -1451,9 +1536,10 @@ def editar_usuario_humiat(
     if existente:
         return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&erro=E-mail já utilizado por outro usuário", status_code=303)
 
-    tipo = tipo if tipo in {TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA} else TIPO_CLIENTE_EMPRESA
-    if tipo == TIPO_CLIENTE_EMPRESA and not empresa_id.strip().isdigit():
-        return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&erro=O acesso da empresa precisa estar vinculado a uma empresa", status_code=303)
+    empresa_vinculada = int(empresa_id) if empresa_id.strip().isdigit() else None
+    tipo = TIPO_CLIENTE_EMPRESA if empresa_vinculada else TIPO_ADMIN_HUMIAT
+    if alvo.id == admin.id and empresa_vinculada:
+        return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&erro=Você não pode vincular seu próprio usuário a uma empresa", status_code=303)
 
     alvo.nome = nome.strip()
     alvo.email = email
@@ -1463,10 +1549,9 @@ def editar_usuario_humiat(
     alvo.organiza_usuario = None
 
     db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario_id).delete(synchronize_session=False)
-    empresa_auditoria = None
-    if tipo == TIPO_CLIENTE_EMPRESA:
-        empresa_auditoria = int(empresa_id)
-        db.add(HumiatUsuarioEmpresa(usuario_id=usuario_id, empresa_id=empresa_auditoria))
+    empresa_auditoria = empresa_vinculada
+    if empresa_vinculada:
+        db.add(HumiatUsuarioEmpresa(usuario_id=usuario_id, empresa_id=empresa_vinculada))
 
     _auditar(db, request, "EDITAR_USUARIO", admin.id, empresa_auditoria, f"usuario={alvo.email}; tipo={tipo}; ativo={alvo.ativo}")
     db.commit()

@@ -3,20 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Admin Humiat</title>
+  <title>Humiat — Painel interno</title>
   <link rel="icon" href="/static/icons/humiat/favicon.ico">
   <link rel="stylesheet" href="/static/css/humiat-id.css">
 </head>
 <body class="portal-body admin-unified-body">
 <header class="portal-top">
   <a class="portal-logo" href="/painel"><img src="/static/img/logo-humiat.svg" alt="Humiat"></a>
-  <div class="portal-user"><strong>Admin Humiat</strong><span>{{ usuario.nome }}</span><a href="/sair">Sair</a></div>
+  <div class="portal-user"><strong>Equipe interna</strong><span>{{ usuario.nome }}</span><a href="/sair">Sair</a></div>
 </header>
 
 <main class="admin-unified">
   <section class="admin-unified-head">
     <div>
-      <p class="eyebrow">Admin Humiat</p>
+      <p class="eyebrow">Painel interno</p>
       <h1>Empresas</h1>
       <p>Selecione uma empresa e administre tudo sem sair desta tela.</p>
     </div>
@@ -430,7 +430,7 @@
                 <strong>{{ u.nome }}</strong>
                 <small>{{ u.email }}</small>
               </div>
-              <span class="user-role">{% if u.tipo == 'ADMIN_HUMIAT' %}Admin Humiat{% else %}Admin da empresa{% endif %}</span>
+              <span class="user-role">Área da empresa</span>
               <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
               <span class="chevron">⌄</span>
             </summary>
@@ -439,12 +439,6 @@
                 <input type="hidden" name="retorno_empresa_id" value="{{ empresa.id }}">
                 <label>Nome<input name="nome" value="{{ u.nome }}" required></label>
                 <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
-                <label>Perfil
-                  <select name="tipo">
-                    <option value="CLIENTE_EMPRESA" {% if u.tipo=='CLIENTE_EMPRESA' %}selected{% endif %}>Acesso da Empresa</option>
-                    <option value="ADMIN_HUMIAT" {% if u.tipo=='ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option>
-                  </select>
-                </label>
                 <label>Empresa
                   <select name="empresa_id">
                     <option value="">— sem empresa —</option>
@@ -534,10 +528,9 @@
     <label>Nome<input name="nome" required></label>
     <label>E-mail<input type="email" name="email" required></label>
     <label>Senha inicial<input type="password" name="senha" required minlength="8"></label>
-    <label>Perfil<select name="tipo" id="novoUsuarioTipo"><option value="CLIENTE_EMPRESA">Acesso da Empresa</option><option value="ADMIN_HUMIAT">Administrador Humiat</option></select></label>
-    <label id="novoUsuarioEmpresaLabel">Empresa
+    <label>Empresa <small style="display:block;color:var(--muted);margin-top:4px">Deixe sem empresa para equipe interna/perfil completo.</small>
       <select name="empresa_id">
-        <option value="">— selecione —</option>
+        <option value="">— sem empresa (equipe interna) —</option>
         {% for e in empresas %}<option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
       </select>
     </label>
@@ -557,7 +550,7 @@
         <div class="avatar">{{ (u.nome or 'U')[0]|upper }}</div>
         <div><strong>{{ u.nome }}</strong><small>{{ u.email }}</small></div>
         <span>{{ empresa_nome.v }}</span>
-        <span>{% if u.tipo == 'ADMIN_HUMIAT' %}Admin Humiat{% else %}Admin da empresa{% endif %}</span>
+        <span>{% if eid %}Área da empresa{% else %}Equipe interna{% endif %}</span>
         <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
         <button type="button" class="text-btn" data-dialog-open="editar-usuario-{{ u.id }}">Editar</button>{% if eid %}<a class="text-btn" href="/painel?empresa_id={{ eid }}">Abrir empresa</a>{% endif %}
       </div>
@@ -575,10 +568,9 @@
     <label>Nome<input name="nome" value="{{ u.nome }}" required></label>
     <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
     <label>Nova senha <small style="display:block;color:var(--muted);margin-top:4px">Deixe em branco para manter a senha atual.</small><input type="password" name="senha" minlength="8" placeholder="Manter senha atual"></label>
-    <label>Perfil<select name="tipo" class="editarUsuarioTipo" data-empresa-label="editarUsuarioEmpresaLabel{{ u.id }}"><option value="CLIENTE_EMPRESA" {% if u.tipo != 'ADMIN_HUMIAT' %}selected{% endif %}>Acesso da Empresa</option><option value="ADMIN_HUMIAT" {% if u.tipo == 'ADMIN_HUMIAT' %}selected{% endif %}>Administrador Humiat</option></select></label>
-    <label id="editarUsuarioEmpresaLabel{{ u.id }}">Empresa
+    <label>Empresa <small style="display:block;color:var(--muted);margin-top:4px">Sem empresa = equipe interna/perfil completo.</small>
       <select name="empresa_id">
-        <option value="">— selecione —</option>
+        <option value="">— sem empresa (equipe interna) —</option>
         {% for e in empresas %}<option value="{{ e.id }}" {% if eid == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
       </select>
     </label>
@@ -631,20 +623,6 @@
     let manual = false;
     slug.addEventListener('input', () => manual = slug.value.trim() !== '' && slug.value !== slugify(name.value));
     name.addEventListener('input', () => { if (!manual) slug.value = slugify(name.value); });
-  });
-
-  const tipo = document.getElementById('novoUsuarioTipo');
-  const empresaLabel = document.getElementById('novoUsuarioEmpresaLabel');
-  if (tipo && empresaLabel) {
-    const sync = () => empresaLabel.classList.toggle('field-muted', tipo.value === 'ADMIN_HUMIAT');
-    tipo.addEventListener('change', sync); sync();
-  }
-
-  document.querySelectorAll('.editarUsuarioTipo').forEach(sel => {
-    const label = document.getElementById(sel.dataset.empresaLabel);
-    if (!label) return;
-    const sync = () => label.classList.toggle('field-muted', sel.value === 'ADMIN_HUMIAT');
-    sel.addEventListener('change', sync); sync();
   });
 
   document.querySelectorAll('.color-grid input[type=color]').forEach(input => {
