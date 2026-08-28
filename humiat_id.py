@@ -3,13 +3,10 @@ import hmac
 import json
 import os
 import secrets
-import smtplib
-import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from io import BytesIO
-from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode
@@ -35,11 +32,9 @@ SOLVOZ_API_TIMEOUT = float(os.getenv("HUMIAT_SOLVOZ_API_TIMEOUT", "8") or "8")
 SOLVOZ_DIAGNOSTICS_PATH = os.getenv("HUMIAT_SOLVOZ_DIAGNOSTICS_PATH", "/_sv/uso/7f29c4b8").strip() or "/_sv/uso/7f29c4b8"
 
 RESET_MINUTES = int(os.getenv("HUMIAT_RESET_MINUTES", "30") or "30")
-SMTP_HOST = os.getenv("HUMIAT_SMTP_HOST", "smtp.gmail.com").strip()
-SMTP_PORT = int(os.getenv("HUMIAT_SMTP_PORT", "587") or "587")
-SMTP_USER = os.getenv("HUMIAT_SMTP_USER", "").strip()
-SMTP_PASSWORD = os.getenv("HUMIAT_SMTP_PASSWORD", "").strip()
-SMTP_FROM = os.getenv("HUMIAT_SMTP_FROM", SMTP_USER).strip()
+RESEND_API_KEY = os.getenv("HUMIAT_RESEND_API_KEY", "").strip()
+EMAIL_FROM = os.getenv("HUMIAT_EMAIL_FROM", "").strip()
+RESEND_API_URL = os.getenv("HUMIAT_RESEND_API_URL", "https://api.resend.com/emails").strip()
 
 TIPO_ADMIN_HUMIAT = "ADMIN_HUMIAT"
 TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"
@@ -170,25 +165,58 @@ def _auditar(db: Session, request: Request, acao: str, usuario_id: int | None = 
 
 
 def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
-    if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM):
-        raise RuntimeError("E-mail de recuperação não configurado no servidor")
-    msg = EmailMessage()
-    msg["Subject"] = "Humiat ID - Redefinição de senha"
-    msg["From"] = SMTP_FROM
-    msg["To"] = destino
-    msg.set_content(
-        f"Olá, {nome or 'usuário'}.\n\n"
+    """Envia a recuperação pela API HTTPS do Resend (porta 443, compatível com Render Free)."""
+    if not RESEND_API_KEY:
+        raise RuntimeError("HUMIAT_RESEND_API_KEY não configurada no servidor")
+    if not EMAIL_FROM:
+        raise RuntimeError("HUMIAT_EMAIL_FROM não configurado no servidor")
+
+    nome_exibicao = (nome or "usuário").strip()
+    texto = (
+        f"Olá, {nome_exibicao}.\n\n"
         "Recebemos uma solicitação para redefinir sua senha do Humiat ID.\n"
         f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n\n"
         "Se você não pediu a alteração, ignore esta mensagem.\n"
     )
-    contexto = ssl.create_default_context()
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
-        smtp.ehlo()
-        smtp.starttls(context=context)
-        smtp.ehlo()
-        smtp.login(SMTP_USER, SMTP_PASSWORD)
-        smtp.send_message(msg)
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#0b1220">
+      <h2 style="margin-bottom:8px">Humiat ID</h2>
+      <p>Olá, {nome_exibicao}.</p>
+      <p>Recebemos uma solicitação para redefinir sua senha do Humiat ID.</p>
+      <p>O link abaixo é válido por <strong>{RESET_MINUTES} minutos</strong> e só pode ser utilizado uma vez.</p>
+      <p style="margin:28px 0"><a href="{link}" style="background:#0ea5e9;color:white;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">Criar nova senha</a></p>
+      <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{link}</p>
+      <p style="font-size:13px;color:#475569">Se você não solicitou a alteração, ignore este e-mail.</p>
+    </div>
+    """
+
+    payload = json.dumps({
+        "from": EMAIL_FROM,
+        "to": [destino],
+        "subject": "Humiat ID - Redefinição de senha",
+        "text": texto,
+        "html": html,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        RESEND_API_URL,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Humiat-ID/1.0.7",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status < 200 or resp.status >= 300:
+                raise RuntimeError(f"Resend retornou HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Falha Resend HTTP {exc.code}: {detalhe[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
 
 
 def _slug(valor: str) -> str:
