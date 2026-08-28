@@ -3,10 +3,13 @@ import hmac
 import json
 import os
 import secrets
+import smtplib
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from io import BytesIO
+from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode
@@ -30,6 +33,13 @@ SSO_SECRET = os.getenv("HUMIAT_SSO_SECRET", "").strip()
 SOLVOZ_BASE_URL = os.getenv("HUMIAT_SOLVOZ_URL", "https://www.solvoz.com.br").strip().rstrip("/")
 SOLVOZ_API_TIMEOUT = float(os.getenv("HUMIAT_SOLVOZ_API_TIMEOUT", "8") or "8")
 SOLVOZ_DIAGNOSTICS_PATH = os.getenv("HUMIAT_SOLVOZ_DIAGNOSTICS_PATH", "/_sv/uso/7f29c4b8").strip() or "/_sv/uso/7f29c4b8"
+
+RESET_MINUTES = int(os.getenv("HUMIAT_RESET_MINUTES", "30") or "30")
+SMTP_HOST = os.getenv("HUMIAT_SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("HUMIAT_SMTP_PORT", "587") or "587")
+SMTP_USER = os.getenv("HUMIAT_SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("HUMIAT_SMTP_PASSWORD", "").strip()
+SMTP_FROM = os.getenv("HUMIAT_SMTP_FROM", SMTP_USER).strip()
 
 TIPO_ADMIN_HUMIAT = "ADMIN_HUMIAT"
 TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"
@@ -95,6 +105,17 @@ class HumiatSessao(Base):
     user_agent = Column(String(300), nullable=True)
 
 
+class HumiatSenhaReset(Base):
+    __tablename__ = "humiat_senha_resets"
+    id = Column(Integer, primary_key=True)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    usuario_id = Column(Integer, ForeignKey("humiat_usuarios.id"), nullable=False)
+    criado_em = Column(DateTime, server_default=func.now())
+    expira_em = Column(DateTime, nullable=False)
+    usado_em = Column(DateTime, nullable=True)
+    ip = Column(String(80), nullable=True)
+
+
 class HumiatAuditoria(Base):
     __tablename__ = "humiat_auditoria"
     id = Column(Integer, primary_key=True)
@@ -146,6 +167,28 @@ def _ip(request: Request) -> str:
 
 def _auditar(db: Session, request: Request, acao: str, usuario_id: int | None = None, empresa_id: int | None = None, detalhe: str = ""):
     db.add(HumiatAuditoria(usuario_id=usuario_id, empresa_id=empresa_id, acao=acao, detalhe=detalhe[:3000], ip=_ip(request)))
+
+
+def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM):
+        raise RuntimeError("E-mail de recuperação não configurado no servidor")
+    msg = EmailMessage()
+    msg["Subject"] = "Humiat ID - Redefinição de senha"
+    msg["From"] = SMTP_FROM
+    msg["To"] = destino
+    msg.set_content(
+        f"Olá, {nome or 'usuário'}.\n\n"
+        "Recebemos uma solicitação para redefinir sua senha do Humiat ID.\n"
+        f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n\n"
+        "Se você não pediu a alteração, ignore esta mensagem.\n"
+    )
+    contexto = ssl.create_default_context()
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
+        smtp.ehlo()
+        smtp.starttls(context=context)
+        smtp.ehlo()
+        smtp.login(SMTP_USER, SMTP_PASSWORD)
+        smtp.send_message(msg)
 
 
 def _slug(valor: str) -> str:
@@ -469,6 +512,70 @@ def login_humiat(request: Request, erro: str = "", db: Session = Depends(get_db)
     if humiat_usuario_da_requisicao(request, db):
         return RedirectResponse("/painel", status_code=303)
     return templates.TemplateResponse("humiat/login.html", {"request": request, "erro": erro})
+
+
+@router.get("/esqueci-senha", response_class=HTMLResponse)
+def esqueci_senha_humiat(request: Request, enviado: str = "", erro: str = ""):
+    return templates.TemplateResponse("humiat/esqueci_senha.html", {"request": request, "enviado": enviado, "erro": erro})
+
+
+@router.post("/esqueci-senha")
+def solicitar_reset_humiat(request: Request, email: str = Form(...), db: Session = Depends(get_db)):
+    login = email.strip().lower()
+    usuario = db.query(HumiatUsuario).filter(HumiatUsuario.email == login, HumiatUsuario.ativo == 1).first()
+    # Resposta pública é sempre igual para não revelar quais e-mails estão cadastrados.
+    if usuario:
+        agora = datetime.utcnow()
+        recente = (db.query(HumiatSenhaReset)
+            .filter(HumiatSenhaReset.usuario_id == usuario.id, HumiatSenhaReset.criado_em >= agora - timedelta(minutes=2))
+            .order_by(HumiatSenhaReset.id.desc()).first())
+        if not recente:
+            token = secrets.token_urlsafe(40)
+            reset = HumiatSenhaReset(
+                token_hash=_hash_token(token), usuario_id=usuario.id,
+                expira_em=agora + timedelta(minutes=RESET_MINUTES), ip=_ip(request)
+            )
+            db.add(reset)
+            _auditar(db, request, "SENHA_RESET_SOLICITADO", usuario_id=usuario.id)
+            db.commit()
+            link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
+            try:
+                _enviar_email_recuperacao(usuario.email, usuario.nome, link)
+                _auditar(db, request, "SENHA_RESET_EMAIL_ENVIADO", usuario_id=usuario.id)
+                db.commit()
+            except Exception as exc:
+                _auditar(db, request, "SENHA_RESET_EMAIL_ERRO", usuario_id=usuario.id, detalhe=str(exc))
+                db.commit()
+                print(f"[HUMIAT ID] Falha ao enviar recuperação para {usuario.email}: {exc}")
+    return RedirectResponse("/esqueci-senha?enviado=1", status_code=303)
+
+
+@router.get("/redefinir-senha", response_class=HTMLResponse)
+def formulario_reset_humiat(request: Request, token: str = "", erro: str = "", db: Session = Depends(get_db)):
+    item = db.query(HumiatSenhaReset).filter(HumiatSenhaReset.token_hash == _hash_token(token)).first() if token else None
+    valido = bool(item and not item.usado_em and item.expira_em >= datetime.utcnow())
+    return templates.TemplateResponse("humiat/redefinir_senha.html", {"request": request, "token": token, "valido": valido, "erro": erro})
+
+
+@router.post("/redefinir-senha")
+def concluir_reset_humiat(request: Request, token: str = Form(...), senha: str = Form(...), confirmar: str = Form(...), db: Session = Depends(get_db)):
+    item = db.query(HumiatSenhaReset).filter(HumiatSenhaReset.token_hash == _hash_token(token)).first()
+    if not item or item.usado_em or item.expira_em < datetime.utcnow():
+        return RedirectResponse("/redefinir-senha?erro=Link expirado ou inválido", status_code=303)
+    if senha != confirmar:
+        return RedirectResponse(f"/redefinir-senha?token={urllib.parse.quote(token)}&erro=As senhas não conferem", status_code=303)
+    if len(senha) < 8:
+        return RedirectResponse(f"/redefinir-senha?token={urllib.parse.quote(token)}&erro=A senha precisa ter pelo menos 8 caracteres", status_code=303)
+    usuario = db.query(HumiatUsuario).filter(HumiatUsuario.id == item.usuario_id, HumiatUsuario.ativo == 1).first()
+    if not usuario:
+        return RedirectResponse("/redefinir-senha?erro=Link expirado ou inválido", status_code=303)
+    usuario.senha_hash = gerar_hash_senha_id(senha)
+    item.usado_em = datetime.utcnow()
+    # Encerra sessões antigas após troca de senha.
+    db.query(HumiatSessao).filter(HumiatSessao.usuario_id == usuario.id).delete(synchronize_session=False)
+    _auditar(db, request, "SENHA_RESET_CONCLUIDO", usuario_id=usuario.id)
+    db.commit()
+    return RedirectResponse("/entrar?erro=Senha redefinida. Entre com a nova senha.", status_code=303)
 
 
 @router.post("/entrar")

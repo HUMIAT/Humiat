@@ -230,3 +230,6 @@
   .machine-summary-grid{grid-template-columns:1fr}
   .machines-card .card-title-row{align-items:flex-start;flex-direction:column}
 }
+
+/* Humiat ID - recuperação de senha */
+.id-forgot{display:block;text-align:center;margin-top:2px;font-size:.92rem;font-weight:700;color:var(--id-accent,#7c3aed);text-decoration:none}.id-forgot:hover{text-decoration:underline}.id-success{border-color:rgba(34,197,94,.35)!important;background:rgba(34,197,94,.10)!important}
