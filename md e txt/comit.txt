@@ -1,1 +1,1 @@
-Organiza v1.1.0 - recibo por equipamento na ficha do cliente
+Organiza v1.1.1 - gera QR antes da licença sem exigir NR HD

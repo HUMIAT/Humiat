@@ -85,6 +85,28 @@
       <div class="secao-form-titulo">
         <span>4</span>
         <div>
+          <h2>QR Code</h2>
+          <p>Gera os QR Codes do catálogo e da máquina antes da licença. Não exige NR HD e mantém o mesmo endereço configurado no SolVoz.</p>
+        </div>
+      </div>
+
+      {% if equipamento.solvoz_empresa_id and equipamento.plano %}
+      <button class="botao primario botao-cheio" type="submit"
+              formaction="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/gerar-qr"
+              formmethod="post">
+        Gerar QR Code
+      </button>
+      {% else %}
+      <button class="botao botao-cheio" type="button" disabled>
+        Selecione o plano e a Empresa SolVoz para gerar
+      </button>
+      {% endif %}
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo">
+        <span>5</span>
+        <div>
           <h2>Licença e QR Code</h2>
           <p>Valida NR máquina, NR HD, plano e Empresa SolVoz. Gera a licença, o QR do catálogo e também o QR 500x500 contendo somente o número do equipamento.</p>
         </div>
@@ -105,7 +127,7 @@
     {% endif %}
 
     <section class="cartao secao-form">
-      <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}5{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
+      <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}6{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
       <label class="campo-largo"><textarea name="observacao">{{ equipamento.observacao if equipamento and equipamento.observacao else '' }}</textarea></label>
     </section>
     {% if confirmar_duplicado %}
@@ -118,7 +140,7 @@
 
   {% if equipamento and equipamento.id %}
   <section class="cartao secao-form transferencia-equipamento">
-    <div class="secao-form-titulo"><span>6</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
+    <div class="secao-form-titulo"><span>7</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/transferir" onsubmit="return confirm('Confirma a transferência deste equipamento para outro cliente?')">
       <div class="form-grid-organizada dois-colunas">
         <label>Novo cliente *<select name="cliente_destino_id" required><option value="">Selecione...</option>{% for c in clientes_transferencia %}<option value="{{ c.id }}">{{ c.nome }} · {{ c.telefone|telefone }}</option>{% endfor %}</select></label>

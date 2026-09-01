@@ -1913,6 +1913,56 @@ def criar_qr_id_equipamento(maquina: str, url: str, destino: Path):
 
     arte.save(destino, "PNG")
 
+def validar_dados_qr(equipamento: Equipamento, db: Session):
+    """Valida somente os dados necessários para gerar os QR Codes antes da licença."""
+    maquina = re.sub(r"[^A-Z0-9]", "", (equipamento.maquina or "").upper())
+    if not re.fullmatch(r"KRJ\d{5}", maquina):
+        raise HTTPException(400, "O número da máquina deve seguir o padrão KRJ00040.")
+
+    empresa = None
+    if equipamento.solvoz_empresa_id:
+        empresa = db.query(SolVozEmpresa).filter(
+            SolVozEmpresa.id == equipamento.solvoz_empresa_id,
+            SolVozEmpresa.ativo == 1,
+        ).first()
+    if not empresa:
+        raise HTTPException(400, "Selecione a Empresa SolVoz antes de gerar o QR Code.")
+
+    plano = normalizar_plano_qr(equipamento.plano)
+    if not equipamento.plano:
+        raise HTTPException(400, "Selecione o plano do equipamento antes de gerar o QR Code.")
+    return maquina, plano, empresa
+
+
+def gerar_pacote_qr(equipamento: Equipamento, db: Session) -> Path:
+    """Gera os QR Codes antes da licença, sem exigir NR HD."""
+    maquina, plano, empresa = validar_dados_qr(equipamento, db)
+    url_qr = montar_url_qr_solvoz(
+        empresa,
+        maquina,
+        plano,
+        bool(equipamento.catalogo_online),
+    )
+
+    pasta = PASTA_LICENCAS / maquina
+    pasta.mkdir(parents=True, exist_ok=True)
+
+    qr_catalogo = pasta / f"QR_{maquina}_{plano}.png"
+    criar_arte_qr(maquina, plano, url_qr, qr_catalogo)
+
+    qr_id = pasta / f"QR_ID_{maquina}_500x500.png"
+    criar_qr_id_equipamento(maquina, url_qr, qr_id)
+
+    url_catalogo = pasta / "URL_CATALOGO.txt"
+    url_catalogo.write_text(url_qr, encoding="utf-8")
+
+    zip_path = PASTA_LICENCAS / f"{maquina}_QR.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as pacote:
+        for arquivo in [url_catalogo, qr_catalogo, qr_id]:
+            pacote.write(arquivo, arcname=f"{maquina}/{arquivo.name}")
+    return zip_path
+
+
 def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Path]:
     maquina, numero_hd, plano, empresa = validar_dados_licenca(equipamento, db)
     url_qr = montar_url_qr_solvoz(
@@ -1937,6 +1987,31 @@ def gerar_pasta_licenca(equipamento: Equipamento, db: Session) -> tuple[Path, Pa
         for arquivo in [pasta / "MAQUINA_KRJ.txt", pasta / "LICENCA_HD_KRJ.txt", pasta / "URL_CATALOGO.txt", png, qr_id]:
             pacote.write(arquivo, arcname=f"{maquina}/{arquivo.name}")
     return pasta, zip_path
+
+
+@app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/gerar-qr")
+async def equipamento_gerar_qr(cliente_id: int, equipamento_id: int, request: Request,
+                               usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.cliente_id == cliente_id
+    ).first()
+    if not eq:
+        raise HTTPException(404)
+
+    # Salva as alterações feitas na ficha antes de gerar o QR, igual ao fluxo da licença.
+    form = dict(await request.form())
+    preencher_equipamento(eq, form, db)
+    garantir_identificacao_equipamento(db, eq)
+    db.commit()
+
+    zip_path = gerar_pacote_qr(eq, db)
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=zip_path.name,
+        headers={"X-Pasta-Gerada": str(PASTA_LICENCAS / (eq.maquina or ""))}
+    )
 
 
 @app.post("/organiza/clientes/{cliente_id}/equipamentos/{equipamento_id}/gerar-licenca")
