@@ -1,0 +1,194 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean relatorio-vendas">
+  <div class="titulo-linha relatorio-topo">
+    <div>
+      <p class="tag">Relatório</p>
+      <h1>Relatório de vendas de equipamentos</h1>
+      <p class="texto-suave">{{ total_vendas }} equipamento(s) encontrado(s) com os filtros selecionados.</p>
+    </div>
+    <div class="relatorio-acoes">
+      <a class="botao secundario" href="/organiza/vendas{% if filtro_query %}?{{ filtro_query }}{% endif %}">Voltar para vendas</a>
+      <button id="imprimir-relatorio" class="botao primario" type="button">Imprimir / salvar PDF</button>
+    </div>
+  </div>
+
+  {% set pagamento_nomes = {
+    'todos': 'Todos',
+    'pendente': 'Falta pagamento',
+    'sem_pagamento': 'Sem pagamento',
+    'quitado': 'Quitados',
+    'excesso': 'Pagamento acima do total'
+  } %}
+  {% set valor_nomes = {'todos': 'Todos os valores', 'acima_5000': 'Acima de R$ 5.000,00'} %}
+  {% set ordem_nomes = {
+    'recentes': 'Mais novos primeiro',
+    'antigos': 'Mais antigos primeiro',
+    'maior_valor': 'Maior valor',
+    'maior_saldo': 'Maior saldo a receber'
+  } %}
+
+  <div class="cartao relatorio-filtros">
+    <div>
+      <small>Busca / equipamento</small>
+      <strong>{{ q or 'Todos' }}</strong>
+    </div>
+    <div>
+      <small>Pagamento</small>
+      <strong>{{ pagamento_nomes.get(pagamento_filtro, pagamento_filtro) }}</strong>
+    </div>
+    <div>
+      <small>Valor</small>
+      <strong>{{ valor_nomes.get(valor_filtro, valor_filtro) }}</strong>
+    </div>
+    <div>
+      <small>Status</small>
+      <strong>
+        {% if status_filtros %}
+          {{ status_filtros|join(', ') }}
+        {% else %}
+          Todos
+        {% endif %}
+      </strong>
+    </div>
+    <div>
+      <small>Ordenação</small>
+      <strong>{{ ordem_nomes.get(ordem, ordem) }}</strong>
+    </div>
+  </div>
+
+  <div class="relatorio-resumo">
+    <div class="cartao resumo-item">
+      <small>Valor total dos equipamentos</small>
+      <strong>{{ total_vendido|moeda }}</strong>
+    </div>
+    <div class="cartao resumo-item">
+      <small>Total recebido</small>
+      <strong>{{ total_recebido|moeda }}</strong>
+    </div>
+    <div class="cartao resumo-item saldo">
+      <small>Total a receber</small>
+      <strong>{{ total_falta|moeda }}</strong>
+    </div>
+  </div>
+
+  {% if total_excesso > 0.009 %}
+  <div class="alerta erro relatorio-alerta">
+    Há {{ total_excesso|moeda }} em pagamentos registrados acima do valor total das vendas filtradas.
+  </div>
+  {% endif %}
+
+  <div class="cartao tabela-relatorio-wrap">
+    <table class="tabela-relatorio">
+      <thead>
+        <tr>
+          <th>Cliente</th>
+          <th>Equipamento</th>
+          <th>Status</th>
+          <th>Data da compra</th>
+          <th>Data de entrega</th>
+          <th class="numero">Valor total</th>
+          <th class="numero">Recebido</th>
+          <th class="numero">Falta receber</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for venda in vendas %}
+        <tr>
+          <td>
+            <strong>{{ venda.cliente.nome }}</strong>
+            <small>{{ venda|codigo_tecnico }}</small>
+          </td>
+          <td>
+            <strong>{{ venda|rotulo_maquina }}</strong>
+            <small>{{ venda.tipo or 'Equipamento' }} · {{ venda.modelo or 'Sem modelo' }}</small>
+          </td>
+          <td>{{ venda.status or '-' }}</td>
+          <td>{{ venda.data_compra|data_br }}</td>
+          <td>{{ venda.previsao_entrega|data_br }}</td>
+          <td class="numero">{{ venda.total_calculado|moeda }}</td>
+          <td class="numero">{{ venda.recebido_calculado|moeda }}</td>
+          <td class="numero falta">{{ venda.falta_calculada|moeda }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td class="vazio-relatorio" colspan="8">Nenhuma venda encontrada com estes filtros.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% if vendas %}
+      <tfoot>
+        <tr>
+          <th colspan="5">Totais</th>
+          <th class="numero">{{ total_vendido|moeda }}</th>
+          <th class="numero">{{ total_recebido|moeda }}</th>
+          <th class="numero">{{ total_falta|moeda }}</th>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+
+  <p class="texto-suave relatorio-rodape">
+    Relatório gerado em {{ gerado_em.strftime('%d/%m/%Y às %H:%M') }}.
+  </p>
+</section>
+
+<style>
+.relatorio-acoes{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.relatorio-filtros{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:16px 0;padding:14px}
+.relatorio-filtros>div{display:grid;gap:4px;min-width:0}
+.relatorio-filtros small,.resumo-item small{color:#64748b;font-size:12px}
+.relatorio-filtros strong{font-size:13px;overflow-wrap:anywhere}
+.relatorio-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.resumo-item{display:grid;gap:6px;padding:16px}
+.resumo-item strong{font-size:21px}
+.resumo-item.saldo{border-color:#fdba74;background:#fff7ed}
+.resumo-item.saldo strong,.tabela-relatorio .falta{color:#c2410c}
+.relatorio-alerta{margin:0 0 14px}
+.tabela-relatorio-wrap{overflow-x:auto;padding:0}
+.tabela-relatorio{width:100%;border-collapse:collapse;min-width:1050px}
+.tabela-relatorio th,.tabela-relatorio td{padding:12px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;font-size:13px}
+.tabela-relatorio thead th{background:#f8fafc;color:#334155;font-size:12px;white-space:nowrap}
+.tabela-relatorio tbody td strong,.tabela-relatorio tbody td small{display:block}
+.tabela-relatorio tbody td small{margin-top:3px;color:#64748b}
+.tabela-relatorio .numero{text-align:right;white-space:nowrap}
+.tabela-relatorio tfoot th{background:#f8fafc;border-top:2px solid #cbd5e1;border-bottom:0}
+.vazio-relatorio{text-align:center!important;color:#64748b;padding:28px!important}
+.relatorio-rodape{text-align:right;margin-top:10px;font-size:12px}
+
+@media(max-width:1000px){
+  .relatorio-filtros{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .relatorio-filtros,.relatorio-resumo{grid-template-columns:1fr}
+  .relatorio-acoes{width:100%}
+  .relatorio-acoes .botao{flex:1;text-align:center}
+}
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  body{background:#fff!important}
+  .app-sidebar,.mobile-nav,.relatorio-acoes{display:none!important}
+  .app-shell{display:block!important}
+  .app-main{margin:0!important;padding:0!important;width:100%!important;max-width:none!important}
+  .pagina-clean{max-width:none!important;margin:0!important;padding:0!important}
+  .relatorio-topo{margin-bottom:8px}
+  .relatorio-filtros,.relatorio-resumo{break-inside:avoid}
+  .cartao{box-shadow:none!important}
+  .tabela-relatorio-wrap{border:0!important;overflow:visible!important}
+  .tabela-relatorio{min-width:0!important}
+  .tabela-relatorio th,.tabela-relatorio td{padding:6px 5px;font-size:9px}
+  .tabela-relatorio thead th{font-size:8px}
+  .resumo-item{padding:8px}
+  .resumo-item strong{font-size:15px}
+  .relatorio-rodape{margin-top:6px}
+}
+</style>
+
+<script>
+(function () {
+  const botao = document.getElementById('imprimir-relatorio');
+  if (botao) botao.addEventListener('click', function () { window.print(); });
+})();
+</script>
+{% endblock %}

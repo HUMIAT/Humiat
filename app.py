@@ -1,4 +1,4 @@
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 import hashlib
 import hmac
 import os
@@ -2117,8 +2117,9 @@ def _migrar_pagamentos_legados_vendas(db: Session, equipamentos: list[Equipament
     return alterados
 
 
-@app.get("/organiza/vendas", response_class=HTMLResponse)
-def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+
+def _vendas_filtradas(request: Request, db: Session) -> dict:
+    """Carrega as vendas e aplica exatamente os mesmos cálculos e filtros da tela e do relatório."""
     equipamentos = (
         db.query(Equipamento)
         .options(selectinload(Equipamento.cliente))
@@ -2134,10 +2135,11 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     equipamentos = [eq for eq in equipamentos if equipamento_eh_venda(eq)]
     status_opcoes = sorted({eq.status for eq in equipamentos if eq.status})
 
-    # Recupera automaticamente os recebimentos antigos que existiam apenas no
-    # campo legado `pago`. Esses lançamentos ficam locais e NUNCA vão ao Connect.
-    # O financeiro exibido na listagem é sempre recalculado pelos pagamentos
-    # reais, evitando depender de campos legados pago/falta desatualizados.
+    # Sincroniza automaticamente vendas antigas ou recém-cadastradas em que o
+    # valor recebido ainda existe apenas no campo legado `pago`.
+    # Depois disso, tela e relatório usam a mesma fonte: PagamentoVenda.
+    _migrar_pagamentos_legados_vendas(db, equipamentos)
+
     ids = [eq.id for eq in equipamentos]
     pagamentos_por_equipamento = {}
     if ids:
@@ -2156,7 +2158,12 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     q = (request.query_params.get("q") or "").strip().lower()
     pagamento = (request.query_params.get("pagamento") or "todos").strip()
     valor_filtro = (request.query_params.get("valor") or "todos").strip()
-    status = (request.query_params.get("status") or "todos").strip()
+    status_filtros = [
+        valor.strip()
+        for valor in request.query_params.getlist("status")
+        if valor and valor.strip()
+    ]
+    status_filtros = [valor for valor in status_filtros if valor in status_opcoes]
     ordem = (request.query_params.get("ordem") or "recentes").strip()
 
     if q:
@@ -2164,10 +2171,16 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             eq.cliente.nome or "", eq.tipo or "", eq.modelo or "",
             codigo_tecnico(eq), rotulo_maquina(eq),
         ]).lower()]
+
     if pagamento == "pendente":
         equipamentos = [eq for eq in equipamentos if eq.falta_calculada > 0.009]
     elif pagamento == "quitado":
-        equipamentos = [eq for eq in equipamentos if eq.total_calculado > 0 and eq.falta_calculada <= 0.009 and eq.excesso_calculado <= 0.009]
+        equipamentos = [
+            eq for eq in equipamentos
+            if eq.total_calculado > 0
+            and eq.falta_calculada <= 0.009
+            and eq.excesso_calculado <= 0.009
+        ]
     elif pagamento == "sem_pagamento":
         equipamentos = [eq for eq in equipamentos if eq.recebido_calculado <= 0.009]
     elif pagamento == "excesso":
@@ -2175,17 +2188,53 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
 
     if valor_filtro == "acima_5000":
         equipamentos = [eq for eq in equipamentos if eq.total_calculado > 5000]
-    if status != "todos":
-        equipamentos = [eq for eq in equipamentos if (eq.status or "") == status]
+
+    if status_filtros:
+        status_selecionados = set(status_filtros)
+        equipamentos = [eq for eq in equipamentos if (eq.status or "") in status_selecionados]
 
     if ordem == "antigos":
         equipamentos.sort(key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id))
     elif ordem == "maior_valor":
-        equipamentos.sort(key=lambda eq: (eq.total_calculado, eq.data_compra or date.min, eq.id), reverse=True)
+        equipamentos.sort(
+            key=lambda eq: (eq.total_calculado, eq.data_compra or date.min, eq.id),
+            reverse=True,
+        )
     elif ordem == "maior_saldo":
-        equipamentos.sort(key=lambda eq: (eq.falta_calculada, eq.data_compra or date.min, eq.id), reverse=True)
+        equipamentos.sort(
+            key=lambda eq: (eq.falta_calculada, eq.data_compra or date.min, eq.id),
+            reverse=True,
+        )
     else:
-        equipamentos.sort(key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id), reverse=True)
+        equipamentos.sort(
+            key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id),
+            reverse=True,
+        )
+
+    parametros_filtro = [
+        ("q", request.query_params.get("q", "")),
+        ("pagamento", pagamento),
+        ("valor", valor_filtro),
+        *[("status", item) for item in status_filtros],
+        ("ordem", ordem),
+    ]
+
+    return {
+        "equipamentos": equipamentos,
+        "q": request.query_params.get("q", ""),
+        "pagamento_filtro": pagamento,
+        "valor_filtro": valor_filtro,
+        "status_filtros": status_filtros,
+        "ordem": ordem,
+        "status_opcoes": status_opcoes,
+        "filtro_query": urlencode(parametros_filtro),
+    }
+
+
+@app.get("/organiza/vendas", response_class=HTMLResponse)
+def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    dados = _vendas_filtradas(request, db)
+    equipamentos = dados["equipamentos"]
 
     # Paginação: não renderizar centenas de cards em uma única resposta.
     total_vendas = len(equipamentos)
@@ -2197,14 +2246,56 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     total_paginas = max((total_vendas + por_pagina - 1) // por_pagina, 1)
     pagina = min(pagina, total_paginas)
     inicio = (pagina - 1) * por_pagina
-    equipamentos = equipamentos[inicio:inicio + por_pagina]
+    equipamentos_pagina = equipamentos[inicio:inicio + por_pagina]
 
     return templates.TemplateResponse("organiza/vendas.html", {
-        "request": request, "usuario": usuario, "vendas": equipamentos,
-        "q": request.query_params.get("q", ""), "pagamento_filtro": pagamento,
-        "valor_filtro": valor_filtro, "status_filtro": status, "ordem": ordem,
-        "status_opcoes": status_opcoes, "total_vendas": total_vendas,
-        "pagina": pagina, "total_paginas": total_paginas,
+        "request": request,
+        "usuario": usuario,
+        "vendas": equipamentos_pagina,
+        "q": dados["q"],
+        "pagamento_filtro": dados["pagamento_filtro"],
+        "valor_filtro": dados["valor_filtro"],
+        "status_filtros": dados["status_filtros"],
+        "ordem": dados["ordem"],
+        "status_opcoes": dados["status_opcoes"],
+        "total_vendas": total_vendas,
+        "pagina": pagina,
+        "total_paginas": total_paginas,
+        "filtro_query": dados["filtro_query"],
+    })
+
+
+@app.get("/organiza/relatorios/vendas", response_class=HTMLResponse)
+def vendas_relatorio(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    dados = _vendas_filtradas(request, db)
+    vendas = dados["equipamentos"]
+
+    total_vendido = round(sum(eq.total_calculado for eq in vendas), 2)
+    total_recebido = round(sum(eq.recebido_calculado for eq in vendas), 2)
+    total_falta = round(sum(eq.falta_calculada for eq in vendas), 2)
+    total_excesso = round(sum(eq.excesso_calculado for eq in vendas), 2)
+
+    return templates.TemplateResponse("organiza/vendas_relatorio.html", {
+        "request": request,
+        "usuario": usuario,
+        "titulo": "Relatório de vendas",
+        "vendas": vendas,
+        "total_vendas": len(vendas),
+        "total_vendido": total_vendido,
+        "total_recebido": total_recebido,
+        "total_falta": total_falta,
+        "total_excesso": total_excesso,
+        "q": dados["q"],
+        "pagamento_filtro": dados["pagamento_filtro"],
+        "valor_filtro": dados["valor_filtro"],
+        "status_filtros": dados["status_filtros"],
+        "ordem": dados["ordem"],
+        "filtro_query": dados["filtro_query"],
+        "gerado_em": datetime.now(),
     })
 
 

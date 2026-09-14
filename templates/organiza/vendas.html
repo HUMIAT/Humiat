@@ -1,9 +1,19 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean">
-  <div class="titulo-linha"><div><p class="tag">Vendas</p><h1>Vendas de equipamentos</h1><p class="texto-suave">Acompanhe gabinete, montagem, entrega e recebimentos em um único lugar.</p></div><a class="botao primario" href="/organiza/vendas/nova">+ Nova venda</a></div>
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">Vendas</p>
+      <h1>Vendas de equipamentos</h1>
+      <p class="texto-suave">Acompanhe gabinete, montagem, entrega e recebimentos em um único lugar.</p>
+    </div>
+    <div class="titulo-acoes-vendas">
+      <button class="botao secundario" type="submit" form="filtros-vendas" formaction="/organiza/relatorios/vendas">Relatório</button>
+      <a class="botao primario" href="/organiza/vendas/nova">+ Nova venda</a>
+    </div>
+  </div>
 
-  <form method="get" class="cartao filtros-vendas">
+  <form id="filtros-vendas" method="get" class="cartao filtros-vendas">
     <label class="filtro-busca">Buscar
       <input name="q" value="{{ q }}" placeholder="Cliente, equipamento ou código">
     </label>
@@ -22,12 +32,34 @@
         <option value="acima_5000" {% if valor_filtro == 'acima_5000' %}selected{% endif %}>Acima de R$ 5.000,00</option>
       </select>
     </label>
-    <label>Status
-      <select name="status">
-        <option value="todos">Todos</option>
-        {% for item in status_opcoes %}<option value="{{ item }}" {% if status_filtro == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
-      </select>
-    </label>
+    <div class="filtro-status">
+      <span class="filtro-rotulo">Status</span>
+      <details class="status-multi" data-status-multi>
+        <summary>
+          <span data-status-resumo>
+            {% if status_filtros|length == 0 %}
+              Todos
+            {% elif status_filtros|length == 1 %}
+              {{ status_filtros[0] }}
+            {% else %}
+              {{ status_filtros|length }} status selecionados
+            {% endif %}
+          </span>
+        </summary>
+        <div class="status-multi-menu">
+          <div class="status-multi-topo">
+            <strong>Escolha um ou mais</strong>
+            <button type="button" class="status-limpar" data-status-limpar>Limpar</button>
+          </div>
+          {% for item in status_opcoes %}
+          <label class="status-opcao">
+            <input type="checkbox" name="status" value="{{ item }}" {% if item in status_filtros %}checked{% endif %}>
+            <span>{{ item }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
     <label>Ordenar
       <select name="ordem">
         <option value="recentes" {% if ordem == 'recentes' %}selected{% endif %}>Mais novos primeiro</option>
@@ -61,14 +93,47 @@
   </div>
   {% if total_paginas > 1 %}
   <div style="display:flex;justify-content:center;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap">
-    {% if pagina > 1 %}<a class="botao secundario" href="?q={{ q }}&pagamento={{ pagamento_filtro }}&valor={{ valor_filtro }}&status={{ status_filtro }}&ordem={{ ordem }}&pagina={{ pagina-1 }}">← Anterior</a>{% endif %}
+    {% if pagina > 1 %}<a class="botao secundario" href="?{{ filtro_query }}&pagina={{ pagina-1 }}">← Anterior</a>{% endif %}
     <span class="texto-suave">Página {{ pagina }} de {{ total_paginas }}</span>
-    {% if pagina < total_paginas %}<a class="botao secundario" href="?q={{ q }}&pagamento={{ pagamento_filtro }}&valor={{ valor_filtro }}&status={{ status_filtro }}&ordem={{ ordem }}&pagina={{ pagina+1 }}">Próxima →</a>{% endif %}
+    {% if pagina < total_paginas %}<a class="botao secundario" href="?{{ filtro_query }}&pagina={{ pagina+1 }}">Próxima →</a>{% endif %}
   </div>
   {% endif %}
 
 </section>
 <style>
-.filtros-vendas{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(150px,1fr)) auto;gap:12px;align-items:end;margin:16px 0;padding:14px}.filtros-vendas label{display:grid;gap:6px;font-size:13px;font-weight:700}.filtros-vendas input,.filtros-vendas select{min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 10px;background:#fff}.filtros-acoes{display:flex;gap:8px}.resultado-vendas{margin:0 0 12px}.alerta-venda{margin:10px 0 0;padding:8px 10px;font-size:13px}@media(max-width:1100px){.filtros-vendas{grid-template-columns:repeat(2,minmax(0,1fr))}.filtro-busca{grid-column:1/-1}.filtros-acoes{grid-column:1/-1}}@media(max-width:640px){.filtros-vendas{grid-template-columns:1fr}.filtro-busca,.filtros-acoes{grid-column:auto}.filtros-acoes .botao{flex:1}}
+.titulo-acoes-vendas{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filtros-vendas{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(150px,1fr)) auto;gap:12px;align-items:end;margin:16px 0;padding:14px}.filtros-vendas label{display:grid;gap:6px;font-size:13px;font-weight:700}.filtros-vendas input,.filtros-vendas select{min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 10px;background:#fff}.filtro-status{display:grid;gap:6px;min-width:0}.filtro-rotulo{font-size:13px;font-weight:700}.status-multi{position:relative;min-width:0}.status-multi summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 34px 8px 10px;background:#fff;cursor:pointer;font-size:14px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}.status-multi summary::-webkit-details-marker{display:none}.status-multi summary:after{content:"⌄";position:absolute;right:11px;top:50%;transform:translateY(-55%);font-size:16px}.status-multi[open] summary{border-color:#7aa7ff;box-shadow:0 0 0 2px rgba(37,99,235,.08)}.status-multi-menu{position:absolute;z-index:30;top:calc(100% + 6px);left:0;min-width:240px;width:max-content;max-width:320px;padding:10px;border:1px solid #d0d9e6;border-radius:10px;background:#fff;box-shadow:0 12px 28px rgba(15,23,42,.14)}.status-multi-topo{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:2px 4px 8px;font-size:12px}.status-limpar{border:0;background:transparent;color:#2563eb;font-weight:700;cursor:pointer;padding:4px}.status-opcao{display:flex!important;grid-template-columns:none!important;align-items:center;gap:8px!important;padding:8px 6px;border-radius:7px;font-size:13px!important;font-weight:500!important;cursor:pointer}.status-opcao:hover{background:#f5f8fc}.status-opcao input{min-height:0!important;width:16px;height:16px;margin:0;padding:0}.filtros-acoes{display:flex;gap:8px}.resultado-vendas{margin:0 0 12px}.alerta-venda{margin:10px 0 0;padding:8px 10px;font-size:13px}@media(max-width:1100px){.filtros-vendas{grid-template-columns:repeat(2,minmax(0,1fr))}.filtro-busca{grid-column:1/-1}.filtros-acoes{grid-column:1/-1}.status-multi-menu{width:100%;min-width:100%}}@media(max-width:640px){.filtros-vendas{grid-template-columns:1fr}.filtro-busca,.filtros-acoes{grid-column:auto}.filtros-acoes .botao{flex:1}}
 </style>
+<script>
+(function () {
+  const campo = document.querySelector('[data-status-multi]');
+  if (!campo) return;
+
+  const resumo = campo.querySelector('[data-status-resumo]');
+  const caixas = Array.from(campo.querySelectorAll('input[name="status"]'));
+  const limpar = campo.querySelector('[data-status-limpar]');
+
+  function atualizarResumo() {
+    const marcadas = caixas.filter((caixa) => caixa.checked);
+    if (!marcadas.length) {
+      resumo.textContent = 'Todos';
+    } else if (marcadas.length === 1) {
+      resumo.textContent = marcadas[0].value;
+    } else {
+      resumo.textContent = `${marcadas.length} status selecionados`;
+    }
+  }
+
+  caixas.forEach((caixa) => caixa.addEventListener('change', atualizarResumo));
+  limpar.addEventListener('click', function () {
+    caixas.forEach((caixa) => { caixa.checked = false; });
+    atualizarResumo();
+  });
+
+  document.addEventListener('click', function (evento) {
+    if (campo.open && !campo.contains(evento.target)) campo.removeAttribute('open');
+  });
+
+  atualizarResumo();
+})();
+</script>
 {% endblock %}
