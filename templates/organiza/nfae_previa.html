@@ -2,14 +2,14 @@
 {% block conteudo %}
 <section class="pagina-clean">
   <div class="titulo-linha">
-    <div><p class="tag">NFA-e</p><h1>Preparar NFA-e</h1><p class="texto-suave">{{ cliente.nome }} · {{ equipamento|rotulo_maquina }}</p></div>
+    <div><p class="tag">NFA-e</p><h1>Emitir NFA-e</h1><p class="texto-suave">{{ cliente.nome }} · {{ equipamento|rotulo_maquina }}</p></div>
     <a class="botao" href="/organiza/clientes/{{ cliente.id }}">Voltar</a>
   </div>
 
   {% if faltantes %}
   <div class="alerta erro"><strong>Antes de emitir, complete:</strong> {{ faltantes|join(', ') }}.</div>
   {% else %}
-  <div class="alerta sucesso"><strong>Dados conferidos.</strong> O Organiza já preparou cliente, produto, padrão fiscal, valor e pagamentos.</div>
+  <div class="alerta sucesso"><strong>Dados prontos.</strong> O Organiza vai enviar cliente, produto, padrão fiscal, valor e pagamentos para a extensão do Chrome preencher a NFA-e.</div>
   {% endif %}
 
   <section class="cartao secao-form">
@@ -18,10 +18,11 @@
       <label>Nome<input readonly value="{{ dados.destinatario.nome }}"></label>
       <label>CPF/CNPJ<input readonly value="{{ dados.destinatario.cpf_cnpj }}"></label>
       <label>E-mail<input readonly value="{{ dados.destinatario.email }}"></label>
+      <label>Telefone<input readonly value="{{ dados.destinatario.telefone }}"></label>
       <label>CEP<input readonly value="{{ dados.destinatario.cep }}"></label>
       <label class="campo-duplo">Endereço<input readonly value="{{ dados.destinatario.logradouro }}, {{ dados.destinatario.numero }}{% if dados.destinatario.complemento %} - {{ dados.destinatario.complemento }}{% endif %}"></label>
       <label>Município / UF<input readonly value="{{ dados.destinatario.municipio }} / {{ dados.destinatario.uf }}"></label>
-      <label>Código IBGE<input readonly value="{{ dados.destinatario.municipio_ibge or 'Será salvo automaticamente nas próximas consultas de CEP' }}"></label>
+      <label>Código IBGE<input readonly value="{{ dados.destinatario.municipio_ibge or 'Automático pelo CEP quando disponível' }}"></label>
     </div>
   </section>
 
@@ -51,12 +52,58 @@
     <div class="linha-item"><span>Total da venda</span><strong>R$ {{ '%.2f'|format(dados.totais.venda)|replace('.', ',') }}</strong></div>
   </section>
 
-  <div class="acoes-titulo" style="margin-top:16px;flex-wrap:wrap">
-    <a class="botao primario" href="https://svp-extranet.svrs.rs.gov.br/apl/nfa/pcc_common/index.aspx?ref=3" target="_blank" rel="noopener">Abrir emissor NFA-e</a>
-    <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nfae.json">Baixar dados para automação</a>
-    <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.xml">XML de apoio</a>
-    <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.csv">CSV de apoio</a>
-  </div>
-  <p class="texto-suave" style="margin-top:12px">O Organiza prepara os dados, mas a validação e emissão continuam sendo confirmadas por você no portal da SEFAZ.</p>
+  <section class="cartao secao-form" style="margin-top:16px">
+    <div class="secao-form-titulo"><span>4</span><div><h2>Preenchimento automático</h2><p>Com a extensão Organiza NFA-e instalada no Chrome, este botão envia os dados diretamente para a tela da SEFAZ já autenticada.</p></div></div>
+    <div id="nfae-ext-status" class="alerta" style="display:none"></div>
+    <div class="acoes-titulo" style="margin-top:12px;flex-wrap:wrap">
+      <button id="nfae-auto-btn" class="botao primario" type="button" {% if faltantes %}disabled{% endif %}>Preencher NFA-e automaticamente</button>
+      <a class="botao" href="https://svp-extranet.svrs.rs.gov.br/" target="_blank" rel="noopener">Abrir portal SEFAZ</a>
+      <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nfae.json">Baixar dados</a>
+      <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.xml">XML de apoio</a>
+      <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.csv">CSV de apoio</a>
+    </div>
+    <p class="texto-suave" style="margin-top:12px">A emissão continua sendo confirmada por você na SEFAZ. A automação apenas preenche os campos com os dados já cadastrados no Organiza.</p>
+  </section>
 </section>
+<script>
+(function(){
+  const btn = document.getElementById('nfae-auto-btn');
+  const status = document.getElementById('nfae-ext-status');
+  if (!btn || btn.disabled) return;
+  let extensaoPronta = false;
+  function mostrar(txt, tipo){
+    status.style.display='block';
+    status.className='alerta ' + (tipo || '');
+    status.textContent=txt;
+  }
+  window.addEventListener('message', function(ev){
+    if (ev.source !== window || !ev.data) return;
+    if (ev.data.type === 'ORGANIZA_NFAE_EXT_READY') {
+      extensaoPronta = true;
+      mostrar('Extensão Organiza NFA-e conectada. Pode preencher automaticamente.', 'sucesso');
+    }
+    if (ev.data.type === 'ORGANIZA_NFAE_OK') {
+      mostrar('Dados enviados. Vá para a aba da SEFAZ: a extensão vai preencher a tela automaticamente.', 'sucesso');
+    }
+    if (ev.data.type === 'ORGANIZA_NFAE_ERRO') {
+      mostrar('Não foi possível enviar os dados para a extensão: ' + (ev.data.mensagem || 'erro desconhecido'), 'erro');
+    }
+  });
+  window.postMessage({type:'ORGANIZA_NFAE_PING'}, '*');
+  setTimeout(function(){
+    if (!extensaoPronta) mostrar('Extensão Organiza NFA-e ainda não foi detectada neste Chrome. Instale-a uma única vez para usar o preenchimento automático.', 'erro');
+  }, 1200);
+  btn.addEventListener('click', function(){
+    if (!extensaoPronta) {
+      mostrar('Instale/ative a extensão Organiza NFA-e no Chrome e atualize esta página.', 'erro');
+      return;
+    }
+    mostrar('Enviando dados do Organiza para a SEFAZ...', '');
+    window.postMessage({
+      type:'ORGANIZA_NFAE_PREPARAR',
+      payloadUrl:'/organiza/equipamentos/{{ equipamento.id }}/nfae/payload'
+    }, '*');
+  });
+})();
+</script>
 {% endblock %}

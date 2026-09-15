@@ -1,0 +1,23 @@
+ORGANIZA NFA-e — Extensão Chrome 1.0.0
+
+INSTALAÇÃO (uma única vez)
+1. Descompacte a pasta da extensão em um local fixo do computador.
+2. Abra o Chrome e digite: chrome://extensions
+3. Ative "Modo do desenvolvedor" no canto superior direito.
+4. Clique em "Carregar sem compactação".
+5. Selecione a pasta Extensao_Chrome_Organiza_NFAe.
+6. Deixe a extensão "Organiza NFA-e" ativada.
+
+USO
+1. No Organiza, abra o cliente/equipamento e clique em "Emitir NFA-e".
+2. Na tela de conferência, clique em "Preencher NFA-e automaticamente".
+3. Se a SEFAZ já estiver aberta, a extensão leva você para a aba dela.
+4. Se a SEFAZ não estiver aberta, o portal será aberto; faça a autenticação e entre em "Emitir Nova NF-e".
+5. A extensão preenche automaticamente os campos à medida que cada aba da NFA-e é aberta.
+6. Confira os dados e faça a validação/emissão manualmente na SEFAZ.
+7. Depois de concluir, clique em "Limpar dados" no quadro Organiza → NFA-e para evitar reaproveitar a nota anterior.
+
+SEGURANÇA
+- A extensão não guarda senha da SEFAZ.
+- Os dados da nota ficam somente no armazenamento local do Chrome e expiram em até 4 horas.
+- A extensão não clica em "Validar", "Salvar" ou "Emitir" por você.

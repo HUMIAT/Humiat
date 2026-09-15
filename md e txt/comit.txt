@@ -1,3 +1,3 @@
 git add .
-git commit -m "Organiza 1.1.3 - padrao fiscal NFA-e e preparacao automatica"
+git commit -m "Organiza 1.1.4 - preenchimento automatico NFA-e pela extensao Chrome"
 git push origin main

@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Organiza NFA-e",
+  "version": "1.0.0",
+  "description": "Leva os dados do Organiza para o emissor NFA-e da SEFAZ e preenche os campos automaticamente.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://humiat.com.br/*",
+    "https://www.humiat.com.br/*",
+    "https://svp-extranet.svrs.rs.gov.br/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://humiat.com.br/*", "https://www.humiat.com.br/*"],
+      "js": ["organiza_bridge.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://svp-extranet.svrs.rs.gov.br/*"],
+      "js": ["sefaz_fill.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

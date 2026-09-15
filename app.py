@@ -45,7 +45,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.3"
+ORGANIZA_VERSION = "1.1.4"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 
 # Padrão fiscal usado na preparação da NFA-e.
@@ -1522,10 +1522,11 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         })
     recebido = round(sum(p["valor"] for p in pagamentos_dados), 2)
     return {
-        "versao_layout": "ORGANIZA-NFAE-1",
+        "versao_layout": "ORGANIZA-NFAE-2",
         "operacao": {
             "natureza": NFAE_PADRAO_FISCAL["natureza_operacao"],
             "tipo": "Saída",
+            "destino": "Interna" if (((cliente.estado if cliente else "") or "").strip().upper() == "RJ") else "Interestadual",
             "consumidor_final": True,
             "finalidade": "NF-e normal",
             "tipo_atendimento": "Operação NÃO Presencial, pela INTERNET",
@@ -2935,6 +2936,22 @@ def dados_nfae_previa(equipamento_id: int, request: Request, usuario: Usuario = 
         "request": request, "usuario": usuario, "equipamento": eq, "cliente": eq.cliente,
         "dados": dados, "faltantes": nfae_campos_faltantes(dados),
     })
+
+
+@app.get("/organiza/equipamentos/{equipamento_id}/nfae/payload")
+def dados_nfae_payload(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(status_code=404, detail="Equipamento não encontrado")
+    dados = nfae_dados_equipamento(eq, db)
+    dados["campos_faltantes"] = nfae_campos_faltantes(dados)
+    dados["automacao"] = {
+        "origem": "Organiza",
+        "versao": ORGANIZA_VERSION,
+        "gerado_em": datetime.now().isoformat(timespec="seconds"),
+        "expira_em_minutos": 240,
+    }
+    return JSONResponse(dados, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 @app.get("/organiza/equipamentos/{equipamento_id}/nfae.json")
