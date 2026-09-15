@@ -31,5 +31,9 @@ Versão 1.0.20:
 - mantém checkpoint ao trocar de frame/aba da SVRS;
 - navegação automática entre abas usa todos os frames acessíveis;
 - fundo cinza de modal não bloqueia Validar/Salvar;
-- CFOP 5102 para RJ e 6102 para outras UFs, sem fallback incorreto;
+- CFOP selecionado somente entre as opções efetivamente liberadas pela SEFAZ; não força 6102 por UF;
 - Produto: Validar Item e Salvar Item; Transporte: 9-Sem frete; Pagamento: Incluir, preencher e Salvar.
+
+1.0.22: remove regra fixa de 6102 por UF; usa somente CFOP disponibilizado pela SEFAZ.
+
+1.0.23: primeira tela manual orientada/validada por UF; RJ=Interna/5102 e outra UF=Interestadual/6102. A automação só avança quando Saída, Destino e Venda de Mercadoria estiverem coerentes.

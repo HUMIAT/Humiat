@@ -476,12 +476,10 @@
       const essentials = ['CFOP', 'Unidade comercial', 'Valor unitário', 'Quantidade', 'Valor produto'];
       if (essentials.every((x) => resultOk(results, x))) next = ['tributos'];
       else if (!resultOk(results, 'CFOP') && productCfopRetries >= 8) {
-        const ufDest = String(((payload || {}).destinatario || {}).uf || '').trim().toUpperCase();
-        const esperado = ufDest && ufDest !== 'RJ' ? '6102 (Interestadual)' : '5102 (Interna)';
         pauseAtCheckpoint(
-          'cfop_destino_incompativel',
-          'CFOP incompatível com a UF do destinatário.',
-          `CFOP esperado: ${esperado}. Confira na aba NF-e se o campo Destino está correto e depois clique em Continuar automação.`
+          'cfop_nao_disponivel',
+          'A SEFAZ não liberou um CFOP de venda nesta tela.',
+          'Confira na primeira tela se o Destino está correto para a UF do cliente. RJ = Interna/5102; outra UF = Interestadual/6102. Depois clique em Continuar automação.'
         );
         return true;
       }
@@ -550,13 +548,12 @@
     if (now - lastActionAt < 650) return false;
 
     if (kind === 'nfe') {
-      // A regra acordada é simples: Natureza = Venda de Mercadoria libera o fluxo.
-      // Os demais campos padrão são preenchidos quando localizados, mas não bloqueiam
-      // a ida ao destinatário caso a tela antiga não reporte algum deles ao script.
-      if (resultOk(results, 'Natureza da operação')) {
+      // A primeira tela é manual, mas precisa estar coerente com a UF do cliente
+      // antes de avançar. Isso garante que a SEFAZ libere o CFOP correto (5102/6102).
+      if (resultOk(results, 'Tipo de operação') && resultOk(results, 'Destino') && resultOk(results, 'Natureza da operação')) {
         if (checkpoint !== 'nfe_para_destinatario') {
           setCheckpoint('nfe_para_destinatario');
-          updateBanner('Natureza confirmada.', 'Aguardando a tela estabilizar para abrir Destinatário/Remetente...');
+          updateBanner('Primeira tela conferida.', 'Aguardando a SEFAZ estabilizar para abrir Destinatário/Remetente...');
           scheduleFill(900);
           return true;
         }
@@ -564,7 +561,7 @@
         if (clickLegacyTab(['destinatário/remetente', 'destinatario/remetente', 'destinatário', 'destinatario'])) {
           setCheckpoint('destinatario_preencher');
           lastActionAt = now;
-          updateBanner('Natureza confirmada.', 'Abrindo Destinatário/Remetente automaticamente...');
+          updateBanner('Primeira tela conferida.', 'Abrindo Destinatário/Remetente automaticamente...');
           scheduleFill(900);
           return true;
         }
@@ -756,26 +753,33 @@
 
   function fillNfe(d) {
     const results = [];
+    const op = d.operacao || {};
+    const destUF = String((d.destinatario || {}).uf || '').trim().toUpperCase();
+    const destinoEsperado = op.destino || (destUF === 'RJ' ? 'Interna' : 'Interestadual');
 
-    // A primeira etapa da NF-e fica manual. A extensão NÃO altera:
-    // - Tipo de operação
-    // - Tipo de operação (Destino)
-    // - Natureza da operação
-    // Ela apenas aguarda a Natureza já estar em "Venda de Mercadoria".
-    // Assim evitamos os postbacks/loops da tela antiga da SEFAZ.
+    // A primeira tela continua manual para evitar os postbacks/loops da SVRS.
+    // A extensão apenas ORIENTA e VALIDA antes de avançar.
+    const tipoOp = findSelectWithOptions(['Entrada', 'Saída']);
+    const destino = findSelectWithOptions(['Interna', 'Interestadual']);
     const natureza = findNaturezaSelect();
+
+    const tipoOk = !!(tipoOp && isSelectAt(tipoOp, 'Saída'));
+    const destinoOk = !!(destino && isSelectAt(destino, destinoEsperado));
     const naturezaOk = !!(natureza && isSelectAt(natureza, 'Venda de Mercadoria'));
+
+    results.push(['Tipo de operação', tipoOk]);
+    results.push(['Destino', destinoOk]);
     results.push(['Natureza da operação', naturezaOk]);
 
-    if (!naturezaOk) {
+    if (!tipoOk || !destinoOk || !naturezaOk) {
+      const cfopEsperado = String((d.produto || {}).cfop || (destinoEsperado === 'Interestadual' ? '6102' : '5102'));
       updateBanner(
-        'Aguardando Natureza da operação.',
-        'Preencha manualmente "Venda de Mercadoria". Assim que estiver selecionado, a automação continua sozinha.'
+        'Confira a primeira tela da NF-e.',
+        `Cliente ${destUF || '-'}: selecione Saída / ${destinoEsperado} / Venda de Mercadoria. CFOP esperado: ${cfopEsperado}. Depois a automação continua sozinha.`
       );
       return results;
     }
 
-    // Natureza confirmada: daqui em diante a automação assume o fluxo.
     workflowActive = true;
     automationPaused = false;
     saveWorkflowState();
@@ -911,12 +915,9 @@
     let cfop = findField(['cfop'], { tag: 'SELECT', reject: ['grupo'] });
     if (!cfop) cfop = findSelectByOption([p.cfop, '5102', '6102']);
 
-    // Como os três campos iniciais da NF-e ficaram manuais, a própria SEFAZ
-    // passa a ser a fonte de verdade para o CFOP disponível nesta nota. Ex.:
-    // se a tela foi configurada como Interna, ela oferece 5102; se for
-    // Interestadual, normalmente oferece 6102. Primeiro tenta o CFOP vindo do
-    // Organiza e, se ele não existir nas opções atuais, escolhe somente o CFOP
-    // de venda de mercadoria (5102/6102) que a SEFAZ realmente disponibilizou.
+    // Os três campos iniciais continuam manuais, mas a extensão valida o Destino
+    // antes de chegar aqui. Assim o CFOP esperado pelo Organiza deve estar entre
+    // as opções liberadas pela SEFAZ: 5102 para RJ e 6102 para outra UF.
     let cfopOk = false;
     if (cfop) {
       try { cfop.focus({preventScroll: true}); } catch (_) { try { cfop.focus(); } catch (_) {} }
@@ -926,10 +927,10 @@
         return t === norm(code) || t.startsWith(norm(code) + ' ') || t.includes(norm(code) + ' venda');
       });
       const ufDest = String((d.destinatario || {}).uf || '').trim().toUpperCase();
-      // RJ = operação interna (5102). Qualquer outra UF = interestadual (6102).
-      // Nunca cai de 6102 para 5102, pois isso gera rejeição na validação final.
-      const desired = ufDest ? (ufDest === 'RJ' ? '5102' : '6102') : String(p.cfop || '').trim();
-      if (desired && hasCode(desired)) cfopOk = setSelect(cfop, desired);
+      const preferred = String(p.cfop || (ufDest === 'RJ' ? '5102' : '6102')).trim();
+      // O Organiza calcula o CFOP esperado pela UF. Se a SEFAZ não disponibilizar
+      // esse código, não escolhe o oposto: volta a orientar a primeira tela.
+      if (preferred && hasCode(preferred)) cfopOk = setSelect(cfop, preferred);
     }
     results.push(['CFOP', cfopOk]);
     if (grupoOk && !cfopOk && productCfopRetries < 8) {
@@ -1243,7 +1244,12 @@
     automationPaused = false;
     checkpoint = '';
     saveWorkflowState();
-    updateBanner('Dados do Organiza carregados.', 'Aguardando Natureza da operação = Venda de Mercadoria. Depois disso o fluxo continua automaticamente.');
+    {
+      const uf = String((data.destinatario || {}).uf || '').trim().toUpperCase();
+      const dest = String((data.operacao || {}).destino || (uf === 'RJ' ? 'Interna' : 'Interestadual'));
+      const cfop = String((data.produto || {}).cfop || (dest === 'Interestadual' ? '6102' : '5102'));
+      updateBanner('Dados do Organiza carregados.', `Primeira tela: selecione Saída / ${dest} / Venda de Mercadoria. CFOP esperado: ${cfop}.`);
+    }
     runFill(true);
     scheduleFill(1200);
   }

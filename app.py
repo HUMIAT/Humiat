@@ -45,13 +45,14 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.7"
+ORGANIZA_VERSION = "1.1.9"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 
 # Padrão fiscal usado na preparação da NFA-e.
-# A regra operacional definida pela Karaokê RJ é manter estes campos fixos e
-# variar apenas código/descrição do produto. O CFOP é escolhido automaticamente
-# conforme a UF do destinatário (RJ = operação interna; outra UF = interestadual).
+# A regra operacional definida pela Karaokê RJ mantém os campos fiscais padrão e
+# calcula o CFOP conforme a UF do destinatário: 5102 para RJ e 6102 para outra UF.
+# A primeira tela da NFA-e continua manual, mas o Organiza/Extensão orienta o
+# usuário a marcar Interna ou Interestadual antes de iniciar o preenchimento.
 NFAE_PADRAO_FISCAL = {
     "natureza_operacao": "Venda de Mercadoria",
     "grupo_cfop": "Venda de Mercadoria",
@@ -64,8 +65,6 @@ NFAE_PADRAO_FISCAL = {
     "pis_cst": "07",
     "cofins_cst": "07",
     "valor_compoe_total": True,
-    "cfop_interno": "5102",
-    "cfop_interestadual": "6102",
 }
 
 NFAE_PRODUTOS_PADRAO = {
@@ -1688,8 +1687,8 @@ def nfae_descricao_produto(eq: Equipamento) -> str:
 
 
 def nfae_cfop(cliente: Cliente | None) -> str:
-    uf = ((cliente.estado if cliente else "") or "").strip().upper()
-    return NFAE_PADRAO_FISCAL["cfop_interno"] if uf == "RJ" else NFAE_PADRAO_FISCAL["cfop_interestadual"]
+    uf = (((cliente.estado if cliente else "") or "").strip().upper())
+    return "5102" if uf == "RJ" else "6102"
 
 
 def nfae_tipo_documento(documento: str | None) -> str:
@@ -1732,7 +1731,7 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         })
     recebido = round(sum(p["valor"] for p in pagamentos_dados), 2)
     return {
-        "versao_layout": "ORGANIZA-NFAE-4",
+        "versao_layout": "ORGANIZA-NFAE-5",
         "operacao": {
             "natureza": NFAE_PADRAO_FISCAL["natureza_operacao"],
             "tipo": "Saída",

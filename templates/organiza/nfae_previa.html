@@ -12,6 +12,17 @@
   <div class="alerta sucesso"><strong>Dados prontos.</strong> O Organiza vai enviar cliente, produto, padrão fiscal, valor e pagamentos para a extensão do Chrome preencher a NFA-e.</div>
   {% endif %}
 
+  <section class="cartao secao-form" style="border:2px solid #f0b429">
+    <div class="secao-form-titulo"><span>!</span><div><h2>Primeira tela da SEFAZ</h2><p>Antes da automação continuar, confira estes três campos na aba NF-e.</p></div></div>
+    <div class="alerta" style="display:block;margin:8px 0 0">
+      <strong>Para este cliente ({{ dados.destinatario.uf }}):</strong><br>
+      Tipo de operação: <strong>Saída</strong><br>
+      Tipo de operação (Destino): <strong>{{ dados.operacao.destino }}</strong><br>
+      Natureza da operação: <strong>Venda de Mercadoria</strong><br>
+      <span class="texto-suave">CFOP esperado no produto: <strong>{{ dados.produto.cfop }}</strong>. A extensão só seguirá quando a primeira tela estiver compatível.</span>
+    </div>
+  </section>
+
   <section class="cartao secao-form">
     <div class="secao-form-titulo"><span>1</span><div><h2>Destinatário</h2><p>Dados puxados do cadastro do cliente.</p></div></div>
     <div class="form-grid-organizada tres-colunas">

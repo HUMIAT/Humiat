@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Organiza NFA-e",
-  "version": "1.0.21",
-  "description": "Fluxo automático NFA-e 1.0.21: preserva estado entre frames, navega abas automaticamente, valida/salva produto, abre pagamento, preenche sem frete e impede CFOP estadual para destinatário interestadual.",
+  "version": "1.0.23",
+  "description": "Fluxo automático NFA-e 1.0.23: orienta e valida a primeira tela (Saída/Interna ou Interestadual/Venda de Mercadoria) antes de seguir e aplica CFOP 5102/6102 conforme UF.",
   "permissions": [
     "storage",
     "tabs",
