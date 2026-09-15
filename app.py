@@ -45,8 +45,36 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.2"
+ORGANIZA_VERSION = "1.1.3"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
+
+# Padrão fiscal usado na preparação da NFA-e.
+# A regra operacional definida pela Karaokê RJ é manter estes campos fixos e
+# variar apenas código/descrição do produto. O CFOP é escolhido automaticamente
+# conforme a UF do destinatário (RJ = operação interna; outra UF = interestadual).
+NFAE_PADRAO_FISCAL = {
+    "natureza_operacao": "Venda de Mercadoria",
+    "grupo_cfop": "Venda de Mercadoria",
+    "ncm": "95045000",
+    "ean": "SEM GTIN",
+    "unidade": "UN",
+    "quantidade": 1,
+    "origem": "0",
+    "csosn": "400",
+    "pis_cst": "07",
+    "cofins_cst": "06",
+    "valor_compoe_total": True,
+    "cfop_interno": "5102",
+    "cfop_interestadual": "6102",
+}
+
+NFAE_PRODUTOS_PADRAO = {
+    "JUKEBOX": ("00001", "Jukebox"),
+    "MALETA": ("00002", "Maletaokê"),
+    "IPHONE": ("00003", "Karaokê iPhone"),
+    "FLIPERAMA": ("00004", "Fliperama"),
+}
+
 app.include_router(humiat_router)
 
 PREFIXOS_EQUIPAMENTO = {
@@ -341,6 +369,7 @@ class Cliente(Base):
     observacao = Column(Text, nullable=True)
     token_ficha = Column(String(64), nullable=True, unique=True)
     inscricao_estadual = Column(String(30), nullable=True)
+    municipio_ibge = Column(String(12), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     equipamentos = relationship("Equipamento", back_populates="cliente", cascade="all, delete-orphan")
 
@@ -417,6 +446,8 @@ class Equipamento(Base):
     # O plano já existe no equipamento e continua sendo a fonte oficial.
     solvoz_empresa_id = Column(Integer, ForeignKey("solvoz_empresas.id"), nullable=True)
     catalogo_online = Column(Integer, nullable=False, default=0)
+    nota_codigo = Column(String(20), nullable=True)
+    nota_descricao = Column(String(180), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
@@ -813,6 +844,8 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "inscricao_estadual" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN inscricao_estadual VARCHAR(30)"))
+            if "municipio_ibge" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN municipio_ibge VARCHAR(12)"))
             if "pais" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN pais VARCHAR(2) NOT NULL DEFAULT 'BR'"))
             if "ddi" not in existentes_clientes:
@@ -836,6 +869,10 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN solvoz_empresa_id INTEGER"))
             if "catalogo_online" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_online INTEGER NOT NULL DEFAULT 0"))
+            if "nota_codigo" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN nota_codigo VARCHAR(20)"))
+            if "nota_descricao" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN nota_descricao VARCHAR(180)"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -1251,6 +1288,7 @@ def preencher_cliente(cliente: Cliente, form: dict):
     cliente.cep = (form.get("cep") or "").strip() or None
     cliente.municipio = (form.get("municipio") or "").strip() or None
     cliente.cidade = cliente.municipio
+    cliente.municipio_ibge = re.sub(r"\D", "", (form.get("municipio_ibge") or "").strip()) or None
     cliente.estado = (form.get("estado") or "").strip() or None
     cliente.bairro = (form.get("bairro") or "").strip() or None
     cliente.endereco = (form.get("endereco") or "").strip() or None
@@ -1441,9 +1479,134 @@ def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_P
     return max(indice_atual - indice_pacote, 0)
 
 
+def nfae_padrao_produto(tipo: str | None) -> tuple[str, str]:
+    tipo_n = tipo_equipamento_padrao(tipo or "")
+    return NFAE_PRODUTOS_PADRAO.get(tipo_n, ("00005", tipo_n.title() if tipo_n else "Produto"))
+
+
+def nfae_codigo_produto(eq: Equipamento) -> str:
+    codigo_padrao, _ = nfae_padrao_produto(eq.tipo)
+    return (getattr(eq, "nota_codigo", None) or codigo_padrao).strip()
+
+
+def nfae_descricao_produto(eq: Equipamento) -> str:
+    _, descricao_padrao = nfae_padrao_produto(eq.tipo)
+    return (getattr(eq, "nota_descricao", None) or descricao_padrao).strip()
+
+
+def nfae_cfop(cliente: Cliente | None) -> str:
+    uf = ((cliente.estado if cliente else "") or "").strip().upper()
+    return NFAE_PADRAO_FISCAL["cfop_interno"] if uf == "RJ" else NFAE_PADRAO_FISCAL["cfop_interestadual"]
+
+
+def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
+    cliente = eq.cliente
+    total = round(moeda_num(eq.valor or eq.preco_venda or "0"), 2)
+    pagamentos = db.query(PagamentoVenda).filter(
+        PagamentoVenda.equipamento_id == eq.id
+    ).order_by(PagamentoVenda.data.asc(), PagamentoVenda.id.asc()).all() if eq.id else []
+    pagamentos_dados = [
+        {
+            "data": p.data.strftime("%d/%m/%Y") if p.data else "",
+            "forma": (p.forma or p.banco or "").strip(),
+            "banco": (p.banco or "").strip(),
+            "valor": round(float(p.valor or 0), 2),
+        }
+        for p in pagamentos
+    ]
+    if not pagamentos_dados and moeda_num(eq.pago) > 0:
+        pagamentos_dados.append({
+            "data": eq.data_compra.strftime("%d/%m/%Y") if eq.data_compra else "",
+            "forma": "Histórico", "banco": "Histórico",
+            "valor": round(moeda_num(eq.pago), 2),
+        })
+    recebido = round(sum(p["valor"] for p in pagamentos_dados), 2)
+    return {
+        "versao_layout": "ORGANIZA-NFAE-1",
+        "operacao": {
+            "natureza": NFAE_PADRAO_FISCAL["natureza_operacao"],
+            "tipo": "Saída",
+            "consumidor_final": True,
+            "finalidade": "NF-e normal",
+            "tipo_atendimento": "Operação NÃO Presencial, pela INTERNET",
+            "intermediador": "Operação sem intermediador",
+        },
+        "destinatario": {
+            "nome": cliente.nome or "",
+            "cpf_cnpj": cliente.documento or "",
+            "inscricao_estadual": cliente.inscricao_estadual or "",
+            "email": cliente.email or "",
+            "telefone": cliente.telefone or "",
+            "cep": cliente.cep or "",
+            "logradouro": cliente.endereco or "",
+            "numero": cliente.endereco_numero or "",
+            "complemento": cliente.complemento or "",
+            "bairro": cliente.bairro or "",
+            "municipio": cliente.municipio or cliente.cidade or "",
+            "municipio_ibge": getattr(cliente, "municipio_ibge", None) or "",
+            "uf": cliente.estado or "",
+        },
+        "produto": {
+            "codigo": nfae_codigo_produto(eq),
+            "descricao": nfae_descricao_produto(eq),
+            "grupo_cfop": NFAE_PADRAO_FISCAL["grupo_cfop"],
+            "cfop": nfae_cfop(cliente),
+            "ncm": NFAE_PADRAO_FISCAL["ncm"],
+            "ean": NFAE_PADRAO_FISCAL["ean"],
+            "unidade": NFAE_PADRAO_FISCAL["unidade"],
+            "quantidade": NFAE_PADRAO_FISCAL["quantidade"],
+            "valor_unitario": total,
+            "valor_total": total,
+            "ean_tributavel": NFAE_PADRAO_FISCAL["ean"],
+            "unidade_tributavel": NFAE_PADRAO_FISCAL["unidade"],
+            "origem": NFAE_PADRAO_FISCAL["origem"],
+            "csosn": NFAE_PADRAO_FISCAL["csosn"],
+            "pis_cst": NFAE_PADRAO_FISCAL["pis_cst"],
+            "cofins_cst": NFAE_PADRAO_FISCAL["cofins_cst"],
+            "valor_compoe_total": NFAE_PADRAO_FISCAL["valor_compoe_total"],
+            "numero_serie": eq.numero_serie or "",
+        },
+        "pagamentos": pagamentos_dados,
+        "totais": {
+            "venda": total,
+            "recebido": recebido,
+            "saldo": max(round(total - recebido, 2), 0),
+        },
+        "referencia": {
+            "equipamento_id": eq.id,
+            "codigo_tecnico": eq.maquina or "",
+            "identificacao": rotulo_maquina(eq),
+            "data_compra": eq.data_compra.strftime("%d/%m/%Y") if eq.data_compra else "",
+        },
+    }
+
+
+def nfae_campos_faltantes(dados: dict) -> list[str]:
+    d = dados["destinatario"]
+    p = dados["produto"]
+    faltantes = []
+    for chave, rotulo in [
+        ("nome", "nome do cliente"), ("cpf_cnpj", "CPF/CNPJ"), ("cep", "CEP"),
+        ("logradouro", "endereço"), ("numero", "número"), ("bairro", "bairro"),
+        ("municipio", "município"), ("uf", "UF"),
+    ]:
+        if not str(d.get(chave) or "").strip():
+            faltantes.append(rotulo)
+    if not p.get("codigo"):
+        faltantes.append("código fiscal do produto")
+    if not p.get("descricao"):
+        faltantes.append("descrição fiscal do produto")
+    if float(p.get("valor_total") or 0) <= 0:
+        faltantes.append("valor da venda")
+    return faltantes
+
+
 def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     eq.tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip()) or None
     eq.modelo = (form.get("modelo") or "").strip() or None
+    codigo_padrao_nfae, descricao_padrao_nfae = nfae_padrao_produto(eq.tipo)
+    eq.nota_codigo = re.sub(r"[^A-Za-z0-9._-]", "", (form.get("nota_codigo") or "").strip()) or codigo_padrao_nfae
+    eq.nota_descricao = (form.get("nota_descricao") or "").strip() or descricao_padrao_nfae
     pacote_informado = (form.get("pacote") or "").strip()
     if pacote_informado:
         eq.pacote = pacote_informado
@@ -2762,22 +2925,55 @@ def garantia_pdf(equipamento_id: int, usuario: Usuario = Depends(usuario_logado)
     return Response(buffer.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="contrato_garantia_{nome}_{eq.id}.pdf"'})
 
 
+@app.get("/organiza/equipamentos/{equipamento_id}/nfae", response_class=HTMLResponse)
+def dados_nfae_previa(equipamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    dados = nfae_dados_equipamento(eq, db)
+    return templates.TemplateResponse("organiza/nfae_previa.html", {
+        "request": request, "usuario": usuario, "equipamento": eq, "cliente": eq.cliente,
+        "dados": dados, "faltantes": nfae_campos_faltantes(dados),
+    })
+
+
+@app.get("/organiza/equipamentos/{equipamento_id}/nfae.json")
+def dados_nfae_json(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    dados = nfae_dados_equipamento(eq, db)
+    dados["campos_faltantes"] = nfae_campos_faltantes(dados)
+    return JSONResponse(dados, headers={"Content-Disposition": f'attachment; filename="nfae_organiza_{eq.id}.json"'})
+
+
 @app.get("/organiza/equipamentos/{equipamento_id}/nota.xml")
 def dados_nota_xml(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
     if not eq:
         raise HTTPException(404)
-    c = eq.cliente
-    raiz = ET.Element("dados_para_emissao")
-    ET.SubElement(raiz, "aviso").text = "Arquivo de apoio para importacao. Nao e uma NF-e autorizada pela SEFAZ."
+    dados = nfae_dados_equipamento(eq, db)
+    raiz = ET.Element("dados_para_emissao_nfae", versao="1")
+    ET.SubElement(raiz, "aviso").text = "Arquivo de apoio do Organiza. Nao e uma NF-e autorizada pela SEFAZ."
+    oper = ET.SubElement(raiz, "operacao")
+    for chave, valor in dados["operacao"].items():
+        ET.SubElement(oper, chave).text = str(valor).lower() if isinstance(valor, bool) else str(valor or "")
     dest = ET.SubElement(raiz, "destinatario")
-    for chave, valor in {"nome":c.nome,"cpf_cnpj":c.documento,"inscricao_estadual":c.inscricao_estadual,"email":c.email,"telefone":c.telefone,"cep":c.cep,"logradouro":c.endereco,"numero":c.endereco_numero,"complemento":c.complemento,"bairro":c.bairro,"municipio":c.municipio or c.cidade,"uf":c.estado}.items():
-        ET.SubElement(dest,chave).text = valor or ""
-    item = ET.SubElement(raiz, "item")
-    for chave, valor in {"descricao":f"{eq.tipo or ''} {eq.modelo or ''}".strip(),"codigo":eq.maquina,"numero_serie":eq.numero_serie,"valor_total":str(moeda_num(eq.valor or eq.preco_venda or '0')),"data_compra":eq.data_compra.isoformat() if eq.data_compra else ""}.items():
-        ET.SubElement(item,chave).text = valor or ""
+    for chave, valor in dados["destinatario"].items():
+        ET.SubElement(dest, chave).text = str(valor or "")
+    item = ET.SubElement(raiz, "produto")
+    for chave, valor in dados["produto"].items():
+        ET.SubElement(item, chave).text = str(valor).lower() if isinstance(valor, bool) else str(valor or "")
+    pags = ET.SubElement(raiz, "pagamentos")
+    for pagamento in dados["pagamentos"]:
+        el = ET.SubElement(pags, "pagamento")
+        for chave, valor in pagamento.items():
+            ET.SubElement(el, chave).text = str(valor or "")
+    totais = ET.SubElement(raiz, "totais")
+    for chave, valor in dados["totais"].items():
+        ET.SubElement(totais, chave).text = str(valor or "")
     conteudo = ET.tostring(raiz, encoding="utf-8", xml_declaration=True)
-    return Response(conteudo, media_type="application/xml", headers={"Content-Disposition": f'attachment; filename="dados_nota_{eq.id}.xml"'})
+    return Response(conteudo, media_type="application/xml", headers={"Content-Disposition": f'attachment; filename="dados_nfae_{eq.id}.xml"'})
 
 
 @app.get("/organiza/equipamentos/{equipamento_id}/nota.csv")
@@ -2785,14 +2981,24 @@ def dados_nota_csv(equipamento_id: int, usuario: Usuario = Depends(usuario_logad
     eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
     if not eq:
         raise HTTPException(404)
-    c = eq.cliente
+    dados = nfae_dados_equipamento(eq, db)
+    d, p, t = dados["destinatario"], dados["produto"], dados["totais"]
     out = io.StringIO()
-    campos = ["nome","cpf_cnpj","inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","uf","descricao","codigo","numero_serie","valor_total","data_compra"]
+    campos = [
+        "nome","cpf_cnpj","inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","municipio_ibge","uf",
+        "codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total",
+        "pagamentos","valor_recebido","saldo","codigo_tecnico","data_compra"
+    ]
     w = csv.DictWriter(out, fieldnames=campos, delimiter=';')
     w.writeheader()
-    w.writerow({"nome":c.nome,"cpf_cnpj":c.documento or "","inscricao_estadual":c.inscricao_estadual or "","email":c.email or "","telefone":c.telefone,"cep":c.cep or "","logradouro":c.endereco or "","numero":c.endereco_numero or "","complemento":c.complemento or "","bairro":c.bairro or "","municipio":c.municipio or c.cidade or "","uf":c.estado or "","descricao":f"{eq.tipo or ''} {eq.modelo or ''}".strip(),"codigo":eq.maquina or "","numero_serie":eq.numero_serie or "","valor_total":str(moeda_num(eq.valor or eq.preco_venda or '0')).replace('.',','),"data_compra":eq.data_compra.strftime('%d/%m/%Y') if eq.data_compra else ""})
+    w.writerow({
+        **d, **{k: p.get(k, "") for k in ["codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total"]},
+        "pagamentos": " | ".join(f'{x["forma"]}: R$ {x["valor"]:.2f}' for x in dados["pagamentos"]),
+        "valor_recebido": t["recebido"], "saldo": t["saldo"],
+        "codigo_tecnico": dados["referencia"]["codigo_tecnico"], "data_compra": dados["referencia"]["data_compra"],
+    })
     conteudo = '\ufeff' + out.getvalue()
-    return Response(conteudo.encode('utf-8'), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="dados_nota_{eq.id}.csv"'})
+    return Response(conteudo.encode('utf-8'), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="dados_nfae_{eq.id}.csv"'})
 
 
 @app.get("/organiza/configuracoes/pacotes", response_class=HTMLResponse)

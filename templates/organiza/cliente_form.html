@@ -29,7 +29,7 @@
         <label class="campo-duplo">Endereço<input id="endereco" name="endereco" value="{{ cliente.endereco if cliente and cliente.endereco else '' }}"></label>
         <label>Número<input name="endereco_numero" value="{{ cliente.endereco_numero if cliente and cliente.endereco_numero else '' }}"></label>
         <label>Bairro<input id="bairro" name="bairro" value="{{ cliente.bairro if cliente and cliente.bairro else '' }}"></label>
-        <label>Município<input id="municipio" name="municipio" value="{{ cliente.municipio or cliente.cidade if cliente else '' }}"></label>
+        <label>Município<input id="municipio" name="municipio" value="{{ cliente.municipio or cliente.cidade if cliente else '' }}"><input type="hidden" id="municipio_ibge" name="municipio_ibge" value="{{ cliente.municipio_ibge if cliente and cliente.municipio_ibge else '' }}"></label>
         <label>Estado<input id="estado" name="estado" value="{{ cliente.estado if cliente and cliente.estado else '' }}"></label>
         <label>Complemento<input name="complemento" value="{{ cliente.complemento if cliente and cliente.complemento else '' }}"></label>
       </div>
@@ -39,7 +39,7 @@
   </form>
 </section>
 <script>
-async function buscarCep(){const cep=document.getElementById('cep'); if(!cep)return; const n=cep.value.replace(/\D/g,''); if(n.length!==8)return; try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'); const d=await r.json(); if(d.erro)return; document.getElementById('endereco').value=d.logradouro||''; document.getElementById('bairro').value=d.bairro||''; document.getElementById('municipio').value=d.localidade||''; document.getElementById('estado').value=d.uf||'';}catch(e){}}
+async function buscarCep(){const cep=document.getElementById('cep'); if(!cep)return; const n=cep.value.replace(/\D/g,''); if(n.length!==8)return; try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'); const d=await r.json(); if(d.erro)return; document.getElementById('endereco').value=d.logradouro||''; document.getElementById('bairro').value=d.bairro||''; document.getElementById('municipio').value=d.localidade||''; document.getElementById('estado').value=d.uf||''; document.getElementById('municipio_ibge').value=d.ibge||'';}catch(e){}}
 const cepEl=document.getElementById('cep'); if(cepEl){cepEl.addEventListener('blur',buscarCep);cepEl.addEventListener('input',()=>{let n=cepEl.value.replace(/\D/g,'').slice(0,8);cepEl.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;});}
 </script>
 {% endblock %}

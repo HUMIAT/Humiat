@@ -1,0 +1,62 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">NFA-e</p><h1>Preparar NFA-e</h1><p class="texto-suave">{{ cliente.nome }} · {{ equipamento|rotulo_maquina }}</p></div>
+    <a class="botao" href="/organiza/clientes/{{ cliente.id }}">Voltar</a>
+  </div>
+
+  {% if faltantes %}
+  <div class="alerta erro"><strong>Antes de emitir, complete:</strong> {{ faltantes|join(', ') }}.</div>
+  {% else %}
+  <div class="alerta sucesso"><strong>Dados conferidos.</strong> O Organiza já preparou cliente, produto, padrão fiscal, valor e pagamentos.</div>
+  {% endif %}
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>1</span><div><h2>Destinatário</h2><p>Dados puxados do cadastro do cliente.</p></div></div>
+    <div class="form-grid-organizada tres-colunas">
+      <label>Nome<input readonly value="{{ dados.destinatario.nome }}"></label>
+      <label>CPF/CNPJ<input readonly value="{{ dados.destinatario.cpf_cnpj }}"></label>
+      <label>E-mail<input readonly value="{{ dados.destinatario.email }}"></label>
+      <label>CEP<input readonly value="{{ dados.destinatario.cep }}"></label>
+      <label class="campo-duplo">Endereço<input readonly value="{{ dados.destinatario.logradouro }}, {{ dados.destinatario.numero }}{% if dados.destinatario.complemento %} - {{ dados.destinatario.complemento }}{% endif %}"></label>
+      <label>Município / UF<input readonly value="{{ dados.destinatario.municipio }} / {{ dados.destinatario.uf }}"></label>
+      <label>Código IBGE<input readonly value="{{ dados.destinatario.municipio_ibge or 'Será salvo automaticamente nas próximas consultas de CEP' }}"></label>
+    </div>
+  </section>
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>2</span><div><h2>Produto e padrão fiscal</h2><p>Código e descrição vêm do equipamento; os demais campos usam o padrão definido.</p></div></div>
+    <div class="form-grid-organizada quatro-colunas">
+      <label>Código<input readonly value="{{ dados.produto.codigo }}"></label>
+      <label class="campo-duplo">Descrição<input readonly value="{{ dados.produto.descricao }}"></label>
+      <label>NCM<input readonly value="{{ dados.produto.ncm }}"></label>
+      <label>CFOP<input readonly value="{{ dados.produto.cfop }}"></label>
+      <label>EAN<input readonly value="{{ dados.produto.ean }}"></label>
+      <label>Unidade<input readonly value="{{ dados.produto.unidade }}"></label>
+      <label>Quantidade<input readonly value="{{ dados.produto.quantidade }}"></label>
+      <label>Valor<input readonly value="R$ {{ '%.2f'|format(dados.produto.valor_total)|replace('.', ',') }}"></label>
+      <label>Origem<input readonly value="{{ dados.produto.origem }}"></label>
+      <label>CSOSN<input readonly value="{{ dados.produto.csosn }}"></label>
+      <label>PIS CST<input readonly value="{{ dados.produto.pis_cst }}"></label>
+      <label>COFINS CST<input readonly value="{{ dados.produto.cofins_cst }}"></label>
+    </div>
+  </section>
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>3</span><div><h2>Pagamentos</h2><p>Recebimentos registrados no Organiza.</p></div></div>
+    {% for p in dados.pagamentos %}
+      <div class="linha-item"><span>{{ p.data or '-' }} · {{ p.forma or p.banco or 'Não informado' }}</span><strong>R$ {{ '%.2f'|format(p.valor)|replace('.', ',') }}</strong></div>
+    {% else %}<p class="texto-suave">Nenhum pagamento detalhado registrado.</p>{% endfor %}
+    <div class="linha-item"><span>Total da venda</span><strong>R$ {{ '%.2f'|format(dados.totais.venda)|replace('.', ',') }}</strong></div>
+  </section>
+
+  <div class="acoes-titulo" style="margin-top:16px;flex-wrap:wrap">
+    <a class="botao primario" href="https://svp-extranet.svrs.rs.gov.br/apl/nfa/pcc_common/index.aspx?ref=3" target="_blank" rel="noopener">Abrir emissor NFA-e</a>
+    <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nfae.json">Baixar dados para automação</a>
+    <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.xml">XML de apoio</a>
+    <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.csv">CSV de apoio</a>
+  </div>
+  <p class="texto-suave" style="margin-top:12px">O Organiza prepara os dados, mas a validação e emissão continuam sendo confirmadas por você no portal da SEFAZ.</p>
+</section>
+{% endblock %}

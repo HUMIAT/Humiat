@@ -45,8 +45,21 @@
     </section>
 
     <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>3</span><div><h2>Dados para NFA-e</h2><p>Você altera somente código e descrição. O restante usa o padrão fiscal da Karaokê RJ.</p></div></div>
+      <div class="form-grid-organizada tres-colunas">
+        <label>Código do produto<input id="nota-codigo" name="nota_codigo" maxlength="20" value="{{ equipamento.nota_codigo if equipamento and equipamento.nota_codigo else '' }}" placeholder="00001"><small>Ex.: 00001 Jukebox, 00002 Maletaokê.</small></label>
+        <label class="campo-duplo">Descrição na NFA-e<input id="nota-descricao" name="nota_descricao" maxlength="180" value="{{ equipamento.nota_descricao if equipamento and equipamento.nota_descricao else '' }}" placeholder="Jukebox"></label>
+        <label>NCM<input value="95045000" readonly aria-readonly="true"></label>
+        <label>EAN<input value="SEM GTIN" readonly aria-readonly="true"></label>
+        <label>Unidade<input value="UN - Unidade" readonly aria-readonly="true"></label>
+        <label>Tributação<input value="Origem 0 · CSOSN 400 · PIS 07 · COFINS 06" readonly aria-readonly="true"></label>
+      </div>
+      <p class="texto-suave" style="margin-top:10px">CFOP automático: <strong>5102 para cliente do RJ</strong> e <strong>6102 para outra UF</strong>. Quantidade padrão: 1. Valor vem da venda.</p>
+    </section>
+
+    <section class="cartao secao-form">
       <div class="secao-form-titulo">
-        <span>{% if equipamento and equipamento.id %}3{% else %}2{% endif %}</span>
+        <span>4</span>
         <div>
           <h2>SolVoz</h2>
           <p>Defina a empresa pública do catálogo. O domínio é preenchido automaticamente pelo cadastro da empresa.</p>
@@ -83,7 +96,7 @@
     {% if equipamento and equipamento.id %}
     <section class="cartao secao-form">
       <div class="secao-form-titulo">
-        <span>4</span>
+        <span>5</span>
         <div>
           <h2>QR Code</h2>
           <p>Gera os QR Codes do catálogo e da máquina antes da licença. Não exige NR HD e mantém o mesmo endereço configurado no SolVoz.</p>
@@ -105,7 +118,7 @@
 
     <section class="cartao secao-form">
       <div class="secao-form-titulo">
-        <span>5</span>
+        <span>6</span>
         <div>
           <h2>Licença e QR Code</h2>
           <p>Valida NR máquina, NR HD, plano e Empresa SolVoz. Gera a licença, o QR do catálogo e também o QR 500x500 contendo somente o número do equipamento.</p>
@@ -127,7 +140,7 @@
     {% endif %}
 
     <section class="cartao secao-form">
-      <div class="secao-form-titulo"><span>{% if equipamento and equipamento.id %}6{% else %}3{% endif %}</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
+      <div class="secao-form-titulo"><span>7</span><div><h2>Observações</h2><p>Informações especiais sobre gabinete, montagem ou entrega.</p></div></div>
       <label class="campo-largo"><textarea name="observacao">{{ equipamento.observacao if equipamento and equipamento.observacao else '' }}</textarea></label>
     </section>
     {% if confirmar_duplicado %}
@@ -140,7 +153,7 @@
 
   {% if equipamento and equipamento.id %}
   <section class="cartao secao-form transferencia-equipamento">
-    <div class="secao-form-titulo"><span>7</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
+    <div class="secao-form-titulo"><span>8</span><div><h2>Transferir equipamento</h2><p>Altere o proprietário quando o equipamento for vendido para outro cliente. O código da máquina permanece o mesmo.</p></div></div>
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/transferir" onsubmit="return confirm('Confirma a transferência deste equipamento para outro cliente?')">
       <div class="form-grid-organizada dois-colunas">
         <label>Novo cliente *<select name="cliente_destino_id" required><option value="">Selecione...</option>{% for c in clientes_transferencia %}<option value="{{ c.id }}">{{ c.nome }} · {{ c.telefone|telefone }}</option>{% endfor %}</select></label>
@@ -203,6 +216,32 @@
   }
   empresa.addEventListener("change", atualizarDominio);
   atualizarDominio();
+})();
+</script>
+
+<script>
+(() => {
+  const tipo = document.getElementById('tipo-equipamento');
+  const codigo = document.getElementById('nota-codigo');
+  const descricao = document.getElementById('nota-descricao');
+  if (!tipo || !codigo || !descricao) return;
+  const padrao = {
+    JUKEBOX:['00001','Jukebox'],
+    MALETA:['00002','Maletaokê'],
+    IPHONE:['00003','Karaokê iPhone'],
+    FLIPERAMA:['00004','Fliperama']
+  };
+  let tipoAnterior = (tipo.value || '').toUpperCase();
+  function atualizar(force=false){
+    const atual=(tipo.value || '').toUpperCase();
+    const novo=padrao[atual] || ['00005', atual ? atual.charAt(0)+atual.slice(1).toLowerCase() : 'Produto'];
+    const anterior=padrao[tipoAnterior] || ['00005','Produto'];
+    if (force || !codigo.value.trim() || codigo.value.trim()===anterior[0]) codigo.value=novo[0];
+    if (force || !descricao.value.trim() || descricao.value.trim()===anterior[1]) descricao.value=novo[1];
+    tipoAnterior=atual;
+  }
+  tipo.addEventListener('change',()=>atualizar(false));
+  atualizar(false);
 })();
 </script>
 
