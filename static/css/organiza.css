@@ -3664,3 +3664,19 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 /* Identidade oficial do Organiza */
 .organiza-brand-icon{width:34px;height:34px;border-radius:9px;object-fit:cover;box-shadow:0 5px 14px rgba(0,0,0,.25);flex:0 0 auto}
 .login-brand>img{width:48px;height:48px;border-radius:14px;object-fit:cover;box-shadow:0 8px 24px rgba(0,0,0,.28)}
+
+/* Organiza v1.1.2 — acesso SolVoz no cadastro do cliente */
+.resumo-coluna{display:grid;gap:16px;align-content:start}
+.solvoz-acesso-card{display:grid;gap:10px}
+.solvoz-acesso-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.solvoz-acesso-topo .tag{margin-bottom:6px}
+.solvoz-acesso-topo strong{display:block;overflow-wrap:anywhere;font-size:.95rem}
+.solvoz-selo{display:inline-flex;align-items:center;justify-content:center;padding:6px 9px;border-radius:999px;font-size:.72rem;font-weight:800;white-space:nowrap}
+.solvoz-selo.ativo{background:#dcfce7;color:#166534}
+.solvoz-selo.pendente{background:#fef3c7;color:#92400e}
+.solvoz-selo.erro{background:#fee2e2;color:#991b1b}
+.solvoz-aviso{margin:0;padding:9px 10px;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:.82rem;font-weight:700}
+.solvoz-equip-lista{display:block;color:#64748b;line-height:1.45}
+.solvoz-acoes{display:flex;gap:8px;flex-wrap:wrap}
+.solvoz-acoes form{margin:0}
+@media(max-width:760px){.resumo-coluna{grid-template-columns:1fr}.solvoz-acesso-topo{align-items:center}}

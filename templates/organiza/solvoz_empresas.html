@@ -29,7 +29,7 @@
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           {% if linha.clientes %}<form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/criar-acesso" style="display:flex;gap:8px;align-items:center;margin:0">
             {% if linha.clientes|length > 1 %}<select name="cliente_id" required><option value="">Selecione o cliente</option>{% for c in linha.clientes %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}</select>{% else %}<input type="hidden" name="cliente_id" value="{{ linha.clientes[0].id }}">{% endif %}
-            <button class="botao primario" type="submit">Criar / reenviar acesso</button></form>{% endif %}
+            <button class="botao primario" type="submit">Criar / atualizar acesso</button></form>{% endif %}
           <a class="botao" href="/organiza/configuracoes/solvoz-empresas?editar={{ empresa.id }}#editar-empresa">Editar</a>
           <form method="post" action="/organiza/configuracoes/solvoz-empresas/{{ empresa.id }}/status" style="margin:0"><input type="hidden" name="ativo" value="{{ 0 if empresa.ativo else 1 }}"><button class="botao" type="submit">{{ 'Desativar' if empresa.ativo else 'Ativar' }}</button></form>
         </div>

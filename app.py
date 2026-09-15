@@ -25,13 +25,16 @@ from starlette.requests import ClientDisconnect
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_, inspect, text
 from sqlalchemy.orm import Session, relationship, selectinload
 
-from config import ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL, LOKAFEST_API_TOKEN
+from config import (
+    ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL, LOKAFEST_API_TOKEN,
+    SOLVOZ_API_TOKEN, SOLVOZ_BASE_URL, SOLVOZ_API_TIMEOUT,
+)
 from database import Base, SessionLocal, engine, get_db
 from humiat_id import (
     router as humiat_router, seed_humiat_id, migrar_humiat_id_schema,
     humiat_usuario_da_requisicao, TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA,
     HumiatEmpresa, HumiatUsuario, HumiatUsuarioEmpresa, HumiatEmpresaProduto, HumiatProduto,
-    garantir_empresa_solvoz_humiat, provisionar_acesso_solvoz_cliente,
+    garantir_empresa_solvoz_humiat,
 )
 
 from services.comunicacao import (
@@ -42,7 +45,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.1"
+ORGANIZA_VERSION = "1.1.2"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 app.include_router(humiat_router)
 
@@ -109,6 +112,151 @@ def montar_url_qr_solvoz(empresa, maquina: str, plano: str, catalogo_online: boo
 
 def empresas_solvoz_ativas(db: Session):
     return db.query(SolVozEmpresa).filter(SolVozEmpresa.ativo == 1).order_by(SolVozEmpresa.nome.asc()).all()
+
+
+# ------------------------------------------------------------------
+# Organiza 8.8 / v1.1.2 — criação de acesso diretamente no SolVoz
+# ------------------------------------------------------------------
+def _solvoz_integracao_configurada() -> bool:
+    return bool(SOLVOZ_API_TOKEN and SOLVOZ_BASE_URL)
+
+
+def _solvoz_api_request(caminho: str, *, metodo: str = "GET", payload: dict | None = None, query: dict | None = None) -> dict:
+    """Chamada servidor-servidor para o SolVoz usando o token compartilhado.
+
+    Nunca envia senha do Organiza. O SolVoz cria/gera a própria credencial.
+    """
+    if not _solvoz_integracao_configurada():
+        raise RuntimeError("Integração Organiza → SolVoz não configurada (SOLVOZ_API_TOKEN).")
+    url = SOLVOZ_BASE_URL.rstrip("/") + "/" + caminho.lstrip("/")
+    if query:
+        qs = urllib.parse.urlencode({k: v for k, v in query.items() if v not in (None, "")})
+        if qs:
+            url += ("&" if "?" in url else "?") + qs
+    headers = {
+        "Accept": "application/json",
+        "X-SolVoz-Token": SOLVOZ_API_TOKEN,
+        "User-Agent": f"Organiza/{ORGANIZA_VERSION}",
+    }
+    data = None
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=metodo.upper(), headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=SOLVOZ_API_TIMEOUT) as resp:
+            bruto = resp.read().decode("utf-8", errors="replace")
+            return json.loads(bruto) if bruto else {"ok": True}
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        try:
+            obj = json.loads(detalhe)
+            detalhe = obj.get("detail") or obj.get("erro") or detalhe
+        except Exception:
+            pass
+        raise RuntimeError(f"SolVoz respondeu HTTP {exc.code}: {str(detalhe)[:300]}")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Não foi possível acessar o SolVoz: {exc.reason}")
+
+
+def _solvoz_grupos_cliente(cliente) -> list[dict]:
+    """Agrupa equipamentos online do cliente pela empresa SolVoz."""
+    grupos: dict[int, dict] = {}
+    for eq in list(getattr(cliente, "equipamentos", []) or []):
+        empresa = getattr(eq, "solvoz_empresa", None)
+        codigo = codigo_tecnico(eq)
+        if not getattr(eq, "catalogo_online", 0) or not empresa or not getattr(empresa, "id", None) or not codigo:
+            continue
+        grupo = grupos.setdefault(int(empresa.id), {
+            "empresa": empresa,
+            "equipamentos": [],
+            "codigos": [],
+        })
+        grupo["equipamentos"].append(eq)
+        grupo["codigos"].append(codigo)
+    return list(grupos.values())
+
+
+def _solvoz_provisionar_cliente(cliente, grupos: list[dict]) -> list[dict]:
+    email = (getattr(cliente, "email", None) or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("O cliente precisa ter um e-mail válido no Organiza.")
+    if not grupos:
+        raise ValueError("O cliente não possui equipamento com Catálogo Online e empresa SolVoz vinculados.")
+    resultados = []
+    for grupo in grupos:
+        empresa = grupo["empresa"]
+        payload = {
+            "nome": (getattr(cliente, "nome", None) or "").strip(),
+            "email": email,
+            "documento": (getattr(cliente, "documento", None) or "").strip(),
+            "telefone": (getattr(cliente, "telefone", None) or "").strip(),
+            "cliente_id": str(getattr(cliente, "id", "") or ""),
+            "empresa_slug": (getattr(empresa, "slug", None) or "").strip(),
+            "equipamentos": list(dict.fromkeys(grupo["codigos"])),
+        }
+        resultados.append(_solvoz_api_request(
+            "/api/integracoes/organiza/solvoz/acesso", metodo="POST", payload=payload
+        ))
+    return resultados
+
+
+def _solvoz_cache_salvar(db: Session, cliente, resultados: list[dict], *, erro: str = "") -> None:
+    email = (getattr(cliente, "email", None) or "").strip().lower()
+    registro = db.query(SolVozAcessoCliente).filter(SolVozAcessoCliente.cliente_id == int(cliente.id)).first()
+    if not registro:
+        registro = SolVozAcessoCliente(cliente_id=int(cliente.id), email=email)
+        db.add(registro)
+    primeiro = resultados[0] if resultados else {}
+    registro.email = email
+    if primeiro.get("usuario_id"):
+        registro.solvoz_usuario_id = int(primeiro.get("usuario_id"))
+    registro.status = "ATIVO" if resultados else "ERRO"
+    registro.trocar_senha = 1 if any(bool(r.get("trocar_senha_primeiro_acesso")) for r in resultados) else 0
+    registro.email_enviado = 1 if any(bool(r.get("email_enviado")) for r in resultados) else 0
+    erros = [str(r.get("email_erro") or "").strip() for r in resultados if r.get("email_erro")]
+    registro.ultimo_erro = (erro or (erros[0] if erros else ""))[:500] or None
+    registro.atualizado_em = datetime.now()
+    db.commit()
+
+
+def _solvoz_contexto_cliente(cliente, db: Session) -> dict:
+    """Monta o card sem bloquear a ficha do cliente com consulta HTTP externa."""
+    grupos = _solvoz_grupos_cliente(cliente)
+    contexto = {
+        "configurado": _solvoz_integracao_configurada(),
+        "status": "SEM_ACESSO",
+        "usuario": (getattr(cliente, "email", None) or "").strip().lower(),
+        "equipamentos": [
+            f"{rotulo_maquina(eq)} · {codigo_tecnico(eq)}"
+            for grupo in grupos for eq in grupo["equipamentos"]
+        ],
+        "empresas": [str(getattr(grupo["empresa"], "nome", "") or "") for grupo in grupos],
+        "total_equipamentos": sum(len(grupo["equipamentos"]) for grupo in grupos),
+        "trocar_senha": False,
+        "erro": "",
+        "email_enviado": False,
+    }
+    email = contexto["usuario"]
+    if not email or "@" not in email:
+        contexto["status"] = "SEM_EMAIL"
+        return contexto
+    if not grupos:
+        contexto["status"] = "SEM_EQUIPAMENTO"
+        return contexto
+    if not contexto["configurado"]:
+        contexto["status"] = "NAO_CONFIGURADO"
+        return contexto
+    registro = db.query(SolVozAcessoCliente).filter(SolVozAcessoCliente.cliente_id == int(cliente.id)).first()
+    if registro and (registro.email or "").strip().lower() == email:
+        contexto["status"] = (registro.status or "ATIVO").upper()
+        contexto["trocar_senha"] = bool(registro.trocar_senha)
+        contexto["email_enviado"] = bool(registro.email_enviado)
+        contexto["erro"] = registro.ultimo_erro or ""
+        contexto["usuario_id"] = registro.solvoz_usuario_id
+        contexto["atualizado_em"] = registro.atualizado_em
+    return contexto
+
 
 
 STATUS_EQUIPE = {"Aguardando equipamento", "Recebida", "Orçamento em elaboração", "Confirmação pendente", "Em manutenção", "Aguardando peça"}
@@ -218,6 +366,25 @@ class SolVozEmpresa(Base):
     dominio = Column(String(255), nullable=False)
     ativo = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
+
+
+class SolVozAcessoCliente(Base):
+    """Cache local do acesso criado no SolVoz.
+
+    Evita consultar o SolVoz toda vez que a ficha do cliente é aberta.
+    O SolVoz continua sendo a fonte da autenticação/senha; aqui guardamos apenas
+    o estado operacional para exibir o card no Organiza.
+    """
+    __tablename__ = "solvoz_acessos_clientes"
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, unique=True, index=True)
+    email = Column(String(180), nullable=False)
+    solvoz_usuario_id = Column(Integer, nullable=True)
+    status = Column(String(30), nullable=False, default="ATIVO")
+    trocar_senha = Column(Integer, nullable=False, default=1)
+    email_enviado = Column(Integer, nullable=False, default=0)
+    ultimo_erro = Column(Text, nullable=True)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class Equipamento(Base):
@@ -1121,7 +1288,9 @@ async def cliente_criar(request: Request, usuario: Usuario = Depends(usuario_log
 
 @app.get("/organiza/clientes/{cliente_id}", response_class=HTMLResponse)
 def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    cliente = db.query(Cliente).options(selectinload(Cliente.equipamentos)).filter(Cliente.id == cliente_id).first()
+    cliente = db.query(Cliente).options(
+        selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
+    ).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
@@ -1138,7 +1307,87 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     return templates.TemplateResponse("organiza/cliente_detalhe.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
         "equipamentos": equipamentos, "status_filtro": status_filtro, "tipo_filtro": tipo_filtro,
+        "solvoz_acesso": _solvoz_contexto_cliente(cliente, db),
+        "solvoz_sucesso": request.query_params.get("solvoz_sucesso", ""),
+        "solvoz_erro": request.query_params.get("solvoz_erro", ""),
     })
+
+
+@app.post("/organiza/clientes/{cliente_id}/solvoz-acesso")
+def cliente_solvoz_criar_acesso(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    cliente = db.query(Cliente).options(
+        selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
+    ).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    try:
+        resultados = _solvoz_provisionar_cliente(cliente, _solvoz_grupos_cliente(cliente))
+        _solvoz_cache_salvar(db, cliente, resultados)
+        enviados = sum(1 for r in resultados if r.get("email_enviado"))
+        criado = any(bool(r.get("criado")) for r in resultados)
+        if enviados:
+            msg = "Acesso SolVoz criado e senha provisória enviada para o e-mail do cliente."
+        elif criado:
+            erros_email = [r.get("email_erro") for r in resultados if r.get("email_erro")]
+            msg = "Acesso criado no SolVoz, mas o e-mail não foi enviado" + (f": {erros_email[0]}" if erros_email else ".")
+            return RedirectResponse(
+                f"/organiza/clientes/{cliente_id}?solvoz_erro={quote_plus(msg)}", status_code=303
+            )
+        else:
+            msg = "Acesso SolVoz atualizado. Os equipamentos foram vinculados ao usuário existente."
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?solvoz_sucesso={quote_plus(msg)}", status_code=303
+        )
+    except (ValueError, RuntimeError) as exc:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?solvoz_erro={quote_plus(str(exc))}", status_code=303
+        )
+
+
+@app.post("/organiza/clientes/{cliente_id}/solvoz-acesso/reenviar")
+def cliente_solvoz_reenviar_acesso(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    email = (cliente.email or "").strip().lower()
+    if not email or "@" not in email:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?solvoz_erro={quote_plus('O cliente precisa ter um e-mail válido no Organiza.')}",
+            status_code=303,
+        )
+    try:
+        resultado = _solvoz_api_request(
+            "/api/integracoes/organiza/solvoz/acesso/reenviar",
+            metodo="POST", payload={"email": email},
+        )
+        _solvoz_cache_salvar(db, cliente, [resultado])
+        if resultado.get("email_enviado"):
+            msg = "Nova senha provisória enviada para o e-mail do cliente."
+            chave = "solvoz_sucesso"
+        else:
+            msg = "A senha provisória foi gerada, mas o e-mail não foi enviado: " + (resultado.get("email_erro") or "verifique a configuração de e-mail do SolVoz.")
+            chave = "solvoz_erro"
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?{chave}={quote_plus(msg)}", status_code=303
+        )
+    except RuntimeError as exc:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?solvoz_erro={quote_plus(str(exc))}", status_code=303
+        )
 
 
 @app.get("/organiza/clientes/{cliente_id}/editar", response_class=HTMLResponse)
@@ -1510,16 +1759,29 @@ def _clientes_vinculados_empresa_solvoz(db: Session, empresa_id: int):
 
 
 def _emails_com_acesso_solvoz(db: Session, slug: str) -> set[str]:
-    h_empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == normalizar_slug_solvoz(slug)).first()
-    if not h_empresa:
-        return set()
-    linhas = (
-        db.query(HumiatUsuario.email)
-        .join(HumiatUsuarioEmpresa, HumiatUsuarioEmpresa.usuario_id == HumiatUsuario.id)
-        .filter(HumiatUsuarioEmpresa.empresa_id == h_empresa.id, HumiatUsuario.ativo == 1)
+    """Une acessos Humiat legados e novos acessos diretos SolVoz."""
+    slug_n = normalizar_slug_solvoz(slug)
+    emails: set[str] = set()
+    h_empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == slug_n).first()
+    if h_empresa:
+        linhas = (
+            db.query(HumiatUsuario.email)
+            .join(HumiatUsuarioEmpresa, HumiatUsuarioEmpresa.usuario_id == HumiatUsuario.id)
+            .filter(HumiatUsuarioEmpresa.empresa_id == h_empresa.id, HumiatUsuario.ativo == 1)
+            .all()
+        )
+        emails.update({(x[0] or "").strip().lower() for x in linhas if x[0]})
+    diretos = (
+        db.query(SolVozAcessoCliente.email)
+        .join(Cliente, Cliente.id == SolVozAcessoCliente.cliente_id)
+        .join(Equipamento, Equipamento.cliente_id == Cliente.id)
+        .join(SolVozEmpresa, SolVozEmpresa.id == Equipamento.solvoz_empresa_id)
+        .filter(SolVozEmpresa.slug == slug_n, SolVozAcessoCliente.status == "ATIVO")
+        .distinct()
         .all()
     )
-    return {(x[0] or "").strip().lower() for x in linhas if x[0]}
+    emails.update({(x[0] or "").strip().lower() for x in diretos if x[0]})
+    return emails
 
 
 @app.get("/organiza/configuracoes/solvoz-empresas", response_class=HTMLResponse)
@@ -1639,28 +1901,30 @@ async def solvoz_empresa_criar_acesso(
     if not cliente:
         msg = quote_plus("Selecione o cliente que receberá o acesso ao SolVoz.")
         return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={msg}", status_code=303)
+    # A partir da v1.1.2 o Organiza não cria mais a senha/usuário aqui.
+    # Ele envia os dados do cadastro e dos equipamentos; o próprio SolVoz
+    # cria a credencial, gera a senha provisória e envia o e-mail.
+    cliente = db.query(Cliente).options(
+        selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
+    ).filter(Cliente.id == cliente.id).first()
+    grupos = [g for g in _solvoz_grupos_cliente(cliente) if int(g["empresa"].id) == int(empresa.id)]
     try:
-        resultado = provisionar_acesso_solvoz_cliente(
-            db,
-            empresa_nome=empresa.nome,
-            empresa_slug=empresa.slug,
-            cliente_nome=cliente.nome,
-            cliente_email=cliente.email or "",
-            cliente_documento=cliente.documento or "",
-            cliente_telefone=cliente.telefone or "",
-            request=request,
-            enviar_email=True,
-        )
-    except ValueError as exc:
+        resultados = _solvoz_provisionar_cliente(cliente, grupos)
+        _solvoz_cache_salvar(db, cliente, resultados)
+    except (ValueError, RuntimeError) as exc:
         return RedirectResponse(
             f"/organiza/configuracoes/solvoz-empresas?erro={quote_plus(str(exc))}", status_code=303
         )
+    resultado = resultados[0] if resultados else {}
     if resultado.get("email_enviado"):
-        msg = f"Acesso SolVoz criado para {cliente.nome}. O e-mail para definir a senha foi enviado."
+        msg = f"Acesso SolVoz criado para {cliente.nome}. A senha provisória foi enviada por e-mail."
         chave = "sucesso"
-    else:
-        msg = f"Acesso criado para {cliente.nome}, mas o e-mail não foi enviado: {resultado.get('email_erro') or 'verifique a configuração de e-mail.'}"
+    elif resultado.get("criado"):
+        msg = f"Acesso criado para {cliente.nome}, mas o e-mail não foi enviado: {resultado.get('email_erro') or 'verifique a configuração de e-mail do SolVoz.'}"
         chave = "erro"
+    else:
+        msg = f"Acesso SolVoz de {cliente.nome} atualizado e equipamentos vinculados."
+        chave = "sucesso"
     return RedirectResponse(
         f"/organiza/configuracoes/solvoz-empresas?{chave}={quote_plus(msg)}", status_code=303
     )
@@ -1685,7 +1949,7 @@ async def solvoz_empresa_status(
 
 
 def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
-    esperado = (os.getenv("SOLVOZ_API_TOKEN") or "").strip()
+    esperado = SOLVOZ_API_TOKEN
     if not esperado:
         raise HTTPException(503, "Integração SolVoz ainda não configurada.")
     recebido = (x_solvoz_token or "").strip()

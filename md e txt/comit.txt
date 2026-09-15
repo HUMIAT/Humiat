@@ -1,1 +1,1 @@
-Organiza v1.1.1 - gera QR antes da licença sem exigir NR HD
+Organiza v1.1.2 - cria acesso SolVoz pelo cadastro e equipamentos do cliente

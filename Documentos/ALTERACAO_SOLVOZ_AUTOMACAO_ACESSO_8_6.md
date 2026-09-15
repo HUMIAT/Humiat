@@ -1,3 +1,7 @@
+# HISTÓRICO — substituído pelo fluxo 8.8 / v1.1.2
+
+> Este documento registra o fluxo anterior via Humiat ID. Para novas criações use `ALTERACAO_ACESSO_SOLVOZ_DIRETO_1_1_2.md`.
+
 # Organiza 8.6 — Automação SolVoz
 
 - Empresas clonadas no SolVoz passam a ser criadas automaticamente em `solvoz_empresas` no Organiza via integração servidor-servidor.

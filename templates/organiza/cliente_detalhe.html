@@ -1,6 +1,55 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ cliente.nome }}</h1><p class="texto-suave">+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p></div><div class="acoes-titulo"><a class="botao" href="/organiza/clientes">Voltar</a><a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a><a class="botao" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Manutenção</a><a class="botao" href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">+ Venda</a><a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nEsse procedimento é importante para emissão de documentos, garantia e futuros atendimentos.\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a></div></div>
-<div class="grade-ficha clean-ficha"><article class="cartao"><p class="tag">Dados do cliente</p><dl class="lista-dados"><dt>Documento</dt><dd>{{ cliente.documento or '-' }}</dd><dt>E-mail</dt><dd>{{ cliente.email or '-' }}</dd><dt>Inscrição estadual</dt><dd>{{ cliente.inscricao_estadual or '-' }}</dd><dt>Município</dt><dd>{{ cliente.municipio or cliente.cidade or '-' }}</dd><dt>Endereço</dt><dd>{{ cliente.endereco or '-' }}{% if cliente.endereco_numero %}, {{ cliente.endereco_numero }}{% endif %}</dd><dt>Bairro</dt><dd>{{ cliente.bairro or '-' }}</dd></dl>{% if cliente.observacao %}<p class="observacao">{{ cliente.observacao }}</p>{% endif %}</article><article class="cartao resumo-unico"><small>Equipamentos vinculados</small><strong>{{ cliente.equipamentos|length }}</strong></article></div>
+{% if solvoz_sucesso %}<div class="alerta sucesso">{{ solvoz_sucesso }}</div>{% endif %}
+{% if solvoz_erro %}<div class="alerta erro">{{ solvoz_erro }}</div>{% endif %}
+<div class="grade-ficha clean-ficha">
+  <article class="cartao">
+    <p class="tag">Dados do cliente</p>
+    <dl class="lista-dados">
+      <dt>Documento</dt><dd>{{ cliente.documento or '-' }}</dd>
+      <dt>E-mail</dt><dd>{{ cliente.email or '-' }}</dd>
+      <dt>Inscrição estadual</dt><dd>{{ cliente.inscricao_estadual or '-' }}</dd>
+      <dt>Município</dt><dd>{{ cliente.municipio or cliente.cidade or '-' }}</dd>
+      <dt>Endereço</dt><dd>{{ cliente.endereco or '-' }}{% if cliente.endereco_numero %}, {{ cliente.endereco_numero }}{% endif %}</dd>
+      <dt>Bairro</dt><dd>{{ cliente.bairro or '-' }}</dd>
+    </dl>
+    {% if cliente.observacao %}<p class="observacao">{{ cliente.observacao }}</p>{% endif %}
+  </article>
+  <div class="resumo-coluna">
+    <article class="cartao resumo-unico"><small>Equipamentos vinculados</small><strong>{{ cliente.equipamentos|length }}</strong></article>
+    <article class="cartao solvoz-acesso-card">
+      <div class="solvoz-acesso-topo">
+        <div><p class="tag">Acesso SolVoz</p><strong>{{ solvoz_acesso.usuario or 'Sem e-mail' }}</strong></div>
+        {% if solvoz_acesso.status == 'ATIVO' %}<span class="solvoz-selo ativo">Ativo</span>
+        {% elif solvoz_acesso.status == 'INATIVO' %}<span class="solvoz-selo erro">Inativo</span>
+        {% elif solvoz_acesso.status == 'ERRO' %}<span class="solvoz-selo erro">Erro</span>
+        {% else %}<span class="solvoz-selo pendente">Sem acesso</span>{% endif %}
+      </div>
+      {% if solvoz_acesso.status == 'ATIVO' %}
+        <p class="texto-suave">Administrador da própria empresa no SolVoz.</p>
+        {% if solvoz_acesso.trocar_senha %}<p class="solvoz-aviso">Aguardando a troca da senha no primeiro acesso.</p>{% endif %}
+        {% if solvoz_acesso.equipamentos %}<small class="solvoz-equip-lista">{{ solvoz_acesso.equipamentos|join(' • ') }}</small>{% endif %}
+        <div class="solvoz-acoes">
+          <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso"><button class="botao pequeno" type="submit">Atualizar equipamentos</button></form>
+          <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso/reenviar"><button class="botao pequeno" type="submit">Reenviar senha</button></form>
+        </div>
+      {% elif solvoz_acesso.status == 'SEM_EMAIL' %}
+        <p class="texto-suave">Cadastre um e-mail válido no cliente para criar o usuário.</p>
+      {% elif solvoz_acesso.status == 'SEM_EQUIPAMENTO' %}
+        <p class="texto-suave">Vincule um equipamento com Catálogo Online e empresa SolVoz.</p>
+      {% elif solvoz_acesso.status == 'NAO_CONFIGURADO' %}
+        <p class="texto-suave">Configure o token da integração Organiza → SolVoz.</p>
+      {% elif solvoz_acesso.status == 'ERRO' %}
+        <p class="texto-suave">{{ solvoz_acesso.erro }}</p>
+        <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso"><button class="botao pequeno" type="submit">Tentar novamente</button></form>
+      {% else %}
+        <p class="texto-suave">O SolVoz usará o e-mail do cadastro, vinculará os equipamentos e enviará uma senha provisória.</p>
+        {% if solvoz_acesso.equipamentos %}<small class="solvoz-equip-lista">{{ solvoz_acesso.equipamentos|join(' • ') }}</small>{% endif %}
+        <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso"><button class="botao primario pequeno" type="submit">Criar acesso SolVoz</button></form>
+      {% endif %}
+    </article>
+  </div>
+</div>
 <section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Equipamentos</h2><p class="texto-suave">Organizados por tipo e identificação do cliente.</p></div><div class="acoes-titulo"><form method="get" class="filtros-equipamentos"><select name="status_equipamento" onchange="this.form.submit()"><option value="Ativo" {% if status_filtro=='Ativo' %}selected{% endif %}>Ativos</option><option value="Inativo" {% if status_filtro=='Inativo' %}selected{% endif %}>Inativos</option><option value="Todos" {% if status_filtro=='Todos' %}selected{% endif %}>Todos</option></select><select name="tipo_equipamento" onchange="this.form.submit()"><option value="">Todos os equipamentos</option>{% for tipo in ['JUKEBOX','MALETA','IPHONE','FLIPERAMA'] %}<option value="{{ tipo }}" {% if tipo_filtro==tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></form><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Adicionar</a></div></div><div class="equip-grid">{% for eq in equipamentos %}<article class="equip-card"><div class="equip-head"><div><span class="pill">{{ eq.status }}</span><h3>{{ eq|rotulo_maquina }}</h3><p>{{ eq.tipo or 'Equipamento' }}{% if eq.modelo %} · {{ eq.modelo }}{% endif %}</p><small>Código técnico: <strong>{{ eq|codigo_tecnico }}</strong></small></div><a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a></div><dl><dt>Identificação</dt><dd><strong>{{ eq|rotulo_maquina }}</strong></dd><dt>Código técnico / monitor</dt><dd>{{ eq|codigo_tecnico }}</dd><dt>Código do HD</dt><dd>{{ eq.numero_hd or '-' }}</dd><dt>Fabricante</dt><dd>{{ eq.fabricante or 'KARAOKERJ' }}</dd><dt>Pacote</dt><dd>{{ eq.pacote or '-' }}</dd><dt>Plano</dt><dd>{{ eq.plano or '-' }}</dd><dt>Preço de venda</dt><dd>{{ eq.preco_venda|moeda }}</dd><dt>Pago</dt><dd>{{ eq.pago|moeda }}</dd><dt>Falta</dt><dd>{{ eq.falta|moeda }}</dd></dl><div class="acoes-documentos"><a class="botao pequeno" target="_blank" href="/organiza/equipamentos/{{ eq.id }}/garantia.pdf">Contrato de garantia</a><a class="botao pequeno" target="_blank" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/recibo">Recibo</a><a class="botao pequeno" href="/organiza/equipamentos/{{ eq.id }}/nota.xml">XML para nota</a><a class="botao pequeno" href="/organiza/equipamentos/{{ eq.id }}/nota.csv">CSV para nota</a></div>{% if eq.observacao %}<p class="observacao">{{ eq.observacao }}</p>{% endif %}</article>{% else %}<p class="texto-suave vazio">Nenhum equipamento cadastrado.</p>{% endfor %}</div></section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div><a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a></div><div class="lista-cards-mobile">{% for m in manutencoes %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
 {% endblock %}
