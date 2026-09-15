@@ -16,6 +16,7 @@
     <div class="secao-form-titulo"><span>1</span><div><h2>Destinatário</h2><p>Dados puxados do cadastro do cliente.</p></div></div>
     <div class="form-grid-organizada tres-colunas">
       <label>Nome<input readonly value="{{ dados.destinatario.nome }}"></label>
+      <label>Tipo<input readonly value="{{ dados.destinatario.tipo_documento or 'Verificar documento' }}"></label>
       <label>CPF/CNPJ<input readonly value="{{ dados.destinatario.cpf_cnpj }}"></label>
       <label>E-mail<input readonly value="{{ dados.destinatario.email }}"></label>
       <label>Telefone<input readonly value="{{ dados.destinatario.telefone }}"></label>
@@ -41,6 +42,7 @@
       <label>CSOSN<input readonly value="{{ dados.produto.csosn }}"></label>
       <label>PIS CST<input readonly value="{{ dados.produto.pis_cst }}"></label>
       <label>COFINS CST<input readonly value="{{ dados.produto.cofins_cst }}"></label>
+      <label class="campo-duplo">Observação fiscal<input readonly value="{{ dados.observacao_fiscal }}"></label>
     </div>
   </section>
 
@@ -62,7 +64,7 @@
       <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.xml">XML de apoio</a>
       <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.csv">CSV de apoio</a>
     </div>
-    <p class="texto-suave" style="margin-top:12px">A emissão continua sendo confirmada por você na SEFAZ. A automação apenas preenche os campos com os dados já cadastrados no Organiza.</p>
+    <p class="texto-suave" style="margin-top:12px">A emissão continua sendo confirmada por você na SEFAZ. A extensão não altera o Emitente e não clica em Validar/Salvar/Emitir: a validação final fica com a própria SEFAZ.</p>
   </section>
 </section>
 <script>

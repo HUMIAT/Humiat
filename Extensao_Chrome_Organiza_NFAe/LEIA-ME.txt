@@ -1,23 +1,23 @@
-ORGANIZA NFA-e — Extensão Chrome 1.0.0
+ORGANIZA NFA-e — EXTENSÃO CHROME 1.0.2
 
-INSTALAÇÃO (uma única vez)
-1. Descompacte a pasta da extensão em um local fixo do computador.
-2. Abra o Chrome e digite: chrome://extensions
-3. Ative "Modo do desenvolvedor" no canto superior direito.
-4. Clique em "Carregar sem compactação".
-5. Selecione a pasta Extensao_Chrome_Organiza_NFAe.
-6. Deixe a extensão "Organiza NFA-e" ativada.
+Fluxo corrigido e validado por mapeamento visual das telas da NFA-e:
+- Emitente: nunca é alterado.
+- NF-e: Saída, Interna/Interestadual, Venda de Mercadoria, Consumidor Final, NF-e normal, operação não presencial e sem intermediador.
+- Destinatário: separa CPF e CNPJ, trata Inscrição Estadual / Não Contribuinte e preenche endereço. UF é definida antes do município.
+- Produtos e Serviços: abre Incluir quando a lista está vazia e preenche somente a janela do item.
+- Tributos: ICMS origem 0 + CSOSN 400; PIS 07; COFINS 06. Demais valores ficam para a SEFAZ.
+- Informações adicionais do item: usa equipamento + atualização enviados pelo Organiza.
+- Total: não altera (SEFAZ calcula).
+- Transporte, Referências e Cobrança: não altera.
+- Pagamento: abre Incluir quando vazio e preenche a janela separada de pagamento.
+- Observação: preenche somente "Informações adicionais de interesse do Fisco" com equipamento + atualização.
 
-USO
-1. No Organiza, abra o cliente/equipamento e clique em "Emitir NFA-e".
-2. Na tela de conferência, clique em "Preencher NFA-e automaticamente".
-3. Se a SEFAZ já estiver aberta, a extensão leva você para a aba dela.
-4. Se a SEFAZ não estiver aberta, o portal será aberto; faça a autenticação e entre em "Emitir Nova NF-e".
-5. A extensão preenche automaticamente os campos à medida que cada aba da NFA-e é aberta.
-6. Confira os dados e faça a validação/emissão manualmente na SEFAZ.
-7. Depois de concluir, clique em "Limpar dados" no quadro Organiza → NFA-e para evitar reaproveitar a nota anterior.
+A extensão NÃO clica em Validar/Salvar/Emitir a NF-e. A validação final permanece na SEFAZ e com o usuário.
 
-SEGURANÇA
-- A extensão não guarda senha da SEFAZ.
-- Os dados da nota ficam somente no armazenamento local do Chrome e expiram em até 4 horas.
-- A extensão não clica em "Validar", "Salvar" ou "Emitir" por você.
+INSTALAÇÃO
+1. Extraia esta pasta.
+2. Chrome -> chrome://extensions
+3. Ative Modo do desenvolvedor.
+4. Carregar sem compactação.
+5. Selecione a pasta que contém manifest.json.
+6. Confirme que aparece a versão 1.0.2.

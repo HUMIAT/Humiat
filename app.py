@@ -45,7 +45,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.4"
+ORGANIZA_VERSION = "1.1.5"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 
 # Padrão fiscal usado na preparação da NFA-e.
@@ -1499,6 +1499,23 @@ def nfae_cfop(cliente: Cliente | None) -> str:
     return NFAE_PADRAO_FISCAL["cfop_interno"] if uf == "RJ" else NFAE_PADRAO_FISCAL["cfop_interestadual"]
 
 
+def nfae_tipo_documento(documento: str | None) -> str:
+    digitos = re.sub(r"\D", "", documento or "")
+    return "CPF" if len(digitos) == 11 else "CNPJ" if len(digitos) == 14 else ""
+
+
+def nfae_observacao_simples(eq: Equipamento) -> str:
+    """Texto curto e sempre derivado do equipamento do Organiza.
+
+    Não usa texto fixo por modelo para evitar que uma Jukebox seja descrita como
+    Maletaokê (ou vice-versa). O pacote instalado é a atualização exibida no
+    cadastro do equipamento.
+    """
+    equipamento = nfae_descricao_produto(eq) or tipo_equipamento_padrao(eq.tipo or "").title() or "Equipamento"
+    atualizacao = (eq.pacote or "").strip()
+    return f"{equipamento} - atualização {atualizacao}" if atualizacao else equipamento
+
+
 def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
     cliente = eq.cliente
     total = round(moeda_num(eq.valor or eq.preco_venda or "0"), 2)
@@ -1522,7 +1539,7 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         })
     recebido = round(sum(p["valor"] for p in pagamentos_dados), 2)
     return {
-        "versao_layout": "ORGANIZA-NFAE-2",
+        "versao_layout": "ORGANIZA-NFAE-3",
         "operacao": {
             "natureza": NFAE_PADRAO_FISCAL["natureza_operacao"],
             "tipo": "Saída",
@@ -1535,7 +1552,9 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         "destinatario": {
             "nome": cliente.nome or "",
             "cpf_cnpj": cliente.documento or "",
+            "tipo_documento": nfae_tipo_documento(cliente.documento),
             "inscricao_estadual": cliente.inscricao_estadual or "",
+            "sem_inscricao_estadual": not bool((cliente.inscricao_estadual or "").strip().strip("-")),
             "email": cliente.email or "",
             "telefone": cliente.telefone or "",
             "cep": cliente.cep or "",
@@ -1566,12 +1585,20 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
             "cofins_cst": NFAE_PADRAO_FISCAL["cofins_cst"],
             "valor_compoe_total": NFAE_PADRAO_FISCAL["valor_compoe_total"],
             "numero_serie": eq.numero_serie or "",
+            "atualizacao": (eq.pacote or "").strip(),
+            "informacao_adicional": nfae_observacao_simples(eq),
         },
+        "observacao_fiscal": nfae_observacao_simples(eq),
         "pagamentos": pagamentos_dados,
         "totais": {
             "venda": total,
             "recebido": recebido,
             "saldo": max(round(total - recebido, 2), 0),
+        },
+        "pagamento_nfae": {
+            "forma": (pagamentos_dados[0].get("forma") or pagamentos_dados[0].get("banco") or "") if pagamentos_dados else "",
+            "valor": recebido if recebido > 0 else total,
+            "a_vista": True,
         },
         "referencia": {
             "equipamento_id": eq.id,
@@ -2981,6 +3008,7 @@ def dados_nota_xml(equipamento_id: int, usuario: Usuario = Depends(usuario_logad
     item = ET.SubElement(raiz, "produto")
     for chave, valor in dados["produto"].items():
         ET.SubElement(item, chave).text = str(valor).lower() if isinstance(valor, bool) else str(valor or "")
+    ET.SubElement(raiz, "observacao_fiscal").text = str(dados.get("observacao_fiscal") or "")
     pags = ET.SubElement(raiz, "pagamentos")
     for pagamento in dados["pagamentos"]:
         el = ET.SubElement(pags, "pagamento")
@@ -3002,14 +3030,15 @@ def dados_nota_csv(equipamento_id: int, usuario: Usuario = Depends(usuario_logad
     d, p, t = dados["destinatario"], dados["produto"], dados["totais"]
     out = io.StringIO()
     campos = [
-        "nome","cpf_cnpj","inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","municipio_ibge","uf",
-        "codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total",
-        "pagamentos","valor_recebido","saldo","codigo_tecnico","data_compra"
+        "nome","cpf_cnpj","tipo_documento","inscricao_estadual","sem_inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","municipio_ibge","uf",
+        "codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total","atualizacao","informacao_adicional",
+        "observacao_fiscal","pagamentos","valor_recebido","saldo","codigo_tecnico","data_compra"
     ]
     w = csv.DictWriter(out, fieldnames=campos, delimiter=';')
     w.writeheader()
     w.writerow({
-        **d, **{k: p.get(k, "") for k in ["codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total"]},
+        **d, **{k: p.get(k, "") for k in ["codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total","atualizacao","informacao_adicional"]},
+        "observacao_fiscal": dados.get("observacao_fiscal", ""),
         "pagamentos": " | ".join(f'{x["forma"]}: R$ {x["valor"]:.2f}' for x in dados["pagamentos"]),
         "valor_recebido": t["recebido"], "saldo": t["saldo"],
         "codigo_tecnico": dados["referencia"]["codigo_tecnico"], "data_compra": dados["referencia"]["data_compra"],
