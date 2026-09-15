@@ -8,6 +8,7 @@
     <p class="tag">Dados do cliente</p>
     <dl class="lista-dados">
       <dt>Documento</dt><dd>{{ cliente.documento or '-' }}</dd>
+      <dt>Razão social</dt><dd>{{ cliente.razao_social or '-' }}</dd>
       <dt>E-mail</dt><dd>{{ cliente.email or '-' }}</dd>
       <dt>Inscrição estadual</dt><dd>{{ cliente.inscricao_estadual or '-' }}</dd>
       <dt>Município</dt><dd>{{ cliente.municipio or cliente.cidade or '-' }}</dd>

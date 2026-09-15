@@ -5,7 +5,8 @@
 {% if salvo %}<div class="alerta sucesso">Dados atualizados com sucesso.</div>{% endif %}{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 <form method="post" class="formulario">
 <div class="form-grid-organizada duas-colunas">
-<label>Nome completo / razão social *<input name="nome" required value="{{ cliente.nome or '' }}"></label>
+<label>Nome / contato *<input name="nome" required value="{{ cliente.nome or '' }}"></label>
+<label>Razão social (se CNPJ)<input name="razao_social" value="{{ cliente.razao_social or '' }}"></label>
 <label>WhatsApp *<input name="telefone" required inputmode="numeric" value="{{ cliente.telefone or '' }}"></label>
 <label>CPF/CNPJ *<input name="documento" required value="{{ cliente.documento or '' }}"></label>
 <label>Inscrição estadual<input name="inscricao_estadual" value="{{ cliente.inscricao_estadual or '' }}"></label>

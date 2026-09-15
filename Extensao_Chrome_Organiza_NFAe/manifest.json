@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Organiza NFA-e",
-  "version": "1.0.2",
-  "description": "Preenche a NFA-e por aba com dados do Organiza, sem alterar o emitente e com tratamento separado de CPF/CNPJ.",
+  "version": "1.0.18",
+  "description": "Fluxo automático NFA-e: aguarda Natureza = Venda de Mercadoria, preenche destinatário, produto/tributos, valida e salva item, transporte sem frete, pagamento e observação; com Pausar/Continuar.",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://humiat.com.br/*",

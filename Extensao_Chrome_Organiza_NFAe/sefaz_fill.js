@@ -6,11 +6,79 @@
   let filling = false;
   let lastRun = 0;
   let lastActionAt = 0;
+  let fillRetryTimer = null;
+  let payloadPollTimer = null;
+  let payloadFingerprint = '';
+  let productCfopRetries = 0;
+  let productIncludeOpened = false;
+  let destinatarioActivated = false;
+  let productWorkflowDone = false;
+  let productTabActionAt = 0;
+  let paymentNewOpened = false;
+  let checkpointAt = 0;
+  let workflowActive = false;
+  let automationPaused = false;
+  let checkpoint = '';
+
+  const SESSION_ACTIVE = 'organiza_nfae_workflow_active';
+  const SESSION_PAUSED = 'organiza_nfae_workflow_paused';
+  const SESSION_CHECKPOINT = 'organiza_nfae_workflow_checkpoint';
+  const SESSION_CHECKPOINT_AT = 'organiza_nfae_workflow_checkpoint_at';
+
+  function loadWorkflowState() {
+    try {
+      workflowActive = sessionStorage.getItem(SESSION_ACTIVE) === '1';
+      automationPaused = sessionStorage.getItem(SESSION_PAUSED) === '1';
+      checkpoint = sessionStorage.getItem(SESSION_CHECKPOINT) || '';
+      checkpointAt = Number(sessionStorage.getItem(SESSION_CHECKPOINT_AT) || 0);
+    } catch (_) {}
+  }
+
+  function saveWorkflowState() {
+    try {
+      sessionStorage.setItem(SESSION_ACTIVE, workflowActive ? '1' : '0');
+      sessionStorage.setItem(SESSION_PAUSED, automationPaused ? '1' : '0');
+      if (checkpoint) { sessionStorage.setItem(SESSION_CHECKPOINT, checkpoint); sessionStorage.setItem(SESSION_CHECKPOINT_AT, String(checkpointAt || Date.now())); }
+      else { sessionStorage.removeItem(SESSION_CHECKPOINT); sessionStorage.removeItem(SESSION_CHECKPOINT_AT); }
+    } catch (_) {}
+  }
+
+  function isPaused() {
+    loadWorkflowState();
+    return automationPaused;
+  }
+
+  function isWorkflowActive() {
+    loadWorkflowState();
+    return workflowActive;
+  }
+
+  function extensionAlive() {
+    try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (_) { return false; }
+  }
+
+  function isContextInvalidated(err) {
+    return String(err && (err.message || err)).includes('Extension context invalidated');
+  }
+
+  async function runtimeMessage(message) {
+    if (!extensionAlive()) return null;
+    try { return await chrome.runtime.sendMessage(message); }
+    catch (err) { if (isContextInvalidated(err)) return null; throw err; }
+  }
+
+  async function broadcastWorkflow(command, extra = {}) {
+    return await runtimeMessage(Object.assign({type:'NFAE_WORKFLOW_BROADCAST', command}, extra));
+  }
 
   const norm = (s) => String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase().replace(/\s+/g, ' ')
-    .replace(/[\*:\-–—]+/g, ' ').trim();
+    .toLowerCase()
+    // A SEFAZ usa rótulos como "Unid. Comercial", "Qtd. Comercial" e
+    // "Valor Produto/Serviço". Normaliza toda pontuação para espaço para
+    // que o mapeamento não dependa de ponto, barra, hífen ou parênteses.
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ').trim();
 
   const isVisible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const controlsSelector = 'input:not([type=hidden]):not([type=button]):not([type=submit]), select, textarea';
@@ -146,6 +214,17 @@
     try { el.dispatchEvent(new Event(type, { bubbles: true })); } catch (_) {}
   }
 
+
+  function activateLegacyControl(el) {
+    if (!el) return false;
+    try { el.focus({preventScroll: true}); } catch (_) { try { el.focus(); } catch (_) {} }
+    try { el.dispatchEvent(new FocusEvent('focusin', {bubbles: true})); } catch (_) { fire(el, 'focus'); }
+    try { el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, view: window})); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, view: window})); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window})); } catch (_) { try { el.click(); } catch (_) {} }
+    return true;
+  }
+
   function setSelect(el, wanted) {
     if (!el || el.tagName !== 'SELECT') return false;
     const w = norm(wanted);
@@ -195,6 +274,29 @@
     return { ok: setValue(el, value), el };
   }
 
+  // Localiza selects estruturais da SEFAZ pelas próprias opções.
+  // É mais confiável que depender apenas do HTML antigo dos rótulos.
+  function findSelectWithOptions(requiredOptions = []) {
+    const wanted = requiredOptions.map(norm).filter(Boolean);
+    for (const sel of controls().filter((el) => el.tagName === 'SELECT')) {
+      const opts = Array.from(sel.options || []).map((o) => norm(o.textContent || o.value || ''));
+      const ok = wanted.every((w) => opts.some((t) => t === w || t.includes(w) || w.includes(t)));
+      if (ok) return sel;
+    }
+    return null;
+  }
+
+  function setSelectAndNotify(el, wanted) {
+    if (!el || el.tagName !== 'SELECT') return false;
+    const before = String(el.value || '');
+    const ok = setSelect(el, wanted);
+    if (!ok) return false;
+    // setSelect já dispara input/change/blur quando o valor realmente muda.
+    // Não dispare novamente quando o campo já está correto: na SEFAZ legada,
+    // repetir o change provoca novo postback e faz a tela ficar piscando.
+    return String(el.value || '') !== '' && (before !== String(el.value || '') || isSelectAt(el, wanted));
+  }
+
   function clickByText(texts, exact = true) {
     const wanted = texts.map(norm);
     const els = Array.from(document.querySelectorAll('a,button,input[type=button],input[type=submit]')).filter(isVisible);
@@ -203,6 +305,264 @@
       if (wanted.some((w) => exact ? txt === w : (txt === w || txt.includes(w)))) {
         try { el.click(); return true; } catch (_) {}
       }
+    }
+    return false;
+  }
+
+  function clickAction(texts) {
+    if (clickByText(texts, true)) return true;
+    return clickByText(texts, false);
+  }
+
+  function setCheckpoint(name) {
+    checkpoint = name || '';
+    checkpointAt = checkpoint ? Date.now() : 0;
+    saveWorkflowState();
+  }
+
+  function checkpointElapsed(ms) {
+    loadWorkflowState();
+    return !!checkpointAt && (Date.now() - checkpointAt >= ms);
+  }
+
+  function findTaxSelect(kind) {
+    if (kind === 'pis') {
+      return findField(['tributação pis cst', 'tributacao pis cst'], { tag: 'SELECT' }) ||
+             findSelectByOption(['PIS 07', 'Oper. Isenta da Contribuição', 'Oper Isenta da Contribuicao']);
+    }
+    if (kind === 'cofins') {
+      return findField(['tributação cofins cst', 'tributacao cofins cst'], { tag: 'SELECT' }) ||
+             findSelectByOption(['COFINS 06', 'Alíq. Zero', 'Aliq Zero']);
+    }
+    return null;
+  }
+
+  function setTaxCode(kind, code) {
+    const sel = findTaxSelect(kind);
+    if (!sel) return false;
+    const tries = kind === 'pis'
+      ? [code, 'PIS 07', 'PIS 07 - Oper. Isenta da Contribuição']
+      : [code, 'COFINS 06', 'COFINS 06 - Oper. Tribut. - Alíq. Zero'];
+    for (const value of tries) if (setSelect(sel, value)) return true;
+    return false;
+  }
+
+
+  function clickLegacyTab(texts) {
+    const wanted = texts.map(norm).filter(Boolean);
+    const candidates = Array.from(document.querySelectorAll('a,button,input[type=button],input[type=submit],[onclick],[role=tab]'))
+      .filter((el) => isVisible(el) && !(el.closest && el.closest('#organiza-nfae-box')));
+    for (const el of candidates) {
+      const txt = norm(el.textContent || el.value || el.title || '');
+      if (!txt) continue;
+      if (wanted.some((w) => txt === w || txt.startsWith(w + ' ') || txt.includes(w))) {
+        try {
+          el.focus({preventScroll:true});
+        } catch (_) { try { el.focus(); } catch (_) {} }
+        try { el.click(); return true; } catch (_) {}
+      }
+    }
+    return false;
+  }
+
+  function resultOk(results, name) {
+    const n = norm(name);
+    const item = (results || []).find((x) => norm(x[0]) === n);
+    return !!(item && item[1]);
+  }
+
+  function pauseAtCheckpoint(name, message, detail = '') {
+    workflowActive = true;
+    automationPaused = true;
+    checkpoint = name || '';
+    checkpointAt = Date.now();
+    saveWorkflowState();
+    updateBanner(message, detail);
+    broadcastWorkflow('PAUSE', {checkpoint, message, detail}).catch(() => {});
+    return true;
+  }
+
+  function advanceProductWorkflow(kind, results) {
+    if (!isWorkflowActive() || isPaused()) return false;
+    const now = Date.now();
+
+    // Após validar o item, salva automaticamente. Se a SEFAZ impedir o salvamento,
+    // para depois de alguns segundos para o usuário ver o erro em tela.
+    if (checkpoint === 'produto_validando' && kind.startsWith('produto_')) {
+      if (!checkpointElapsed(850)) { scheduleFill(900); return true; }
+      if (clickAction(['salvar item'])) {
+        setCheckpoint('produto_salvando');
+        lastActionAt = now;
+        updateBanner('Produto validado.', 'Salvando item automaticamente...');
+        scheduleFill(1200);
+        return true;
+      }
+    }
+    if (checkpoint === 'produto_salvando' && kind.startsWith('produto_')) {
+      if (!checkpointElapsed(4500)) { scheduleFill(1000); return true; }
+      pauseAtCheckpoint(
+        'produto_erro',
+        'A SEFAZ não saiu da tela do produto.',
+        'Confira os campos marcados em vermelho. Corrija o que for necessário e clique em Continuar automação.'
+      );
+      return true;
+    }
+
+    if (now - productTabActionAt < 650) return false;
+    let next = null;
+    if (kind === 'produto_dados') {
+      const essentials = ['CFOP', 'Unidade comercial', 'Valor unitário', 'Quantidade', 'Valor produto'];
+      if (essentials.every((x) => resultOk(results, x))) next = ['tributos'];
+    } else if (kind === 'produto_icms') {
+      if (resultOk(results, 'Origem') && resultOk(results, 'ICMS/CSOSN')) next = ['pis'];
+    } else if (kind === 'produto_pis') {
+      if (resultOk(results, 'PIS CST')) next = ['cofins'];
+    } else if (kind === 'produto_cofins') {
+      if (resultOk(results, 'COFINS CST')) next = ['inf adicionais', 'informações adicionais', 'informacoes adicionais'];
+    } else if (kind === 'produto_adicional') {
+      if (resultOk(results, 'Informações adicionais')) {
+        productWorkflowDone = true;
+        if (clickAction(['validar item'])) {
+          setCheckpoint('produto_validando');
+          lastActionAt = now;
+          updateBanner('Produto preenchido.', 'Validando item automaticamente...');
+          scheduleFill(1000);
+          return true;
+        }
+        pauseAtCheckpoint(
+          'produto_validar_manual',
+          'Produto preenchido.',
+          'Não localizei o botão Validar Item. Valide/salve manualmente e clique em Continuar automação.'
+        );
+        return true;
+      }
+      return false;
+    }
+
+    if (next && clickLegacyTab(next)) {
+      productTabActionAt = now;
+      scheduleFill(850);
+      setTimeout(() => scheduleFill(250), 1200);
+      return true;
+    }
+    return false;
+  }
+
+  function productAlreadyListed() {
+    const p = (payload && payload.produto) || {};
+    const txt = bodyText();
+    const code = norm(p.codigo || '');
+    const desc = norm(p.descricao || '');
+    return !!((code && txt.includes(code)) || (desc && txt.includes(desc)));
+  }
+
+  function paymentLooksSaved() {
+    const txt = bodyText();
+    if (txt.includes('nao ha item') || txt.includes('nenhum item')) return false;
+    const p = pagamentoInfo(payload || {});
+    const val = norm(moneyBR(p.valor));
+    const desc = norm(p.descricao || '');
+    return (val && txt.includes(val)) || (desc && txt.includes(desc) && txt.includes('pagamento'));
+  }
+
+  function advanceMainWorkflow(kind, results) {
+    if (!isWorkflowActive() || isPaused()) return false;
+    const now = Date.now();
+    if (now - lastActionAt < 650) return false;
+
+    if (kind === 'nfe') {
+      const essentials = ['Natureza da operação', 'Consumidor final', 'Finalidade', 'Tipo atendimento', 'Intermediador'];
+      if (essentials.every((x) => resultOk(results, x))) {
+        if (clickLegacyTab(['destinatário/remetente', 'destinatario/remetente', 'destinatário', 'destinatario'])) {
+          lastActionAt = now;
+          updateBanner('Natureza confirmada.', 'Abrindo Destinatário/Remetente automaticamente...');
+          scheduleFill(900);
+          return true;
+        }
+      }
+    }
+
+    if (kind === 'destinatario') {
+      const essentials = ['Tipo documento', 'Nome/Razão Social', 'Logradouro', 'Número', 'Bairro', 'CEP', 'UF', 'Município'];
+      if (essentials.every((x) => resultOk(results, x))) {
+        if (clickLegacyTab(['produtos e serviços', 'produtos e servicos'])) {
+          lastActionAt = now;
+          updateBanner('Destinatário preenchido.', 'Abrindo Produtos e Serviços...');
+          scheduleFill(850);
+          return true;
+        }
+      }
+    }
+
+    if (kind === 'produtos_lista') {
+      if (checkpoint === 'produto_salvando' || productAlreadyListed()) {
+        setCheckpoint('');
+        if (clickLegacyTab(['transporte'])) {
+          lastActionAt = now;
+          updateBanner('Produto salvo.', 'Seguindo para Transporte...');
+          scheduleFill(850);
+          return true;
+        }
+      }
+    }
+
+    if (kind === 'transporte' && resultOk(results, 'Modalidade frete')) {
+      setCheckpoint('pagamento_abrir');
+      paymentNewOpened = false;
+      if (clickLegacyTab(['pagamento'])) {
+        lastActionAt = now;
+        updateBanner('Transporte preenchido.', 'Abrindo Pagamento...');
+        scheduleFill(850);
+        return true;
+      }
+    }
+
+    if (kind === 'pagamento_detalhe') {
+      const essentials = ['Meio de pagamento', 'Valor do pagamento', 'Forma de pagamento'];
+      if (essentials.every((x) => resultOk(results, x))) {
+        if (checkpoint !== 'pagamento_salvando') {
+          if (clickAction(['salvar', 'salvar item'])) {
+            setCheckpoint('pagamento_salvando');
+            lastActionAt = now;
+            updateBanner('Pagamento preenchido.', 'Salvando pagamento automaticamente...');
+            scheduleFill(1200);
+            return true;
+          }
+          pauseAtCheckpoint(
+            'pagamento_salvar_manual',
+            'Pagamento preenchido.',
+            'Não localizei o botão Salvar. Salve manualmente e clique em Continuar automação.'
+          );
+          return true;
+        }
+        if (checkpoint === 'pagamento_salvando' && checkpointElapsed(4500)) {
+          pauseAtCheckpoint(
+            'pagamento_erro',
+            'A SEFAZ não saiu da tela do pagamento.',
+            'Confira os campos obrigatórios. Corrija o que for necessário e clique em Continuar automação.'
+          );
+          return true;
+        }
+      }
+    }
+
+    if (kind === 'pagamento_lista' && (checkpoint === 'pagamento_salvando' || paymentLooksSaved())) {
+      setCheckpoint('');
+      if (clickLegacyTab(['observação', 'observacao'])) {
+        lastActionAt = now;
+        updateBanner('Pagamento salvo.', 'Abrindo Observação...');
+        scheduleFill(850);
+        return true;
+      }
+    }
+
+    if (kind === 'observacao' && resultOk(results, 'Informações de interesse do Fisco')) {
+      pauseAtCheckpoint(
+        'revisao_final',
+        'Preenchimento automático concluído.',
+        'Revise a nota. A emissão final continua sob seu controle: clique em Validar/Salvar/Emitir somente quando estiver tudo correto.'
+      );
+      return true;
     }
     return false;
   }
@@ -237,12 +597,23 @@
     // Janela interna de pagamento.
     if (hasVisibleLabel(['meio de pagamento'], { tag: 'SELECT' }) && hasVisibleLabel(['valor do pagamento'], { notTypes: ['checkbox', 'radio'] })) return 'pagamento_detalhe';
 
+    // Lista principal de Produtos e Serviços. O portal antigo nem sempre
+    // expõe a palavra "linhas"; usa também os cabeçalhos reais da tabela.
+    if (txt.includes('produtos e servicos') && txt.includes('ncm') && txt.includes('cfop') &&
+        txt.includes('cst icms') && (txt.includes('v unit') || txt.includes('valor unit'))) return 'produtos_lista';
+
     // Abas principais.
     if (txt.includes('tipo de documento') && txt.includes('razao social nome')) return 'destinatario';
-    if (txt.includes('tipo de operacao') && txt.includes('natureza da operacao')) return 'nfe';
+    // A tela principal da NFA-e pode estar dentro de um frame e o texto dos
+    // rótulos nem sempre é exposto de forma estável. Detecta também pelos
+    // selects estruturais da própria SEFAZ.
+    const selTipoOp = findSelectWithOptions(['Entrada', 'Saída']);
+    const selDestino = findSelectWithOptions(['Interna', 'Interestadual']);
+    if ((selTipoOp && selDestino) || (txt.includes('tipo de operacao') && txt.includes('natureza da operacao'))) return 'nfe';
     if (txt.includes('informacoes adicionais de interesse do fisco')) return 'observacao';
     if (hash.includes('produtos') || (txt.includes('produtos e servicos') && txt.includes('linhas'))) return 'produtos_lista';
-    if (hash.includes('pagamento') || (txt.includes('pagamentos') && txt.includes('linhas'))) return 'pagamento_lista';
+    const hasNovoPagamento = Array.from(document.querySelectorAll('a,button,input[type=button],input[type=submit]')).filter(isVisible).some((el) => ['novo','incluir'].includes(norm(el.textContent || el.value || el.title || '')));
+    if (hash.includes('pagamento') || (txt.includes('pagamentos') && txt.includes('linhas')) || (txt.includes('pagamento') && hasNovoPagamento)) return 'pagamento_lista';
     if (txt.includes('total nota fiscal') || txt.includes('base de calculo icms')) return 'total';
     if (txt.includes('transporte')) return 'transporte';
     if (txt.includes('referencias')) return 'referencias';
@@ -250,18 +621,54 @@
     return 'outro';
   }
 
+  function selectedText(sel) {
+    if (!sel || sel.tagName !== 'SELECT') return '';
+    const opt = sel.options && sel.options[sel.selectedIndex];
+    return norm(opt ? (opt.textContent || opt.value) : sel.value);
+  }
+
+  function isSelectAt(sel, wanted) {
+    const cur = selectedText(sel);
+    const w = norm(wanted);
+    return !!cur && (cur === w || cur.includes(w) || w.includes(cur));
+  }
+
+  function findNaturezaSelect() {
+    return findField(['natureza da operação', 'natureza da operacao'], { tag: 'SELECT' }) ||
+           findSelectByOption(['Venda de Mercadoria']);
+  }
+
   function fillNfe(d) {
-    const op = d.operacao || {};
-    const destUF = String((d.destinatario || {}).uf || '').trim().toUpperCase();
     const results = [];
-    results.push(['Tipo de operação', setByLabel(['tipo de operação entrada saída', 'tipo de operacao entrada saida'], op.tipo || 'Saída', { tag: 'SELECT', reject: ['destino'] }).ok]);
-    results.push(['Destino', setByLabel(['tipo de operação destino', 'tipo de operacao destino'], op.destino || (destUF === 'RJ' ? 'Interna' : 'Interestadual'), { tag: 'SELECT' }).ok]);
-    results.push(['Natureza', setByLabel(['natureza da operação', 'natureza da operacao'], op.natureza || 'Venda de Mercadoria', { tag: 'SELECT' }).ok]);
+
+    // A primeira etapa da NF-e fica manual. A extensão NÃO altera:
+    // - Tipo de operação
+    // - Tipo de operação (Destino)
+    // - Natureza da operação
+    // Ela apenas aguarda a Natureza já estar em "Venda de Mercadoria".
+    // Assim evitamos os postbacks/loops da tela antiga da SEFAZ.
+    const natureza = findNaturezaSelect();
+    const naturezaOk = !!(natureza && isSelectAt(natureza, 'Venda de Mercadoria'));
+    results.push(['Natureza da operação', naturezaOk]);
+
+    if (!naturezaOk) {
+      updateBanner(
+        'Aguardando Natureza da operação.',
+        'Preencha manualmente "Venda de Mercadoria". Assim que estiver selecionado, a automação continua sozinha.'
+      );
+      return results;
+    }
+
+    // Natureza confirmada: daqui em diante a automação assume o fluxo.
+    workflowActive = true;
+    automationPaused = false;
+    checkpoint = '';
+    saveWorkflowState();
+
     results.push(['Consumidor final', setByLabel(['consumidor final'], '1 - Sim', { tag: 'SELECT' }).ok]);
     results.push(['Finalidade', setByLabel(['finalidade de emissão', 'finalidade de emissao'], '1 - NF-e normal', { tag: 'SELECT' }).ok]);
     results.push(['Tipo atendimento', setByLabel(['tipo atendimento'], '2 - Operação NÃO Presencial, pela INTERNET', { tag: 'SELECT' }).ok]);
     results.push(['Intermediador', setByLabel(['ind intermediador marketplace', 'intermediador marketplace'], '0 - Operação sem intermediador', { tag: 'SELECT' }).ok]);
-    // Data/hora da emissão e saída são responsabilidade da SEFAZ.
     return results;
   }
 
@@ -280,6 +687,17 @@
     const results = [];
 
     const tipoSelect = findField(['tipo de documento'], { tag: 'SELECT' });
+
+    // A tela legada do Destinatário/Remetente só inicializa corretamente
+    // depois que o primeiro campo recebe foco/clique. O usuário confirmou que,
+    // ao clicar manualmente em "Tipo de documento", o restante passa a ser
+    // preenchido. Reproduz esse gesto uma única vez e só depois continua.
+    if (tipoSelect && !destinatarioActivated) {
+      destinatarioActivated = true;
+      activateLegacyControl(tipoSelect);
+      scheduleFill(280);
+      return [['Ativação da tela do destinatário', true]];
+    }
     const beforeTipo = tipoSelect ? norm(tipoSelect.options[tipoSelect.selectedIndex]?.textContent || tipoSelect.value) : '';
     const tipoOk = tipoSelect ? setSelect(tipoSelect, tipo) : false;
     results.push(['Tipo documento', tipoOk]);
@@ -288,7 +706,8 @@
 
     const docLabels = tipo === 'CPF' ? ['cpf'] : ['cnpj'];
     results.push([tipo || 'Documento', setByLabel(docLabels, doc, { notTypes: ['checkbox', 'radio'] }).ok]);
-    results.push(['Nome/Razão Social', setByLabel(['razão social nome', 'razao social nome'], x.nome, { notTypes: ['checkbox', 'radio'] }).ok]);
+    const nomeFiscal = tipo === 'CNPJ' ? (x.razao_social || '') : (x.nome || '');
+    results.push(['Nome/Razão Social', setByLabel(['razão social nome', 'razao social nome'], nomeFiscal, { notTypes: ['checkbox', 'radio'] }).ok]);
 
     const ie = String(x.inscricao_estadual || '').trim();
     const semIe = x.sem_inscricao_estadual === true || !ie || ie === '-';
@@ -296,7 +715,10 @@
     if (semIeBox) setValue(semIeBox, semIe);
     results.push(['Sem IE', !!semIeBox]);
     if (!semIe) {
-      results.push(['Inscrição Estadual', setValue(findIeInput(), ie)]);
+      const ieOk = setValue(findIeInput(), ie);
+      results.push(['Inscrição Estadual', ieOk]);
+      const contrib = findSelectByOption(['contribuinte icms', 'contribuinte']);
+      if (contrib) setSelect(contrib, 'CONTRIBUINTE');
     } else {
       const contrib = findSelectByOption(['não contribuinte', 'nao contribuinte']);
       results.push(['Não contribuinte', contrib ? setSelect(contrib, 'NÃO CONTRIBUINTE') : true]);
@@ -331,8 +753,46 @@
     const results = [];
     results.push(['Código', setByLabel(['código', 'codigo'], p.codigo, { notTypes: ['checkbox', 'radio'], reject: ['cest'] }).ok]);
     results.push(['Descrição', setByLabel(['descrição', 'descricao'], p.descricao, { notTypes: ['checkbox', 'radio'] }).ok]);
-    results.push(['Grupo CFOP', setByLabel(['grupo cfop'], p.grupo_cfop || 'Venda de Mercadoria', { tag: 'SELECT' }).ok]);
-    results.push(['CFOP', setByLabel(['cfop'], p.cfop, { tag: 'SELECT', reject: ['grupo'] }).ok]);
+
+    // Grupo CFOP precisa ser definido antes do CFOP. A SEFAZ libera/recarrega
+    // as opções do CFOP somente depois que o grupo é processado.
+    const grupo = findField(['grupo cfop'], { tag: 'SELECT' });
+    const grupoOk = grupo ? setSelect(grupo, p.grupo_cfop || 'Venda de Mercadoria') : false;
+    results.push(['Grupo CFOP', grupoOk]);
+
+    let cfop = findField(['cfop'], { tag: 'SELECT', reject: ['grupo'] });
+    if (!cfop) cfop = findSelectByOption([p.cfop, '5102', '6102']);
+
+    // Como os três campos iniciais da NF-e ficaram manuais, a própria SEFAZ
+    // passa a ser a fonte de verdade para o CFOP disponível nesta nota. Ex.:
+    // se a tela foi configurada como Interna, ela oferece 5102; se for
+    // Interestadual, normalmente oferece 6102. Primeiro tenta o CFOP vindo do
+    // Organiza e, se ele não existir nas opções atuais, escolhe somente o CFOP
+    // de venda de mercadoria (5102/6102) que a SEFAZ realmente disponibilizou.
+    let cfopOk = false;
+    if (cfop) {
+      try { cfop.focus({preventScroll: true}); } catch (_) { try { cfop.focus(); } catch (_) {} }
+      const available = Array.from(cfop.options || []);
+      const hasCode = (code) => available.some((o) => {
+        const t = norm(`${o.value || ''} ${o.textContent || ''}`);
+        return t === norm(code) || t.startsWith(norm(code) + ' ') || t.includes(norm(code) + ' venda');
+      });
+      const desired = String(p.cfop || '').trim();
+      const candidates = [];
+      if (desired) candidates.push(desired);
+      if (!candidates.includes('5102')) candidates.push('5102');
+      if (!candidates.includes('6102')) candidates.push('6102');
+      const usable = candidates.find(hasCode);
+      if (usable) cfopOk = setSelect(cfop, usable);
+    }
+    results.push(['CFOP', cfopOk]);
+    if (grupoOk && !cfopOk && productCfopRetries < 8) {
+      productCfopRetries += 1;
+      scheduleFill(850);
+    } else if (cfopOk) {
+      productCfopRetries = 0;
+    }
+
     results.push(['NCM', setByLabel(['ncm'], p.ncm || '95045000', { notTypes: ['checkbox', 'radio'] }).ok]);
     results.push(['EAN', setByLabel(['ean'], p.ean || 'SEM GTIN', { notTypes: ['checkbox', 'radio'], reject: ['tributavel', 'tributável'] }).ok]);
     results.push(['Unidade comercial', setByLabel(['unid comercial', 'unidade comercial'], p.unidade || 'UN', { tag: 'SELECT' }).ok]);
@@ -371,12 +831,12 @@
 
   function fillProdutoPis(d) {
     const p = d.produto || {};
-    return [['PIS CST', setByLabel(['tributação pis cst', 'tributacao pis cst'], p.pis_cst || '07', { tag: 'SELECT' }).ok]];
+    return [['PIS CST', setTaxCode('pis', p.pis_cst || '07')]];
   }
 
   function fillProdutoCofins(d) {
     const p = d.produto || {};
-    return [['COFINS CST', setByLabel(['tributação cofins cst', 'tributacao cofins cst'], p.cofins_cst || '06', { tag: 'SELECT' }).ok]];
+    return [['COFINS CST', setTaxCode('cofins', p.cofins_cst || '06')]];
   }
 
   function fillProdutoAdicional(d) {
@@ -399,6 +859,17 @@
     else if (n.includes('boleto')) { descricao = 'Boleto'; meio = ['15', 'Boleto']; }
     const valor = Number(explicit.valor || first.valor || (d.totais || {}).recebido || (d.totais || {}).venda || 0);
     return { descricao, meio, valor };
+  }
+
+  function fillTransporte(d) {
+    const results = [];
+    // Padrão definido pelo usuário para as vendas de equipamentos: 9 - Sem frete.
+    // Não preenche transportador, endereço, veículo ou volumes.
+    let modalidade = findField(['modalidade frete', 'modalidade de frete'], { tag: 'SELECT' });
+    if (!modalidade) modalidade = findSelectByOption(['9 - Sem frete', 'Sem frete']);
+    if (modalidade) activateLegacyControl(modalidade);
+    results.push(['Modalidade frete', modalidade ? setSelect(modalidade, '9 - Sem frete') : false]);
+    return results;
   }
 
   function fillPagamento(d) {
@@ -425,11 +896,31 @@
     const now = Date.now();
     if (now - lastActionAt < 1600) return false;
     const txt = bodyText();
-    if (kind === 'produtos_lista' && txt.includes('nao ha item para ser listado')) {
-      if (clickByText(['incluir'], true)) { lastActionAt = now; return true; }
+    if (kind === 'produtos_lista') {
+      const p = (payload && payload.produto) || {};
+      const code = norm(p.codigo || '');
+      const desc = norm(p.descricao || '');
+      const alreadyListed = (code && txt.includes(code)) || (desc && txt.includes(desc));
+      const looksEmpty = txt.includes('nao ha item') || txt.includes('nenhum item') || txt.includes('nenhum produto');
+      if (!alreadyListed && !productIncludeOpened && (looksEmpty || txt.includes('produtos e servicos'))) {
+        if (clickByText(['incluir'], true)) {
+          productIncludeOpened = true;
+          lastActionAt = now;
+          return true;
+        }
+      }
     }
-    if (kind === 'pagamento_lista' && txt.includes('nao ha item para ser listado')) {
-      if (clickByText(['incluir'], true)) { lastActionAt = now; return true; }
+    if (kind === 'pagamento_lista') {
+      const precisaAbrir = checkpoint === 'pagamento_abrir' || !paymentLooksSaved();
+      if (precisaAbrir && !paymentNewOpened) {
+        if (clickAction(['novo', 'incluir'])) {
+          paymentNewOpened = true;
+          setCheckpoint('pagamento_preencher');
+          lastActionAt = now;
+          scheduleFill(900);
+          return true;
+        }
+      }
     }
     return false;
   }
@@ -448,24 +939,50 @@
       box = document.createElement('div');
       box.id = 'organiza-nfae-box';
       box.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;background:#fff;border:2px solid #2563eb;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.22);padding:10px 12px;max-width:430px;font:13px Arial;color:#111';
-      box.innerHTML = '<div style="font-weight:700;margin-bottom:6px">Organiza → NFA-e</div><div id="organiza-nfae-msg" style="margin-bottom:4px"></div><div id="organiza-nfae-detail" style="font-size:11px;color:#555;margin-bottom:8px"></div><button id="organiza-nfae-fill" style="margin-right:6px;padding:6px 9px;cursor:pointer">Preencher agora</button><button id="organiza-nfae-clear" style="padding:6px 9px;cursor:pointer">Limpar dados</button>';
+      box.innerHTML = '<div style="font-weight:700;margin-bottom:6px">Organiza → NFA-e</div><div id="organiza-nfae-msg" style="margin-bottom:4px"></div><div id="organiza-nfae-detail" style="font-size:11px;color:#555;margin-bottom:8px"></div><button id="organiza-nfae-fill" style="margin-right:6px;padding:6px 9px;cursor:pointer">Iniciar automático</button><button id="organiza-nfae-pause" style="margin-right:6px;padding:6px 9px;cursor:pointer">Pausar</button><button id="organiza-nfae-clear" style="padding:6px 9px;cursor:pointer">Limpar dados</button>';
       document.documentElement.appendChild(box);
-      box.querySelector('#organiza-nfae-fill').addEventListener('click', () => runFill(true));
+      box.querySelector('#organiza-nfae-fill').addEventListener('click', async () => {
+        workflowActive = true;
+        automationPaused = false;
+        checkpoint = '';
+        saveWorkflowState();
+        updateBanner('Automação iniciada.', 'Ela seguirá pelas telas até um ponto de revisão. Você pode pausar a qualquer momento.');
+        await broadcastWorkflow('START');
+        runFill(true);
+      });
+      box.querySelector('#organiza-nfae-pause').addEventListener('click', async () => {
+        loadWorkflowState();
+        automationPaused = !automationPaused;
+        if (!automationPaused) workflowActive = true;
+        saveWorkflowState();
+        await broadcastWorkflow(automationPaused ? 'PAUSE' : 'RESUME', {checkpoint});
+        updateBanner(automationPaused ? 'Automação pausada.' : 'Automação retomada.', automationPaused ? 'Você está livre para alterar qualquer campo manualmente.' : 'Continuando a partir da tela atual.');
+        if (!automationPaused) runFill(true);
+      });
       box.querySelector('#organiza-nfae-clear').addEventListener('click', async () => {
-        await chrome.storage.local.remove([STORAGE_KEY, SAVED_AT_KEY]);
+        const answer = await runtimeMessage({type:'NFAE_CLEAR_PAYLOAD'});
         payload = null;
-        box.remove();
+        if (answer && answer.ok) box.remove();
+        else updateBanner('Não foi possível limpar os dados.', 'Atualize esta aba da SEFAZ e tente novamente.');
       });
     }
-    const m = box.querySelector('#organiza-nfae-msg'); if (m) m.textContent = msg;
-    const det = box.querySelector('#organiza-nfae-detail'); if (det) det.textContent = detail || '';
+    const m = box.querySelector('#organiza-nfae-msg');
+    if (m && m.textContent !== String(msg || '')) m.textContent = String(msg || '');
+    const det = box.querySelector('#organiza-nfae-detail');
+    const detailText = String(detail || '');
+    if (det && det.textContent !== detailText) det.textContent = detailText;
+    const pauseBtn = box.querySelector('#organiza-nfae-pause');
+    if (pauseBtn) {
+      loadWorkflowState();
+      pauseBtn.textContent = automationPaused ? 'Continuar automação' : 'Pausar';
+      pauseBtn.style.fontWeight = automationPaused ? '700' : '400';
+    }
   }
 
   function noTouchMessage(kind) {
     const messages = {
       emitente: 'Emitente é a Karaokê RJ e não será alterado pelo Organiza.',
       total: 'Aba Total: cálculo deixado para a SEFAZ.',
-      transporte: 'Aba Transporte: permanece vazia.',
       referencias: 'Aba Referências: permanece vazia.',
       cobranca: 'Aba Cobrança: permanece vazia.'
     };
@@ -473,6 +990,15 @@
   }
 
   function runFill(force = false) {
+    loadWorkflowState();
+    if (automationPaused) {
+      updateBanner('Automação pausada.', checkpoint ? 'Ponto de revisão: ' + checkpoint + '. Faça as alterações que quiser e clique em Continuar automação.' : 'Faça as alterações que quiser e clique em Continuar automação.');
+      return;
+    }
+    if (!extensionAlive()) {
+      updateBanner('Extensão foi atualizada/recarregada.', 'Pressione Ctrl+F5 nesta aba da SEFAZ. Depois volte ao Organiza e clique em Preencher NFA-e automaticamente.');
+      return;
+    }
     if (!payload || filling) return;
     const now = Date.now();
     if (!force && now - lastRun < 350) return;
@@ -494,14 +1020,17 @@
       else if (kind === 'produto_adicional') res = fillProdutoAdicional(payload);
       else if (kind === 'pagamento_detalhe') res = fillPagamento(payload);
       else if (kind === 'observacao') res = fillObservacao(payload);
-      else if (['emitente', 'total', 'transporte', 'referencias', 'cobranca'].includes(kind)) {
+      else if (kind === 'transporte') res = fillTransporte(payload);
+      else if (['emitente', 'total', 'referencias', 'cobranca'].includes(kind)) {
         updateBanner(noTouchMessage(kind), 'Nenhum campo desta tela será alterado.');
         return;
       } else if (kind === 'produtos_lista') {
-        updateBanner('Produtos e Serviços', bodyText().includes('nao ha item para ser listado') ? 'Clique em Incluir (ou aguarde a abertura automática).' : 'Produto já listado; não será duplicado.');
+        updateBanner('Produtos e Serviços', bodyText().includes('nao ha item para ser listado') ? 'Abrindo Incluir automaticamente...' : 'Produto já listado; seguindo o fluxo.');
+        advanceMainWorkflow(kind, []);
         return;
       } else if (kind === 'pagamento_lista') {
-        updateBanner('Pagamento', bodyText().includes('nao ha item para ser listado') ? 'Clique em Incluir (ou aguarde a abertura automática).' : 'Pagamento já listado; não será duplicado.');
+        updateBanner('Pagamento', bodyText().includes('nao ha item para ser listado') ? 'Abrindo Incluir automaticamente...' : 'Pagamento já listado; seguindo o fluxo.');
+        advanceMainWorkflow(kind, []);
         return;
       } else {
         updateBanner(noTouchMessage(kind));
@@ -512,6 +1041,7 @@
       if (sum) {
         const detail = sum.missing.length ? 'Não localizados nesta tela: ' + sum.missing.join(', ') : 'Todos os campos previstos desta tela foram localizados.';
         updateBanner(`Preenchimento: ${sum.ok}/${sum.total} campos`, detail);
+        if (!advanceProductWorkflow(kind, res)) advanceMainWorkflow(kind, res);
       }
     } catch (e) {
       updateBanner('Dados carregados, mas houve falha em alguns campos.', String(e && e.message || e));
@@ -520,27 +1050,122 @@
     }
   }
 
-  async function loadPayload() {
-    const obj = await chrome.storage.local.get([STORAGE_KEY, SAVED_AT_KEY]);
-    const saved = obj[SAVED_AT_KEY] || 0;
-    if (!obj[STORAGE_KEY] || Date.now() - saved > MAX_AGE_MS) {
-      payload = null;
-      return;
-    }
-    payload = obj[STORAGE_KEY];
-    updateBanner('Dados do Organiza carregados.');
-    runFill(true);
-    let tries = 0;
-    const timer = setInterval(() => {
-      if (!payload || tries++ > 25) return clearInterval(timer);
-      runFill(true);
-    }, 800);
+  function fingerprint(data) {
+    try { return JSON.stringify(data || {}); } catch (_) { return String(Date.now()); }
   }
 
-  chrome.runtime.onMessage.addListener((msg) => { if (msg && msg.type === 'NFAE_PREENCHER') loadPayload(); });
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && (changes[STORAGE_KEY] || changes.organiza_nfae_trigger)) loadPayload();
-  });
-  new MutationObserver(() => { if (payload) runFill(false); }).observe(document.documentElement, { subtree: true, childList: true });
-  loadPayload();
+  function scheduleFill(delay = 700) {
+    if (fillRetryTimer) clearTimeout(fillRetryTimer);
+    fillRetryTimer = setTimeout(() => {
+      fillRetryTimer = null;
+      if (payload && !isPaused()) runFill(true);
+    }, delay);
+  }
+
+  function acceptPayload(data) {
+    if (!data) return;
+    const fp = fingerprint(data);
+    const changed = fp !== payloadFingerprint;
+    payload = data;
+    if (!changed) return;
+    payloadFingerprint = fp;
+    productCfopRetries = 0;
+    productIncludeOpened = false;
+    destinatarioActivated = false;
+    productWorkflowDone = false;
+    productTabActionAt = 0;
+    paymentNewOpened = false;
+    checkpointAt = 0;
+
+    // Um novo pedido vindo do Organiza já inicia o fluxo. O botão Pausar
+    // continua disponível e, se o usuário pausar, consultas repetidas do mesmo
+    // payload não reativam a automação.
+    workflowActive = true;
+    automationPaused = false;
+    checkpoint = '';
+    saveWorkflowState();
+    updateBanner('Dados do Organiza carregados.', 'Aguardando Natureza da operação = Venda de Mercadoria. Depois disso o fluxo continua automaticamente.');
+    runFill(true);
+    scheduleFill(1200);
+  }
+
+  async function requestPayloadOnce() {
+    const answer = await runtimeMessage({type:'NFAE_GET_PAYLOAD'});
+    if (answer && answer.payload) acceptPayload(answer.payload);
+  }
+
+  // A página da SEFAZ não usa chrome.storage. Assim, recarregar/atualizar a extensão
+  // não deixa listeners de storage inválidos presos nesta aba.
+  if (extensionAlive()) {
+    try {
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (!msg || !msg.type) return;
+        if (msg.type === 'NFAE_PAYLOAD' && msg.payload) acceptPayload(msg.payload);
+        if (msg.type === 'NFAE_PREENCHER') requestPayloadOnce().catch(() => {});
+        if (msg.type === 'NFAE_WORKFLOW_COMMAND') {
+          if (msg.command === 'START') { workflowActive = true; automationPaused = false; checkpoint = ''; checkpointAt = 0; }
+          else if (msg.command === 'PAUSE') { workflowActive = true; automationPaused = true; checkpoint = msg.checkpoint || checkpoint || ''; }
+          else if (msg.command === 'RESUME') { workflowActive = true; automationPaused = false; checkpoint = ''; checkpointAt = 0; }
+          else if (msg.command === 'STOP') { workflowActive = false; automationPaused = false; checkpoint = ''; checkpointAt = 0; }
+          saveWorkflowState();
+          if (msg.message) updateBanner(msg.message, msg.detail || '');
+          if ((msg.command === 'START' || msg.command === 'RESUME') && payload) setTimeout(() => runFill(true), 120);
+          else updateBanner(automationPaused ? 'Automação pausada.' : 'Dados do Organiza carregados.');
+        }
+      });
+    } catch (_) {}
+  }
+
+
+  // Algumas abas do emissor antigo apenas alternam visibilidade e não mudam
+  // a árvore DOM. Um clique real do usuário em uma aba deve disparar uma nova
+  // leitura da tela, sem reagir aos cliques automáticos da própria extensão.
+  document.addEventListener('click', (ev) => {
+    if (!payload || !ev.isTrusted || isPaused()) return;
+    const el = ev.target && (ev.target.closest ? ev.target.closest('a,button,input,[onclick],[role=tab]') : null);
+    if (!el || (el.closest && el.closest('#organiza-nfae-box'))) return;
+    scheduleFill(420);
+  }, true);
+
+  let mutationTimer = null;
+  new MutationObserver((mutations) => {
+    if (!payload || isPaused()) return;
+
+    // Ignora alterações feitas pelo próprio painel da extensão. Antes, cada
+    // atualização do texto do painel acionava o observer novamente e criava
+    // um loop infinito de preenchimento/pisca-pisca.
+    const relevant = mutations.some((m) => {
+      const target = m && m.target;
+      if (!target) return false;
+      const el = target.nodeType === 1 ? target : target.parentElement;
+      if (el && el.closest && el.closest('#organiza-nfae-box')) return false;
+      return true;
+    });
+    if (!relevant) return;
+
+    if (mutationTimer) clearTimeout(mutationTimer);
+    mutationTimer = setTimeout(() => {
+      mutationTimer = null;
+      runFill(false);
+    }, 750);
+  }).observe(document.documentElement, { subtree: true, childList: true });
+
+  loadWorkflowState();
+  requestPayloadOnce().catch(() => {});
+
+  // Consulta leve apenas para receber um payload novo quando o usuário volta do
+  // Organiza. Não chama preenchimento em cascata se os dados forem os mesmos.
+  let payloadPolls = 0;
+  payloadPollTimer = setInterval(async () => {
+    if (!extensionAlive() || payloadPolls++ > 120) {
+      clearInterval(payloadPollTimer);
+      payloadPollTimer = null;
+      return;
+    }
+    const answer = await runtimeMessage({type:'NFAE_GET_PAYLOAD'});
+    if (answer && answer.payload) {
+      const fp = fingerprint(answer.payload);
+      if (fp !== payloadFingerprint) acceptPayload(answer.payload);
+    }
+  }, 2000);
 })();

@@ -18,6 +18,7 @@
         <label>DDI *<input name="ddi" class="js-ddi" inputmode="numeric" maxlength="5" required value="{{ cliente.ddi if cliente and cliente.ddi else '55' }}"></label>
         <label>WhatsApp *<input name="telefone" class="js-telefone-internacional" inputmode="tel" maxlength="20" required placeholder="(21) 97422-5034" value="{{ cliente.telefone if cliente and cliente.telefone else '' }}"></label>
         <label>Empresa<input name="empresa" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}"></label>
+        <label>Razão social (CNPJ)<input name="razao_social" value="{{ cliente.razao_social if cliente and cliente.razao_social else '' }}"></label>
         <label>CPF/CNPJ<input name="documento" value="{{ cliente.documento if cliente and cliente.documento else '' }}"></label><label>Inscrição estadual<input name="inscricao_estadual" value="{{ cliente.inscricao_estadual if cliente and cliente.inscricao_estadual else '' }}"></label>
         <label>E-mail<input type="email" name="email" value="{{ cliente.email if cliente and cliente.email else '' }}"></label>
       </div>

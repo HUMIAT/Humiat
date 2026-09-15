@@ -45,7 +45,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.5"
+ORGANIZA_VERSION = "1.1.6"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 
 # Padrão fiscal usado na preparação da NFA-e.
@@ -353,6 +353,7 @@ class Cliente(Base):
     pais = Column(String(2), nullable=False, default="BR")
     ddi = Column(String(5), nullable=False, default="55")
     empresa = Column(String(140), nullable=True)
+    razao_social = Column(String(180), nullable=True)
     documento = Column(String(30), nullable=True)
     cep = Column(String(20), nullable=True)
     cidade = Column(String(120), nullable=True)
@@ -842,6 +843,8 @@ def iniciar_banco():
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
+            if "razao_social" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN razao_social VARCHAR(180)"))
             if "inscricao_estadual" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN inscricao_estadual VARCHAR(30)"))
             if "municipio_ibge" not in existentes_clientes:
@@ -1283,6 +1286,7 @@ def preencher_cliente(cliente: Cliente, form: dict):
         form.get("telefone") or "",
     )
     cliente.empresa = (form.get("empresa") or "").strip() or None
+    cliente.razao_social = (form.get("razao_social") or "").strip() or None
     cliente.documento = (form.get("documento") or "").strip() or None
     cliente.inscricao_estadual = (form.get("inscricao_estadual") or "").strip() or None
     cliente.cep = (form.get("cep") or "").strip() or None
@@ -1551,6 +1555,7 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         },
         "destinatario": {
             "nome": cliente.nome or "",
+            "razao_social": (cliente.razao_social or cliente.empresa or "") if nfae_tipo_documento(cliente.documento) == "CNPJ" else "",
             "cpf_cnpj": cliente.documento or "",
             "tipo_documento": nfae_tipo_documento(cliente.documento),
             "inscricao_estadual": cliente.inscricao_estadual or "",
@@ -1620,6 +1625,8 @@ def nfae_campos_faltantes(dados: dict) -> list[str]:
     ]:
         if not str(d.get(chave) or "").strip():
             faltantes.append(rotulo)
+    if d.get("tipo_documento") == "CNPJ" and not str(d.get("razao_social") or "").strip():
+        faltantes.append("razão social")
     if not p.get("codigo"):
         faltantes.append("código fiscal do produto")
     if not p.get("descricao"):
@@ -3030,7 +3037,7 @@ def dados_nota_csv(equipamento_id: int, usuario: Usuario = Depends(usuario_logad
     d, p, t = dados["destinatario"], dados["produto"], dados["totais"]
     out = io.StringIO()
     campos = [
-        "nome","cpf_cnpj","tipo_documento","inscricao_estadual","sem_inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","municipio_ibge","uf",
+        "nome","razao_social","cpf_cnpj","tipo_documento","inscricao_estadual","sem_inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","municipio_ibge","uf",
         "codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total","atualizacao","informacao_adicional",
         "observacao_fiscal","pagamentos","valor_recebido","saldo","codigo_tecnico","data_compra"
     ]

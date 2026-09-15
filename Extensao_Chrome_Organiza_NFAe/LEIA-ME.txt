@@ -1,23 +1,18 @@
-ORGANIZA NFA-e — EXTENSÃO CHROME 1.0.2
+Organiza NFA-e — extensão Chrome 1.0.18
 
-Fluxo corrigido e validado por mapeamento visual das telas da NFA-e:
-- Emitente: nunca é alterado.
-- NF-e: Saída, Interna/Interestadual, Venda de Mercadoria, Consumidor Final, NF-e normal, operação não presencial e sem intermediador.
-- Destinatário: separa CPF e CNPJ, trata Inscrição Estadual / Não Contribuinte e preenche endereço. UF é definida antes do município.
-- Produtos e Serviços: abre Incluir quando a lista está vazia e preenche somente a janela do item.
-- Tributos: ICMS origem 0 + CSOSN 400; PIS 07; COFINS 06. Demais valores ficam para a SEFAZ.
-- Informações adicionais do item: usa equipamento + atualização enviados pelo Organiza.
-- Total: não altera (SEFAZ calcula).
-- Transporte, Referências e Cobrança: não altera.
-- Pagamento: abre Incluir quando vazio e preenche a janela separada de pagamento.
-- Observação: preenche somente "Informações adicionais de interesse do Fisco" com equipamento + atualização.
+Fluxo automático atualizado:
+- Aguarda Natureza da operação = Venda de Mercadoria na primeira aba.
+- Preenche Destinatário/Remetente.
+- Para CNPJ usa Razão Social do Organiza (com fallback para Empresa/Nome).
+- Preenche Inscrição Estadual quando cadastrada; sem IE, marca Sem Inscrição Estadual.
+- Abre Produtos e Serviços > Incluir.
+- Preenche Dados, ICMS, PIS, COFINS e Informações Adicionais.
+- Corrige transição PIS -> COFINS.
+- Clica em Validar Item e Salvar Item automaticamente.
+- Após salvar o produto, segue para Transporte e usa 9 - Sem frete.
+- Em Pagamento, clica primeiro em Novo/Incluir, preenche e salva automaticamente.
+- Depois segue para Observação.
+- A emissão final da NF-e continua manual: a extensão não clica em Emitir.
+- Botão Pausar/Continuar permanece disponível durante todo o fluxo.
 
-A extensão NÃO clica em Validar/Salvar/Emitir a NF-e. A validação final permanece na SEFAZ e com o usuário.
-
-INSTALAÇÃO
-1. Extraia esta pasta.
-2. Chrome -> chrome://extensions
-3. Ative Modo do desenvolvedor.
-4. Carregar sem compactação.
-5. Selecione a pasta que contém manifest.json.
-6. Confirme que aparece a versão 1.0.2.
+Se a SEFAZ rejeitar algum item e a tela não avançar, a automação pausa para correção manual.

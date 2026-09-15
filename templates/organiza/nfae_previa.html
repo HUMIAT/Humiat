@@ -15,9 +15,11 @@
   <section class="cartao secao-form">
     <div class="secao-form-titulo"><span>1</span><div><h2>Destinatário</h2><p>Dados puxados do cadastro do cliente.</p></div></div>
     <div class="form-grid-organizada tres-colunas">
-      <label>Nome<input readonly value="{{ dados.destinatario.nome }}"></label>
+      <label>Nome/Contato<input readonly value="{{ dados.destinatario.nome }}"></label>
+      <label>Razão social<input readonly value="{{ dados.destinatario.razao_social or '-' }}"></label>
       <label>Tipo<input readonly value="{{ dados.destinatario.tipo_documento or 'Verificar documento' }}"></label>
       <label>CPF/CNPJ<input readonly value="{{ dados.destinatario.cpf_cnpj }}"></label>
+      <label>Inscrição estadual<input readonly value="{{ dados.destinatario.inscricao_estadual or 'Sem IE' }}"></label>
       <label>E-mail<input readonly value="{{ dados.destinatario.email }}"></label>
       <label>Telefone<input readonly value="{{ dados.destinatario.telefone }}"></label>
       <label>CEP<input readonly value="{{ dados.destinatario.cep }}"></label>
@@ -64,7 +66,7 @@
       <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.xml">XML de apoio</a>
       <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.csv">CSV de apoio</a>
     </div>
-    <p class="texto-suave" style="margin-top:12px">A emissão continua sendo confirmada por você na SEFAZ. A extensão não altera o Emitente e não clica em Validar/Salvar/Emitir: a validação final fica com a própria SEFAZ.</p>
+    <p class="texto-suave" style="margin-top:12px">A emissão continua sendo confirmada por você na SEFAZ. A extensão não altera o Emitente. Ela pode validar/salvar os itens internos durante o preenchimento, mas a validação e emissão final da NF-e continuam sob seu controle.</p>
   </section>
 </section>
 <script>
