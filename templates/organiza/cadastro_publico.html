@@ -1,27 +1,106 @@
 {% extends "organiza/base.html" %}
 {% block conteudo_publico %}
 <section class="orcamento-publico"><div class="publico-card cadastro-publico-card">
-<p class="tag">KARAOKÊ RJ · ATUALIZAÇÃO DE CADASTRO</p><h1>Revise seus dados</h1><p class="texto-suave">Revise e confirme seus dados para emissão de documentos, garantia e futuros atendimentos.</p>
-{% if salvo %}<div class="alerta sucesso">Dados atualizados com sucesso.</div>{% endif %}{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
-<form method="post" class="formulario">
+<p class="tag">KARAOKÊ RJ · ATUALIZAÇÃO DE CADASTRO</p>
+<h1>Revise seus dados</h1>
+<p class="texto-suave">Preencha seus dados de contato. Se informar um CNPJ, os dados empresariais e fiscais disponíveis serão consultados automaticamente; você não precisa digitar Razão Social ou Inscrição Estadual.</p>
+{% if salvo %}<div class="alerta sucesso">Dados atualizados com sucesso.</div>{% endif %}
+{% if aviso %}<div class="alerta informacao">{{ aviso }}</div>{% endif %}
+{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+<form method="post" class="formulario" id="cadastro-publico-form">
 <div class="form-grid-organizada duas-colunas">
 <label>Nome / contato *<input name="nome" required value="{{ cliente.nome or '' }}"></label>
-<label>Razão social (se CNPJ)<input name="razao_social" value="{{ cliente.razao_social or '' }}"></label>
 <label>WhatsApp *<input name="telefone" required inputmode="numeric" value="{{ cliente.telefone or '' }}"></label>
-<label>CPF/CNPJ *<input name="documento" required value="{{ cliente.documento or '' }}"></label>
-<label>Inscrição estadual<input name="inscricao_estadual" value="{{ cliente.inscricao_estadual or '' }}"></label>
+<label>CPF/CNPJ *
+  <div style="display:flex;gap:8px;align-items:center">
+    <input id="documento" name="documento" required inputmode="numeric" value="{{ cliente.documento or '' }}" style="flex:1">
+    <button class="botao pequeno" type="button" id="consultar-cnpj" style="display:none">Consultar CNPJ</button>
+  </div>
+  <small class="texto-suave" id="cnpj-msg"></small>
+</label>
 <label>E-mail *<input type="email" name="email" required value="{{ cliente.email or '' }}"></label>
-<label>Empresa<input name="empresa" value="{{ cliente.empresa or '' }}"></label>
 </div>
-<h2>Endereço</h2><div class="form-grid-organizada duas-colunas">
-<label>Buscar CEP *<input id="cep" name="cep" required inputmode="numeric" maxlength="9" value="{{ cliente.cep or '' }}"></label>
+
+<div id="dados-cnpj" class="alerta informacao" {% if not cliente.razao_social %}style="display:none"{% endif %}>
+  <strong>Dados empresariais consultados</strong>
+  <div style="margin-top:8px;display:grid;gap:4px">
+    <span>Razão Social: <b id="cnpj-razao">{{ cliente.razao_social or '-' }}</b></span>
+    <span>Nome fantasia: <b id="cnpj-fantasia">{{ cliente.empresa or '-' }}</b></span>
+    <span>Inscrição Estadual: <b id="cnpj-ie">{{ cliente.inscricao_estadual or '-' }}</b></span>
+    <span>Situação ICMS: <b id="cnpj-icms">{{ situacao_icms_rotulo(cliente.situacao_icms) }}</b></span>
+    <span>Situação CNPJ: <b id="cnpj-situacao">{{ cliente.cnpj_situacao_cadastral or '-' }}</b></span>
+  </div>
+</div>
+
+<h2>Endereço</h2>
+<p class="texto-suave" id="endereco-ajuda">Para CNPJ, o endereço será preenchido pela consulta empresarial. Para CPF, informe normalmente.</p>
+<div class="form-grid-organizada duas-colunas">
+<label>CEP *<input id="cep" name="cep" required inputmode="numeric" maxlength="9" value="{{ cliente.cep or '' }}"></label>
 <label>Endereço *<input id="endereco" name="endereco" required value="{{ cliente.endereco or '' }}"></label>
-<label>Número *<input name="endereco_numero" required value="{{ cliente.endereco_numero or '' }}"></label>
-<label>Complemento<input name="complemento" value="{{ cliente.complemento or '' }}"></label>
+<label>Número *<input id="endereco_numero" name="endereco_numero" required value="{{ cliente.endereco_numero or '' }}"></label>
+<label>Complemento<input id="complemento" name="complemento" value="{{ cliente.complemento or '' }}"></label>
 <label>Bairro *<input id="bairro" name="bairro" required value="{{ cliente.bairro or '' }}"></label>
-<label>Município *<input id="municipio" name="municipio" required value="{{ cliente.municipio or cliente.cidade or '' }}"></label>
+<label>Município *<input id="municipio" name="municipio" required value="{{ cliente.municipio or cliente.cidade or '' }}"><input type="hidden" id="municipio_ibge" name="municipio_ibge" value="{{ cliente.municipio_ibge or '' }}"></label>
 <label>Estado *<input id="estado" name="estado" required maxlength="2" value="{{ cliente.estado or '' }}"></label>
-</div><input type="hidden" name="observacao" value="{{ cliente.observacao or '' }}"><button class="botao primario botao-cheio">Salvar meus dados</button>
+</div>
+<input type="hidden" name="observacao" value="{{ cliente.observacao or '' }}">
+<button class="botao primario botao-cheio">Salvar meus dados</button>
 </form></div></section>
-<script>async function buscarCep(){const e=document.getElementById('cep'),n=e.value.replace(/\D/g,'');if(n.length!==8)return;try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'),d=await r.json();if(d.erro)return;endereco.value=d.logradouro||'';bairro.value=d.bairro||'';municipio.value=d.localidade||'';estado.value=d.uf||'';}catch(x){}}const c=document.getElementById('cep');c.addEventListener('blur',buscarCep);c.addEventListener('input',()=>{let n=c.value.replace(/\D/g,'').slice(0,8);c.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;});</script>
+<script>
+(() => {
+  const doc = document.getElementById('documento');
+  const btn = document.getElementById('consultar-cnpj');
+  const msg = document.getElementById('cnpj-msg');
+  const box = document.getElementById('dados-cnpj');
+  const camposEndereco = ['cep','endereco','endereco_numero','complemento','bairro','municipio','estado'];
+  let ultimoConsultado = '';
+
+  const digits = (v) => (v || '').replace(/\D/g,'');
+  function ehCnpj(){ return digits(doc.value).length === 14; }
+  function atualizarModo(){
+    const cnpj = ehCnpj();
+    btn.style.display = cnpj ? '' : 'none';
+    camposEndereco.forEach(id => {
+      const el=document.getElementById(id); if(!el) return;
+      if(!cnpj) el.readOnly=false;
+      if(id!=='complemento') el.required=!cnpj;
+    });
+  }
+  function aplicar(d){
+    document.getElementById('cnpj-razao').textContent = d.razao_social || '-';
+    document.getElementById('cnpj-fantasia').textContent = d.nome_fantasia || '-';
+    document.getElementById('cnpj-ie').textContent = d.inscricao_estadual || '-';
+    document.getElementById('cnpj-icms').textContent = d.situacao_icms === 'CONTRIBUINTE' ? 'Contribuinte do ICMS' : (d.situacao_icms === 'NAO_CONTRIBUINTE' ? 'Não contribuinte do ICMS' : (d.situacao_icms === 'ISENTO' ? 'Isento de IE' : 'Não confirmado'));
+    document.getElementById('cnpj-situacao').textContent = d.situacao_cadastral || '-';
+    box.style.display='';
+    const mapa={cep:'cep',endereco:'endereco',numero:'endereco_numero',complemento:'complemento',bairro:'bairro',municipio:'municipio',municipio_ibge:'municipio_ibge',uf:'estado'};
+    Object.entries(mapa).forEach(([k,id])=>{ const el=document.getElementById(id); if(el && d[k]) el.value=d[k]; });
+    camposEndereco.forEach(id => { const el=document.getElementById(id); if(el && id!=='complemento') el.readOnly=true; });
+  }
+  async function consultar(){
+    const cnpj=digits(doc.value);
+    if(cnpj.length!==14) return;
+    if(cnpj===ultimoConsultado) return;
+    btn.disabled=true; msg.textContent='Consultando dados do CNPJ...';
+    try{
+      const r=await fetch(location.pathname + '/consultar-cnpj', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cnpj})});
+      const d=await r.json();
+      if(!r.ok) throw new Error(d.erro || 'Não foi possível consultar o CNPJ.');
+      ultimoConsultado=cnpj; aplicar(d); msg.textContent='CNPJ consultado. Dados empresariais preenchidos automaticamente.';
+    }catch(e){ msg.textContent=e.message || 'Falha na consulta do CNPJ.'; }
+    finally{btn.disabled=false;}
+  }
+  doc.addEventListener('input', atualizarModo);
+  doc.addEventListener('blur', ()=>{ if(ehCnpj()) consultar(); });
+  btn.addEventListener('click', consultar);
+  atualizarModo();
+
+  async function buscarCep(){
+    if(ehCnpj()) return; // CNPJ usa o endereço cadastral consultado.
+    const e=document.getElementById('cep'),n=e.value.replace(/\D/g,'');if(n.length!==8)return;
+    try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'),d=await r.json();if(d.erro)return;endereco.value=d.logradouro||'';bairro.value=d.bairro||'';municipio.value=d.localidade||'';estado.value=d.uf||'';document.getElementById('municipio_ibge').value=d.ibge||'';}catch(x){}
+  }
+  const c=document.getElementById('cep');c.addEventListener('blur',buscarCep);c.addEventListener('input',()=>{let n=c.value.replace(/\D/g,'').slice(0,8);c.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;});
+})();
+</script>
 {% endblock %}

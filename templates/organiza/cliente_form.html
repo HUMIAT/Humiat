@@ -17,9 +17,20 @@
         </label>
         <label>DDI *<input name="ddi" class="js-ddi" inputmode="numeric" maxlength="5" required value="{{ cliente.ddi if cliente and cliente.ddi else '55' }}"></label>
         <label>WhatsApp *<input name="telefone" class="js-telefone-internacional" inputmode="tel" maxlength="20" required placeholder="(21) 97422-5034" value="{{ cliente.telefone if cliente and cliente.telefone else '' }}"></label>
-        <label>Empresa<input name="empresa" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}"></label>
+        <label>Empresa / nome fantasia<input name="empresa" value="{{ cliente.empresa if cliente and cliente.empresa else '' }}"></label>
         <label>Razão social (CNPJ)<input name="razao_social" value="{{ cliente.razao_social if cliente and cliente.razao_social else '' }}"></label>
-        <label>CPF/CNPJ<input name="documento" value="{{ cliente.documento if cliente and cliente.documento else '' }}"></label><label>Inscrição estadual<input name="inscricao_estadual" value="{{ cliente.inscricao_estadual if cliente and cliente.inscricao_estadual else '' }}"></label>
+        <label>CPF/CNPJ<input id="documento" name="documento" value="{{ cliente.documento if cliente and cliente.documento else '' }}"></label>
+        <label>Inscrição estadual<input name="inscricao_estadual" value="{{ cliente.inscricao_estadual if cliente and cliente.inscricao_estadual else '' }}"></label>
+        <label>Situação ICMS
+          <select name="situacao_icms">
+            {% set sit = cliente.situacao_icms if cliente and cliente.situacao_icms else 'NAO_CONFIRMADO' %}
+            <option value="NAO_CONFIRMADO" {{ 'selected' if sit=='NAO_CONFIRMADO' else '' }}>Não confirmado</option>
+            <option value="CONTRIBUINTE" {{ 'selected' if sit=='CONTRIBUINTE' else '' }}>Contribuinte do ICMS</option>
+            <option value="NAO_CONTRIBUINTE" {{ 'selected' if sit=='NAO_CONTRIBUINTE' else '' }}>Não contribuinte do ICMS</option>
+            <option value="ISENTO" {{ 'selected' if sit=='ISENTO' else '' }}>Isento de IE</option>
+          </select>
+        </label>
+        <label>Situação do CNPJ<input readonly value="{{ cliente.cnpj_situacao_cadastral if cliente and cliente.cnpj_situacao_cadastral else 'Não consultado' }}"></label>
         <label>E-mail<input type="email" name="email" value="{{ cliente.email if cliente and cliente.email else '' }}"></label>
       </div>
     </section>

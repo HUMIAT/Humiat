@@ -1,4 +1,10 @@
-Organiza NFA-e — extensão Chrome 1.0.18
+Organiza NFA-e 1.0.21
+
+- Usa situação ICMS enviada pelo Organiza; não presume contribuinte só porque existe IE.
+- Padrão MEI atualizado: CSOSN 102, PIS 07, COFINS 07.
+- Mantém o fluxo automático e as correções da 1.0.20.
+
+Organiza NFA-e — extensão Chrome 1.0.19
 
 Fluxo automático atualizado:
 - Aguarda Natureza da operação = Venda de Mercadoria na primeira aba.
@@ -16,3 +22,14 @@ Fluxo automático atualizado:
 - Botão Pausar/Continuar permanece disponível durante todo o fluxo.
 
 Se a SEFAZ rejeitar algum item e a tela não avançar, a automação pausa para correção manual.
+
+
+1.0.19: navegação automática mais tolerante; IE estrutural; espera postbacks antes de validar/salvar; evita avanço durante máscara de carregamento.
+
+
+Versão 1.0.20:
+- mantém checkpoint ao trocar de frame/aba da SVRS;
+- navegação automática entre abas usa todos os frames acessíveis;
+- fundo cinza de modal não bloqueia Validar/Salvar;
+- CFOP 5102 para RJ e 6102 para outras UFs, sem fallback incorreto;
+- Produto: Validar Item e Salvar Item; Transporte: 9-Sem frete; Pagamento: Incluir, preencher e Salvar.

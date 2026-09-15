@@ -45,7 +45,7 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.6"
+ORGANIZA_VERSION = "1.1.7"
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 
 # Padrão fiscal usado na preparação da NFA-e.
@@ -60,9 +60,9 @@ NFAE_PADRAO_FISCAL = {
     "unidade": "UN",
     "quantidade": 1,
     "origem": "0",
-    "csosn": "400",
+    "csosn": "102",
     "pis_cst": "07",
-    "cofins_cst": "06",
+    "cofins_cst": "07",
     "valor_compoe_total": True,
     "cfop_interno": "5102",
     "cfop_interestadual": "6102",
@@ -370,6 +370,10 @@ class Cliente(Base):
     observacao = Column(Text, nullable=True)
     token_ficha = Column(String(64), nullable=True, unique=True)
     inscricao_estadual = Column(String(30), nullable=True)
+    situacao_icms = Column(String(30), nullable=True)
+    cnpj_situacao_cadastral = Column(String(40), nullable=True)
+    cnpj_fonte = Column(String(80), nullable=True)
+    cnpj_consultado_em = Column(DateTime, nullable=True)
     municipio_ibge = Column(String(12), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     equipamentos = relationship("Equipamento", back_populates="cliente", cascade="all, delete-orphan")
@@ -847,6 +851,15 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN razao_social VARCHAR(180)"))
             if "inscricao_estadual" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN inscricao_estadual VARCHAR(30)"))
+            if "situacao_icms" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN situacao_icms VARCHAR(30)"))
+            if "cnpj_situacao_cadastral" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN cnpj_situacao_cadastral VARCHAR(40)"))
+            if "cnpj_fonte" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN cnpj_fonte VARCHAR(80)"))
+            if "cnpj_consultado_em" not in existentes_clientes:
+                tipo_data_cnpj = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+                conn.execute(text(f"ALTER TABLE clientes ADD COLUMN cnpj_consultado_em {tipo_data_cnpj}"))
             if "municipio_ibge" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN municipio_ibge VARCHAR(12)"))
             if "pais" not in existentes_clientes:
@@ -1278,6 +1291,140 @@ def cpf_valido(documento: str) -> bool:
     return True
 
 
+
+CNPJ_IE_UFS_SUPORTADAS = {"BA", "GO", "MG", "PB", "PR", "PE", "RS", "SC", "SP", "SE"}
+
+
+def cnpj_valido(documento: str) -> bool:
+    cnpj = limpar_documento(documento)
+    if len(cnpj) != 14 or cnpj == cnpj[0] * 14:
+        return False
+    def _digito(base: str, pesos: list[int]) -> str:
+        total = sum(int(n) * p for n, p in zip(base, pesos))
+        resto = total % 11
+        return str(0 if resto < 2 else 11 - resto)
+    d1 = _digito(cnpj[:12], [5,4,3,2,9,8,7,6,5,4,3,2])
+    d2 = _digito(cnpj[:12] + d1, [6,5,4,3,2,9,8,7,6,5,4,3,2])
+    return cnpj[-2:] == d1 + d2
+
+
+def _cnpj_ws_url(cnpj: str) -> str:
+    base = (os.getenv("CNPJ_API_BASE_URL") or "https://publica.cnpj.ws/cnpj").strip().rstrip("/")
+    return f"{base}/{cnpj}"
+
+
+def consultar_cnpj_publico(documento: str) -> dict:
+    """Consulta pontual de CNPJ para cadastro; nunca executa varredura/lote."""
+    cnpj = limpar_documento(documento)
+    if not cnpj_valido(cnpj):
+        raise ValueError("CNPJ inválido.")
+    req = urllib.request.Request(
+        _cnpj_ws_url(cnpj),
+        headers={"Accept": "application/json", "User-Agent": "HUMIAT-Organiza/1.1.7"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise ValueError("CNPJ não encontrado na consulta pública.") from exc
+        if exc.code == 429:
+            raise RuntimeError("Limite temporário da consulta de CNPJ atingido. Aguarde alguns segundos e tente novamente.") from exc
+        raise RuntimeError(f"Consulta de CNPJ indisponível (HTTP {exc.code}).") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Não foi possível consultar o CNPJ agora. Tente novamente em instantes.") from exc
+
+    est = data.get("estabelecimento") or {}
+    estado = est.get("estado") or {}
+    cidade = est.get("cidade") or {}
+    uf = str(estado.get("sigla") or "").strip().upper()
+    ies = list(est.get("inscricoes_estaduais") or [])
+    ie_ativas = []
+    for item in ies:
+        if not item or item.get("ativo") is not True:
+            continue
+        item_estado = item.get("estado") or {}
+        item_uf = str(item_estado.get("sigla") or "").strip().upper()
+        if not uf or not item_uf or item_uf == uf:
+            ie_ativas.append(str(item.get("inscricao_estadual") or "").strip())
+    ie_ativas = [ie for ie in ie_ativas if ie]
+    ie = ie_ativas[0] if ie_ativas else ""
+
+    # Uma IE ativa no cadastro estadual é evidência suficiente para o Organiza
+    # tratar o destinatário como contribuinte. Ausência de IE NÃO vira
+    # automaticamente "não contribuinte": fica pendente para conferência.
+    situacao_icms = "CONTRIBUINTE" if ie else "NAO_CONFIRMADO"
+    if not ie and uf not in CNPJ_IE_UFS_SUPORTADAS:
+        situacao_icms = "NAO_CONFIRMADO"
+
+    tipo_logradouro = str(est.get("tipo_logradouro") or "").strip()
+    logradouro = str(est.get("logradouro") or "").strip()
+    endereco = " ".join(x for x in (tipo_logradouro, logradouro) if x).strip()
+    ddd = re.sub(r"\D", "", str(est.get("ddd1") or ""))
+    telefone = re.sub(r"\D", "", str(est.get("telefone1") or ""))
+
+    return {
+        "cnpj": cnpj,
+        "razao_social": str(data.get("razao_social") or "").strip(),
+        "nome_fantasia": str(est.get("nome_fantasia") or "").strip(),
+        "situacao_cadastral": str(est.get("situacao_cadastral") or "").strip(),
+        "inscricao_estadual": ie,
+        "situacao_icms": situacao_icms,
+        "cep": re.sub(r"\D", "", str(est.get("cep") or "")),
+        "endereco": endereco,
+        "numero": str(est.get("numero") or "").strip(),
+        "complemento": str(est.get("complemento") or "").strip(),
+        "bairro": str(est.get("bairro") or "").strip(),
+        "municipio": str(cidade.get("nome") or "").strip(),
+        "municipio_ibge": str(cidade.get("ibge_id") or "").strip(),
+        "uf": uf,
+        "email_empresa": str(est.get("email") or "").strip(),
+        "telefone_empresa": (ddd + telefone) if (ddd or telefone) else "",
+        "fonte": "CNPJ.ws (Receita Federal / cadastros estaduais quando disponíveis)",
+        "consultado_em": datetime.now(),
+    }
+
+
+def aplicar_dados_cnpj(cliente: Cliente, dados: dict, *, atualizar_endereco: bool = True) -> None:
+    cliente.documento = dados.get("cnpj") or cliente.documento
+    if dados.get("razao_social"):
+        cliente.razao_social = dados["razao_social"]
+    if dados.get("nome_fantasia"):
+        cliente.empresa = dados["nome_fantasia"]
+    cliente.cnpj_situacao_cadastral = dados.get("situacao_cadastral") or None
+    cliente.cnpj_fonte = dados.get("fonte") or None
+    cliente.cnpj_consultado_em = dados.get("consultado_em") or datetime.now()
+    cliente.situacao_icms = dados.get("situacao_icms") or "NAO_CONFIRMADO"
+    if dados.get("inscricao_estadual"):
+        cliente.inscricao_estadual = dados["inscricao_estadual"]
+    elif str(dados.get("uf") or "").upper() in CNPJ_IE_UFS_SUPORTADAS:
+        cliente.inscricao_estadual = None
+    if atualizar_endereco:
+        if dados.get("cep"): cliente.cep = dados["cep"]
+        if dados.get("endereco"): cliente.endereco = dados["endereco"]
+        if dados.get("numero"): cliente.endereco_numero = dados["numero"]
+        if dados.get("complemento"): cliente.complemento = dados["complemento"]
+        if dados.get("bairro"): cliente.bairro = dados["bairro"]
+        if dados.get("municipio"):
+            cliente.municipio = dados["municipio"]
+            cliente.cidade = dados["municipio"]
+        if dados.get("municipio_ibge"): cliente.municipio_ibge = dados["municipio_ibge"]
+        if dados.get("uf"): cliente.estado = dados["uf"]
+
+
+def situacao_icms_rotulo(valor: str | None) -> str:
+    return {
+        "CONTRIBUINTE": "Contribuinte do ICMS",
+        "NAO_CONTRIBUINTE": "Não contribuinte do ICMS",
+        "ISENTO": "Isento de IE",
+        "NAO_CONFIRMADO": "Não confirmado",
+    }.get((valor or "").strip().upper(), "Não confirmado")
+
+
+templates.env.globals["situacao_icms_rotulo"] = situacao_icms_rotulo
+
 def preencher_cliente(cliente: Cliente, form: dict):
     cliente.nome = limpar_nome_cliente(form.get("nome") or "")
     cliente.pais, cliente.ddi, cliente.telefone = normalizar_contato(
@@ -1289,6 +1436,8 @@ def preencher_cliente(cliente: Cliente, form: dict):
     cliente.razao_social = (form.get("razao_social") or "").strip() or None
     cliente.documento = (form.get("documento") or "").strip() or None
     cliente.inscricao_estadual = (form.get("inscricao_estadual") or "").strip() or None
+    if "situacao_icms" in form:
+        cliente.situacao_icms = (form.get("situacao_icms") or "NAO_CONFIRMADO").strip().upper() or "NAO_CONFIRMADO"
     cliente.cep = (form.get("cep") or "").strip() or None
     cliente.municipio = (form.get("municipio") or "").strip() or None
     cliente.cidade = cliente.municipio
@@ -1352,6 +1501,8 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "solvoz_acesso": _solvoz_contexto_cliente(cliente, db),
         "solvoz_sucesso": request.query_params.get("solvoz_sucesso", ""),
         "solvoz_erro": request.query_params.get("solvoz_erro", ""),
+        "cnpj_sucesso": request.query_params.get("cnpj_sucesso", ""),
+        "cnpj_erro": request.query_params.get("cnpj_erro", ""),
     })
 
 
@@ -1456,6 +1607,44 @@ async def cliente_salvar(cliente_id: int, request: Request, usuario: Usuario = D
     return RedirectResponse(f"/organiza/clientes/{cliente.id}", status_code=303)
 
 
+@app.post("/organiza/clientes/{cliente_id}/atualizar-cnpj")
+def cliente_atualizar_cnpj(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    cnpj = limpar_documento(cliente.documento or "")
+    if len(cnpj) != 14:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?cnpj_erro={quote_plus('O cadastro precisa ter um CNPJ válido para atualização automática.')}",
+            status_code=303,
+        )
+    try:
+        dados = consultar_cnpj_publico(cnpj)
+        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
+        db.commit()
+        msg = "Cadastro empresarial atualizado pelo CNPJ. Confira Razão Social, IE, situação ICMS e endereço."
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_sucesso={quote_plus(msg)}", status_code=303)
+    except (ValueError, RuntimeError) as exc:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_erro={quote_plus(str(exc))}", status_code=303)
+
+
+@app.get("/organiza/api/cnpj/{cnpj}")
+def api_consultar_cnpj_admin(cnpj: str, usuario: Usuario = Depends(usuario_logado)):
+    try:
+        dados = consultar_cnpj_publico(cnpj)
+        serial = {**dados, "consultado_em": dados["consultado_em"].isoformat()}
+        return JSONResponse(serial)
+    except ValueError as exc:
+        return JSONResponse({"erro": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"erro": str(exc)}, status_code=503)
+
+
 PACOTE_ATUAL_PADRAO = "2026.1"
 
 
@@ -1543,7 +1732,7 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         })
     recebido = round(sum(p["valor"] for p in pagamentos_dados), 2)
     return {
-        "versao_layout": "ORGANIZA-NFAE-3",
+        "versao_layout": "ORGANIZA-NFAE-4",
         "operacao": {
             "natureza": NFAE_PADRAO_FISCAL["natureza_operacao"],
             "tipo": "Saída",
@@ -1559,6 +1748,8 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
             "cpf_cnpj": cliente.documento or "",
             "tipo_documento": nfae_tipo_documento(cliente.documento),
             "inscricao_estadual": cliente.inscricao_estadual or "",
+            "situacao_icms": (cliente.situacao_icms or "NAO_CONFIRMADO").strip().upper(),
+            "ind_ie_dest": {"CONTRIBUINTE": "1", "ISENTO": "2", "NAO_CONTRIBUINTE": "9"}.get((cliente.situacao_icms or "").strip().upper(), ""),
             "sem_inscricao_estadual": not bool((cliente.inscricao_estadual or "").strip().strip("-")),
             "email": cliente.email or "",
             "telefone": cliente.telefone or "",
@@ -1625,8 +1816,14 @@ def nfae_campos_faltantes(dados: dict) -> list[str]:
     ]:
         if not str(d.get(chave) or "").strip():
             faltantes.append(rotulo)
-    if d.get("tipo_documento") == "CNPJ" and not str(d.get("razao_social") or "").strip():
-        faltantes.append("razão social")
+    if d.get("tipo_documento") == "CNPJ":
+        if not str(d.get("razao_social") or "").strip():
+            faltantes.append("razão social")
+        sit = str(d.get("situacao_icms") or "").strip().upper()
+        if sit not in {"CONTRIBUINTE", "NAO_CONTRIBUINTE", "ISENTO"}:
+            faltantes.append("situação ICMS confirmada")
+        if sit == "CONTRIBUINTE" and not str(d.get("inscricao_estadual") or "").strip():
+            faltantes.append("inscrição estadual")
     if not p.get("codigo"):
         faltantes.append("código fiscal do produto")
     if not p.get("descricao"):
@@ -2825,7 +3022,32 @@ def cadastro_publico(token: str, request: Request, db: Session = Depends(get_db)
     cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
     if not cliente:
         raise HTTPException(404)
-    return templates.TemplateResponse("organiza/cadastro_publico.html", {"request": request, "cliente": cliente, "erro": "", "salvo": request.query_params.get("salvo")})
+    return templates.TemplateResponse("organiza/cadastro_publico.html", {
+        "request": request, "cliente": cliente, "erro": "",
+        "salvo": request.query_params.get("salvo"),
+        "aviso": request.query_params.get("aviso", ""),
+    })
+
+
+@app.post("/cadastro/{token}/consultar-cnpj")
+async def cadastro_publico_consultar_cnpj(token: str, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    if not cliente:
+        raise HTTPException(404)
+    body = await request.json()
+    cnpj = limpar_documento(str((body or {}).get("cnpj") or ""))
+    try:
+        dados = consultar_cnpj_publico(cnpj)
+        # Consulta do próprio cliente: persiste dados fiscais/oficiais, mas não
+        # troca nome, WhatsApp ou e-mail de contato informados pelo cliente.
+        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
+        db.commit()
+        serial = {**dados, "consultado_em": dados["consultado_em"].isoformat()}
+        return JSONResponse(serial)
+    except ValueError as exc:
+        return JSONResponse({"erro": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"erro": str(exc)}, status_code=503)
 
 
 @app.post("/cadastro/{token}")
@@ -2835,16 +3057,75 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
         raise HTTPException(404)
     form = dict(await request.form())
     telefone_original = cliente.telefone
-    preencher_cliente(cliente, form)
+    documento_original = limpar_documento(cliente.documento or "")
+
+    # O cadastro público recebe somente dados do cliente. Razão social, IE e
+    # situação ICMS nunca são aceitas do navegador; vêm da consulta de CNPJ.
+    cliente.nome = limpar_nome_cliente(form.get("nome") or "")
+    cliente.pais, cliente.ddi, cliente.telefone = normalizar_contato(
+        form.get("pais") or getattr(cliente, "pais", "BR"),
+        form.get("ddi") or getattr(cliente, "ddi", "55"),
+        form.get("telefone") or "",
+    )
+    cliente.documento = (form.get("documento") or "").strip() or None
+    cliente.email = (form.get("email") or "").strip() or None
+    cliente.cep = (form.get("cep") or "").strip() or cliente.cep
+    cliente.endereco = (form.get("endereco") or "").strip() or cliente.endereco
+    cliente.endereco_numero = (form.get("endereco_numero") or "").strip() or cliente.endereco_numero
+    cliente.complemento = (form.get("complemento") or "").strip() or cliente.complemento
+    cliente.bairro = (form.get("bairro") or "").strip() or cliente.bairro
+    cliente.municipio = (form.get("municipio") or "").strip() or cliente.municipio
+    cliente.cidade = cliente.municipio
+    cliente.municipio_ibge = re.sub(r"\D", "", (form.get("municipio_ibge") or "").strip()) or cliente.municipio_ibge
+    cliente.estado = (form.get("estado") or "").strip().upper() or cliente.estado
+
     if not cliente.nome or not telefone_valido(cliente.telefone):
         cliente.telefone = telefone_original
-        return templates.TemplateResponse("organiza/cadastro_publico.html", {"request": request, "cliente": cliente, "erro": "Informe nome e WhatsApp válidos.", "salvo": False}, status_code=400)
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente, "erro": "Informe nome e WhatsApp válidos.", "salvo": False, "aviso": ""
+        }, status_code=400)
     duplicado = db.query(Cliente).filter(Cliente.telefone == cliente.telefone, Cliente.id != cliente.id).first()
     if duplicado:
         cliente.telefone = telefone_original
-        return templates.TemplateResponse("organiza/cadastro_publico.html", {"request": request, "cliente": cliente, "erro": "Este WhatsApp já pertence a outro cadastro.", "salvo": False}, status_code=400)
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente, "erro": "Este WhatsApp já pertence a outro cadastro.", "salvo": False, "aviso": ""
+        }, status_code=400)
+
+    aviso = ""
+    doc = limpar_documento(cliente.documento or "")
+    if len(doc) == 14:
+        if not cnpj_valido(doc):
+            return templates.TemplateResponse("organiza/cadastro_publico.html", {
+                "request": request, "cliente": cliente, "erro": "Informe um CNPJ válido.", "salvo": False, "aviso": ""
+            }, status_code=400)
+        try:
+            # Se o botão já consultou o mesmo CNPJ há poucos minutos, evita
+            # consumir de novo o limite da API pública.
+            recente = cliente.cnpj_consultado_em and documento_original == doc and (datetime.now() - cliente.cnpj_consultado_em) < timedelta(minutes=10)
+            if not recente:
+                aplicar_dados_cnpj(cliente, consultar_cnpj_publico(doc), atualizar_endereco=True)
+        except RuntimeError as exc:
+            cliente.situacao_icms = cliente.situacao_icms or "NAO_CONFIRMADO"
+            aviso = f"Dados pessoais salvos, mas a consulta fiscal do CNPJ não pôde ser confirmada agora: {exc}"
+        except ValueError as exc:
+            return templates.TemplateResponse("organiza/cadastro_publico.html", {
+                "request": request, "cliente": cliente, "erro": str(exc), "salvo": False, "aviso": ""
+            }, status_code=400)
+    elif len(doc) == 11:
+        if not cpf_valido(doc):
+            return templates.TemplateResponse("organiza/cadastro_publico.html", {
+                "request": request, "cliente": cliente, "erro": "Informe um CPF válido.", "salvo": False, "aviso": ""
+            }, status_code=400)
+    elif doc:
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente, "erro": "Informe um CPF ou CNPJ válido.", "salvo": False, "aviso": ""
+        }, status_code=400)
+
     db.commit()
-    return RedirectResponse(f"/cadastro/{token}?salvo=1", status_code=303)
+    destino = f"/cadastro/{token}?salvo=1"
+    if aviso:
+        destino += "&aviso=" + quote_plus(aviso)
+    return RedirectResponse(destino, status_code=303)
 
 
 def _nome_arquivo(texto: str) -> str:

@@ -3,6 +3,8 @@
 <section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ cliente.nome }}</h1><p class="texto-suave">+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p></div><div class="acoes-titulo"><a class="botao" href="/organiza/clientes">Voltar</a><a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a><a class="botao" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Manutenção</a><a class="botao" href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">+ Venda</a><a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nEsse procedimento é importante para emissão de documentos, garantia e futuros atendimentos.\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a></div></div>
 {% if solvoz_sucesso %}<div class="alerta sucesso">{{ solvoz_sucesso }}</div>{% endif %}
 {% if solvoz_erro %}<div class="alerta erro">{{ solvoz_erro }}</div>{% endif %}
+{% if cnpj_sucesso %}<div class="alerta sucesso">{{ cnpj_sucesso }}</div>{% endif %}
+{% if cnpj_erro %}<div class="alerta erro">{{ cnpj_erro }}</div>{% endif %}
 <div class="grade-ficha clean-ficha">
   <article class="cartao">
     <p class="tag">Dados do cliente</p>
@@ -11,10 +13,19 @@
       <dt>Razão social</dt><dd>{{ cliente.razao_social or '-' }}</dd>
       <dt>E-mail</dt><dd>{{ cliente.email or '-' }}</dd>
       <dt>Inscrição estadual</dt><dd>{{ cliente.inscricao_estadual or '-' }}</dd>
+      <dt>Situação ICMS</dt><dd>{{ situacao_icms_rotulo(cliente.situacao_icms) }}</dd>
+      <dt>Situação CNPJ</dt><dd>{{ cliente.cnpj_situacao_cadastral or 'Não consultado' }}</dd>
+      <dt>Última consulta CNPJ</dt><dd>{{ cliente.cnpj_consultado_em.strftime('%d/%m/%Y %H:%M') if cliente.cnpj_consultado_em else '-' }}</dd>
       <dt>Município</dt><dd>{{ cliente.municipio or cliente.cidade or '-' }}</dd>
       <dt>Endereço</dt><dd>{{ cliente.endereco or '-' }}{% if cliente.endereco_numero %}, {{ cliente.endereco_numero }}{% endif %}</dd>
       <dt>Bairro</dt><dd>{{ cliente.bairro or '-' }}</dd>
     </dl>
+    {% if cliente.documento and cliente.documento|replace('.','')|replace('/','')|replace('-','')|length >= 14 %}
+    <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizar-cnpj" style="margin-top:14px">
+      <button class="botao pequeno" type="submit">Atualizar cadastro pelo CNPJ</button>
+      <small class="texto-suave" style="display:block;margin-top:6px">Consulta Razão Social, endereço, IE e situação cadastral disponível.</small>
+    </form>
+    {% endif %}
     {% if cliente.observacao %}<p class="observacao">{{ cliente.observacao }}</p>{% endif %}
   </article>
   <div class="resumo-coluna">
