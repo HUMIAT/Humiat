@@ -1,0 +1,145 @@
+Organiza NFA-e 1.0.21
+
+- Usa situação ICMS enviada pelo Organiza; não presume contribuinte só porque existe IE.
+- Padrão MEI atualizado: CSOSN 102, PIS 07, COFINS 07.
+- Mantém o fluxo automático e as correções da 1.0.20.
+
+Organiza NFA-e — extensão Chrome 1.0.19
+
+Fluxo automático atualizado:
+- Aguarda Natureza da operação = Venda de Mercadoria na primeira aba.
+- Preenche Destinatário/Remetente.
+- Para CNPJ usa Razão Social do Organiza (com fallback para Empresa/Nome).
+- Preenche Inscrição Estadual quando cadastrada; sem IE, marca Sem Inscrição Estadual.
+- Abre Produtos e Serviços > Incluir.
+- Preenche Dados, ICMS, PIS, COFINS e Informações Adicionais.
+- Corrige transição PIS -> COFINS.
+- Clica em Validar Item e Salvar Item automaticamente.
+- Após salvar o produto, segue para Transporte e usa 9 - Sem frete.
+- Em Pagamento, clica primeiro em Novo/Incluir, preenche e salva automaticamente.
+- Depois segue para Observação.
+- A emissão final da NF-e continua manual: a extensão não clica em Emitir.
+- Botão Pausar/Continuar permanece disponível durante todo o fluxo.
+
+Se a SEFAZ rejeitar algum item e a tela não avançar, a automação pausa para correção manual.
+
+
+1.0.19: navegação automática mais tolerante; IE estrutural; espera postbacks antes de validar/salvar; evita avanço durante máscara de carregamento.
+
+
+Versão 1.0.20:
+- mantém checkpoint ao trocar de frame/aba da SVRS;
+- navegação automática entre abas usa todos os frames acessíveis;
+- fundo cinza de modal não bloqueia Validar/Salvar;
+- CFOP selecionado somente entre as opções efetivamente liberadas pela SEFAZ; não força 6102 por UF;
+- Produto: Validar Item e Salvar Item; Transporte: 9-Sem frete; Pagamento: Incluir, preencher e Salvar.
+
+1.0.22: remove regra fixa de 6102 por UF; usa somente CFOP disponibilizado pela SEFAZ.
+
+1.0.24: primeira tela manual orientada/validada por UF; RJ=Interna/5102 e outra UF=Interestadual/6102. A automação só avança quando Saída, Destino e Venda de Mercadoria estiverem coerentes.
+
+
+NOVO NA 1.0.24
+- Popup de ajuda na primeira tela da NF-e.
+- Mostra Saída, Destino Interna/Interestadual e Venda de Mercadoria conforme a UF do cliente.
+- Mostra CFOP esperado 5102/6102.
+- Botões Fechar e Não mostrar novamente nesta nota.
+
+
+1.0.25:
+- Navegação das abas principais reforçada para o portal ASP.NET legado, executando __doPostBack/WebForm no MAIN world quando necessário.
+- Produto e Pagamento acionam Incluir/Novo no mesmo mecanismo legado antes de preencher.
+- Após Validar Item, a extensão orienta confirmar OK na mensagem da SEFAZ e só então inicia a espera para Salvar Item.
+- Transporte: Modalidade Frete é selecionada pelo código 9 (Sem frete) e o onchange/AutoPostBack é disparado no MAIN world.
+
+
+1.0.26
+- Popup inicial informa UF do cliente, Destino, CFOP esperado e todos os padrões da primeira tela.
+- Após confirmar o popup, a extensão preenche automaticamente a aba NF-e, um combo por vez, aguardando os postbacks da SEFAZ.
+- Produto: Validar Item -> aguardar "Item validado com sucesso!" -> clicar OK -> Salvar Item.
+- Produto e Pagamento continuam abrindo Incluir/Novo antes do formulário.
+- Pagamento usa o botão Salvar da própria janela de pagamento, evitando o Salvar global da nota.
+- Transporte continua selecionando 9 - Sem frete com change/AutoPostBack.
+
+1.0.28: corrige loop de foco/postback no Destinatário (IE e campos mascarados); não redispara eventos em valores já corretos; navegação principal reforçada para tabs antigos em TD/SPAN/IMG.
+
+
+1.0.28: clique das abas principais refeito para priorizar o controle exato e __doPostBack direto; avisos de unload do portal são apenas do código legado da SVRS. O banner agora informa quais campos ainda impedem o avanço do Destinatário.
+
+1.0.29: abas principais passam a usar diretamente os hrefs/hash reais do portal (#destinatario, #produtos, #transporte, #pagamento, #observacao), confirmados pela barra de status do navegador; fallback legado mantido.
+
+1.0.31: corrige o acionamento do botão Incluir em Produtos quando o texto acessível aparece duplicado pelo ícone; reforça Incluir/Novo do Pagamento; Transporte usa o código 9 exclusivamente no campo Modalidade Frete para selecionar '9 - Sem frete', sem focar o combo.
+
+1.0.31: primeira tela passa a usar IDs exatos confirmados no DevTools: _f_tpNF -> _f_idDest -> aguarda _f_cNatureza -> _f_dest_enderDest_UF. A Natureza só é tratada depois do Destino, como no preenchimento manual da SEFAZ.
+
+1.0.32: corrige o pisca-pisca/loop na primeira tela. Remove atributos data-organiza-main-*-ack, reconhece _f_tpNF Saída pelo value=1 e _f_idDest por value 1/2/3, dispara apenas um change por etapa e bloqueia reenvio do mesmo combo enquanto a SEFAZ processa.
+
+1.0.33: corrige a primeira tela: _f_tpNF (Saída) é definido sem disparar change; _f_idDest é o primeiro combo que aciona a atualização da SEFAZ, liberando Natureza e UF. Evita o pisca-pisca preso no primeiro campo.
+
+1.0.34: primeira tela passa a usar checkpoints por payload. _f_tpNF dispara change somente uma vez para alimentar Natureza; depois _f_idDest, Natureza e UF são tratados em sequência sem voltar a zerar campos já preenchidos.
+
+1.0.35: corrige checkpoint antigo na primeira tela. A tela da SEFAZ passa a ser a fonte da verdade; se _f_idDest voltar para -, a automação recua para Destino e tenta novamente, sem ficar presa em dest_wait.
+
+1.0.36: simplifica a primeira tela. Usa a UF como fonte da verdade para _f_idDest (RJ=1 Interna; demais=2 Interestadual), aplica o value no MAIN world e dispara input+change como a seleção manual. Só depois trata _f_cNatureza.
+
+1.0.37: primeira tela simplificada pelos IDs/values reais: _f_tpNF=1 (Saída) é definido sem evento; _f_idDest=1/2/3 é alterado somente se necessário e dispara um único change para a SEFAZ montar _f_cNatureza. Sem focus/input/blur/repetição nesses dois campos.
+
+1.0.38: o campo Destino (_f_idDest) recebe foco primeiro; após 180 ms a extensão aplica 1=Interna ou 2=Interestadual e dispara um único change. O campo Saída (_f_tpNF) permanece sem repetição/foco.
+
+1.0.39: elimina o loop de foco na primeira tela. O Destino (_f_idDest) é focado/alterado uma única vez por payload; se a SEFAZ reconstruir a tela ou não confirmar imediatamente, a extensão aguarda sem repetir change, evitando que o foco volte continuamente para _f_tpNF.
+
+1.0.40: primeira tela passa a reproduzir a navegação manual Saída -> TAB -> Destino. O TAB é executado uma única vez; _f_idDest recebe o foco e só depois é aplicado 1=Interna ou 2=Interestadual com um único change.
+
+1.0.41: painel passa a exibir log visual das etapas. Ao iniciar, reinicia o checkpoint da primeira tela e mostra foco antes/depois do TAB, valor aplicado em _f_idDest e confirmação do Destino.
+
+1.0.42: painel de diagnóstico ganha botão Copiar log; o histórico passa a guardar até 120 eventos e a cópia inclui versão, URL, foco, checkpoint, etapa NF-e e valores atuais de Tipo de operação, Destino, Natureza e UF.
+
+1.0.44: aplica a sequência confirmada manualmente no Console da SEFAZ: _f_tpNF=1 sem evento; _f_idDest=1/2 com um único change; _f_dest_enderDest_UF=UF sem evento; _f_cNatureza=1 sem evento. Remove TAB/focus/blur/input desses quatro campos e preserva os demais campos que já funcionavam.
+
+
+1.0.44 - Primeira tela SVRS: campos 0/1/3/4 confirmados no Console; cada etapa usa focus() + value + um único change, aguardando a SEFAZ antes da próxima. Localização dos SELECTs não depende mais de getElementById().
+
+1.0.45: corrige ReferenceError findSemIeCheckbox no Destinatário/Remetente; restaura o preenchimento de IE/Sem IE. Primeira tela mantém a sequência focus + value + change confirmada no Console. Para cliente RJ/Interna, a etapa UF é ignorada; para outras UFs, continua Interestadual + UF do cliente. O Copiar log passa a mostrar a versão real do manifest.
+
+1.0.46: Produtos e Serviços passa a acionar primeiro o botão exato btIncDet (onclick incluirDet()) antes de preencher o item. Transporte passa a localizar primeiro o select exato f_transp_modFrete e aplicar focus + value=9 + um change para selecionar 9 - Sem frete.
+
+1.0.47: Produto passa a reproduzir exatamente o Console no btIncDet (focus + click nativo). Transporte passa a reproduzir exatamente o Console no f_transp_modFrete (focus + value=9 + change) e mantém retry ativo se o combo ainda não estiver pronto. Pagamento não foi alterado.
+
+1.0.48: Corrige Produto e Transporte para executar no MAIN world da página, igual ao Console. O botão btIncDet chama incluirDet() diretamente e volta a tentar se o formulário não abrir. Transporte aplica focus + value=9 + change no MAIN world. Pagamento permanece inalterado.
+
+1.0.49: Produto deixa de chamar incluirDet() por evento especial. O btIncDet agora usa o mesmo mecanismo já comprovado no Incluir/Novo do Pagamento: localizar o controle real, focus(), activateInMainWorld() e clique nativo no MAIN world. A automação só continua quando o formulário do item realmente abre; se não abrir, libera nova tentativa. Transporte e Pagamento não foram alterados.
+
+1.0.50: Corrige o caso em que Produtos e Serviços aparecia aberto, mas o painel ainda não estava realmente ativo. Antes de clicar btIncDet, a extensão reativa a própria aba Produtos, aguarda a SVRS estabilizar e só então executa Incluir. Baseado no teste em que um clique manual na aba Produtos fazia o automático continuar. Pagamento e Transporte não foram alterados.
+
+1.0.52: Mantém o painel flutuante com Iniciar automático, Pausar, Copiar log, Limpar log e Limpar dados. Remove a regressão da 1.0.51 que escondia o popup. Em Produtos, executa no MAIN world e diretamente em top.frames[2] a sequência observada no teste manual: Pagamento -> Produtos -> btIncDet. Em Transporte, localiza f_transp_modFrete no frame principal, aplica value=9 + change e aciona Pagamento diretamente no MAIN world. Pagamento evita novo Incluir quando já existe linha listada.
+
+1.0.53: Mantém integralmente o painel flutuante e o botão Copiar log. Produto: o clique em Incluir deixa de depender do content script/evento intermediário e passa a ser executado por chrome.scripting no MAIN world real, somente no frame top.frames[2], reproduzindo o teste do Console: Pagamento -> Produtos -> btIncDet.focus() -> btIncDet.click(). Transporte: a detecção do campo f_transp_modFrete passa a ter prioridade sobre o texto residual da aba Emitente; Sem frete é aplicado no MAIN world real e, após confirmar valor 9, a aba Pagamento é aberta diretamente. Pagamento: abrir a aba não cria lançamento; Incluir/Novo só é permitido quando o checkpoint oficial é pagamento_abrir (vindo do Transporte) e não existe linha de pagamento.
+
+1.0.54: Mantém o painel flutuante e Copiar log. Produto: antes do Incluir, passa por Totais e volta para Produtos, então executa btIncDet no MAIN world; o Incluir de Produto só é permitido no checkpoint produto_abrir, impedindo que volte a disparar depois de Pagamento. Transporte: mantém 9 - Sem frete. Pagamento: é reativado por Pagamento -> Transporte -> Pagamento; abrir a aba não cria linha, e Incluir/Novo continua permitido apenas quando o fluxo veio oficialmente do Transporte e não há pagamento listado. A detecção da aba ativa por hash passa a ter prioridade para impedir confusão entre Pagamento e Produtos.
+
+1.0.55: Mantém o painel flutuante e Copiar log. Produto: remove os desvios por Totais/Pagamento e reproduz literalmente o teste manual, clicando no <span>Produtos e Serviços</span>, aguardando e só então acionando btIncDet no MAIN world. Pagamento: remove Pagamento -> Transporte -> Pagamento; passa a clicar diretamente no <span>Pagamento</span> para ativar a aba. Abrir a aba não cria lançamento; Incluir/Novo continua bloqueado se já existir pagamento e só é permitido quando o fluxo chegou oficialmente do Transporte.
+
+1.0.56: Mantém o painel flutuante e Copiar log. Produto: reproduz exatamente o teste confirmado no Console, disparando pointerover, mouseover, pointerdown, mousedown, pointerup, mouseup e click no <span>Produtos e Serviços</span>, aguarda 1s e só então executa btIncDet.focus() + btIncDet.click(). Pagamento: usa a mesma sequência real de mouse no <span>Pagamento</span>; abrir/ativar a aba continua sem criar linha, e Incluir/Novo permanece bloqueado quando já existe pagamento. Transporte mantém 9 - Sem frete.
+
+1.0.57: Produto e Pagamento deixam de simular a sequência completa de eventos no <span>. O teste confirmado no Console mostrou que o comportamento imediato ocorre ao localizar o <span> da aba, obter span.closest('a') e executar focus()+click() no link pai. Produto aguarda 1s e só então executa btIncDet.focus()+click(). Pagamento usa o mesmo mecanismo para ativar a aba e continua sem duplicar linhas já existentes. Transporte mantém 9 - Sem frete e o painel com Copiar log permanece.
+
+1.0.58: Corrige a diferença restante entre extensão e Console. As ações Produto, Transporte e abertura de Pagamento passam a ser executadas pelo chrome.scripting no frame superior (frame 0) e, de lá, acessam literalmente top.frames[2].document, exatamente como o comando que funcionou instantaneamente no DevTools. Produto localiza <span>Produtos e Serviços</span>, usa closest('a'), focus()+click(), aguarda a SEFAZ e então executa btIncDet.focus()+click(). Popup/Copiar log preservados.
+
+1.0.59: O DevTools revelou o listener real das abas: FpcTabs.GoTo(this.hash.substring(1)). A extensão passa a chamar diretamente FpcTabs.GoTo('produtos') e FpcTabs.GoTo('pagamento') no MAIN world de top.frames[2], sem depender da simulação de clique/mouse. Produto só então aciona btIncDet. Mantidos Sem frete=9, trava de pagamento duplicado e popup/Copiar log.
+
+1.0.60: Diagnóstico do Incluir Produto. Corrigido o cooldown: ao chegar em Produtos a rotina era chamada antes de 1600 ms e desistia sem agendar nova tentativa, por isso o log parava em 'Abrindo Incluir automaticamente...'. Agora agenda nova tentativa, executa no MAIN world a sequência que funcionou no Console (link Produtos focus/click, espera, btIncDet focus/click) e registra no Copiar log: envio MAIN, retorno, aba encontrada/ativada, btIncDet encontrado, clique disparado e formulário aberto.
+
+1.0.62: Correção de encerramento e múltiplos frames. Apenas top.frames[2] pode executar/preencher/navegar; frames auxiliares não alteram checkpoints. Mantém checkpoint observacao_abrir após Pagamento, impede retorno à primeira tela e, ao concluir Observação, grava estado CONCLUÍDO e desliga o workflow. RESUME preserva o checkpoint atual.
+
+
+1.0.62: pagamento salvo encerra definitivamente a automação; não abre Observação ou outra seção e limpa o payload temporário para evitar reinício.
+
+1.0.63: Após o Pagamento salvo, a única ação final automática é clicar no botão global Validar. Não abre Observação, não clica Salvar/Emitir, não responde popup e encerra o workflow logo após o clique em Validar.
+
+1.0.64: Corrige a raiz do erro após Transporte/Pagamento. O checkpoint pagamento_abrir agora é persistido ANTES de FpcTabs.GoTo('pagamento'), pois a troca de aba pode destruir o timer/contexto anterior. Remove a busca global clickAction(['novo','incluir']) do Pagamento, que varria todos os frames e podia clicar em 'Novo' fora da aba e iniciar outra NFA-e. O Incluir do Pagamento passa a ser executado no MAIN world exclusivamente em top.frames[2].document, somente pelo controle exato 'Incluir', com diagnóstico e retry seguro. Após pagamento salvo, continua clicando apenas Validar e encerra.
+
+1.0.65: Corrige a navegação que podia carregar a NFA-e dentro dela mesma após Transporte. Pagamento volta a ser aberto pelo link real da aba (focus()+click()), exatamente como no teste manual/Console, sem FpcTabs.GoTo. PAYMENT_INCLUDE reobtém top.frames[2] após a troca de aba, procura somente 'Incluir' nesse documento, nunca 'Novo', e registra diagnóstico dos controles encontrados se falhar.
+
+1.0.66: compatibilidade com Organiza 1.1.10. Quando o cadastro informa endereço de entrega diferente, a extensão usa esse endereço no destinatário da NFA-e; quando está marcado como igual, mantém o endereço do cliente.
+
+1.0.67: corrige o endereço usado para abrir o portal público da NFA-e do RJ para https://nfae.fazenda.rj.gov.br/sefaz-dfe-nfae/paginas/inicio.faces. O domínio SVRS continua sendo usado apenas para reconhecer e automatizar a tela interna após o redirecionamento.

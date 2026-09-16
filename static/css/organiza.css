@@ -3062,7 +3062,7 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .retirada-form .retirada-aviso, .retirada-form button { grid-column: 1 / -1; }
 .retirada-aviso { min-height: 22px; color: #b42318; font-weight: 700; }
 @media (max-width: 640px) { .retirada-form { grid-template-columns: 1fr; } }
-.acoes-documentos{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.cadastro-publico-card{max-width:850px}.cadastro-publico-card h2{margin-top:22px}.venda-pagina #buscar_cliente{background:#f8fbff}
+.acoes-documentos{display:flex;gap:7px;flex-wrap:nowrap;margin-top:14px;overflow-x:auto;padding-bottom:3px;scrollbar-width:thin}.acoes-documentos>.botao{flex:0 0 auto;white-space:nowrap}.acoes-documentos .copiado{border-color:#16a34a;background:#ecfdf3;color:#166534}.opcionais-venda-wrap{width:100%;overflow-x:auto;margin-top:15px;border:1px solid #e2e8f0;border-radius:12px}.opcionais-venda-tabela{width:100%;min-width:620px;border-collapse:collapse;table-layout:fixed;background:#fff}.opcionais-venda-tabela th,.opcionais-venda-tabela td{padding:8px 6px;text-align:center;border-right:1px solid #e2e8f0}.opcionais-venda-tabela th:last-child,.opcionais-venda-tabela td:last-child{border-right:0}.opcionais-venda-tabela th{font-size:.72rem;line-height:1.15;color:#64748b;background:#f8fafc;font-weight:800}.opcionais-venda-tabela td{font-size:.82rem;color:#0f172a;font-weight:800;border-top:1px solid #e2e8f0}.venda-opcionais{margin-top:18px;padding-top:16px;border-top:1px solid #e2e8f0}.venda-opcionais h3{margin:0 0 12px;font-size:1rem;color:#0f2f57}.cadastro-publico-card{max-width:850px}.cadastro-publico-card h2{margin-top:22px}.venda-pagina #buscar_cliente{background:#f8fbff}
 
 
 /* Desconto condicionado à aprovação de todos os opcionais */

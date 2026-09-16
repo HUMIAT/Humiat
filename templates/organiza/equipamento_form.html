@@ -42,6 +42,47 @@
         </div>
         <label class="saldo-destaque">Valor restante<input id="valor_restante" readonly value="{{ equipamento.falta|moeda if equipamento else 'R$ 0,00' }}"></label>
       </div>
+      <div class="venda-opcionais">
+        <h3>Opcionais da venda</h3>
+        <div class="form-grid-organizada tres-colunas">
+          <label>Som
+            <select name="som">
+              {% set som_atual = equipamento.som if equipamento and equipamento.som else 'NA' %}
+              {% for op in ['Premium','JBL','NA'] %}<option value="{{ op }}" {% if som_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>HDMI Tela 2
+            <select name="hdmi_tela_2">
+              {% set hdmi_atual = equipamento.hdmi_tela_2 if equipamento and equipamento.hdmi_tela_2 else 'NA' %}
+              {% for op in ['Sim','Não','NA'] %}<option value="{{ op }}" {% if hdmi_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Teclado Bluetooth
+            <select name="teclado_bluetooth">
+              {% set teclado_atual = equipamento.teclado_bluetooth if equipamento and equipamento.teclado_bluetooth else 'NA' %}
+              {% for op in ['Sim','Não','NA'] %}<option value="{{ op }}" {% if teclado_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Microfone
+            <select name="microfone">
+              {% set microfone_atual = equipamento.microfone if equipamento and equipamento.microfone else 'Com fio' %}
+              {% for op in ['Com fio','Sem fio','NA'] %}<option value="{{ op }}" {% if microfone_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Sistema de Crédito
+            <select name="sistema_credito">
+              {% set credito_atual = equipamento.sistema_credito if equipamento and equipamento.sistema_credito else 'NA' %}
+              {% for op in ['Moedeiro','Ficheiro','Teclado','NA'] %}<option value="{{ op }}" {% if credito_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Catálogo Impresso
+            <select name="catalogo_impresso">
+              {% set catalogo_impresso_atual = equipamento.catalogo_impresso if equipamento and equipamento.catalogo_impresso else 'NA' %}
+              {% for op in ['Sim','Não','NA'] %}<option value="{{ op }}" {% if catalogo_impresso_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+      </div>
     </section>
 
     <section class="cartao secao-form">

@@ -463,6 +463,12 @@ class Equipamento(Base):
     nota_codigo = Column(String(20), nullable=True)
     nota_descricao = Column(String(180), nullable=True)
     chave_acesso_nfe = Column(String(44), nullable=True)
+    som = Column(String(20), nullable=False, default="NA")
+    hdmi_tela_2 = Column(String(10), nullable=False, default="NA")
+    teclado_bluetooth = Column(String(10), nullable=False, default="NA")
+    microfone = Column(String(20), nullable=False, default="Com fio")
+    sistema_credito = Column(String(20), nullable=False, default="NA")
+    catalogo_impresso = Column(String(10), nullable=False, default="NA")
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
@@ -919,6 +925,18 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN nota_descricao VARCHAR(180)"))
             if "chave_acesso_nfe" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN chave_acesso_nfe VARCHAR(44)"))
+            if "som" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN som VARCHAR(20) NOT NULL DEFAULT 'NA'"))
+            if "hdmi_tela_2" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN hdmi_tela_2 VARCHAR(10) NOT NULL DEFAULT 'NA'"))
+            if "teclado_bluetooth" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN teclado_bluetooth VARCHAR(10) NOT NULL DEFAULT 'NA'"))
+            if "microfone" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN microfone VARCHAR(20) NOT NULL DEFAULT 'Com fio'"))
+            if "sistema_credito" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN sistema_credito VARCHAR(20) NOT NULL DEFAULT 'NA'"))
+            if "catalogo_impresso" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_impresso VARCHAR(10) NOT NULL DEFAULT 'NA'"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -1976,6 +1994,20 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         solvoz_empresa_id = 0
     eq.solvoz_empresa_id = solvoz_empresa_id or None
     eq.catalogo_online = 1 if str(form.get("catalogo_online") or "").strip().lower() in ("1", "true", "on", "sim") else 0
+
+    # Opcionais operacionais da venda. São salvos no próprio equipamento para
+    # acompanhar a configuração entregue ao cliente e aparecer no card principal.
+    def opcao(valor, permitidos, padrao):
+        texto = (valor or "").strip()
+        return texto if texto in permitidos else padrao
+
+    eq.som = opcao(form.get("som"), {"Premium", "JBL", "NA"}, "NA")
+    eq.hdmi_tela_2 = opcao(form.get("hdmi_tela_2"), {"Sim", "Não", "NA"}, "NA")
+    eq.teclado_bluetooth = opcao(form.get("teclado_bluetooth"), {"Sim", "Não", "NA"}, "NA")
+    eq.microfone = opcao(form.get("microfone"), {"Com fio", "Sem fio", "NA"}, "Com fio")
+    eq.sistema_credito = opcao(form.get("sistema_credito"), {"Moedeiro", "Ficheiro", "Teclado", "NA"}, "NA")
+    eq.catalogo_impresso = opcao(form.get("catalogo_impresso"), {"Sim", "Não", "NA"}, "NA")
+
     eq.valor = (form.get("valor") or "").strip() or None
     eq.preco_custo = (form.get("preco_custo") or "").strip() or None
     eq.preco_venda = (form.get("preco_venda") or "").strip() or None

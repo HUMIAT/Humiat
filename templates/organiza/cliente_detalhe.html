@@ -64,26 +64,120 @@
     </article>
   </div>
 </div>
-<section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Equipamentos</h2><p class="texto-suave">Organizados por tipo e identificação do cliente.</p></div><div class="acoes-titulo"><form method="get" class="filtros-equipamentos"><select name="status_equipamento" onchange="this.form.submit()"><option value="Ativo" {% if status_filtro=='Ativo' %}selected{% endif %}>Ativos</option><option value="Inativo" {% if status_filtro=='Inativo' %}selected{% endif %}>Inativos</option><option value="Todos" {% if status_filtro=='Todos' %}selected{% endif %}>Todos</option></select><select name="tipo_equipamento" onchange="this.form.submit()"><option value="">Todos os equipamentos</option>{% for tipo in ['JUKEBOX','MALETA','IPHONE','FLIPERAMA'] %}<option value="{{ tipo }}" {% if tipo_filtro==tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></form><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Adicionar</a></div></div><div class="equip-grid">{% for eq in equipamentos %}<article class="equip-card"><div class="equip-head"><div><span class="pill">{{ eq.status }}</span><h3>{{ eq|rotulo_maquina }}</h3><p>{{ eq.tipo or 'Equipamento' }}{% if eq.modelo %} · {{ eq.modelo }}{% endif %}</p><small>Código técnico: <strong>{{ eq|codigo_tecnico }}</strong></small></div><a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a></div><dl><dt>Identificação</dt><dd><strong>{{ eq|rotulo_maquina }}</strong></dd><dt>Código técnico / monitor</dt><dd>{{ eq|codigo_tecnico }}</dd><dt>Código do HD</dt><dd>{{ eq.numero_hd or '-' }}</dd><dt>Fabricante</dt><dd>{{ eq.fabricante or 'KARAOKERJ' }}</dd><dt>Pacote</dt><dd>{{ eq.pacote or '-' }}</dd><dt>Plano</dt><dd>{{ eq.plano or '-' }}</dd><dt>Preço de venda</dt><dd>{{ eq.preco_venda|moeda }}</dd><dt>Pago</dt><dd>{{ eq.pago|moeda }}</dd><dt>Falta</dt><dd>{{ eq.falta|moeda }}</dd><dt>Chave NF-e</dt><dd>{% if eq.chave_acesso_nfe %}{{ eq.chave_acesso_nfe }}{% else %}-{% endif %}</dd></dl><div class="acoes-documentos"><a class="botao pequeno" target="_blank" href="/organiza/equipamentos/{{ eq.id }}/garantia.pdf">Contrato de garantia</a><a class="botao pequeno" target="_blank" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/recibo">Recibo</a><a class="botao pequeno" href="/organiza/equipamentos/{{ eq.id }}/nfae">Emitir NFA-e</a><a class="botao pequeno" target="_blank" rel="noopener" href="{{ NFE_CONSULTA_URL }}">Consultar NF-e</a><button class="botao pequeno copiar-chave-nfe" type="button" data-chave="{{ eq.chave_acesso_nfe or '' }}" {% if not eq.chave_acesso_nfe %}disabled title="Cadastre a chave de acesso na tela da NFA-e"{% endif %}>Copiar chave</button></div>{% if eq.observacao %}<p class="observacao">{{ eq.observacao }}</p>{% endif %}</article>{% else %}<p class="texto-suave vazio">Nenhum equipamento cadastrado.</p>{% endfor %}</div></section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div><a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a></div><div class="lista-cards-mobile">{% for m in manutencoes %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
+<section class="cartao tabela-cartao">
+  <div class="titulo-linha compacto">
+    <div><h2>Equipamentos</h2><p class="texto-suave">Organizados por tipo e identificação do cliente.</p></div>
+    <div class="acoes-titulo">
+      <form method="get" class="filtros-equipamentos">
+        <select name="status_equipamento" onchange="this.form.submit()">
+          <option value="Ativo" {% if status_filtro=='Ativo' %}selected{% endif %}>Ativos</option>
+          <option value="Inativo" {% if status_filtro=='Inativo' %}selected{% endif %}>Inativos</option>
+          <option value="Todos" {% if status_filtro=='Todos' %}selected{% endif %}>Todos</option>
+        </select>
+        <select name="tipo_equipamento" onchange="this.form.submit()">
+          <option value="">Todos os equipamentos</option>
+          {% for tipo in ['JUKEBOX','MALETA','IPHONE','FLIPERAMA'] %}<option value="{{ tipo }}" {% if tipo_filtro==tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}
+        </select>
+      </form>
+      <a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Adicionar</a>
+    </div>
+  </div>
+  <div class="equip-grid">
+    {% for eq in equipamentos %}
+    <article class="equip-card">
+      <div class="equip-head">
+        <div>
+          <span class="pill">{{ eq.status }}</span>
+          <h3>{{ eq|rotulo_maquina }}</h3>
+          <p>{{ eq.tipo or 'Equipamento' }}{% if eq.modelo %} · {{ eq.modelo }}{% endif %}</p>
+          <small>Código técnico: <strong>{{ eq|codigo_tecnico }}</strong></small>
+        </div>
+        <a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a>
+      </div>
+      <dl>
+        <dt>Identificação</dt><dd><strong>{{ eq|rotulo_maquina }}</strong></dd>
+        <dt>Código técnico / monitor</dt><dd>{{ eq|codigo_tecnico }}</dd>
+        <dt>Código do HD</dt><dd>{{ eq.numero_hd or '-' }}</dd>
+        <dt>Fabricante</dt><dd>{{ eq.fabricante or 'KARAOKERJ' }}</dd>
+        <dt>Pacote</dt><dd>{{ eq.pacote or '-' }}</dd>
+        <dt>Plano</dt><dd>{{ eq.plano or '-' }}</dd>
+        <dt>Preço de venda</dt><dd>{{ eq.preco_venda|moeda }}</dd>
+        <dt>Pago</dt><dd>{{ eq.pago|moeda }}</dd>
+        <dt>Falta</dt><dd>{{ eq.falta|moeda }}</dd>
+        <dt>Chave NF-e</dt><dd>{% if eq.chave_acesso_nfe %}{{ eq.chave_acesso_nfe }}{% else %}-{% endif %}</dd>
+      </dl>
+
+      <div class="opcionais-venda-wrap">
+        <table class="opcionais-venda-tabela">
+          <thead><tr>
+            <th>Som</th>
+            <th>HDMI Tela 2</th>
+            <th>Teclado Bluetooth</th>
+            <th>Microfone</th>
+            <th>Sistema de Crédito</th>
+            <th>Catálogo Impresso</th>
+          </tr></thead>
+          <tbody><tr>
+            <td>{{ eq.som or 'NA' }}</td>
+            <td>{{ eq.hdmi_tela_2 or 'NA' }}</td>
+            <td>{{ eq.teclado_bluetooth or 'NA' }}</td>
+            <td>{{ eq.microfone or 'Com fio' }}</td>
+            <td>{{ eq.sistema_credito or 'NA' }}</td>
+            <td>{{ eq.catalogo_impresso or 'NA' }}</td>
+          </tr></tbody>
+        </table>
+      </div>
+
+      <div class="acoes-documentos">
+        <a class="botao pequeno" target="_blank" href="/organiza/equipamentos/{{ eq.id }}/garantia.pdf">Contrato de garantia</a>
+        <a class="botao pequeno" target="_blank" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/recibo">Recibo</a>
+        <a class="botao pequeno" href="/organiza/equipamentos/{{ eq.id }}/nfae">Emitir NFA-e</a>
+        <a class="botao pequeno" target="_blank" rel="noopener" href="{{ NFE_CONSULTA_URL }}">Consultar NF-e</a>
+        <button class="botao pequeno copiar-chave-nfe" type="button" data-chave="{{ eq.chave_acesso_nfe or '' }}" onclick="copiarChaveNfeCard(this)" {% if not eq.chave_acesso_nfe %}disabled title="Cadastre a chave de acesso na tela da NFA-e"{% endif %}>Copiar chave</button>
+      </div>
+      {% if eq.observacao %}<p class="observacao">{{ eq.observacao }}</p>{% endif %}
+    </article>
+    {% else %}
+    <p class="texto-suave vazio">Nenhum equipamento cadastrado.</p>
+    {% endfor %}
+  </div>
+</section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div><a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a></div><div class="lista-cards-mobile">{% for m in manutencoes %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
 <script>
-(function(){
-  document.querySelectorAll('.copiar-chave-nfe').forEach(function(btn){
-    btn.addEventListener('click', async function(){
-      const chave = (btn.dataset.chave || '').replace(/\D/g, '');
-      if (chave.length !== 44) return;
-      try {
-        await navigator.clipboard.writeText(chave);
-      } catch (_) {
-        const area = document.createElement('textarea');
-        area.value = chave;
-        area.style.position = 'fixed'; area.style.opacity = '0';
-        document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
-      }
-      const original = btn.textContent;
-      btn.textContent = 'Chave copiada';
-      setTimeout(function(){ btn.textContent = original; }, 1600);
-    });
-  });
-})();
+async function copiarChaveNfeCard(btn){
+  const chave = ((btn && btn.dataset && btn.dataset.chave) || '').replace(/\D/g, '');
+  if (chave.length !== 44) {
+    window.alert('Chave de acesso inválida. Cadastre os 44 dígitos na tela da NFA-e.');
+    return;
+  }
+  let copiado = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(chave);
+      copiado = true;
+    }
+  } catch (_) {}
+  if (!copiado) {
+    const area = document.createElement('textarea');
+    area.value = chave;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.left = '-9999px';
+    area.style.top = '0';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, chave.length);
+    try { copiado = document.execCommand('copy'); } catch (_) { copiado = false; }
+    area.remove();
+  }
+  if (!copiado) {
+    window.prompt('Copie a chave de acesso:', chave);
+    return;
+  }
+  const original = btn.textContent;
+  btn.textContent = 'Chave copiada';
+  btn.classList.add('copiado');
+  setTimeout(function(){ btn.textContent = original; btn.classList.remove('copiado'); }, 1600);
+}
 </script>
 {% endblock %}
