@@ -121,6 +121,44 @@
     for(const lab of [...document.querySelectorAll('label,span,div,p')].filter(visible)){const lt=norm(lab.textContent);if(!wants.every(w=>lt.includes(w)))continue;let f=null;try{if(lab.htmlFor)f=document.getElementById(lab.htmlFor);if(!f)f=lab.querySelector('input,textarea,select');if(!f&&lab.parentElement)f=lab.parentElement.querySelector('input,textarea,select')}catch(_){}if(f&&visible(f))return f}
     return null;
   }
+  function findSection(words){
+    const wants=words.map(norm);
+    const heads=[...document.querySelectorAll('h1,h2,h3,h4,h5,legend,strong,span,div,p')].filter(visible);
+    for(const h of heads){
+      const ht=norm(h.textContent||'');
+      if(!wants.every(w=>ht.includes(w)))continue;
+      let n=h;
+      for(let i=0;i<7&&n;i++,n=n.parentElement){
+        try{
+          const qtd=n.querySelectorAll('input,textarea,select').length;
+          const txt=norm(n.textContent||'');
+          if(qtd>=3&&txt.length<12000)return n;
+        }catch(_){}
+      }
+    }
+    return null;
+  }
+  function findFieldIn(root,words,selector='input,textarea,select'){
+    if(!root)return null;
+    const wants=words.map(norm), els=[...root.querySelectorAll(selector)].filter(visible);
+    for(const el of els){
+      let label='';
+      try{if(el.id){const l=root.querySelector('label[for="'+CSS.escape(el.id)+'"]')||document.querySelector('label[for="'+CSS.escape(el.id)+'"]');if(l)label=textOf(l)}}catch(_){}
+      if(!label){try{const l=el.closest('label');if(l)label=textOf(l)}catch(_){}}
+      const own=textOf(el);
+      if(wants.every(w=>(own+' '+label).includes(w)))return el;
+    }
+    for(const lab of [...root.querySelectorAll('label')].filter(visible)){
+      const lt=norm(lab.textContent||'');if(!wants.every(w=>lt.includes(w)))continue;
+      try{let f=null;if(lab.htmlFor)f=document.getElementById(lab.htmlFor);if(!f)f=lab.querySelector(selector);if(!f&&lab.parentElement)f=lab.parentElement.querySelector(selector);if(f&&visible(f))return f}catch(_){}
+    }
+    return null;
+  }
+  function setDateValue(el,iso){
+    if(!el||!iso)return false;
+    const v=(el.type==='date')?String(iso):String(iso).split('-').reverse().join('/');
+    return setField(el,v);
+  }
   function textOf(el){return norm([el.innerText,el.textContent,el.value,el.name,el.id,el.placeholder,el.getAttribute&&el.getAttribute('aria-label')].filter(Boolean).join(' '))}
   function setField(el,val){if(!el||val===undefined||val===null||val==='')return false;try{el.focus();if(el.tagName==='SELECT'){const nv=norm(val),opts=[...el.options],o=opts.find(x=>norm(x.value)===nv||norm(x.textContent).includes(nv));if(!o)return false;el.value=o.value}else el.value=val;fire(el);return true}catch(_){return false}}
 
@@ -164,6 +202,11 @@
         ctnText:'01.07.01 - Suporte técnico em informática, inclusive instalação, configuração e manutenção de programas de computação e bancos de dados.',
         nbs:'115013000',
         nbsText:'115013000 - Serviços de suporte em tecnologia da informação (TI)'
+      },
+      '12.09.03':{
+        ctnText:'12.09.03 - Diversões eletrônicas ou não.',
+        nbs:'111024000',
+        nbsText:'111024000 - Arrendamento mercantil operacional ou locação de equipamentos para diversão e lazer'
       },
       '14.01.01':{
         ctnText:'14.01.01',
@@ -415,8 +458,8 @@
   async function servico(){
     if(getCheckpoint()==='servico_avancando')return;
     setCheckpoint('servico_preenchendo');
-    addDebugStep('Serviço','Ordem segura: País Brasil → Município da prestação → CTN → operação normal (Não) → NBS → descrição.');
-    updateBox('Preenchendo Serviço…','Município, código de tributação, NBS e descrição.');
+    addDebugStep('Serviço','Ordem segura: País Brasil → Município da prestação → CTN → operação normal (Não) → NBS → descrição → dados de evento quando for Aluguel.');
+    updateBox('Preenchendo Serviço…','Município, código de tributação, NBS, descrição e dados do evento quando necessários.');
 
     const s=payload.servico||{}, meta=serviceMeta(s), missing=[];
 
@@ -458,6 +501,72 @@
     const descOk=!!desc&&!!String(s.descricao||'').trim()&&setField(desc,s.descricao);
     if(!descOk)missing.push('Descrição do serviço');
     fieldResult('Serviço - Descrição',descOk,String(s.descricao||'').slice(0,100));
+
+    // CTNs do item 12 exibem o bloco "Informações para Atividade de Evento".
+    // Para Aluguel, o Organiza já envia esses dados; mais adiante eles virão do Connect.
+    const evt=payload.evento||{};
+    const eventoAtivo=!!evt.ativo || /^12\./.test(meta.code);
+    if(eventoAtivo){
+      const root=findSection(['atividade','evento'])||findSection(['informacoes','evento']);
+      if(!root){
+        missing.push('Bloco Informações para Atividade de Evento');
+        fieldResult('Evento - bloco',false,'Informações para Atividade de Evento');
+      }else{
+        const ini=findFieldIn(root,['data inicial']);
+        const fim=findFieldIn(root,['data final']);
+        const evtDesc=findFieldIn(root,['descricao'],'textarea,input');
+        const iniOk=setDateValue(ini,evt.data_inicio);
+        const fimOk=setDateValue(fim,evt.data_fim);
+        const evtDescOk=!!evtDesc&&!!String(evt.descricao||'').trim()&&setField(evtDesc,evt.descricao);
+        fieldResult('Evento - Data inicial',iniOk,evt.data_inicio||'não informada');
+        fieldResult('Evento - Data final',fimOk,evt.data_fim||'não informada');
+        fieldResult('Evento - Descrição',evtDescOk,evt.descricao||'não informada');
+        if(!iniOk)missing.push('Data inicial do evento');
+        if(!fimOk)missing.push('Data final do evento');
+        if(!evtDescOk)missing.push('Descrição da atividade de evento');
+
+        const localTipo=String(evt.local_tipo||'brasil').toLowerCase();
+        if(localTipo==='identificador'){
+          const radioOk=clickLabeledRadio(['identificador']);
+          await sleep(250);
+          const idf=findFieldIn(root,['identificacao'])||findFieldIn(root,['identificador']);
+          const idOk=radioOk&&!!idf&&!!String(evt.identificador||'').trim()&&setField(idf,evt.identificador);
+          fieldResult('Evento - Local',radioOk,'Identificador');
+          fieldResult('Evento - Identificação',idOk,evt.identificador||'não informada');
+          if(!idOk)missing.push('Identificador municipal do evento');
+        }else{
+          const radioOk=clickLabeledRadio(['endereço no brasil','endereco no brasil']);
+          fieldResult('Evento - Local',radioOk,'Endereço no Brasil');
+          if(!radioOk){missing.push('Local do evento = Endereço no Brasil')}
+          await sleep(450);
+          const cep=findFieldIn(root,['cep']);
+          const cepOk=!!cep&&digits(evt.cep).length===8&&setField(cep,digits(evt.cep));
+          fieldResult('Evento - CEP',cepOk,evt.cep||'não informado');
+          if(!cepOk)missing.push('CEP do evento');
+          await sleep(1200);
+
+          const numero=findFieldIn(root,['numero']);
+          const numOk=!!numero&&!!String(evt.numero||'').trim()&&setField(numero,evt.numero);
+          fieldResult('Evento - Número',numOk,evt.numero||'não informado');
+          if(!numOk)missing.push('Número do evento');
+
+          // CEP costuma preencher município, bairro e logradouro pelo próprio portal.
+          // Só escrevemos esses campos quando estão disponíveis/editáveis e vieram do Organiza.
+          const extras=[
+            [['logradouro'],evt.logradouro,'Logradouro'],
+            [['bairro'],evt.bairro,'Bairro'],
+            [['municipio'],evt.municipio,'Município'],
+            [['uf'],evt.uf,'UF'],
+            [['complemento'],evt.complemento,'Complemento']
+          ];
+          for(const [keys,value,label] of extras){
+            if(!value)continue;
+            const el=findFieldIn(root,keys);
+            if(el&&!el.disabled&&!el.readOnly){setField(el,value);fieldResult('Evento - '+label,true,String(value))}
+          }
+        }
+      }
+    }
 
     if(missing.length){
       setCheckpoint('servico_revisao');

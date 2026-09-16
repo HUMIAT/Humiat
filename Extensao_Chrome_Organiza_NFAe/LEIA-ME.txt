@@ -167,3 +167,10 @@ NOVO NA 1.0.24
 - Corrige detecção da etapa Valores/Tributação da NFS-e.
 - A rota /DPS/Tributacao agora tem prioridade sobre textos genéricos como 'serviço prestado'.
 - Evita falso aviso de que o Serviço não avançou quando o portal já abriu a tela de Tributação/Valores.
+
+
+1.0.74
+- Aluguel (CTN 12.09.03): NBS 111024000 - locação de equipamentos para diversão e lazer.
+- Preenche Informações para Atividade de Evento: data inicial/final, descrição e local.
+- Local padrão: Endereço no Brasil; Identificador municipal somente quando informado.
+- Mantém log, pausa/continuação, anti-loop e parada antes de Emitir NFS-e.

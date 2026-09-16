@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Organiza Fiscal",
-  "version": "1.0.73",
-  "description": "Organiza Fiscal: NFA-e + NFS-e com Serviço e Valores mapeados, NBS/CTN/município exatos, tributação padrão MEI e parada antes da emissão.",
+  "version": "1.0.74",
+  "description": "Organiza Fiscal: NFA-e + NFS-e com aluguel/evento, NBS 111024000, datas e endereço do evento, tributação MEI e parada antes da emissão.",
   "permissions": [
     "storage",
     "tabs",

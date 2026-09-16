@@ -88,11 +88,11 @@ NFSE_SERVICO_META = {
     },
     "12.09.03": {
         "codigo_texto": "12.09.03 - Diversões eletrônicas ou não.",
-        # A NFS-e de aluguel usada como referência confirma o CTN 12.09.03, mas o
-        # DANFSe antigo não exibe NBS. O NBS fica vazio até ser validado no portal
-        # atual, evitando inventar uma classificação fiscal.
-        "nbs_codigo": "",
-        "nbs_texto": "",
+        # NBS 2.0: locação de equipamentos para diversão e lazer. É o enquadramento
+        # operacional adotado para Karaokê, fliperama e Just Dance quando a nota é
+        # do tipo Aluguel. O usuário não precisa informar o código na tela.
+        "nbs_codigo": "111024000",
+        "nbs_texto": "111024000 - Arrendamento mercantil operacional ou locação de equipamentos para diversão e lazer",
     },
     # Mantido apenas para compatibilidade com rascunhos antigos já salvos.
     "14.01.01": {
@@ -718,6 +718,21 @@ class NFSERascunho(Base):
     uf_prestacao = Column(String(2), nullable=False, default=NFSE_UF_PADRAO)
     descricao = Column(Text, nullable=False)
     valor_total = Column(Float, nullable=False, default=0)
+    # Campos adicionais exigidos pelos CTNs do item 12 (atividades de evento).
+    # Por enquanto são preenchidos manualmente no Organiza; futuramente o Connect
+    # enviará datas e endereço do evento automaticamente.
+    evento_data_inicio = Column(Date, nullable=True)
+    evento_data_fim = Column(Date, nullable=True)
+    evento_descricao = Column(String(255), nullable=True)
+    evento_local_tipo = Column(String(20), nullable=True, default="brasil")
+    evento_identificador = Column(String(60), nullable=True)
+    evento_cep = Column(String(20), nullable=True)
+    evento_logradouro = Column(String(255), nullable=True)
+    evento_numero = Column(String(30), nullable=True)
+    evento_complemento = Column(String(120), nullable=True)
+    evento_bairro = Column(String(120), nullable=True)
+    evento_municipio = Column(String(120), nullable=True)
+    evento_uf = Column(String(2), nullable=True)
     status = Column(String(30), nullable=False, default="RASCUNHO")
     numero_nfse = Column(String(40), nullable=True)
     chave_acesso = Column(String(80), nullable=True)
@@ -1011,6 +1026,28 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN ddi VARCHAR(5) NOT NULL DEFAULT '55'"))
             conn.execute(text("UPDATE clientes SET pais = 'BR' WHERE pais IS NULL OR pais = ''"))
             conn.execute(text("UPDATE clientes SET ddi = '55' WHERE ddi IS NULL OR ddi = ''"))
+    if "nfse_rascunhos" in insp.get_table_names():
+        existentes_nfse = {c["name"] for c in insp.get_columns("nfse_rascunhos")}
+        with engine.begin() as conn:
+            tipo_data_nfse = "DATE"
+            campos_nfse = {
+                "evento_data_inicio": tipo_data_nfse,
+                "evento_data_fim": tipo_data_nfse,
+                "evento_descricao": "VARCHAR(255)",
+                "evento_local_tipo": "VARCHAR(20)",
+                "evento_identificador": "VARCHAR(60)",
+                "evento_cep": "VARCHAR(20)",
+                "evento_logradouro": "VARCHAR(255)",
+                "evento_numero": "VARCHAR(30)",
+                "evento_complemento": "VARCHAR(120)",
+                "evento_bairro": "VARCHAR(120)",
+                "evento_municipio": "VARCHAR(120)",
+                "evento_uf": "VARCHAR(2)",
+            }
+            for coluna, tipo_sql in campos_nfse.items():
+                if coluna not in existentes_nfse:
+                    conn.execute(text(f"ALTER TABLE nfse_rascunhos ADD COLUMN {coluna} {tipo_sql}"))
+            conn.execute(text("UPDATE nfse_rascunhos SET evento_local_tipo = 'brasil' WHERE evento_local_tipo IS NULL OR evento_local_tipo = ''"))
     if "equipamentos" in insp.get_table_names():
         existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
         with engine.begin() as conn:
@@ -1934,6 +1971,21 @@ def nfse_payload(rascunho: NFSERascunho) -> dict:
             ) or "",
             "valor": round(float(rascunho.valor_total or 0), 2),
         },
+        "evento": {
+            "ativo": nfse_tipo_por_codigo(rascunho.codigo_servico) == NFSE_TIPO_ALUGUEL,
+            "data_inicio": rascunho.evento_data_inicio.isoformat() if rascunho.evento_data_inicio else "",
+            "data_fim": rascunho.evento_data_fim.isoformat() if rascunho.evento_data_fim else "",
+            "descricao": (rascunho.evento_descricao or "").strip(),
+            "local_tipo": (rascunho.evento_local_tipo or "brasil").strip().lower(),
+            "identificador": (rascunho.evento_identificador or "").strip(),
+            "cep": re.sub(r"\D", "", (rascunho.evento_cep or "")),
+            "logradouro": (rascunho.evento_logradouro or "").strip(),
+            "numero": (rascunho.evento_numero or "").strip(),
+            "complemento": (rascunho.evento_complemento or "").strip(),
+            "bairro": (rascunho.evento_bairro or "").strip(),
+            "municipio": (rascunho.evento_municipio or "").strip(),
+            "uf": (rascunho.evento_uf or "").strip().upper(),
+        },
         "tributacao": {
             "issqn_operacao": "TRIBUTAVEL",
             "regime_especial": "NENHUM",
@@ -1957,6 +2009,20 @@ def nfse_campos_faltantes(payload: dict) -> list[str]:
     if not servico.get("codigo"): faltantes.append("código do serviço")
     if not servico.get("descricao"): faltantes.append("descrição do serviço")
     if float(servico.get("valor") or 0) <= 0: faltantes.append("valor total")
+    evento = payload.get("evento") or {}
+    if evento.get("ativo"):
+        if not servico.get("nbs_codigo"): faltantes.append("NBS do aluguel")
+        if not evento.get("data_inicio"): faltantes.append("data inicial do evento")
+        if not evento.get("data_fim"): faltantes.append("data final do evento")
+        if not evento.get("descricao"): faltantes.append("descrição da atividade de evento")
+        local_tipo = (evento.get("local_tipo") or "brasil").lower()
+        if local_tipo == "identificador":
+            if not evento.get("identificador"): faltantes.append("identificador municipal do evento")
+        elif local_tipo == "brasil":
+            if len(re.sub(r"\D", "", evento.get("cep") or "")) != 8: faltantes.append("CEP do evento")
+            if not evento.get("numero"): faltantes.append("número do endereço do evento")
+        else:
+            faltantes.append("local do evento")
     return faltantes
 
 
@@ -3251,7 +3317,12 @@ def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depen
     dados = {
         "cliente_id": "", "origem": "manual", "manutencao_id": "", "competencia": date.today().isoformat(),
         "tipo_servico": NFSE_TIPO_MANUTENCAO, "municipio_prestacao": NFSE_MUNICIPIO_PADRAO,
-        "uf_prestacao": NFSE_UF_PADRAO, "descricao": nfse_descricao_padrao(NFSE_TIPO_MANUTENCAO), "valor_total": ""
+        "uf_prestacao": NFSE_UF_PADRAO, "descricao": nfse_descricao_padrao(NFSE_TIPO_MANUTENCAO), "valor_total": "",
+        "evento_data_inicio": date.today().isoformat(), "evento_data_fim": date.today().isoformat(),
+        "evento_descricao": "Aluguel de Karaokê", "evento_local_tipo": "brasil",
+        "evento_identificador": "", "evento_cep": "", "evento_logradouro": "",
+        "evento_numero": "", "evento_complemento": "", "evento_bairro": "",
+        "evento_municipio": "", "evento_uf": "RJ"
     }
     manutencao = None
     if manutencao_id:
@@ -3296,7 +3367,20 @@ async def nfse_criar(request: Request, usuario: Usuario = Depends(usuario_logado
         codigo_servico=codigo_servico,
         municipio_prestacao=(form.get("municipio_prestacao") or NFSE_MUNICIPIO_PADRAO).strip(),
         uf_prestacao=(form.get("uf_prestacao") or NFSE_UF_PADRAO).strip().upper()[:2],
-        descricao=descricao, valor_total=valor_total, status="RASCUNHO"
+        descricao=descricao, valor_total=valor_total,
+        evento_data_inicio=data_form(form.get("evento_data_inicio")) if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_data_fim=data_form(form.get("evento_data_fim")) if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_descricao=(form.get("evento_descricao") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_local_tipo=(form.get("evento_local_tipo") or "brasil").strip().lower() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_identificador=(form.get("evento_identificador") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_cep=(form.get("evento_cep") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_logradouro=(form.get("evento_logradouro") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_numero=(form.get("evento_numero") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_complemento=(form.get("evento_complemento") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_bairro=(form.get("evento_bairro") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_municipio=(form.get("evento_municipio") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_uf=(form.get("evento_uf") or "").strip().upper()[:2] if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        status="RASCUNHO"
     )
     db.add(nota); db.commit(); db.refresh(nota)
     return RedirectResponse(f"/organiza/nfse/{nota.id}", status_code=303)
@@ -3326,6 +3410,19 @@ async def nfse_salvar(nota_id: int, request: Request, usuario: Usuario = Depends
     nota.uf_prestacao = (form.get("uf_prestacao") or nota.uf_prestacao or NFSE_UF_PADRAO).strip().upper()[:2]
     nota.descricao = (form.get("descricao") or nota.descricao or "").strip()
     nota.valor_total = max(moeda_num(form.get("valor_total")), 0)
+    if tipo_servico == NFSE_TIPO_ALUGUEL:
+        nota.evento_data_inicio = data_form(form.get("evento_data_inicio")) or nota.evento_data_inicio
+        nota.evento_data_fim = data_form(form.get("evento_data_fim")) or nota.evento_data_fim
+        nota.evento_descricao = (form.get("evento_descricao") or nota.evento_descricao or "Aluguel de Karaokê").strip()
+        nota.evento_local_tipo = (form.get("evento_local_tipo") or nota.evento_local_tipo or "brasil").strip().lower()
+        nota.evento_identificador = (form.get("evento_identificador") or "").strip()
+        nota.evento_cep = (form.get("evento_cep") or "").strip()
+        nota.evento_logradouro = (form.get("evento_logradouro") or "").strip()
+        nota.evento_numero = (form.get("evento_numero") or "").strip()
+        nota.evento_complemento = (form.get("evento_complemento") or "").strip()
+        nota.evento_bairro = (form.get("evento_bairro") or "").strip()
+        nota.evento_municipio = (form.get("evento_municipio") or "").strip()
+        nota.evento_uf = (form.get("evento_uf") or "").strip().upper()[:2]
     db.commit()
     return RedirectResponse(f"/organiza/nfse/{nota.id}?salva=1", status_code=303)
 

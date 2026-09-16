@@ -32,6 +32,33 @@
         <textarea id="nfse-descricao" name="descricao" rows="11" required placeholder="Descreva o serviço sem valores individuais.">{{ dados.descricao }}</textarea>
         <small>Este texto é editável. Itens podem ser listados sem preço individual; o valor total fica no campo acima.</small>
       </label>
+      <div id="nfse-evento-campos" class="campo-duplo cartao" style="padding:14px;margin:4px 0 2px;display:none">
+        <h3 style="margin:0 0 6px">Dados da atividade de evento</h3>
+        <p class="texto-suave" style="margin:0 0 12px">Necessários para NFS-e de Aluguel (item 12). Por enquanto preencha aqui; futuramente estes dados virão do Connect.</p>
+        <div class="form-grid-organizada duas-colunas">
+          <label>Data inicial<input class="evento-obrigatorio" type="date" name="evento_data_inicio" value="{{ dados.evento_data_inicio }}"></label>
+          <label>Data final<input class="evento-obrigatorio" type="date" name="evento_data_fim" value="{{ dados.evento_data_fim }}"></label>
+          <label class="campo-duplo">Descrição da atividade/evento<input class="evento-obrigatorio" name="evento_descricao" maxlength="255" value="{{ dados.evento_descricao }}" placeholder="Ex.: Aluguel de Karaokê"></label>
+          <label>Como informar o local
+            <select id="nfse-evento-local-tipo" name="evento_local_tipo">
+              <option value="brasil" {% if dados.evento_local_tipo != 'identificador' %}selected{% endif %}>Endereço no Brasil</option>
+              <option value="identificador" {% if dados.evento_local_tipo == 'identificador' %}selected{% endif %}>Identificador municipal</option>
+            </select>
+            <small>Use Identificador somente se a Prefeitura fornecer um código específico do evento.</small>
+          </label>
+          <div></div>
+          <div id="nfse-evento-brasil" class="campo-duplo form-grid-organizada duas-colunas">
+            <label>CEP do evento<input class="evento-endereco" name="evento_cep" inputmode="numeric" value="{{ dados.evento_cep }}" placeholder="00000-000"></label>
+            <label>Número<input class="evento-endereco" name="evento_numero" value="{{ dados.evento_numero }}"></label>
+            <label class="campo-duplo">Logradouro<input name="evento_logradouro" value="{{ dados.evento_logradouro }}"></label>
+            <label>Bairro<input name="evento_bairro" value="{{ dados.evento_bairro }}"></label>
+            <label>Complemento<input name="evento_complemento" value="{{ dados.evento_complemento }}"></label>
+            <label>Município<input name="evento_municipio" value="{{ dados.evento_municipio }}"></label>
+            <label>UF<input name="evento_uf" maxlength="2" value="{{ dados.evento_uf }}"></label>
+          </div>
+          <label id="nfse-evento-identificador" class="campo-duplo" style="display:none">Identificador municipal do evento<input name="evento_identificador" value="{{ dados.evento_identificador }}"><small>É um código determinado pela Administração Tributária Municipal; não é CPF/CNPJ nem número do contrato.</small></label>
+        </div>
+      </div>
     </div>
     <div class="acoes-titulo"><button class="botao primario" type="submit">Salvar rascunho</button><a class="botao" href="/organiza/nfse">Cancelar</a></div>
   </form>
@@ -47,6 +74,20 @@
     aluguel: {{ nfse_descricao_padrao('aluguel')|tojson }}
   };
   let ultimoPadrao=padroes[tipo.value]||'';
+  const evento=document.getElementById('nfse-evento-campos');
+  const localTipo=document.getElementById('nfse-evento-local-tipo');
+  const eventoBrasil=document.getElementById('nfse-evento-brasil');
+  const eventoIdentificador=document.getElementById('nfse-evento-identificador');
+  function atualizarEvento(){
+    const aluguel=tipo.value==='aluguel';
+    if(evento) evento.style.display=aluguel?'block':'none';
+    document.querySelectorAll('.evento-obrigatorio').forEach(el=>el.required=aluguel);
+    const porId=aluguel&&localTipo&&localTipo.value==='identificador';
+    if(eventoBrasil) eventoBrasil.style.display=(aluguel&&!porId)?'grid':'none';
+    if(eventoIdentificador) eventoIdentificador.style.display=porId?'block':'none';
+    document.querySelectorAll('.evento-endereco').forEach(el=>el.required=aluguel&&!porId);
+    const ident=eventoIdentificador&&eventoIdentificador.querySelector('input'); if(ident) ident.required=!!porId;
+  }
   tipo.addEventListener('change',function(){
     const novo=padroes[tipo.value]||'';
     const atual=(descricao.value||'').trim();
@@ -54,7 +95,10 @@
       descricao.value=novo;
     }
     ultimoPadrao=novo;
+    atualizarEvento();
   });
+  if(localTipo)localTipo.addEventListener('change',atualizarEvento);
+  atualizarEvento();
 })();
 </script>
 {% endblock %}
