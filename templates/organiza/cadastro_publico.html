@@ -1,106 +1,185 @@
 {% extends "organiza/base.html" %}
 {% block conteudo_publico %}
 <section class="orcamento-publico"><div class="publico-card cadastro-publico-card">
-<p class="tag">KARAOKÊ RJ · ATUALIZAÇÃO DE CADASTRO</p>
-<h1>Revise seus dados</h1>
-<p class="texto-suave">Preencha seus dados de contato. Se informar um CNPJ, os dados empresariais e fiscais disponíveis serão consultados automaticamente; você não precisa digitar Razão Social ou Inscrição Estadual.</p>
+<p class="tag">KARAOKÊ RJ · CADASTRO DA COMPRA</p>
+<h1>Complete seus dados</h1>
+<p class="texto-suave">Preencha os dados abaixo. Se for CNPJ, você pode usar <b>Validar CNPJ</b> para trazer os dados empresariais disponíveis.</p>
 {% if salvo %}<div class="alerta sucesso">Dados atualizados com sucesso.</div>{% endif %}
 {% if aviso %}<div class="alerta informacao">{{ aviso }}</div>{% endif %}
 {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 <form method="post" class="formulario" id="cadastro-publico-form">
+
+<h2>Dados do cliente</h2>
 <div class="form-grid-organizada duas-colunas">
-<label>Nome / contato *<input name="nome" required value="{{ cliente.nome or '' }}"></label>
+<label>Nome / contato *<input name="nome" required value="{{ cliente.nome if cliente.nome and not cliente.nome.startswith('Cadastro pendente ') else '' }}"></label>
 <label>WhatsApp *<input name="telefone" required inputmode="numeric" value="{{ cliente.telefone or '' }}"></label>
 <label>CPF/CNPJ *
   <div style="display:flex;gap:8px;align-items:center">
     <input id="documento" name="documento" required inputmode="numeric" value="{{ cliente.documento or '' }}" style="flex:1">
-    <button class="botao pequeno" type="button" id="consultar-cnpj" style="display:none">Consultar CNPJ</button>
+    <button class="botao pequeno" type="button" id="consultar-cnpj" style="display:none">Validar CNPJ</button>
   </div>
   <small class="texto-suave" id="cnpj-msg"></small>
 </label>
 <label>E-mail *<input type="email" name="email" required value="{{ cliente.email or '' }}"></label>
 </div>
 
-<div id="dados-cnpj" class="alerta informacao" {% if not cliente.razao_social %}style="display:none"{% endif %}>
-  <strong>Dados empresariais consultados</strong>
-  <div style="margin-top:8px;display:grid;gap:4px">
-    <span>Razão Social: <b id="cnpj-razao">{{ cliente.razao_social or '-' }}</b></span>
-    <span>Nome fantasia: <b id="cnpj-fantasia">{{ cliente.empresa or '-' }}</b></span>
-    <span>Inscrição Estadual: <b id="cnpj-ie">{{ cliente.inscricao_estadual or '-' }}</b></span>
-    <span>Situação ICMS: <b id="cnpj-icms">{{ situacao_icms_rotulo(cliente.situacao_icms) }}</b></span>
-    <span>Situação CNPJ: <b id="cnpj-situacao">{{ cliente.cnpj_situacao_cadastral or '-' }}</b></span>
+<div id="dados-cnpj" class="cartao" {% if not cliente.razao_social and not cliente.documento %}style="display:none;margin-top:16px"{% else %}style="margin-top:16px"{% endif %}>
+  <h2>Dados da empresa</h2>
+  <div class="form-grid-organizada duas-colunas">
+    <label>Razão Social *<input id="razao_social" name="razao_social" value="{{ cliente.razao_social or '' }}"></label>
+    <label>Nome fantasia<input id="empresa" name="empresa" value="{{ cliente.empresa or '' }}"></label>
+    <label>Contribuinte do ICMS
+      <select id="situacao_icms" name="situacao_icms">
+        <option value="NAO_CONFIRMADO" {% if (cliente.situacao_icms or 'NAO_CONFIRMADO') == 'NAO_CONFIRMADO' %}selected{% endif %}>Não confirmado</option>
+        <option value="CONTRIBUINTE" {% if cliente.situacao_icms == 'CONTRIBUINTE' %}selected{% endif %}>Sim</option>
+        <option value="NAO_CONTRIBUINTE" {% if cliente.situacao_icms == 'NAO_CONTRIBUINTE' %}selected{% endif %}>Não</option>
+        <option value="ISENTO" {% if cliente.situacao_icms == 'ISENTO' %}selected{% endif %}>Isento</option>
+      </select>
+    </label>
+    <label>Inscrição Estadual<input id="inscricao_estadual" name="inscricao_estadual" value="{{ cliente.inscricao_estadual or '' }}"></label>
+  </div>
+  <div id="sintegra-aviso" class="alerta informacao" style="display:none;margin-top:12px">SINTEGRA não disponível. Tente mais tarde.</div>
+  <small class="texto-suave">Situação CNPJ: <b id="cnpj-situacao">{{ cliente.cnpj_situacao_cadastral or '-' }}</b></small>
+</div>
+
+<h2>Endereço do cliente</h2>
+<p class="texto-suave">Digite primeiro o CEP. Logradouro, bairro, município e UF são preenchidos automaticamente e não podem ser alterados. Você pode alterar apenas número e complemento.</p>
+<div class="form-grid-organizada duas-colunas">
+<label class="campo-largo">CEP *<input id="cep" name="cep" required inputmode="numeric" maxlength="9" value="{{ cliente.cep or '' }}"><small class="texto-suave" id="cep-msg"></small></label>
+<label>Endereço *<input id="endereco" name="endereco" readonly required value="{{ cliente.endereco or '' }}"></label>
+<label>Número *<input id="endereco_numero" name="endereco_numero" required value="{{ cliente.endereco_numero or '' }}"></label>
+<label>Complemento<input id="complemento" name="complemento" value="{{ cliente.complemento or '' }}"></label>
+<label>Bairro *<input id="bairro" name="bairro" readonly required value="{{ cliente.bairro or '' }}"></label>
+<label>Município *<input id="municipio" name="municipio" readonly required value="{{ cliente.municipio or cliente.cidade or '' }}"><input type="hidden" id="municipio_ibge" name="municipio_ibge" value="{{ cliente.municipio_ibge or '' }}"></label>
+<label>Estado *<input id="estado" name="estado" readonly required maxlength="2" value="{{ cliente.estado or '' }}"></label>
+</div>
+
+<div style="margin:20px 0 10px">
+  <label style="display:flex;align-items:center;gap:10px;font-weight:700">
+    <input type="checkbox" id="entrega_igual_cliente" name="entrega_igual_cliente" value="1" {% if cliente.entrega_igual_cliente is not defined or cliente.entrega_igual_cliente != 0 %}checked{% endif %} style="width:auto">
+    Endereço de entrega igual ao endereço do cliente
+  </label>
+</div>
+
+<div id="endereco-entrega-box" class="cartao" style="margin-top:12px;display:none">
+  <h2>Endereço de entrega</h2>
+  <p class="texto-suave">Digite primeiro o CEP da entrega. Os dados do CEP ficam bloqueados; somente número e complemento podem ser alterados.</p>
+  <div class="form-grid-organizada duas-colunas">
+    <label class="campo-largo">CEP de entrega *<input id="entrega_cep" name="entrega_cep" inputmode="numeric" maxlength="9" value="{{ cliente.entrega_cep or '' }}"><small class="texto-suave" id="entrega-cep-msg"></small></label>
+    <label>Endereço *<input id="entrega_endereco" name="entrega_endereco" readonly value="{{ cliente.entrega_endereco or '' }}"></label>
+    <label>Número *<input id="entrega_numero" name="entrega_numero" value="{{ cliente.entrega_numero or '' }}"></label>
+    <label>Complemento<input id="entrega_complemento" name="entrega_complemento" value="{{ cliente.entrega_complemento or '' }}"></label>
+    <label>Bairro *<input id="entrega_bairro" name="entrega_bairro" readonly value="{{ cliente.entrega_bairro or '' }}"></label>
+    <label>Município *<input id="entrega_municipio" name="entrega_municipio" readonly value="{{ cliente.entrega_municipio or '' }}"><input type="hidden" id="entrega_municipio_ibge" name="entrega_municipio_ibge" value="{{ cliente.entrega_municipio_ibge or '' }}"></label>
+    <label>Estado *<input id="entrega_estado" name="entrega_estado" readonly maxlength="2" value="{{ cliente.entrega_estado or '' }}"></label>
   </div>
 </div>
 
-<h2>Endereço</h2>
-<p class="texto-suave" id="endereco-ajuda">Para CNPJ, o endereço será preenchido pela consulta empresarial. Para CPF, informe normalmente.</p>
-<div class="form-grid-organizada duas-colunas">
-<label>CEP *<input id="cep" name="cep" required inputmode="numeric" maxlength="9" value="{{ cliente.cep or '' }}"></label>
-<label>Endereço *<input id="endereco" name="endereco" required value="{{ cliente.endereco or '' }}"></label>
-<label>Número *<input id="endereco_numero" name="endereco_numero" required value="{{ cliente.endereco_numero or '' }}"></label>
-<label>Complemento<input id="complemento" name="complemento" value="{{ cliente.complemento or '' }}"></label>
-<label>Bairro *<input id="bairro" name="bairro" required value="{{ cliente.bairro or '' }}"></label>
-<label>Município *<input id="municipio" name="municipio" required value="{{ cliente.municipio or cliente.cidade or '' }}"><input type="hidden" id="municipio_ibge" name="municipio_ibge" value="{{ cliente.municipio_ibge or '' }}"></label>
-<label>Estado *<input id="estado" name="estado" required maxlength="2" value="{{ cliente.estado or '' }}"></label>
-</div>
 <input type="hidden" name="observacao" value="{{ cliente.observacao or '' }}">
 <button class="botao primario botao-cheio">Salvar meus dados</button>
 </form></div></section>
+
 <script>
 (() => {
   const doc = document.getElementById('documento');
   const btn = document.getElementById('consultar-cnpj');
   const msg = document.getElementById('cnpj-msg');
   const box = document.getElementById('dados-cnpj');
-  const camposEndereco = ['cep','endereco','endereco_numero','complemento','bairro','municipio','estado'];
+  const sintegra = document.getElementById('sintegra-aviso');
+  const igual = document.getElementById('entrega_igual_cliente');
+  const entregaBox = document.getElementById('endereco-entrega-box');
   let ultimoConsultado = '';
 
-  const digits = (v) => (v || '').replace(/\D/g,'');
-  function ehCnpj(){ return digits(doc.value).length === 14; }
-  function atualizarModo(){
-    const cnpj = ehCnpj();
-    btn.style.display = cnpj ? '' : 'none';
-    camposEndereco.forEach(id => {
-      const el=document.getElementById(id); if(!el) return;
-      if(!cnpj) el.readOnly=false;
-      if(id!=='complemento') el.required=!cnpj;
-    });
+  const digits = v => (v || '').replace(/\D/g,'');
+  const ehCnpj = () => digits(doc.value).length === 14;
+
+  function formatarCep(el){
+    let n=digits(el.value).slice(0,8);
+    el.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;
   }
-  function aplicar(d){
-    document.getElementById('cnpj-razao').textContent = d.razao_social || '-';
-    document.getElementById('cnpj-fantasia').textContent = d.nome_fantasia || '-';
-    document.getElementById('cnpj-ie').textContent = d.inscricao_estadual || '-';
-    document.getElementById('cnpj-icms').textContent = d.situacao_icms === 'CONTRIBUINTE' ? 'Contribuinte do ICMS' : (d.situacao_icms === 'NAO_CONTRIBUINTE' ? 'Não contribuinte do ICMS' : (d.situacao_icms === 'ISENTO' ? 'Isento de IE' : 'Não confirmado'));
-    document.getElementById('cnpj-situacao').textContent = d.situacao_cadastral || '-';
-    box.style.display='';
-    const mapa={cep:'cep',endereco:'endereco',numero:'endereco_numero',complemento:'complemento',bairro:'bairro',municipio:'municipio',municipio_ibge:'municipio_ibge',uf:'estado'};
-    Object.entries(mapa).forEach(([k,id])=>{ const el=document.getElementById(id); if(el && d[k]) el.value=d[k]; });
-    camposEndereco.forEach(id => { const el=document.getElementById(id); if(el && id!=='complemento') el.readOnly=true; });
+
+  async function buscarCep(prefixo=''){
+    const idCep = prefixo ? 'entrega_cep' : 'cep';
+    const idMsg = prefixo ? 'entrega-cep-msg' : 'cep-msg';
+    const cepEl=document.getElementById(idCep), status=document.getElementById(idMsg);
+    const n=digits(cepEl.value);
+    if(n.length!==8){ if(status) status.textContent=''; return false; }
+    if(status) status.textContent='Consultando CEP...';
+    try{
+      const r=await fetch('https://viacep.com.br/ws/'+n+'/json/');
+      const d=await r.json();
+      if(!r.ok || d.erro) throw new Error('CEP não encontrado.');
+      const mapa = prefixo ? {
+        entrega_endereco:d.logradouro||'', entrega_bairro:d.bairro||'', entrega_municipio:d.localidade||'', entrega_estado:d.uf||'', entrega_municipio_ibge:d.ibge||''
+      } : {
+        endereco:d.logradouro||'', bairro:d.bairro||'', municipio:d.localidade||'', estado:d.uf||'', municipio_ibge:d.ibge||''
+      };
+      Object.entries(mapa).forEach(([id,v])=>{ const el=document.getElementById(id); if(el) el.value=v; });
+      if(status) status.textContent='CEP validado.';
+      return true;
+    }catch(e){
+      if(status) status.textContent=e.message || 'Não foi possível consultar o CEP.';
+      return false;
+    }
   }
-  async function consultar(){
+
+  function atualizarModoDocumento(){
+    const cnpj=ehCnpj();
+    btn.style.display=cnpj?'':'none';
+    box.style.display=cnpj?'':'none';
+    const razao=document.getElementById('razao_social');
+    if(razao) razao.required=cnpj;
+    if(!cnpj) sintegra.style.display='none';
+  }
+
+  async function consultarCnpj(){
     const cnpj=digits(doc.value);
     if(cnpj.length!==14) return;
     if(cnpj===ultimoConsultado) return;
-    btn.disabled=true; msg.textContent='Consultando dados do CNPJ...';
+    btn.disabled=true; msg.textContent='Consultando dados do CNPJ...'; sintegra.style.display='none';
     try{
       const r=await fetch(location.pathname + '/consultar-cnpj', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cnpj})});
       const d=await r.json();
       if(!r.ok) throw new Error(d.erro || 'Não foi possível consultar o CNPJ.');
-      ultimoConsultado=cnpj; aplicar(d); msg.textContent='CNPJ consultado. Dados empresariais preenchidos automaticamente.';
+      ultimoConsultado=cnpj;
+      document.getElementById('razao_social').value=d.razao_social||'';
+      document.getElementById('empresa').value=d.nome_fantasia||'';
+      document.getElementById('inscricao_estadual').value=d.inscricao_estadual||'';
+      document.getElementById('situacao_icms').value=d.situacao_icms||'NAO_CONFIRMADO';
+      document.getElementById('cnpj-situacao').textContent=d.situacao_cadastral||'-';
+      box.style.display='';
+      if(d.cep){ document.getElementById('cep').value=d.cep; formatarCep(document.getElementById('cep')); }
+      if(d.numero) document.getElementById('endereco_numero').value=d.numero;
+      if(d.complemento) document.getElementById('complemento').value=d.complemento;
+      if(d.cep) await buscarCep('');
+      if(d.aviso_ie || (!d.inscricao_estadual && d.situacao_icms==='NAO_CONFIRMADO')) sintegra.style.display='';
+      msg.textContent='CNPJ validado. Confira os dados antes de salvar.';
     }catch(e){ msg.textContent=e.message || 'Falha na consulta do CNPJ.'; }
     finally{btn.disabled=false;}
   }
-  doc.addEventListener('input', atualizarModo);
-  doc.addEventListener('blur', ()=>{ if(ehCnpj()) consultar(); });
-  btn.addEventListener('click', consultar);
-  atualizarModo();
 
-  async function buscarCep(){
-    if(ehCnpj()) return; // CNPJ usa o endereço cadastral consultado.
-    const e=document.getElementById('cep'),n=e.value.replace(/\D/g,'');if(n.length!==8)return;
-    try{const r=await fetch('https://viacep.com.br/ws/'+n+'/json/'),d=await r.json();if(d.erro)return;endereco.value=d.logradouro||'';bairro.value=d.bairro||'';municipio.value=d.localidade||'';estado.value=d.uf||'';document.getElementById('municipio_ibge').value=d.ibge||'';}catch(x){}
+  function atualizarEntrega(){
+    const diferente=!igual.checked;
+    entregaBox.style.display=diferente?'':'none';
+    ['entrega_cep','entrega_endereco','entrega_numero','entrega_bairro','entrega_municipio','entrega_estado'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.required=diferente;
+    });
   }
-  const c=document.getElementById('cep');c.addEventListener('blur',buscarCep);c.addEventListener('input',()=>{let n=c.value.replace(/\D/g,'').slice(0,8);c.value=n.length>5?n.slice(0,5)+'-'+n.slice(5):n;});
+
+  doc.addEventListener('input', atualizarModoDocumento);
+  doc.addEventListener('blur', ()=>{ if(ehCnpj()) consultarCnpj(); });
+  btn.addEventListener('click', consultarCnpj);
+  igual.addEventListener('change', atualizarEntrega);
+
+  const cep=document.getElementById('cep');
+  cep.addEventListener('input',()=>formatarCep(cep));
+  cep.addEventListener('blur',()=>buscarCep(''));
+  const entregaCep=document.getElementById('entrega_cep');
+  entregaCep.addEventListener('input',()=>formatarCep(entregaCep));
+  entregaCep.addEventListener('blur',()=>buscarCep('entrega'));
+
+  atualizarModoDocumento();
+  atualizarEntrega();
 })();
 </script>
 {% endblock %}

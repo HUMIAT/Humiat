@@ -5,9 +5,7 @@ import os
 import re
 import json
 import secrets
-import csv
 import io
-import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 import unicodedata
@@ -45,8 +43,10 @@ from services.comunicacao import (
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-ORGANIZA_VERSION = "1.1.9"
+ORGANIZA_VERSION = ORGANIZA_VERSAO
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
+NFE_CONSULTA_URL = "https://consultadfe.fazenda.rj.gov.br/consultaDFe/paginas/consultaChaveAcesso.faces"
+templates.env.globals["NFE_CONSULTA_URL"] = NFE_CONSULTA_URL
 
 # Padrão fiscal usado na preparação da NFA-e.
 # A regra operacional definida pela Karaokê RJ mantém os campos fiscais padrão e
@@ -362,6 +362,16 @@ class Cliente(Base):
     endereco = Column(String(255), nullable=True)
     endereco_numero = Column(String(30), nullable=True)
     complemento = Column(String(120), nullable=True)
+    # Endereço de entrega opcional. Por padrão, a entrega usa o endereço do cliente.
+    entrega_igual_cliente = Column(Integer, nullable=False, default=1)
+    entrega_cep = Column(String(20), nullable=True)
+    entrega_endereco = Column(String(255), nullable=True)
+    entrega_numero = Column(String(30), nullable=True)
+    entrega_complemento = Column(String(120), nullable=True)
+    entrega_bairro = Column(String(120), nullable=True)
+    entrega_municipio = Column(String(120), nullable=True)
+    entrega_municipio_ibge = Column(String(12), nullable=True)
+    entrega_estado = Column(String(60), nullable=True)
     email = Column(String(140), nullable=True)
     pacote = Column(String(30), nullable=True)
     falta_pacote = Column(Integer, nullable=True)
@@ -452,6 +462,7 @@ class Equipamento(Base):
     catalogo_online = Column(Integer, nullable=False, default=0)
     nota_codigo = Column(String(20), nullable=True)
     nota_descricao = Column(String(180), nullable=True)
+    chave_acesso_nfe = Column(String(44), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
@@ -861,6 +872,24 @@ def iniciar_banco():
                 conn.execute(text(f"ALTER TABLE clientes ADD COLUMN cnpj_consultado_em {tipo_data_cnpj}"))
             if "municipio_ibge" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN municipio_ibge VARCHAR(12)"))
+            if "entrega_igual_cliente" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_igual_cliente INTEGER NOT NULL DEFAULT 1"))
+            if "entrega_cep" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_cep VARCHAR(20)"))
+            if "entrega_endereco" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_endereco VARCHAR(255)"))
+            if "entrega_numero" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_numero VARCHAR(30)"))
+            if "entrega_complemento" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_complemento VARCHAR(120)"))
+            if "entrega_bairro" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_bairro VARCHAR(120)"))
+            if "entrega_municipio" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_municipio VARCHAR(120)"))
+            if "entrega_municipio_ibge" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_municipio_ibge VARCHAR(12)"))
+            if "entrega_estado" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN entrega_estado VARCHAR(60)"))
             if "pais" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN pais VARCHAR(2) NOT NULL DEFAULT 'BR'"))
             if "ddi" not in existentes_clientes:
@@ -888,6 +917,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN nota_codigo VARCHAR(20)"))
             if "nota_descricao" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN nota_descricao VARCHAR(180)"))
+            if "chave_acesso_nfe" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN chave_acesso_nfe VARCHAR(44)"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -1339,17 +1370,35 @@ def consultar_cnpj_publico(documento: str) -> dict:
     estado = est.get("estado") or {}
     cidade = est.get("cidade") or {}
     uf = str(estado.get("sigla") or "").strip().upper()
-    ies = list(est.get("inscricoes_estaduais") or [])
+    # CNPJ.ws já devolve IE em muitos estados, mas o formato pode variar.
+    # Varre as localizações conhecidas sem concluir "não contribuinte" só porque
+    # a IE não veio na resposta.
+    listas_ie = []
+    for origem in (
+        est.get("inscricoes_estaduais"),
+        data.get("inscricoes_estaduais"),
+        est.get("inscricoes_estaduais_ativas"),
+        data.get("inscricoes_estaduais_ativas"),
+    ):
+        if isinstance(origem, list):
+            listas_ie.extend(origem)
     ie_ativas = []
-    for item in ies:
-        if not item or item.get("ativo") is not True:
+    for item in listas_ie:
+        if not isinstance(item, dict):
+            continue
+        ativo_raw = item.get("ativo")
+        situacao_raw = str(item.get("situacao") or item.get("status") or "").strip().upper()
+        ativo = ativo_raw is True or str(ativo_raw).strip().lower() in {"1", "true", "sim", "ativo"} or "ATIV" in situacao_raw
+        if ativo_raw is False or situacao_raw in {"INATIVA", "INATIVO", "BAIXADA", "BAIXADO", "CANCELADA", "CANCELADO"}:
+            ativo = False
+        if not ativo and ativo_raw is not None:
             continue
         item_estado = item.get("estado") or {}
-        item_uf = str(item_estado.get("sigla") or "").strip().upper()
-        if not uf or not item_uf or item_uf == uf:
-            ie_ativas.append(str(item.get("inscricao_estadual") or "").strip())
-    ie_ativas = [ie for ie in ie_ativas if ie]
-    ie = ie_ativas[0] if ie_ativas else ""
+        item_uf = str((item_estado.get("sigla") if isinstance(item_estado, dict) else item_estado) or item.get("uf") or "").strip().upper()
+        numero_ie = str(item.get("inscricao_estadual") or item.get("ie") or item.get("numero") or "").strip()
+        if numero_ie and (not uf or not item_uf or item_uf == uf):
+            ie_ativas.append(numero_ie)
+    ie = next((valor for valor in ie_ativas if valor), "")
 
     # Uma IE ativa no cadastro estadual é evidência suficiente para o Organiza
     # tratar o destinatário como contribuinte. Ausência de IE NÃO vira
@@ -1386,6 +1435,33 @@ def consultar_cnpj_publico(documento: str) -> dict:
     }
 
 
+def consultar_cep_publico(cep: str) -> dict:
+    """Consulta um CEP e devolve somente os campos que o cliente não pode editar manualmente."""
+    numero = re.sub(r"\D", "", cep or "")
+    if len(numero) != 8:
+        raise ValueError("Informe um CEP válido com 8 dígitos.")
+    req = urllib.request.Request(
+        f"https://viacep.com.br/ws/{numero}/json/",
+        headers={"Accept": "application/json", "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSION}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Consulta de CEP indisponível. Tente mais tarde.") from exc
+    if not isinstance(data, dict) or data.get("erro"):
+        raise ValueError("CEP não encontrado.")
+    return {
+        "cep": numero,
+        "endereco": str(data.get("logradouro") or "").strip(),
+        "bairro": str(data.get("bairro") or "").strip(),
+        "municipio": str(data.get("localidade") or "").strip(),
+        "municipio_ibge": re.sub(r"\D", "", str(data.get("ibge") or "")),
+        "uf": str(data.get("uf") or "").strip().upper(),
+    }
+
+
 def aplicar_dados_cnpj(cliente: Cliente, dados: dict, *, atualizar_endereco: bool = True) -> None:
     cliente.documento = dados.get("cnpj") or cliente.documento
     if dados.get("razao_social"):
@@ -1395,11 +1471,12 @@ def aplicar_dados_cnpj(cliente: Cliente, dados: dict, *, atualizar_endereco: boo
     cliente.cnpj_situacao_cadastral = dados.get("situacao_cadastral") or None
     cliente.cnpj_fonte = dados.get("fonte") or None
     cliente.cnpj_consultado_em = dados.get("consultado_em") or datetime.now()
-    cliente.situacao_icms = dados.get("situacao_icms") or "NAO_CONFIRMADO"
+    situacao_api = (dados.get("situacao_icms") or "NAO_CONFIRMADO").strip().upper()
     if dados.get("inscricao_estadual"):
         cliente.inscricao_estadual = dados["inscricao_estadual"]
-    elif str(dados.get("uf") or "").upper() in CNPJ_IE_UFS_SUPORTADAS:
-        cliente.inscricao_estadual = None
+        cliente.situacao_icms = "CONTRIBUINTE"
+    elif not (cliente.situacao_icms or "").strip():
+        cliente.situacao_icms = situacao_api
     if atualizar_endereco:
         if dados.get("cep"): cliente.cep = dados["cep"]
         if dados.get("endereco"): cliente.endereco = dados["endereco"]
@@ -1624,9 +1701,9 @@ def cliente_atualizar_cnpj(
         )
     try:
         dados = consultar_cnpj_publico(cnpj)
-        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
+        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=False)
         db.commit()
-        msg = "Cadastro empresarial atualizado pelo CNPJ. Confira Razão Social, IE, situação ICMS e endereço."
+        msg = "Dados empresariais atualizados pelo CNPJ. O endereço continua sendo validado pelo CEP no cadastro do cliente."
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_sucesso={quote_plus(msg)}", status_code=303)
     except (ValueError, RuntimeError) as exc:
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_erro={quote_plus(str(exc))}", status_code=303)
@@ -1686,8 +1763,48 @@ def nfae_descricao_produto(eq: Equipamento) -> str:
     return (getattr(eq, "nota_descricao", None) or descricao_padrao).strip()
 
 
+def _endereco_cliente_nfae(cliente: Cliente | None) -> dict:
+    if not cliente:
+        return {"cep":"", "logradouro":"", "numero":"", "complemento":"", "bairro":"", "municipio":"", "municipio_ibge":"", "uf":""}
+    return {
+        "cep": cliente.cep or "",
+        "logradouro": cliente.endereco or "",
+        "numero": cliente.endereco_numero or "",
+        "complemento": cliente.complemento or "",
+        "bairro": cliente.bairro or "",
+        "municipio": cliente.municipio or cliente.cidade or "",
+        "municipio_ibge": getattr(cliente, "municipio_ibge", None) or "",
+        "uf": cliente.estado or "",
+    }
+
+
+def _endereco_entrega_nfae(cliente: Cliente | None) -> dict:
+    if not cliente:
+        return {}
+    return {
+        "cep": getattr(cliente, "entrega_cep", None) or "",
+        "logradouro": getattr(cliente, "entrega_endereco", None) or "",
+        "numero": getattr(cliente, "entrega_numero", None) or "",
+        "complemento": getattr(cliente, "entrega_complemento", None) or "",
+        "bairro": getattr(cliente, "entrega_bairro", None) or "",
+        "municipio": getattr(cliente, "entrega_municipio", None) or "",
+        "municipio_ibge": getattr(cliente, "entrega_municipio_ibge", None) or "",
+        "uf": getattr(cliente, "entrega_estado", None) or "",
+    }
+
+
+def _endereco_efetivo_nfae(cliente: Cliente | None) -> dict:
+    endereco_cliente = _endereco_cliente_nfae(cliente)
+    if not cliente or getattr(cliente, "entrega_igual_cliente", 1) != 0:
+        return endereco_cliente
+    entrega = _endereco_entrega_nfae(cliente)
+    # Se um cadastro antigo estiver inconsistente, não inventa endereço: os
+    # campos faltantes serão apontados na prévia da NFA-e.
+    return entrega
+
+
 def nfae_cfop(cliente: Cliente | None) -> str:
-    uf = (((cliente.estado if cliente else "") or "").strip().upper())
+    uf = str(_endereco_efetivo_nfae(cliente).get("uf") or "").strip().upper()
     return "5102" if uf == "RJ" else "6102"
 
 
@@ -1710,6 +1827,10 @@ def nfae_observacao_simples(eq: Equipamento) -> str:
 
 def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
     cliente = eq.cliente
+    endereco_cliente = _endereco_cliente_nfae(cliente)
+    endereco_entrega = _endereco_entrega_nfae(cliente)
+    endereco_nota = _endereco_efetivo_nfae(cliente)
+    entrega_igual_cliente = bool(getattr(cliente, "entrega_igual_cliente", 1) != 0)
     total = round(moeda_num(eq.valor or eq.preco_venda or "0"), 2)
     pagamentos = db.query(PagamentoVenda).filter(
         PagamentoVenda.equipamento_id == eq.id
@@ -1731,11 +1852,11 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
         })
     recebido = round(sum(p["valor"] for p in pagamentos_dados), 2)
     return {
-        "versao_layout": "ORGANIZA-NFAE-5",
+        "versao_layout": "ORGANIZA-NFAE-6",
         "operacao": {
             "natureza": NFAE_PADRAO_FISCAL["natureza_operacao"],
             "tipo": "Saída",
-            "destino": "Interna" if (((cliente.estado if cliente else "") or "").strip().upper() == "RJ") else "Interestadual",
+            "destino": "Interna" if (str(endereco_nota.get("uf") or "").strip().upper() == "RJ") else "Interestadual",
             "consumidor_final": True,
             "finalidade": "NF-e normal",
             "tipo_atendimento": "Operação NÃO Presencial, pela INTERNET",
@@ -1752,14 +1873,17 @@ def nfae_dados_equipamento(eq: Equipamento, db: Session) -> dict:
             "sem_inscricao_estadual": not bool((cliente.inscricao_estadual or "").strip().strip("-")),
             "email": cliente.email or "",
             "telefone": cliente.telefone or "",
-            "cep": cliente.cep or "",
-            "logradouro": cliente.endereco or "",
-            "numero": cliente.endereco_numero or "",
-            "complemento": cliente.complemento or "",
-            "bairro": cliente.bairro or "",
-            "municipio": cliente.municipio or cliente.cidade or "",
-            "municipio_ibge": getattr(cliente, "municipio_ibge", None) or "",
-            "uf": cliente.estado or "",
+            "cep": endereco_nota.get("cep") or "",
+            "logradouro": endereco_nota.get("logradouro") or "",
+            "numero": endereco_nota.get("numero") or "",
+            "complemento": endereco_nota.get("complemento") or "",
+            "bairro": endereco_nota.get("bairro") or "",
+            "municipio": endereco_nota.get("municipio") or "",
+            "municipio_ibge": endereco_nota.get("municipio_ibge") or "",
+            "uf": endereco_nota.get("uf") or "",
+            "endereco_entrega_igual_cliente": entrega_igual_cliente,
+            "endereco_cliente": endereco_cliente,
+            "endereco_entrega": endereco_entrega,
         },
         "produto": {
             "codigo": nfae_codigo_produto(eq),
@@ -2971,49 +3095,74 @@ def venda_nova(request: Request, cliente_id: int = 0, usuario: Usuario = Depends
 async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
     tipos, pacotes = opcoes_equipamentos(db)
-    clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
-    cliente = None
-    cliente_id = int(form.get("cliente_id") or 0)
     telefone = limpar_telefone(form.get("telefone") or "")
-    nome = (form.get("nome") or "").strip()
+    tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip())
 
-    if cliente_id:
-        cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
-    elif telefone:
-        cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
-        if not cliente:
-            if not nome:
-                erro = "Informe o nome para cadastrar o novo cliente."
-                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
-            if not telefone_valido(telefone):
-                erro = "Informe um WhatsApp válido com 11 dígitos, incluindo DDD."
-                return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": 0, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
-            cliente = Cliente(nome=nome, telefone=telefone)
-            cliente.email = (form.get("email") or "").strip() or None
-            cliente.municipio = (form.get("municipio") or "").strip() or None
-            cliente.cidade = cliente.municipio
-            cliente.observacao = (form.get("cliente_observacao") or "").strip() or None
-            db.add(cliente)
-            db.flush()
+    if not telefone_valido(telefone):
+        return templates.TemplateResponse("organiza/venda_nova.html", {
+            "request": request, "usuario": usuario, "clientes": [], "cliente_id": 0,
+            "erro": "Informe um WhatsApp válido com DDD.", "dados": form,
+            "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes,
+        }, status_code=400)
+    if not tipo:
+        return templates.TemplateResponse("organiza/venda_nova.html", {
+            "request": request, "usuario": usuario, "clientes": [], "cliente_id": 0,
+            "erro": "Informe o equipamento vendido.", "dados": form,
+            "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes,
+        }, status_code=400)
 
+    cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
     if not cliente:
-        erro = "Selecione um cliente existente ou informe nome e WhatsApp para criar um novo."
-        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
-    if not (form.get("tipo") or "").strip():
-        erro = "Informe o tipo do equipamento."
-        return templates.TemplateResponse("organiza/venda_nova.html", {"request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente.id, "erro": erro, "dados": form, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes}, status_code=400)
+        cliente = Cliente(
+            nome=f"Cadastro pendente {telefone[-4:]}",
+            telefone=telefone,
+            pais="BR",
+            ddi="55",
+            token_ficha=secrets.token_urlsafe(24),
+        )
+        db.add(cliente)
+        db.flush()
+    elif not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.flush()
 
+    # Na abertura da venda o atendente informa somente WhatsApp + equipamento.
+    # Os demais dados pertencem ao cliente e são preenchidos no link público.
     eq = Equipamento(cliente_id=cliente.id)
-    preencher_equipamento(eq, form, db)
-    if eq.status not in STATUS_VENDA:
-        eq.status = "Solicitar gabinete"
+    preencher_equipamento(eq, {
+        "tipo": tipo,
+        "status": "Solicitar gabinete",
+        "fabricante": "KARAOKERJ",
+        "garantia_meses": "3",
+    }, db)
     garantir_identificacao_equipamento(db, eq)
     db.add(eq)
     db.flush()
     reordenar_series_cliente(db, cliente.id)
     db.commit()
     db.refresh(eq)
-    return RedirectResponse(f"/organiza/clientes/{cliente.id}/equipamentos/{eq.id}/editar?criado=1", status_code=303)
+    return RedirectResponse(f"/organiza/vendas/{eq.id}/cadastro", status_code=303)
+
+
+@app.get("/organiza/vendas/{equipamento_id}/cadastro", response_class=HTMLResponse)
+def venda_link_cadastro(equipamento_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq or not eq.cliente:
+        raise HTTPException(404)
+    cliente = eq.cliente
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
+    cadastro_url = f"{PUBLIC_BASE_URL}/cadastro/{cliente.token_ficha}"
+    mensagem = (
+        "Olá! Para concluir o cadastro da sua compra na Karaokê RJ, preencha seus dados no link abaixo:\n\n"
+        f"{cadastro_url}\n\n"
+        "O cadastro será usado para entrega, garantia e emissão da nota fiscal."
+    )
+    return templates.TemplateResponse("organiza/venda_cadastro_link.html", {
+        "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
+        "cadastro_url": cadastro_url, "mensagem": mensagem,
+    })
 
 
 @app.get("/cadastro/{token}", response_class=HTMLResponse)
@@ -3037,11 +3186,14 @@ async def cadastro_publico_consultar_cnpj(token: str, request: Request, db: Sess
     cnpj = limpar_documento(str((body or {}).get("cnpj") or ""))
     try:
         dados = consultar_cnpj_publico(cnpj)
-        # Consulta do próprio cliente: persiste dados fiscais/oficiais, mas não
-        # troca nome, WhatsApp ou e-mail de contato informados pelo cliente.
-        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
+        # A consulta de CNPJ preenche os dados empresariais/fiscais. O endereço
+        # do cliente é sempre consolidado pelo CEP na página pública, para que
+        # logradouro/bairro/município/UF não sejam digitados manualmente.
+        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=False)
         db.commit()
         serial = {**dados, "consultado_em": dados["consultado_em"].isoformat()}
+        if not dados.get("inscricao_estadual") and dados.get("situacao_icms") == "NAO_CONFIRMADO":
+            serial["aviso_ie"] = "SINTEGRA não disponível. Tente mais tarde."
         return JSONResponse(serial)
     except ValueError as exc:
         return JSONResponse({"erro": str(exc)}, status_code=400)
@@ -3058,8 +3210,6 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
     telefone_original = cliente.telefone
     documento_original = limpar_documento(cliente.documento or "")
 
-    # O cadastro público recebe somente dados do cliente. Razão social, IE e
-    # situação ICMS nunca são aceitas do navegador; vêm da consulta de CNPJ.
     cliente.nome = limpar_nome_cliente(form.get("nome") or "")
     cliente.pais, cliente.ddi, cliente.telefone = normalizar_contato(
         form.get("pais") or getattr(cliente, "pais", "BR"),
@@ -3068,15 +3218,6 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
     )
     cliente.documento = (form.get("documento") or "").strip() or None
     cliente.email = (form.get("email") or "").strip() or None
-    cliente.cep = (form.get("cep") or "").strip() or cliente.cep
-    cliente.endereco = (form.get("endereco") or "").strip() or cliente.endereco
-    cliente.endereco_numero = (form.get("endereco_numero") or "").strip() or cliente.endereco_numero
-    cliente.complemento = (form.get("complemento") or "").strip() or cliente.complemento
-    cliente.bairro = (form.get("bairro") or "").strip() or cliente.bairro
-    cliente.municipio = (form.get("municipio") or "").strip() or cliente.municipio
-    cliente.cidade = cliente.municipio
-    cliente.municipio_ibge = re.sub(r"\D", "", (form.get("municipio_ibge") or "").strip()) or cliente.municipio_ibge
-    cliente.estado = (form.get("estado") or "").strip().upper() or cliente.estado
 
     if not cliente.nome or not telefone_valido(cliente.telefone):
         cliente.telefone = telefone_original
@@ -3098,27 +3239,94 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
                 "request": request, "cliente": cliente, "erro": "Informe um CNPJ válido.", "salvo": False, "aviso": ""
             }, status_code=400)
         try:
-            # Se o botão já consultou o mesmo CNPJ há poucos minutos, evita
-            # consumir de novo o limite da API pública.
             recente = cliente.cnpj_consultado_em and documento_original == doc and (datetime.now() - cliente.cnpj_consultado_em) < timedelta(minutes=10)
             if not recente:
-                aplicar_dados_cnpj(cliente, consultar_cnpj_publico(doc), atualizar_endereco=True)
-        except RuntimeError as exc:
-            cliente.situacao_icms = cliente.situacao_icms or "NAO_CONFIRMADO"
-            aviso = f"Dados pessoais salvos, mas a consulta fiscal do CNPJ não pôde ser confirmada agora: {exc}"
-        except ValueError as exc:
+                aplicar_dados_cnpj(cliente, consultar_cnpj_publico(doc), atualizar_endereco=False)
+        except (RuntimeError, ValueError):
+            aviso = "SINTEGRA não disponível. Tente mais tarde."
+
+        # Se a consulta automática não trouxe a situação fiscal, o cliente pode
+        # informar os dados no próprio cadastro público.
+        razao_manual = (form.get("razao_social") or "").strip()
+        fantasia_manual = (form.get("empresa") or "").strip()
+        if razao_manual:
+            cliente.razao_social = razao_manual
+        if fantasia_manual:
+            cliente.empresa = fantasia_manual
+        situacao_manual = (form.get("situacao_icms") or "").strip().upper()
+        situacao_confirmada_api = (cliente.situacao_icms or "").strip().upper() in {"CONTRIBUINTE", "NAO_CONTRIBUINTE", "ISENTO"}
+        if situacao_manual in {"CONTRIBUINTE", "NAO_CONTRIBUINTE", "ISENTO"}:
+            cliente.situacao_icms = situacao_manual
+        elif not situacao_confirmada_api:
+            cliente.situacao_icms = "NAO_CONFIRMADO"
+        ie_manual = (form.get("inscricao_estadual") or "").strip()
+        if ie_manual:
+            cliente.inscricao_estadual = ie_manual
+        if (cliente.situacao_icms or "").strip().upper() == "NAO_CONFIRMADO":
+            aviso = "SINTEGRA não disponível. Tente mais tarde."
+        if cliente.situacao_icms == "CONTRIBUINTE" and not (cliente.inscricao_estadual or "").strip():
+            aviso = "SINTEGRA não disponível. Tente mais tarde."
+        if not (cliente.razao_social or "").strip():
             return templates.TemplateResponse("organiza/cadastro_publico.html", {
-                "request": request, "cliente": cliente, "erro": str(exc), "salvo": False, "aviso": ""
+                "request": request, "cliente": cliente, "erro": "Informe a Razão Social ou use Validar CNPJ.", "salvo": False, "aviso": aviso
             }, status_code=400)
     elif len(doc) == 11:
         if not cpf_valido(doc):
             return templates.TemplateResponse("organiza/cadastro_publico.html", {
                 "request": request, "cliente": cliente, "erro": "Informe um CPF válido.", "salvo": False, "aviso": ""
             }, status_code=400)
-    elif doc:
+        cliente.razao_social = None
+        cliente.inscricao_estadual = None
+        cliente.situacao_icms = None
+    else:
         return templates.TemplateResponse("organiza/cadastro_publico.html", {
             "request": request, "cliente": cliente, "erro": "Informe um CPF ou CNPJ válido.", "salvo": False, "aviso": ""
         }, status_code=400)
+
+    # Endereço do cliente: CEP é a fonte. O navegador não decide logradouro,
+    # bairro, município ou UF; o servidor consulta novamente o CEP ao salvar.
+    try:
+        end = consultar_cep_publico(form.get("cep") or "")
+    except (ValueError, RuntimeError) as exc:
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente, "erro": str(exc), "salvo": False, "aviso": aviso
+        }, status_code=400)
+    numero = (form.get("endereco_numero") or "").strip()
+    if not numero:
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente, "erro": "Informe o número do endereço do cliente.", "salvo": False, "aviso": aviso
+        }, status_code=400)
+    cliente.cep = end["cep"]
+    cliente.endereco = end["endereco"]
+    cliente.endereco_numero = numero
+    cliente.complemento = (form.get("complemento") or "").strip() or None
+    cliente.bairro = end["bairro"]
+    cliente.municipio = end["municipio"]
+    cliente.cidade = end["municipio"]
+    cliente.municipio_ibge = end["municipio_ibge"] or None
+    cliente.estado = end["uf"]
+
+    cliente.entrega_igual_cliente = 1 if form.get("entrega_igual_cliente") else 0
+    if cliente.entrega_igual_cliente == 0:
+        try:
+            ent = consultar_cep_publico(form.get("entrega_cep") or "")
+        except (ValueError, RuntimeError) as exc:
+            return templates.TemplateResponse("organiza/cadastro_publico.html", {
+                "request": request, "cliente": cliente, "erro": f"Endereço de entrega: {exc}", "salvo": False, "aviso": aviso
+            }, status_code=400)
+        numero_entrega = (form.get("entrega_numero") or "").strip()
+        if not numero_entrega:
+            return templates.TemplateResponse("organiza/cadastro_publico.html", {
+                "request": request, "cliente": cliente, "erro": "Informe o número do endereço de entrega.", "salvo": False, "aviso": aviso
+            }, status_code=400)
+        cliente.entrega_cep = ent["cep"]
+        cliente.entrega_endereco = ent["endereco"]
+        cliente.entrega_numero = numero_entrega
+        cliente.entrega_complemento = (form.get("entrega_complemento") or "").strip() or None
+        cliente.entrega_bairro = ent["bairro"]
+        cliente.entrega_municipio = ent["municipio"]
+        cliente.entrega_municipio_ibge = ent["municipio_ibge"] or None
+        cliente.entrega_estado = ent["uf"]
 
     db.commit()
     destino = f"/cadastro/{token}?salvo=1"
@@ -3252,6 +3460,31 @@ def dados_nfae_previa(equipamento_id: int, request: Request, usuario: Usuario = 
     })
 
 
+@app.post("/organiza/equipamentos/{equipamento_id}/nfae/chave")
+async def salvar_chave_acesso_nfe(
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    chave = re.sub(r"\D", "", (form.get("chave_acesso_nfe") or "").strip())
+    if len(chave) != 44:
+        return RedirectResponse(
+            f"/organiza/equipamentos/{equipamento_id}/nfae?erro_chave=1",
+            status_code=303,
+        )
+    eq.chave_acesso_nfe = chave
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/equipamentos/{equipamento_id}/nfae?chave_salva=1",
+        status_code=303,
+    )
+
+
 @app.get("/organiza/equipamentos/{equipamento_id}/nfae/payload")
 def dados_nfae_payload(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
@@ -3266,72 +3499,6 @@ def dados_nfae_payload(equipamento_id: int, usuario: Usuario = Depends(usuario_l
         "expira_em_minutos": 240,
     }
     return JSONResponse(dados, headers={"Cache-Control": "no-store, max-age=0"})
-
-
-@app.get("/organiza/equipamentos/{equipamento_id}/nfae.json")
-def dados_nfae_json(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
-    if not eq:
-        raise HTTPException(404)
-    dados = nfae_dados_equipamento(eq, db)
-    dados["campos_faltantes"] = nfae_campos_faltantes(dados)
-    return JSONResponse(dados, headers={"Content-Disposition": f'attachment; filename="nfae_organiza_{eq.id}.json"'})
-
-
-@app.get("/organiza/equipamentos/{equipamento_id}/nota.xml")
-def dados_nota_xml(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
-    if not eq:
-        raise HTTPException(404)
-    dados = nfae_dados_equipamento(eq, db)
-    raiz = ET.Element("dados_para_emissao_nfae", versao="1")
-    ET.SubElement(raiz, "aviso").text = "Arquivo de apoio do Organiza. Nao e uma NF-e autorizada pela SEFAZ."
-    oper = ET.SubElement(raiz, "operacao")
-    for chave, valor in dados["operacao"].items():
-        ET.SubElement(oper, chave).text = str(valor).lower() if isinstance(valor, bool) else str(valor or "")
-    dest = ET.SubElement(raiz, "destinatario")
-    for chave, valor in dados["destinatario"].items():
-        ET.SubElement(dest, chave).text = str(valor or "")
-    item = ET.SubElement(raiz, "produto")
-    for chave, valor in dados["produto"].items():
-        ET.SubElement(item, chave).text = str(valor).lower() if isinstance(valor, bool) else str(valor or "")
-    ET.SubElement(raiz, "observacao_fiscal").text = str(dados.get("observacao_fiscal") or "")
-    pags = ET.SubElement(raiz, "pagamentos")
-    for pagamento in dados["pagamentos"]:
-        el = ET.SubElement(pags, "pagamento")
-        for chave, valor in pagamento.items():
-            ET.SubElement(el, chave).text = str(valor or "")
-    totais = ET.SubElement(raiz, "totais")
-    for chave, valor in dados["totais"].items():
-        ET.SubElement(totais, chave).text = str(valor or "")
-    conteudo = ET.tostring(raiz, encoding="utf-8", xml_declaration=True)
-    return Response(conteudo, media_type="application/xml", headers={"Content-Disposition": f'attachment; filename="dados_nfae_{eq.id}.xml"'})
-
-
-@app.get("/organiza/equipamentos/{equipamento_id}/nota.csv")
-def dados_nota_csv(equipamento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
-    if not eq:
-        raise HTTPException(404)
-    dados = nfae_dados_equipamento(eq, db)
-    d, p, t = dados["destinatario"], dados["produto"], dados["totais"]
-    out = io.StringIO()
-    campos = [
-        "nome","razao_social","cpf_cnpj","tipo_documento","inscricao_estadual","sem_inscricao_estadual","email","telefone","cep","logradouro","numero","complemento","bairro","municipio","municipio_ibge","uf",
-        "codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total","atualizacao","informacao_adicional",
-        "observacao_fiscal","pagamentos","valor_recebido","saldo","codigo_tecnico","data_compra"
-    ]
-    w = csv.DictWriter(out, fieldnames=campos, delimiter=';')
-    w.writeheader()
-    w.writerow({
-        **d, **{k: p.get(k, "") for k in ["codigo","descricao","grupo_cfop","cfop","ncm","ean","unidade","quantidade","valor_unitario","valor_total","origem","csosn","pis_cst","cofins_cst","valor_compoe_total","atualizacao","informacao_adicional"]},
-        "observacao_fiscal": dados.get("observacao_fiscal", ""),
-        "pagamentos": " | ".join(f'{x["forma"]}: R$ {x["valor"]:.2f}' for x in dados["pagamentos"]),
-        "valor_recebido": t["recebido"], "saldo": t["saldo"],
-        "codigo_tecnico": dados["referencia"]["codigo_tecnico"], "data_compra": dados["referencia"]["data_compra"],
-    })
-    conteudo = '\ufeff' + out.getvalue()
-    return Response(conteudo.encode('utf-8'), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="dados_nfae_{eq.id}.csv"'})
 
 
 @app.get("/organiza/configuracoes/pacotes", response_class=HTMLResponse)

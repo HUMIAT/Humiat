@@ -24,7 +24,7 @@
   </section>
 
   <section class="cartao secao-form">
-    <div class="secao-form-titulo"><span>1</span><div><h2>Destinatário</h2><p>Dados puxados do cadastro do cliente.</p></div></div>
+    <div class="secao-form-titulo"><span>1</span><div><h2>Destinatário</h2><p>{% if dados.destinatario.endereco_entrega_igual_cliente %}Usando o endereço do cliente.{% else %}Usando o endereço de entrega diferente informado pelo cliente.{% endif %}</p></div></div>
     <div class="form-grid-organizada tres-colunas">
       <label>Nome/Contato<input readonly value="{{ dados.destinatario.nome }}"></label>
       <label>Razão social<input readonly value="{{ dados.destinatario.razao_social or '-' }}"></label>
@@ -72,12 +72,26 @@
     <div id="nfae-ext-status" class="alerta" style="display:none"></div>
     <div class="acoes-titulo" style="margin-top:12px;flex-wrap:wrap">
       <button id="nfae-auto-btn" class="botao primario" type="button" {% if faltantes %}disabled{% endif %}>Preencher NFA-e automaticamente</button>
-      <a class="botao" href="https://svp-extranet.svrs.rs.gov.br/" target="_blank" rel="noopener">Abrir portal SEFAZ</a>
-      <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nfae.json">Baixar dados</a>
-      <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.xml">XML de apoio</a>
-      <a class="botao" href="/organiza/equipamentos/{{ equipamento.id }}/nota.csv">CSV de apoio</a>
+      <a class="botao" href="https://nfae.fazenda.rj.gov.br/sefaz-dfe-nfae/paginas/inicio.faces" target="_blank" rel="noopener">Abrir portal SEFAZ</a>
     </div>
     <p class="texto-suave" style="margin-top:12px">A emissão continua sendo confirmada por você na SEFAZ. A extensão não altera o Emitente. Ela pode validar/salvar os itens internos durante o preenchimento, mas a validação e emissão final da NF-e continuam sob seu controle.</p>
+  </section>
+
+  <section class="cartao secao-form" style="margin-top:16px">
+    <div class="secao-form-titulo"><span>5</span><div><h2>Após emitir a NF-e</h2><p>Salve somente a chave de acesso de 44 dígitos. Não é necessário guardar XML ou CSV no Organiza.</p></div></div>
+    {% if request.query_params.get('chave_salva') %}<div class="alerta sucesso">Chave de acesso salva.</div>{% endif %}
+    {% if request.query_params.get('erro_chave') %}<div class="alerta erro">Informe uma chave de acesso válida com 44 dígitos.</div>{% endif %}
+    <form method="post" action="/organiza/equipamentos/{{ equipamento.id }}/nfae/chave" class="form-grid-organizada" style="grid-template-columns:minmax(260px,1fr) auto;align-items:end;gap:10px">
+      <label>Chave de acesso
+        <input id="chave-acesso-nfe" name="chave_acesso_nfe" inputmode="numeric" maxlength="44" pattern="[0-9]{44}" autocomplete="off" value="{{ equipamento.chave_acesso_nfe or '' }}" placeholder="44 dígitos">
+      </label>
+      <button class="botao primario" type="submit">Salvar chave</button>
+    </form>
+    <div class="acoes-titulo" style="margin-top:12px;flex-wrap:wrap">
+      <a class="botao" href="{{ NFE_CONSULTA_URL }}" target="_blank" rel="noopener">Abrir consulta oficial NF-e</a>
+      <button class="botao" id="copiar-chave-nfe" type="button" {% if not equipamento.chave_acesso_nfe %}disabled title="Salve a chave de acesso primeiro"{% endif %}>Copiar chave de acesso</button>
+    </div>
+    <div id="copiar-chave-status" class="texto-suave" style="margin-top:8px"></div>
   </section>
 </section>
 <script>
@@ -118,6 +132,27 @@
       type:'ORGANIZA_NFAE_PREPARAR',
       payloadUrl:'/organiza/equipamentos/{{ equipamento.id }}/nfae/payload'
     }, '*');
+  });
+})();
+</script>
+<script>
+(function(){
+  const btn = document.getElementById('copiar-chave-nfe');
+  const input = document.getElementById('chave-acesso-nfe');
+  const status = document.getElementById('copiar-chave-status');
+  if (!btn || !input) return;
+  btn.addEventListener('click', async function(){
+    const chave = (input.value || '').replace(/\D/g, '');
+    if (chave.length !== 44) {
+      if (status) status.textContent = 'Salve uma chave válida com 44 dígitos primeiro.';
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chave);
+    } catch (_) {
+      input.focus(); input.select(); document.execCommand('copy');
+    }
+    if (status) status.textContent = 'Chave de acesso copiada.';
   });
 })();
 </script>

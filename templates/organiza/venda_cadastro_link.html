@@ -1,0 +1,22 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">Venda criada</p><h1>Enviar cadastro ao cliente</h1><p class="texto-suave">A venda foi criada. Agora envie o link para o cliente preencher os dados.</p></div>
+    <a class="botao" href="/organiza/vendas">Voltar às vendas</a>
+  </div>
+
+  <section class="cartao secao-form">
+    <div class="form-grid-organizada duas-colunas">
+      <label>WhatsApp<input value="{{ cliente.telefone }}" readonly></label>
+      <label>Equipamento<input value="{{ equipamento.tipo or '' }}" readonly></label>
+      <label class="campo-largo">Link público de cadastro<input value="{{ cadastro_url }}" readonly onclick="this.select()"></label>
+    </div>
+    <div class="acoes-titulo" style="margin-top:18px;flex-wrap:wrap">
+      <a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ mensagem|urlencode }}">Enviar cadastro pelo WhatsApp</a>
+      <a class="botao" target="_blank" href="{{ cadastro_url }}">Abrir página pública</a>
+      <a class="botao" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/editar">Abrir venda/equipamento</a>
+    </div>
+  </section>
+</section>
+{% endblock %}

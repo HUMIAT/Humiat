@@ -1,3 +1,5 @@
 git add .
-git commit -m "Organiza 1.1.9 - orienta primeira tela NFA-e e valida CFOP por UF"
-git push origin main
+git commit -m "Organiza 1.1.12: consulta NF-e por chave de acesso"
+git push
+# Correção do portal público NFA-e RJ
+
