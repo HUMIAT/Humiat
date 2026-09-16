@@ -40,20 +40,17 @@
       <label class="campo-duplo">Descrição<textarea id="nfse-descricao" name="descricao" rows="11" required>{{ nota.descricao }}</textarea><small>Texto inicial sugerido pelo Organiza. Você pode alterar livremente antes de preparar o rascunho.</small></label>
       <div id="nfse-evento-campos" class="campo-duplo cartao" style="padding:14px;margin:4px 0 2px;display:none">
         <h3 style="margin:0 0 6px">Dados da atividade de evento</h3>
-        <p class="texto-suave" style="margin:0 0 12px">Usados apenas no tipo Aluguel. Depois o Connect poderá preencher automaticamente data e local do evento.</p>
+        <p class="texto-suave" style="margin:0 0 12px">Usados apenas no tipo Aluguel. Depois o Connect poderá preencher automaticamente datas e local do evento.</p>
         <div class="form-grid-organizada duas-colunas">
           <label>Data inicial<input class="evento-obrigatorio" type="date" name="evento_data_inicio" value="{{ nota.evento_data_inicio.isoformat() if nota.evento_data_inicio else nota.competencia.isoformat() }}"></label>
           <label>Data final<input class="evento-obrigatorio" type="date" name="evento_data_fim" value="{{ nota.evento_data_fim.isoformat() if nota.evento_data_fim else nota.competencia.isoformat() }}"></label>
           <label class="campo-duplo">Descrição da atividade/evento<input class="evento-obrigatorio" name="evento_descricao" maxlength="255" value="{{ nota.evento_descricao or 'Aluguel de Karaokê' }}" placeholder="Ex.: Aluguel de Karaokê"></label>
-          <label>Como informar o local
-            <select id="nfse-evento-local-tipo" name="evento_local_tipo">
-              <option value="brasil" {% if (nota.evento_local_tipo or 'brasil') != 'identificador' %}selected{% endif %}>Endereço no Brasil</option>
-              <option value="identificador" {% if nota.evento_local_tipo == 'identificador' %}selected{% endif %}>Identificador municipal</option>
-            </select>
-            <small>Identificador é um código do evento fornecido pela Administração Tributária Municipal. No uso normal, escolha Endereço no Brasil.</small>
+          <label class="campo-duplo" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="nfse-evento-igual-cliente" name="evento_endereco_igual_cliente" value="1" {% if nota.evento_endereco_igual_cliente is not defined or nota.evento_endereco_igual_cliente != 0 %}checked{% endif %} style="width:auto">
+            Endereço do evento igual ao endereço do cliente/CNPJ
           </label>
-          <div></div>
-          <div id="nfse-evento-brasil" class="campo-duplo form-grid-organizada duas-colunas">
+          <p class="campo-duplo texto-suave" style="margin:0">Marcado: o Organiza usa o endereço principal do cliente. Desmarcado: informe abaixo o endereço diferente do evento.</p>
+          <div id="nfse-evento-brasil" class="campo-duplo form-grid-organizada duas-colunas" style="display:none">
             <label>CEP do evento<input class="evento-endereco" name="evento_cep" inputmode="numeric" value="{{ nota.evento_cep or '' }}"></label>
             <label>Número<input class="evento-endereco" name="evento_numero" value="{{ nota.evento_numero or '' }}"></label>
             <label class="campo-duplo">Logradouro<input name="evento_logradouro" value="{{ nota.evento_logradouro or '' }}"></label>
@@ -62,7 +59,6 @@
             <label>Município<input name="evento_municipio" value="{{ nota.evento_municipio or '' }}"></label>
             <label>UF<input name="evento_uf" maxlength="2" value="{{ nota.evento_uf or '' }}"></label>
           </div>
-          <label id="nfse-evento-identificador" class="campo-duplo" style="display:none">Identificador municipal do evento<input name="evento_identificador" value="{{ nota.evento_identificador or '' }}"><small>Use somente se a Prefeitura tiver fornecido esse código.</small></label>
         </div>
       </div>
     </div>
@@ -94,18 +90,15 @@
   };
   let ultimoTipo=tipo.value;
   const evento=document.getElementById('nfse-evento-campos');
-  const localTipo=document.getElementById('nfse-evento-local-tipo');
+  const enderecoIgual=document.getElementById('nfse-evento-igual-cliente');
   const eventoBrasil=document.getElementById('nfse-evento-brasil');
-  const eventoIdentificador=document.getElementById('nfse-evento-identificador');
   function atualizarEvento(){
     const aluguel=tipo.value==='aluguel';
     if(evento) evento.style.display=aluguel?'block':'none';
     document.querySelectorAll('.evento-obrigatorio').forEach(el=>el.required=aluguel);
-    const porId=aluguel&&localTipo&&localTipo.value==='identificador';
-    if(eventoBrasil) eventoBrasil.style.display=(aluguel&&!porId)?'grid':'none';
-    if(eventoIdentificador) eventoIdentificador.style.display=porId?'block':'none';
-    document.querySelectorAll('.evento-endereco').forEach(el=>el.required=aluguel&&!porId);
-    const ident=eventoIdentificador&&eventoIdentificador.querySelector('input'); if(ident) ident.required=!!porId;
+    const igual=!!(enderecoIgual&&enderecoIgual.checked);
+    if(eventoBrasil) eventoBrasil.style.display=(aluguel&&!igual)?'grid':'none';
+    document.querySelectorAll('.evento-endereco').forEach(el=>el.required=aluguel&&!igual);
   }
   tipo.addEventListener('change',function(){
     const anterior=padroes[ultimoTipo]||'';
@@ -116,7 +109,7 @@
     ultimoTipo=tipo.value;
     atualizarEvento();
   });
-  if(localTipo)localTipo.addEventListener('change',atualizarEvento);
+  if(enderecoIgual)enderecoIgual.addEventListener('change',atualizarEvento);
   atualizarEvento();
 })();
 </script>

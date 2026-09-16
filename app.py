@@ -724,6 +724,9 @@ class NFSERascunho(Base):
     evento_data_inicio = Column(Date, nullable=True)
     evento_data_fim = Column(Date, nullable=True)
     evento_descricao = Column(String(255), nullable=True)
+    # Por padrão, o local do evento usa o mesmo endereço cadastrado do cliente/tomador.
+    # O endereço específico do evento só é usado quando esta opção for desmarcada.
+    evento_endereco_igual_cliente = Column(Integer, nullable=False, default=1)
     evento_local_tipo = Column(String(20), nullable=True, default="brasil")
     evento_identificador = Column(String(60), nullable=True)
     evento_cep = Column(String(20), nullable=True)
@@ -1034,6 +1037,7 @@ def iniciar_banco():
                 "evento_data_inicio": tipo_data_nfse,
                 "evento_data_fim": tipo_data_nfse,
                 "evento_descricao": "VARCHAR(255)",
+                "evento_endereco_igual_cliente": "INTEGER NOT NULL DEFAULT 1",
                 "evento_local_tipo": "VARCHAR(20)",
                 "evento_identificador": "VARCHAR(60)",
                 "evento_cep": "VARCHAR(20)",
@@ -1048,6 +1052,14 @@ def iniciar_banco():
                 if coluna not in existentes_nfse:
                     conn.execute(text(f"ALTER TABLE nfse_rascunhos ADD COLUMN {coluna} {tipo_sql}"))
             conn.execute(text("UPDATE nfse_rascunhos SET evento_local_tipo = 'brasil' WHERE evento_local_tipo IS NULL OR evento_local_tipo = ''"))
+            # Rascunhos antigos que já tinham endereço específico preenchido continuam usando-o.
+            if "evento_endereco_igual_cliente" not in existentes_nfse:
+                conn.execute(text("""
+                    UPDATE nfse_rascunhos
+                       SET evento_endereco_igual_cliente = 0
+                     WHERE COALESCE(TRIM(evento_cep), '') <> ''
+                        OR COALESCE(TRIM(evento_numero), '') <> ''
+                """))
     if "equipamentos" in insp.get_table_names():
         existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
         with engine.begin() as conn:
@@ -1976,15 +1988,18 @@ def nfse_payload(rascunho: NFSERascunho) -> dict:
             "data_inicio": rascunho.evento_data_inicio.isoformat() if rascunho.evento_data_inicio else "",
             "data_fim": rascunho.evento_data_fim.isoformat() if rascunho.evento_data_fim else "",
             "descricao": (rascunho.evento_descricao or "").strip(),
-            "local_tipo": (rascunho.evento_local_tipo or "brasil").strip().lower(),
-            "identificador": (rascunho.evento_identificador or "").strip(),
-            "cep": re.sub(r"\D", "", (rascunho.evento_cep or "")),
-            "logradouro": (rascunho.evento_logradouro or "").strip(),
-            "numero": (rascunho.evento_numero or "").strip(),
-            "complemento": (rascunho.evento_complemento or "").strip(),
-            "bairro": (rascunho.evento_bairro or "").strip(),
-            "municipio": (rascunho.evento_municipio or "").strip(),
-            "uf": (rascunho.evento_uf or "").strip().upper(),
+            "endereco_igual_cliente": bool(getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0),
+            "local_tipo": "brasil",
+            "identificador": "",
+            # Igual à regra da NFA-e: marcado usa o endereço principal do cliente;
+            # desmarcado usa o endereço específico informado para o evento.
+            "cep": re.sub(r"\D", "", ((cliente.cep or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_cep or ""))),
+            "logradouro": ((cliente.endereco or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_logradouro or "")).strip(),
+            "numero": ((cliente.endereco_numero or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_numero or "")).strip(),
+            "complemento": ((cliente.complemento or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_complemento or "")).strip(),
+            "bairro": ((cliente.bairro or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_bairro or "")).strip(),
+            "municipio": ((cliente.municipio or cliente.cidade or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_municipio or "")).strip(),
+            "uf": ((cliente.estado or "") if getattr(rascunho, "evento_endereco_igual_cliente", 1) != 0 else (rascunho.evento_uf or "")).strip().upper(),
         },
         "tributacao": {
             "issqn_operacao": "TRIBUTAVEL",
@@ -3319,7 +3334,7 @@ def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depen
         "tipo_servico": NFSE_TIPO_MANUTENCAO, "municipio_prestacao": NFSE_MUNICIPIO_PADRAO,
         "uf_prestacao": NFSE_UF_PADRAO, "descricao": nfse_descricao_padrao(NFSE_TIPO_MANUTENCAO), "valor_total": "",
         "evento_data_inicio": date.today().isoformat(), "evento_data_fim": date.today().isoformat(),
-        "evento_descricao": "Aluguel de Karaokê", "evento_local_tipo": "brasil",
+        "evento_descricao": "Aluguel de Karaokê", "evento_endereco_igual_cliente": 1, "evento_local_tipo": "brasil",
         "evento_identificador": "", "evento_cep": "", "evento_logradouro": "",
         "evento_numero": "", "evento_complemento": "", "evento_bairro": "",
         "evento_municipio": "", "evento_uf": "RJ"
@@ -3371,8 +3386,9 @@ async def nfse_criar(request: Request, usuario: Usuario = Depends(usuario_logado
         evento_data_inicio=data_form(form.get("evento_data_inicio")) if tipo_servico == NFSE_TIPO_ALUGUEL else None,
         evento_data_fim=data_form(form.get("evento_data_fim")) if tipo_servico == NFSE_TIPO_ALUGUEL else None,
         evento_descricao=(form.get("evento_descricao") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
-        evento_local_tipo=(form.get("evento_local_tipo") or "brasil").strip().lower() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
-        evento_identificador=(form.get("evento_identificador") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_endereco_igual_cliente=(1 if form.get("evento_endereco_igual_cliente") else 0) if tipo_servico == NFSE_TIPO_ALUGUEL else 1,
+        evento_local_tipo="brasil" if tipo_servico == NFSE_TIPO_ALUGUEL else None,
+        evento_identificador=None,
         evento_cep=(form.get("evento_cep") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
         evento_logradouro=(form.get("evento_logradouro") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
         evento_numero=(form.get("evento_numero") or "").strip() if tipo_servico == NFSE_TIPO_ALUGUEL else None,
@@ -3414,8 +3430,9 @@ async def nfse_salvar(nota_id: int, request: Request, usuario: Usuario = Depends
         nota.evento_data_inicio = data_form(form.get("evento_data_inicio")) or nota.evento_data_inicio
         nota.evento_data_fim = data_form(form.get("evento_data_fim")) or nota.evento_data_fim
         nota.evento_descricao = (form.get("evento_descricao") or nota.evento_descricao or "Aluguel de Karaokê").strip()
-        nota.evento_local_tipo = (form.get("evento_local_tipo") or nota.evento_local_tipo or "brasil").strip().lower()
-        nota.evento_identificador = (form.get("evento_identificador") or "").strip()
+        nota.evento_endereco_igual_cliente = 1 if form.get("evento_endereco_igual_cliente") else 0
+        nota.evento_local_tipo = "brasil"
+        nota.evento_identificador = None
         nota.evento_cep = (form.get("evento_cep") or "").strip()
         nota.evento_logradouro = (form.get("evento_logradouro") or "").strip()
         nota.evento_numero = (form.get("evento_numero") or "").strip()
