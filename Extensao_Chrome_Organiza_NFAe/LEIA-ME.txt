@@ -143,3 +143,5 @@ NOVO NA 1.0.24
 1.0.66: compatibilidade com Organiza 1.1.10. Quando o cadastro informa endereço de entrega diferente, a extensão usa esse endereço no destinatário da NFA-e; quando está marcado como igual, mantém o endereço do cliente.
 
 1.0.67: corrige o endereço usado para abrir o portal público da NFA-e do RJ para https://nfae.fazenda.rj.gov.br/sefaz-dfe-nfae/paginas/inicio.faces. O domínio SVRS continua sendo usado apenas para reconhecer e automatizar a tela interna após o redirecionamento.
+
+1.0.68: adiciona o fluxo NFS-e de Serviço. O Organiza envia um rascunho para o Emissor Nacional; a extensão abre Nova NFS-e, tenta preencher Pessoas, Serviço e Valores e PARA na revisão. Nunca clica no botão final "Emitir NFS-e". O fluxo NFA-e 1.0.67 permanece preservado.

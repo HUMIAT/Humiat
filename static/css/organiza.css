@@ -3680,3 +3680,10 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .solvoz-acoes{display:flex;gap:8px;flex-wrap:wrap}
 .solvoz-acoes form{margin:0}
 @media(max-width:760px){.resumo-coluna{grid-template-columns:1fr}.solvoz-acesso-topo{align-items:center}}
+
+/* Organiza 1.1.15 - Central NFS-e */
+.nfse-descricao{white-space:pre-wrap;background:#f8fafc;border:1px solid #dbe3ef;border-radius:10px;padding:14px;font:inherit;line-height:1.5}
+.tabela-responsiva{overflow-x:auto}
+.tabela-clean{width:100%;border-collapse:collapse;min-width:760px}
+.tabela-clean th,.tabela-clean td{padding:11px 10px;border-bottom:1px solid #e5eaf1;text-align:left;vertical-align:middle}
+.tabela-clean th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;color:#64748b}

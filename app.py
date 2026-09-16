@@ -48,6 +48,12 @@ templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 NFE_CONSULTA_URL = "https://consultadfe.fazenda.rj.gov.br/consultaDFe/paginas/consultaChaveAcesso.faces"
 templates.env.globals["NFE_CONSULTA_URL"] = NFE_CONSULTA_URL
 
+NFSE_PORTAL_URL = "https://www.nfse.gov.br/EmissorNacional/DPS/Pessoas"
+NFSE_CODIGO_SERVICO_PADRAO = "14.01.01"
+NFSE_MUNICIPIO_PADRAO = "Rio de Janeiro"
+NFSE_UF_PADRAO = "RJ"
+templates.env.globals["NFSE_PORTAL_URL"] = NFSE_PORTAL_URL
+
 # Padrão fiscal usado na preparação da NFA-e.
 # A regra operacional definida pela Karaokê RJ mantém os campos fiscais padrão e
 # calcula o CFOP conforme a UF do destinatário: 5102 para RJ e 6102 para outra UF.
@@ -618,6 +624,34 @@ class PagamentoVenda(Base):
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
     equipamento = relationship("Equipamento")
 
+
+
+class NFSERascunho(Base):
+    """Rascunho de NFS-e centralizado no Organiza.
+
+    A primeira fase prepara os dados e os envia ao Emissor Nacional pelo Chrome,
+    parando antes da emissão. Registros emitidos ficam imutáveis para consulta.
+    """
+    __tablename__ = "nfse_rascunhos"
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
+    origem = Column(String(30), nullable=False, default="manual")  # manual | manutencao | conect
+    manutencao_id = Column(Integer, ForeignKey("assistencias.id"), nullable=True, index=True)
+    competencia = Column(Date, nullable=False, default=date.today)
+    codigo_servico = Column(String(30), nullable=False, default=NFSE_CODIGO_SERVICO_PADRAO)
+    municipio_prestacao = Column(String(120), nullable=False, default=NFSE_MUNICIPIO_PADRAO)
+    uf_prestacao = Column(String(2), nullable=False, default=NFSE_UF_PADRAO)
+    descricao = Column(Text, nullable=False)
+    valor_total = Column(Float, nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="RASCUNHO")
+    numero_nfse = Column(String(40), nullable=True)
+    chave_acesso = Column(String(80), nullable=True)
+    enviado_portal_em = Column(DateTime, nullable=True)
+    emitido_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    cliente = relationship("Cliente")
+    manutencao = relationship("Manutencao")
 
 class IntegracaoConect(Base):
     """Controle idempotente do que já foi enviado ao Connect."""
@@ -1764,6 +1798,73 @@ def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_P
     indice_atual = ano_atual * 2 + semestre_atual
     indice_pacote = ano_pacote * 2 + semestre_pacote
     return max(indice_atual - indice_pacote, 0)
+
+
+def nfse_descricao_manutencao(manutencao: Manutencao, orcamento: Orcamento | None) -> str:
+    linhas = ["Serviço de manutenção:"]
+    principal = (manutencao.diagnostico or manutencao.defeito or "Manutenção de equipamento de karaokê").strip()
+    if principal:
+        linhas.extend(["", f"- {principal}"])
+    if orcamento:
+        for item in orcamento.itens:
+            if item.opcional and not item.aprovado:
+                continue
+            descricao = (item.descricao or "").strip()
+            if not descricao:
+                continue
+            qtd = max(int(item.quantidade or 1), 1)
+            prefixo = f"{qtd}x " if qtd > 1 else ""
+            linha = f"- {prefixo}{descricao}"
+            if linha not in linhas:
+                linhas.append(linha)
+    return "\n".join(linhas).strip()
+
+
+def nfse_payload(rascunho: NFSERascunho) -> dict:
+    cliente = rascunho.cliente
+    documento = re.sub(r"\D", "", (cliente.documento or ""))
+    return {
+        "tipo": "NFSE_RASCUNHO",
+        "rascunho_id": rascunho.id,
+        "origem": rascunho.origem,
+        "competencia": rascunho.competencia.isoformat() if rascunho.competencia else date.today().isoformat(),
+        "tomador": {
+            "documento": documento,
+            "tipo_documento": "CNPJ" if len(documento) == 14 else "CPF" if len(documento) == 11 else "",
+            "nome": (cliente.razao_social or cliente.nome or "").strip(),
+            "nome_contato": (cliente.nome or "").strip(),
+            "email": (cliente.email or "").strip(),
+            "telefone": (cliente.whatsapp_completo() or "").strip(),
+            "cep": re.sub(r"\D", "", (cliente.cep or "")),
+            "logradouro": (cliente.endereco or "").strip(),
+            "numero": (cliente.endereco_numero or "").strip(),
+            "complemento": (cliente.complemento or "").strip(),
+            "bairro": (cliente.bairro or "").strip(),
+            "municipio": (cliente.municipio or cliente.cidade or "").strip(),
+            "uf": (cliente.estado or "").strip().upper(),
+        },
+        "servico": {
+            "codigo": (rascunho.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip(),
+            "descricao": (rascunho.descricao or "").strip(),
+            "municipio": (rascunho.municipio_prestacao or NFSE_MUNICIPIO_PADRAO).strip(),
+            "uf": (rascunho.uf_prestacao or NFSE_UF_PADRAO).strip().upper(),
+            "valor": round(float(rascunho.valor_total or 0), 2),
+        },
+        "parar_antes_emitir": True,
+        "portal_url": NFSE_PORTAL_URL,
+    }
+
+
+def nfse_campos_faltantes(payload: dict) -> list[str]:
+    faltantes = []
+    tomador = payload.get("tomador") or {}
+    servico = payload.get("servico") or {}
+    if len(re.sub(r"\D", "", tomador.get("documento") or "")) not in (11, 14): faltantes.append("CPF/CNPJ do cliente")
+    if not tomador.get("nome"): faltantes.append("nome/razão social")
+    if not servico.get("codigo"): faltantes.append("código do serviço")
+    if not servico.get("descricao"): faltantes.append("descrição do serviço")
+    if float(servico.get("valor") or 0) <= 0: faltantes.append("valor total")
+    return faltantes
 
 
 def nfae_padrao_produto(tipo: str | None) -> tuple[str, str]:
@@ -3043,6 +3144,104 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         "status_opcoes": status_opcoes,
         "filtro_query": urlencode(parametros_filtro),
     }
+
+
+@app.get("/organiza/nfse", response_class=HTMLResponse)
+def nfse_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    notas = db.query(NFSERascunho).options(selectinload(NFSERascunho.cliente)).order_by(NFSERascunho.id.desc()).limit(300).all()
+    return templates.TemplateResponse("organiza/nfse_lista.html", {"request": request, "usuario": usuario, "notas": notas})
+
+
+@app.get("/organiza/nfse/nova", response_class=HTMLResponse)
+def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
+    dados = {
+        "cliente_id": "", "origem": "manual", "manutencao_id": "", "competencia": date.today().isoformat(),
+        "codigo_servico": NFSE_CODIGO_SERVICO_PADRAO, "municipio_prestacao": NFSE_MUNICIPIO_PADRAO,
+        "uf_prestacao": NFSE_UF_PADRAO, "descricao": "", "valor_total": ""
+    }
+    manutencao = None
+    if manutencao_id:
+        manutencao = carregar_manutencao(db, manutencao_id)
+        if not manutencao: raise HTTPException(404)
+        orcamento = sorted(manutencao.orcamentos, key=lambda x: x.versao)[-1] if manutencao.orcamentos else None
+        totais = totais_orcamento(orcamento) if orcamento else {}
+        dados.update({
+            "cliente_id": manutencao.cliente_id, "origem": "manutencao", "manutencao_id": manutencao.id,
+            "descricao": nfse_descricao_manutencao(manutencao, orcamento),
+            "valor_total": f"{float(totais.get('aprovado') or 0):.2f}",
+        })
+    return templates.TemplateResponse("organiza/nfse_form.html", {"request": request, "usuario": usuario, "clientes": clientes, "dados": dados, "manutencao": manutencao, "nota": None})
+
+
+@app.post("/organiza/nfse/nova")
+async def nfse_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    cliente_id = int(form.get("cliente_id") or 0)
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente: raise HTTPException(400, "Cliente inválido")
+    origem = (form.get("origem") or "manual").strip().lower()
+    manutencao_id = int(form.get("manutencao_id") or 0) or None
+    if origem != "manutencao": manutencao_id = None
+    competencia = data_form(form.get("competencia")) or date.today()
+    valor_total = max(moeda_num(form.get("valor_total")), 0)
+    descricao = (form.get("descricao") or "").strip()
+    if not descricao or valor_total <= 0:
+        return RedirectResponse(f"/organiza/nfse/nova?manutencao_id={manutencao_id or 0}&erro=1", status_code=303)
+    nota = NFSERascunho(
+        cliente_id=cliente_id, origem=origem, manutencao_id=manutencao_id, competencia=competencia,
+        codigo_servico=(form.get("codigo_servico") or NFSE_CODIGO_SERVICO_PADRAO).strip(),
+        municipio_prestacao=(form.get("municipio_prestacao") or NFSE_MUNICIPIO_PADRAO).strip(),
+        uf_prestacao=(form.get("uf_prestacao") or NFSE_UF_PADRAO).strip().upper()[:2],
+        descricao=descricao, valor_total=valor_total, status="RASCUNHO"
+    )
+    db.add(nota); db.commit(); db.refresh(nota)
+    return RedirectResponse(f"/organiza/nfse/{nota.id}", status_code=303)
+
+
+@app.get("/organiza/nfse/{nota_id}", response_class=HTMLResponse)
+def nfse_detalhe(nota_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    nota = db.query(NFSERascunho).options(selectinload(NFSERascunho.cliente), selectinload(NFSERascunho.manutencao)).filter(NFSERascunho.id == nota_id).first()
+    if not nota: raise HTTPException(404)
+    payload = nfse_payload(nota)
+    return templates.TemplateResponse("organiza/nfse_detalhe.html", {"request": request, "usuario": usuario, "nota": nota, "payload": payload, "faltantes": nfse_campos_faltantes(payload)})
+
+
+@app.post("/organiza/nfse/{nota_id}/salvar")
+async def nfse_salvar(nota_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    nota = db.query(NFSERascunho).filter(NFSERascunho.id == nota_id).first()
+    if not nota: raise HTTPException(404)
+    if nota.status == "EMITIDA":
+        return RedirectResponse(f"/organiza/nfse/{nota.id}?bloqueada=1", status_code=303)
+    form = dict(await request.form())
+    nota.competencia = data_form(form.get("competencia")) or nota.competencia
+    nota.codigo_servico = (form.get("codigo_servico") or nota.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip()
+    nota.municipio_prestacao = (form.get("municipio_prestacao") or nota.municipio_prestacao or NFSE_MUNICIPIO_PADRAO).strip()
+    nota.uf_prestacao = (form.get("uf_prestacao") or nota.uf_prestacao or NFSE_UF_PADRAO).strip().upper()[:2]
+    nota.descricao = (form.get("descricao") or nota.descricao or "").strip()
+    nota.valor_total = max(moeda_num(form.get("valor_total")), 0)
+    db.commit()
+    return RedirectResponse(f"/organiza/nfse/{nota.id}?salva=1", status_code=303)
+
+
+@app.get("/organiza/nfse/{nota_id}/payload")
+def nfse_dados_payload(nota_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    nota = db.query(NFSERascunho).options(selectinload(NFSERascunho.cliente)).filter(NFSERascunho.id == nota_id).first()
+    if not nota: raise HTTPException(404)
+    payload = nfse_payload(nota)
+    payload["campos_faltantes"] = nfse_campos_faltantes(payload)
+    return JSONResponse(payload)
+
+
+@app.post("/organiza/nfse/{nota_id}/portal-preparado")
+def nfse_portal_preparado(nota_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    nota = db.query(NFSERascunho).filter(NFSERascunho.id == nota_id).first()
+    if not nota: raise HTTPException(404)
+    if nota.status != "EMITIDA":
+        nota.status = "PORTAL_RASCUNHO"
+        nota.enviado_portal_em = datetime.now()
+        db.commit()
+    return {"ok": True}
 
 
 @app.get("/organiza/vendas", response_class=HTMLResponse)

@@ -96,6 +96,51 @@ async function focusSefaz(payload) {
 
 
 
+const NFSE_MATCH = 'https://www.nfse.gov.br/EmissorNacional/*';
+const NFSE_HOME = 'https://www.nfse.gov.br/EmissorNacional/DPS/Pessoas';
+const NFSE_STORAGE_KEY = 'organiza_nfse_payload';
+const NFSE_SAVED_AT_KEY = 'organiza_nfse_saved_at';
+
+async function saveNfsePayload(data) {
+  await chrome.storage.local.set({[NFSE_STORAGE_KEY]: data, [NFSE_SAVED_AT_KEY]: Date.now()});
+}
+async function getNfsePayload() {
+  const obj = await chrome.storage.local.get([NFSE_STORAGE_KEY, NFSE_SAVED_AT_KEY]);
+  const saved = Number(obj[NFSE_SAVED_AT_KEY] || 0);
+  if (!obj[NFSE_STORAGE_KEY] || !saved || Date.now() - saved > MAX_AGE_MS) return null;
+  return obj[NFSE_STORAGE_KEY];
+}
+async function sendNfsePayloadToTab(tabId, payload) {
+  if (!tabId || !payload) return false;
+  try {
+    await chrome.tabs.sendMessage(tabId, {type:'NFSE_PAYLOAD', payload});
+    return true;
+  } catch (_) { return false; }
+}
+async function focusNfse(payload) {
+  const tabs = await chrome.tabs.query({url:['https://www.nfse.gov.br/EmissorNacional/*','https://nfse.gov.br/EmissorNacional/*']});
+  if (tabs && tabs.length) {
+    const tab = tabs.find(t => t.active) || tabs[0];
+    if (tab.windowId) await chrome.windows.update(tab.windowId,{focused:true});
+    if (tab.id) {
+      const currentUrl = String(tab.url || '');
+      if (!currentUrl.includes('/EmissorNacional/DPS/Pessoas')) {
+        await chrome.tabs.update(tab.id,{active:true,url:NFSE_HOME});
+        await waitTabComplete(tab.id);
+      } else {
+        await chrome.tabs.update(tab.id,{active:true});
+      }
+      let ok = await sendNfsePayloadToTab(tab.id,payload);
+      if (!ok) { await chrome.tabs.reload(tab.id); await waitTabComplete(tab.id); ok = await sendNfsePayloadToTab(tab.id,payload); }
+      return {found:true,tabId:tab.id,delivered:ok};
+    }
+  }
+  const tab = await chrome.tabs.create({url:NFSE_HOME,active:true});
+  await waitTabComplete(tab.id);
+  const ok = await sendNfsePayloadToTab(tab.id,payload);
+  return {found:false,tabId:tab.id,delivered:ok};
+}
+
 async function executeMainAction(tabId, action) {
   if (!tabId || !action) return {ok:false, error:'ação inválida'};
   try {
@@ -415,6 +460,38 @@ async function executeMainAction(tabId, action) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
+
+  if (msg.type === 'NFSE_PREPARADO') {
+    (async () => {
+      if (!msg.payload) throw new Error('Payload da NFS-e não informado.');
+      await saveNfsePayload(msg.payload);
+      return await focusNfse(msg.payload);
+    })().then(sendResponse).catch(err => sendResponse({ok:false,error:String(err && (err.message || err))}));
+    return true;
+  }
+
+  if (msg.type === 'NFSE_GET_PAYLOAD') {
+    getNfsePayload().then(payload => sendResponse({ok:true,payload})).catch(err => sendResponse({ok:false,error:String(err)}));
+    return true;
+  }
+
+  if (msg.type === 'NFSE_CLEAR_PAYLOAD') {
+    chrome.storage.local.remove([NFSE_STORAGE_KEY,NFSE_SAVED_AT_KEY]).then(() => sendResponse({ok:true})).catch(err => sendResponse({ok:false,error:String(err)}));
+    return true;
+  }
+
+  if (msg.type === 'NFSE_DRAFT_READY') {
+    (async () => {
+      const tabs = await chrome.tabs.query({url:['https://humiat.com.br/*','https://www.humiat.com.br/*']});
+      let delivered = 0;
+      for (const tab of tabs) {
+        if (!tab.id) continue;
+        try { await chrome.tabs.sendMessage(tab.id,{type:'NFSE_DRAFT_READY',rascunhoId:msg.rascunhoId||null}); delivered++; } catch (_) {}
+      }
+      return {ok:true,delivered};
+    })().then(sendResponse).catch(err=>sendResponse({ok:false,error:String(err)}));
+    return true;
+  }
 
   if (msg.type === 'NFAE_MAIN_ACTION') {
     (async () => {

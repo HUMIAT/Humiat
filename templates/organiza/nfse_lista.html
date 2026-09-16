@@ -1,0 +1,32 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">Central fiscal</p><h1>NFS-e de Serviço</h1><p class="texto-suave">Rascunhos e notas de serviço da Karaokê RJ.</p></div>
+    <a class="botao primario" href="/organiza/nfse/nova">+ Nova NFS-e</a>
+  </div>
+  <div class="alerta" style="margin-bottom:16px"><strong>Primeira fase:</strong> o Organiza prepara os dados e a extensão preenche o Emissor Nacional até o rascunho. A emissão final continua manual.</div>
+  <section class="cartao">
+    <div class="tabela-responsiva">
+      <table class="tabela-clean">
+        <thead><tr><th>#</th><th>Competência</th><th>Cliente</th><th>Origem</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for n in notas %}
+          <tr>
+            <td>{{ n.id }}</td>
+            <td>{{ n.competencia|data_br }}</td>
+            <td><strong>{{ n.cliente.razao_social or n.cliente.nome }}</strong><br><small>{{ n.cliente.documento or '-' }}</small></td>
+            <td>{% if n.origem == 'manutencao' %}Manutenção #{{ n.manutencao_id }}{% elif n.origem == 'conect' %}Connect{% else %}Manual{% endif %}</td>
+            <td>R$ {{ '%.2f'|format(n.valor_total or 0)|replace('.', ',') }}</td>
+            <td><span class="pill {% if n.status == 'EMITIDA' %}verde{% elif n.status == 'PORTAL_RASCUNHO' %}azul{% else %}cinza{% endif %}">{{ 'Rascunho no portal' if n.status == 'PORTAL_RASCUNHO' else ('Emitida' if n.status == 'EMITIDA' else 'Rascunho') }}</span></td>
+            <td><a class="botao pequeno" href="/organiza/nfse/{{ n.id }}">Abrir</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="texto-suave">Nenhuma NFS-e criada ainda.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">NFS-e #{{ nota.id }}</p><h1>{{ nota.cliente.razao_social or nota.cliente.nome }}</h1><p class="texto-suave">{% if nota.origem == 'manutencao' %}Origem: Manutenção #{{ nota.manutencao_id }}{% else %}Origem: Manual{% endif %}</p></div>
+    <a class="botao" href="/organiza/nfse">Voltar</a>
+  </div>
+  {% if request.query_params.get('salva') %}<div class="alerta sucesso">Rascunho salvo.</div>{% endif %}
+  {% if request.query_params.get('bloqueada') %}<div class="alerta erro">NFS-e emitida é somente para consulta. Para outro serviço, crie uma nova NFS-e.</div>{% endif %}
+  {% if faltantes %}<div class="alerta erro"><strong>Antes de enviar ao portal:</strong> {{ faltantes|join(', ') }}.</div>{% endif %}
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>1</span><div><h2>Tomador</h2><p>Dados usados no Emissor Nacional.</p></div></div>
+    <div class="form-grid-organizada tres-colunas">
+      <label>Nome / Razão social<input readonly value="{{ payload.tomador.nome }}"></label>
+      <label>CPF/CNPJ<input readonly value="{{ payload.tomador.documento }}"></label>
+      <label>E-mail<input readonly value="{{ payload.tomador.email or '-' }}"></label>
+      <label>CEP<input readonly value="{{ payload.tomador.cep or '-' }}"></label>
+      <label class="campo-duplo">Endereço<input readonly value="{{ payload.tomador.logradouro }}{% if payload.tomador.numero %}, {{ payload.tomador.numero }}{% endif %}{% if payload.tomador.complemento %} - {{ payload.tomador.complemento }}{% endif %}"></label>
+      <label>Município/UF<input readonly value="{{ payload.tomador.municipio }} / {{ payload.tomador.uf }}"></label>
+    </div>
+  </section>
+
+  {% if nota.status != 'EMITIDA' %}
+  <form class="cartao formulario secao-form" method="post" action="/organiza/nfse/{{ nota.id }}/salvar" style="margin-top:16px">
+    <div class="secao-form-titulo"><span>2</span><div><h2>Serviço</h2><p>Revise antes de preparar o rascunho no portal.</p></div></div>
+    <div class="form-grid-organizada duas-colunas">
+      <label>Competência<input type="date" name="competencia" required value="{{ nota.competencia.isoformat() }}"></label>
+      <label>Valor total<input name="valor_total" required value="{{ '%.2f'|format(nota.valor_total or 0) }}"></label>
+      <label>Código do serviço<input name="codigo_servico" required value="{{ nota.codigo_servico }}"></label>
+      <label>Município da prestação<input name="municipio_prestacao" required value="{{ nota.municipio_prestacao }}"></label>
+      <label>UF<input name="uf_prestacao" maxlength="2" required value="{{ nota.uf_prestacao }}"></label>
+      <label class="campo-duplo">Descrição<textarea name="descricao" rows="10" required>{{ nota.descricao }}</textarea></label>
+    </div>
+    <div class="acoes-titulo"><button class="botao primario" type="submit">Salvar alterações</button></div>
+  </form>
+  {% else %}
+  <section class="cartao secao-form" style="margin-top:16px"><div class="alerta sucesso"><strong>NFS-e emitida.</strong> Este registro está bloqueado para edição.</div><pre class="nfse-descricao">{{ nota.descricao }}</pre></section>
+  {% endif %}
+
+  <section class="cartao secao-form" style="margin-top:16px">
+    <div class="secao-form-titulo"><span>3</span><div><h2>Preparar rascunho no Emissor Nacional</h2><p>A extensão preencherá o portal e <strong>parará antes de Emitir NFS-e</strong>.</p></div></div>
+    <div id="nfse-ext-status" class="alerta" style="display:none"></div>
+    <div class="acoes-titulo" style="margin-top:12px;flex-wrap:wrap">
+      {% if nota.status != 'EMITIDA' %}<button id="nfse-auto-btn" class="botao primario" type="button" {% if faltantes %}disabled{% endif %}>Preparar rascunho automaticamente</button>{% endif %}
+      <a class="botao" href="{{ NFSE_PORTAL_URL }}" target="_blank" rel="noopener">Abrir Emissor Nacional</a>
+      {% if nota.origem == 'manutencao' and nota.manutencao_id %}<a class="botao" href="/organiza/manutencoes/{{ nota.manutencao_id }}">Abrir manutenção</a>{% endif %}
+    </div>
+    <p class="texto-suave" style="margin-top:10px">Status: <strong>{{ 'Rascunho no portal' if nota.status == 'PORTAL_RASCUNHO' else ('Emitida' if nota.status == 'EMITIDA' else 'Rascunho no Organiza') }}</strong>. Nesta fase a extensão nunca clica no botão final de emissão.</p>
+  </section>
+</section>
+<script>
+(function(){
+  const btn=document.getElementById('nfse-auto-btn');
+  const status=document.getElementById('nfse-ext-status');
+  if(!btn) return;
+  let pronta=false;
+  function mostrar(txt,tipo){status.style.display='block';status.className='alerta '+(tipo||'');status.textContent=txt;}
+  window.addEventListener('message',async function(ev){
+    if(ev.source!==window||!ev.data) return;
+    if(ev.data.type==='ORGANIZA_NFSE_EXT_READY'){pronta=true;mostrar('Extensão conectada. O portal pode ser preenchido automaticamente.','sucesso');}
+    if(ev.data.type==='ORGANIZA_NFSE_OK'){
+      mostrar('Dados enviados. A extensão vai preencher o Emissor Nacional e parar antes da emissão.','sucesso');
+    }
+    if(ev.data.type==='ORGANIZA_NFSE_DRAFT_READY' && (!ev.data.rascunhoId || String(ev.data.rascunhoId)==='{{ nota.id }}')){
+      mostrar('Rascunho preparado no portal. Confira e emita manualmente quando desejar.','sucesso');
+      try{await fetch('/organiza/nfse/{{ nota.id }}/portal-preparado',{method:'POST',credentials:'same-origin'});}catch(_){ }
+    }
+    if(ev.data.type==='ORGANIZA_NFSE_ERRO') mostrar('Falha ao preparar NFS-e: '+(ev.data.mensagem||'erro desconhecido'),'erro');
+  });
+  window.postMessage({type:'ORGANIZA_NFSE_PING'},'*');
+  setTimeout(()=>{if(!pronta) mostrar('Extensão ainda não detectada neste Chrome. Ative/atualize a extensão Organiza.','erro');},1200);
+  btn.addEventListener('click',function(){
+    if(!pronta){mostrar('Ative a extensão e atualize esta página.','erro');return;}
+    mostrar('Enviando rascunho para o Emissor Nacional...','');
+    window.postMessage({type:'ORGANIZA_NFSE_PREPARAR',payloadUrl:'/organiza/nfse/{{ nota.id }}/payload'},'*');
+  });
+})();
+</script>
+{% endblock %}

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Organiza NFA-e",
-  "version": "1.0.67",
-  "description": "Fluxo automático NFA-e 1.0.67: mantém Produto, Sem frete e Pagamento; após o pagamento salvo, clica somente no botão global Validar e encerra. Suporta endereço de entrega diferente enviado pelo Organiza; não abre Observação, não clica Salvar/Emitir, não responde popup e não inicia nova NF-e.",
+  "name": "Organiza Fiscal",
+  "version": "1.0.68",
+  "description": "Organiza Fiscal 1.0.68: mantém a automação NFA-e e adiciona preparação de rascunho NFS-e no Emissor Nacional, sempre parando antes da emissão final.",
   "permissions": [
     "storage",
     "tabs",
@@ -12,7 +12,9 @@
   "host_permissions": [
     "https://humiat.com.br/*",
     "https://www.humiat.com.br/*",
-    "https://svp-extranet.svrs.rs.gov.br/*"
+    "https://svp-extranet.svrs.rs.gov.br/*",
+    "https://www.nfse.gov.br/*",
+    "https://nfse.gov.br/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -48,6 +50,16 @@
       ],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.nfse.gov.br/EmissorNacional/*",
+        "https://nfse.gov.br/EmissorNacional/*"
+      ],
+      "js": [
+        "nfse_draft.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }
