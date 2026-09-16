@@ -57,16 +57,26 @@ NFSE_UF_PADRAO = "RJ"
 
 # O usuário escolhe apenas o tipo operacional da nota. Os códigos fiscais ficam
 # internos no Organiza e são enviados à extensão sem poluir a tela do usuário.
+# A descrição abaixo é apenas um texto inicial: continua totalmente editável antes
+# de preparar o rascunho no Emissor Nacional.
+NFSE_DADOS_BANCARIOS = """Dados Bancarios:
+
+Transferência
+Banco 033 Santander
+Ag 2991 - C/C 11.056381-8
+
+Pix: 35.458.112/0001-01"""
+
 NFSE_TIPOS_SERVICO = {
     NFSE_TIPO_MANUTENCAO: {
         "rotulo": "Manutenção",
         "codigo": "01.07.01",
-        "descricao_padrao": "Serviço de manutenção",
+        "descricao_padrao": f"Manutenção de Equipamento.\n\n{NFSE_DADOS_BANCARIOS}",
     },
     NFSE_TIPO_ALUGUEL: {
         "rotulo": "Aluguel",
         "codigo": "12.09.03",
-        "descricao_padrao": "Aluguel de Karaoke",
+        "descricao_padrao": f"Aluguel de Karaokê\n\n{NFSE_DADOS_BANCARIOS}",
     },
 }
 
@@ -108,8 +118,13 @@ def nfse_rotulo_tipo(tipo: str | None) -> str:
     chave = (tipo or NFSE_TIPO_MANUTENCAO).strip().lower()
     return NFSE_TIPOS_SERVICO.get(chave, NFSE_TIPOS_SERVICO[NFSE_TIPO_MANUTENCAO])["rotulo"]
 
+def nfse_descricao_padrao(tipo: str | None) -> str:
+    chave = (tipo or NFSE_TIPO_MANUTENCAO).strip().lower()
+    return NFSE_TIPOS_SERVICO.get(chave, NFSE_TIPOS_SERVICO[NFSE_TIPO_MANUTENCAO])["descricao_padrao"]
+
 templates.env.globals["nfse_tipo_por_codigo"] = nfse_tipo_por_codigo
 templates.env.globals["nfse_rotulo_tipo"] = nfse_rotulo_tipo
+templates.env.globals["nfse_descricao_padrao"] = nfse_descricao_padrao
 
 def nfse_norm_municipio(valor: str) -> str:
     return unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii").strip().lower()
@@ -3236,7 +3251,7 @@ def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depen
     dados = {
         "cliente_id": "", "origem": "manual", "manutencao_id": "", "competencia": date.today().isoformat(),
         "tipo_servico": NFSE_TIPO_MANUTENCAO, "municipio_prestacao": NFSE_MUNICIPIO_PADRAO,
-        "uf_prestacao": NFSE_UF_PADRAO, "descricao": "", "valor_total": ""
+        "uf_prestacao": NFSE_UF_PADRAO, "descricao": nfse_descricao_padrao(NFSE_TIPO_MANUTENCAO), "valor_total": ""
     }
     manutencao = None
     if manutencao_id:
@@ -3247,7 +3262,7 @@ def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depen
         dados.update({
             "cliente_id": manutencao.cliente_id, "origem": "manutencao", "manutencao_id": manutencao.id,
             "tipo_servico": NFSE_TIPO_MANUTENCAO,
-            "descricao": nfse_descricao_manutencao(manutencao, orcamento),
+            "descricao": nfse_descricao_padrao(NFSE_TIPO_MANUTENCAO),
             "valor_total": f"{float(totais.get('aprovado') or 0):.2f}",
         })
     return templates.TemplateResponse("organiza/nfse_form.html", {"request": request, "usuario": usuario, "clientes": clientes, "dados": dados, "manutencao": manutencao, "nota": None})

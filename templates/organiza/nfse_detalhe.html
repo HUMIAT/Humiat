@@ -28,7 +28,7 @@
       <label>Competência<input type="date" name="competencia" required value="{{ nota.competencia.isoformat() }}"></label>
       <label>Valor total<input name="valor_total" required value="{{ '%.2f'|format(nota.valor_total or 0) }}"></label>
       <label>Tipo da nota de serviço
-        <select name="tipo_servico" required {% if nota.origem == 'manutencao' %}disabled{% endif %}>
+        <select id="nfse-tipo-servico" name="tipo_servico" required {% if nota.origem == 'manutencao' %}disabled{% endif %}>
           <option value="manutencao" {% if nfse_tipo_por_codigo(nota.codigo_servico) == 'manutencao' %}selected{% endif %}>Manutenção</option>
           <option value="aluguel" {% if nfse_tipo_por_codigo(nota.codigo_servico) == 'aluguel' %}selected{% endif %}>Aluguel</option>
         </select>
@@ -37,7 +37,7 @@
       </label>
       <label>Município da prestação<input name="municipio_prestacao" required value="{{ nota.municipio_prestacao }}"></label>
       <label>UF<input name="uf_prestacao" maxlength="2" required value="{{ nota.uf_prestacao }}"></label>
-      <label class="campo-duplo">Descrição<textarea name="descricao" rows="10" required>{{ nota.descricao }}</textarea></label>
+      <label class="campo-duplo">Descrição<textarea id="nfse-descricao" name="descricao" rows="11" required>{{ nota.descricao }}</textarea><small>Texto inicial sugerido pelo Organiza. Você pode alterar livremente antes de preparar o rascunho.</small></label>
     </div>
     <div class="acoes-titulo"><button class="botao primario" type="submit">Salvar alterações</button></div>
   </form>
@@ -56,6 +56,26 @@
     <p class="texto-suave" style="margin-top:10px">Status: <strong>{{ 'Rascunho no portal' if nota.status == 'PORTAL_RASCUNHO' else ('Emitida' if nota.status == 'EMITIDA' else 'Rascunho no Organiza') }}</strong>. Nesta fase a extensão nunca clica no botão final de emissão.</p>
   </section>
 </section>
+<script>
+(function(){
+  const tipo=document.getElementById('nfse-tipo-servico');
+  const descricao=document.getElementById('nfse-descricao');
+  if(!tipo||!descricao) return;
+  const padroes={
+    manutencao: {{ nfse_descricao_padrao('manutencao')|tojson }},
+    aluguel: {{ nfse_descricao_padrao('aluguel')|tojson }}
+  };
+  let ultimoTipo=tipo.value;
+  tipo.addEventListener('change',function(){
+    const anterior=padroes[ultimoTipo]||'';
+    const atual=(descricao.value||'').trim();
+    if(!atual || atual===String(anterior).trim() || Object.values(padroes).some(v=>atual===String(v).trim())){
+      descricao.value=padroes[tipo.value]||'';
+    }
+    ultimoTipo=tipo.value;
+  });
+})();
+</script>
 <script>
 (function(){
   const btn=document.getElementById('nfse-auto-btn');
