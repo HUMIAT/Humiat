@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Organiza Fiscal",
-  "version": "1.0.68",
-  "description": "Organiza Fiscal 1.0.68: mantém a automação NFA-e e adiciona preparação de rascunho NFS-e no Emissor Nacional, sempre parando antes da emissão final.",
+  "version": "1.0.73",
+  "description": "Organiza Fiscal: NFA-e + NFS-e com Serviço e Valores mapeados, NBS/CTN/município exatos, tributação padrão MEI e parada antes da emissão.",
   "permissions": [
     "storage",
     "tabs",

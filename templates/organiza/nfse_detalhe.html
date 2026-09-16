@@ -27,7 +27,14 @@
     <div class="form-grid-organizada duas-colunas">
       <label>Competência<input type="date" name="competencia" required value="{{ nota.competencia.isoformat() }}"></label>
       <label>Valor total<input name="valor_total" required value="{{ '%.2f'|format(nota.valor_total or 0) }}"></label>
-      <label>Código do serviço<input name="codigo_servico" required value="{{ nota.codigo_servico }}"></label>
+      <label>Tipo da nota de serviço
+        <select name="tipo_servico" required {% if nota.origem == 'manutencao' %}disabled{% endif %}>
+          <option value="manutencao" {% if nfse_tipo_por_codigo(nota.codigo_servico) == 'manutencao' %}selected{% endif %}>Manutenção</option>
+          <option value="aluguel" {% if nfse_tipo_por_codigo(nota.codigo_servico) == 'aluguel' %}selected{% endif %}>Aluguel</option>
+        </select>
+        {% if nota.origem == 'manutencao' %}<input type="hidden" name="tipo_servico" value="manutencao">{% endif %}
+        <small>Os códigos fiscais são definidos internamente pelo Organiza.</small>
+      </label>
       <label>Município da prestação<input name="municipio_prestacao" required value="{{ nota.municipio_prestacao }}"></label>
       <label>UF<input name="uf_prestacao" maxlength="2" required value="{{ nota.uf_prestacao }}"></label>
       <label class="campo-duplo">Descrição<textarea name="descricao" rows="10" required>{{ nota.descricao }}</textarea></label>

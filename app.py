@@ -49,10 +49,70 @@ NFE_CONSULTA_URL = "https://consultadfe.fazenda.rj.gov.br/consultaDFe/paginas/co
 templates.env.globals["NFE_CONSULTA_URL"] = NFE_CONSULTA_URL
 
 NFSE_PORTAL_URL = "https://www.nfse.gov.br/EmissorNacional/DPS/Pessoas"
-NFSE_CODIGO_SERVICO_PADRAO = "14.01.01"
+NFSE_TIPO_MANUTENCAO = "manutencao"
+NFSE_TIPO_ALUGUEL = "aluguel"
+NFSE_CODIGO_SERVICO_PADRAO = "01.07.01"
 NFSE_MUNICIPIO_PADRAO = "Rio de Janeiro"
 NFSE_UF_PADRAO = "RJ"
+
+# O usuário escolhe apenas o tipo operacional da nota. Os códigos fiscais ficam
+# internos no Organiza e são enviados à extensão sem poluir a tela do usuário.
+NFSE_TIPOS_SERVICO = {
+    NFSE_TIPO_MANUTENCAO: {
+        "rotulo": "Manutenção",
+        "codigo": "01.07.01",
+        "descricao_padrao": "Serviço de manutenção",
+    },
+    NFSE_TIPO_ALUGUEL: {
+        "rotulo": "Aluguel",
+        "codigo": "12.09.03",
+        "descricao_padrao": "Aluguel de Karaoke",
+    },
+}
+
+NFSE_SERVICO_META = {
+    "01.07.01": {
+        "codigo_texto": "01.07.01 - Suporte técnico em informática, inclusive instalação, configuração e manutenção de programas de computação e bancos de dados.",
+        "nbs_codigo": "115013000",
+        "nbs_texto": "115013000 - Serviços de suporte em tecnologia da informação (TI)",
+    },
+    "12.09.03": {
+        "codigo_texto": "12.09.03 - Diversões eletrônicas ou não.",
+        # A NFS-e de aluguel usada como referência confirma o CTN 12.09.03, mas o
+        # DANFSe antigo não exibe NBS. O NBS fica vazio até ser validado no portal
+        # atual, evitando inventar uma classificação fiscal.
+        "nbs_codigo": "",
+        "nbs_texto": "",
+    },
+    # Mantido apenas para compatibilidade com rascunhos antigos já salvos.
+    "14.01.01": {
+        "codigo_texto": "14.01.01",
+        "nbs_codigo": "120018900",
+        "nbs_texto": "120018900",
+    },
+}
 templates.env.globals["NFSE_PORTAL_URL"] = NFSE_PORTAL_URL
+
+def nfse_tipo_por_codigo(codigo: str | None) -> str:
+    normalizado = (codigo or "").strip().replace(".000", "")
+    for tipo, meta in NFSE_TIPOS_SERVICO.items():
+        if meta["codigo"] == normalizado:
+            return tipo
+    return NFSE_TIPO_MANUTENCAO
+
+def nfse_codigo_por_tipo(tipo: str | None) -> str:
+    chave = (tipo or NFSE_TIPO_MANUTENCAO).strip().lower()
+    return NFSE_TIPOS_SERVICO.get(chave, NFSE_TIPOS_SERVICO[NFSE_TIPO_MANUTENCAO])["codigo"]
+
+def nfse_rotulo_tipo(tipo: str | None) -> str:
+    chave = (tipo or NFSE_TIPO_MANUTENCAO).strip().lower()
+    return NFSE_TIPOS_SERVICO.get(chave, NFSE_TIPOS_SERVICO[NFSE_TIPO_MANUTENCAO])["rotulo"]
+
+templates.env.globals["nfse_tipo_por_codigo"] = nfse_tipo_por_codigo
+templates.env.globals["nfse_rotulo_tipo"] = nfse_rotulo_tipo
+
+def nfse_norm_municipio(valor: str) -> str:
+    return unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii").strip().lower()
 
 # Padrão fiscal usado na preparação da NFA-e.
 # A regra operacional definida pela Karaokê RJ mantém os campos fiscais padrão e
@@ -1845,10 +1905,28 @@ def nfse_payload(rascunho: NFSERascunho) -> dict:
         },
         "servico": {
             "codigo": (rascunho.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip(),
+            "codigo_texto": NFSE_SERVICO_META.get((rascunho.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip().replace(".000", ""), {}).get("codigo_texto", ""),
+            "nbs_codigo": NFSE_SERVICO_META.get((rascunho.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip().replace(".000", ""), {}).get("nbs_codigo", ""),
+            "nbs_texto": NFSE_SERVICO_META.get((rascunho.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip().replace(".000", ""), {}).get("nbs_texto", ""),
             "descricao": (rascunho.descricao or "").strip(),
             "municipio": (rascunho.municipio_prestacao or NFSE_MUNICIPIO_PADRAO).strip(),
             "uf": (rascunho.uf_prestacao or NFSE_UF_PADRAO).strip().upper(),
+            "municipio_ibge": (
+                getattr(cliente, "municipio_ibge", None)
+                if nfse_norm_municipio(rascunho.municipio_prestacao or NFSE_MUNICIPIO_PADRAO) == nfse_norm_municipio(cliente.municipio or cliente.cidade or "")
+                and (rascunho.uf_prestacao or NFSE_UF_PADRAO).strip().upper() == (cliente.estado or "").strip().upper()
+                else ("3304557" if nfse_norm_municipio(rascunho.municipio_prestacao or NFSE_MUNICIPIO_PADRAO) == nfse_norm_municipio("Rio de Janeiro") and (rascunho.uf_prestacao or NFSE_UF_PADRAO).strip().upper() == "RJ" else "3303500" if nfse_norm_municipio(rascunho.municipio_prestacao or NFSE_MUNICIPIO_PADRAO) == nfse_norm_municipio("Nova Iguaçu") and (rascunho.uf_prestacao or NFSE_UF_PADRAO).strip().upper() == "RJ" else "")
+            ) or "",
             "valor": round(float(rascunho.valor_total or 0), 2),
+        },
+        "tributacao": {
+            "issqn_operacao": "TRIBUTAVEL",
+            "regime_especial": "NENHUM",
+            "exigibilidade_suspensa": False,
+            "retencao_issqn": False,
+            "beneficio_municipal": False,
+            "deducao_reducao": False,
+            "valor_aproximado_tributos": "NAO_INFORMAR",
         },
         "parar_antes_emitir": True,
         "portal_url": NFSE_PORTAL_URL,
@@ -3157,7 +3235,7 @@ def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depen
     clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
     dados = {
         "cliente_id": "", "origem": "manual", "manutencao_id": "", "competencia": date.today().isoformat(),
-        "codigo_servico": NFSE_CODIGO_SERVICO_PADRAO, "municipio_prestacao": NFSE_MUNICIPIO_PADRAO,
+        "tipo_servico": NFSE_TIPO_MANUTENCAO, "municipio_prestacao": NFSE_MUNICIPIO_PADRAO,
         "uf_prestacao": NFSE_UF_PADRAO, "descricao": "", "valor_total": ""
     }
     manutencao = None
@@ -3168,6 +3246,7 @@ def nfse_nova(request: Request, manutencao_id: int = 0, usuario: Usuario = Depen
         totais = totais_orcamento(orcamento) if orcamento else {}
         dados.update({
             "cliente_id": manutencao.cliente_id, "origem": "manutencao", "manutencao_id": manutencao.id,
+            "tipo_servico": NFSE_TIPO_MANUTENCAO,
             "descricao": nfse_descricao_manutencao(manutencao, orcamento),
             "valor_total": f"{float(totais.get('aprovado') or 0):.2f}",
         })
@@ -3185,12 +3264,21 @@ async def nfse_criar(request: Request, usuario: Usuario = Depends(usuario_logado
     if origem != "manutencao": manutencao_id = None
     competencia = data_form(form.get("competencia")) or date.today()
     valor_total = max(moeda_num(form.get("valor_total")), 0)
+    tipo_servico = (form.get("tipo_servico") or NFSE_TIPO_MANUTENCAO).strip().lower()
+    if tipo_servico not in NFSE_TIPOS_SERVICO:
+        tipo_servico = NFSE_TIPO_MANUTENCAO
+    # Uma NFS-e criada a partir de Manutenção sempre usa o enquadramento interno de manutenção.
+    if origem == "manutencao":
+        tipo_servico = NFSE_TIPO_MANUTENCAO
+    codigo_servico = nfse_codigo_por_tipo(tipo_servico)
     descricao = (form.get("descricao") or "").strip()
+    if not descricao:
+        descricao = NFSE_TIPOS_SERVICO[tipo_servico]["descricao_padrao"]
     if not descricao or valor_total <= 0:
         return RedirectResponse(f"/organiza/nfse/nova?manutencao_id={manutencao_id or 0}&erro=1", status_code=303)
     nota = NFSERascunho(
         cliente_id=cliente_id, origem=origem, manutencao_id=manutencao_id, competencia=competencia,
-        codigo_servico=(form.get("codigo_servico") or NFSE_CODIGO_SERVICO_PADRAO).strip(),
+        codigo_servico=codigo_servico,
         municipio_prestacao=(form.get("municipio_prestacao") or NFSE_MUNICIPIO_PADRAO).strip(),
         uf_prestacao=(form.get("uf_prestacao") or NFSE_UF_PADRAO).strip().upper()[:2],
         descricao=descricao, valor_total=valor_total, status="RASCUNHO"
@@ -3215,7 +3303,10 @@ async def nfse_salvar(nota_id: int, request: Request, usuario: Usuario = Depends
         return RedirectResponse(f"/organiza/nfse/{nota.id}?bloqueada=1", status_code=303)
     form = dict(await request.form())
     nota.competencia = data_form(form.get("competencia")) or nota.competencia
-    nota.codigo_servico = (form.get("codigo_servico") or nota.codigo_servico or NFSE_CODIGO_SERVICO_PADRAO).strip()
+    tipo_servico = (form.get("tipo_servico") or nfse_tipo_por_codigo(nota.codigo_servico)).strip().lower()
+    if nota.origem == "manutencao":
+        tipo_servico = NFSE_TIPO_MANUTENCAO
+    nota.codigo_servico = nfse_codigo_por_tipo(tipo_servico)
     nota.municipio_prestacao = (form.get("municipio_prestacao") or nota.municipio_prestacao or NFSE_MUNICIPIO_PADRAO).strip()
     nota.uf_prestacao = (form.get("uf_prestacao") or nota.uf_prestacao or NFSE_UF_PADRAO).strip().upper()[:2]
     nota.descricao = (form.get("descricao") or nota.descricao or "").strip()

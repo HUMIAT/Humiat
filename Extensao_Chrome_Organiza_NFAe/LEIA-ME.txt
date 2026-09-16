@@ -145,3 +145,25 @@ NOVO NA 1.0.24
 1.0.67: corrige o endereço usado para abrir o portal público da NFA-e do RJ para https://nfae.fazenda.rj.gov.br/sefaz-dfe-nfae/paginas/inicio.faces. O domínio SVRS continua sendo usado apenas para reconhecer e automatizar a tela interna após o redirecionamento.
 
 1.0.68: adiciona o fluxo NFS-e de Serviço. O Organiza envia um rascunho para o Emissor Nacional; a extensão abre Nova NFS-e, tenta preencher Pessoas, Serviço e Valores e PARA na revisão. Nunca clica no botão final "Emitir NFS-e". O fluxo NFA-e 1.0.67 permanece preservado.
+
+
+1.0.69 - NFS-e: adicionado painel completo com Pausar/Continuar, Copiar log, Limpar log e Limpar dados. Cada Avançar é acionado no máximo uma vez por etapa; checkpoints persistem entre páginas e impedem reinício/loop. Em erro ou campo obrigatório não localizado, a automação pausa para revisão. Continua proibido clicar automaticamente em Emitir NFS-e.
+
+1.0.70
+- NFS-e: se o portal não avançar após o clique, a automação pausa em vez de aguardar indefinidamente.
+- O log registra o botão Avançar realmente acionado e mensagens/campos de validação encontrados na página.
+- Continuar automação volta a tentar a etapa atual após o usuário corrigir um campo manualmente.
+- Mantida a proteção para nunca clicar em Emitir NFS-e.
+
+1.0.71
+- NFS-e Pessoas: preenche primeiro IBS/CBS = Não e Data de Competência, aguarda o portal liberar o formulário, reafirma Prestador/Fornecedor e preserva integralmente CNPJ/Razão Social/endereço do emitente.
+- Tomador passa a usar somente os controles oficiais Tomador.LocalDomicilio, #Tomador_Inscricao, #Tomador_Nome, #Tomador_Telefone e #Tomador_Email, evitando que dados do tomador sejam gravados no bloco do emitente.
+- Mantidos Pausar/Continuar, Copiar log, checkpoints anti-loop e trava para nunca clicar em Emitir NFS-e.
+
+1.0.72: NFS-e Serviço e Valores mapeados pelos controles oficiais do portal. Serviço: Brasil, município por IBGE, CTN, operação normal=Não, NBS e descrição. Valores: valor total, ISSQN sem suspensão/retenção/benefício/dedução e tributos aproximados=Não informar. Continua parando antes de Emitir NFS-e.
+
+
+1.0.73
+- Corrige detecção da etapa Valores/Tributação da NFS-e.
+- A rota /DPS/Tributacao agora tem prioridade sobre textos genéricos como 'serviço prestado'.
+- Evita falso aviso de que o Serviço não avançou quando o portal já abriu a tela de Tributação/Valores.

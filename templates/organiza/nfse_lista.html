@@ -9,20 +9,21 @@
   <section class="cartao">
     <div class="tabela-responsiva">
       <table class="tabela-clean">
-        <thead><tr><th>#</th><th>Competência</th><th>Cliente</th><th>Origem</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Competência</th><th>Cliente</th><th>Tipo</th><th>Origem</th><th>Valor</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for n in notas %}
           <tr>
             <td>{{ n.id }}</td>
             <td>{{ n.competencia|data_br }}</td>
             <td><strong>{{ n.cliente.razao_social or n.cliente.nome }}</strong><br><small>{{ n.cliente.documento or '-' }}</small></td>
+            <td>{{ nfse_rotulo_tipo(nfse_tipo_por_codigo(n.codigo_servico)) }}</td>
             <td>{% if n.origem == 'manutencao' %}Manutenção #{{ n.manutencao_id }}{% elif n.origem == 'conect' %}Connect{% else %}Manual{% endif %}</td>
             <td>R$ {{ '%.2f'|format(n.valor_total or 0)|replace('.', ',') }}</td>
             <td><span class="pill {% if n.status == 'EMITIDA' %}verde{% elif n.status == 'PORTAL_RASCUNHO' %}azul{% else %}cinza{% endif %}">{{ 'Rascunho no portal' if n.status == 'PORTAL_RASCUNHO' else ('Emitida' if n.status == 'EMITIDA' else 'Rascunho') }}</span></td>
             <td><a class="botao pequeno" href="/organiza/nfse/{{ n.id }}">Abrir</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="texto-suave">Nenhuma NFS-e criada ainda.</td></tr>
+          <tr><td colspan="8" class="texto-suave">Nenhuma NFS-e criada ainda.</td></tr>
         {% endfor %}
         </tbody>
       </table>

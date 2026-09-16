@@ -18,7 +18,13 @@
         </select>
       </label>
       <label>Competência<input type="date" name="competencia" required value="{{ dados.competencia }}"></label>
-      <label>Código do serviço<input name="codigo_servico" required value="{{ dados.codigo_servico }}" placeholder="14.01.01"></label>
+      <label>Tipo da nota de serviço
+        <select name="tipo_servico" required {% if manutencao %}disabled{% endif %}>
+          <option value="manutencao" {% if dados.tipo_servico == 'manutencao' %}selected{% endif %}>Manutenção</option>
+          <option value="aluguel" {% if dados.tipo_servico == 'aluguel' %}selected{% endif %}>Aluguel</option>
+        </select>
+        {% if manutencao %}<input type="hidden" name="tipo_servico" value="manutencao"><small>Como esta NFS-e veio de uma manutenção, o tipo já foi definido automaticamente.</small>{% else %}<small>O Organiza aplica internamente o enquadramento fiscal correspondente. Você não precisa informar códigos.</small>{% endif %}
+      </label>
       <label>Valor total da NFS-e<input name="valor_total" inputmode="decimal" required value="{{ dados.valor_total }}" placeholder="0,00"></label>
       <label>Município da prestação<input name="municipio_prestacao" required value="{{ dados.municipio_prestacao }}"></label>
       <label>UF<input name="uf_prestacao" maxlength="2" required value="{{ dados.uf_prestacao }}"></label>
