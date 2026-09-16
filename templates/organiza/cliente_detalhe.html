@@ -107,26 +107,28 @@
         <dt>Chave NF-e</dt><dd>{% if eq.chave_acesso_nfe %}{{ eq.chave_acesso_nfe }}{% else %}-{% endif %}</dd>
       </dl>
 
+      {% if (eq.som and eq.som != 'NA') or (eq.hdmi_tela_2 and eq.hdmi_tela_2 != 'NA') or (eq.teclado_bluetooth and eq.teclado_bluetooth != 'NA') or (eq.microfone and eq.microfone != 'NA') or (eq.sistema_credito and eq.sistema_credito != 'NA') or (eq.catalogo_impresso and eq.catalogo_impresso != 'NA') %}
       <div class="opcionais-venda-wrap">
         <table class="opcionais-venda-tabela">
           <thead><tr>
-            <th>Som</th>
-            <th>HDMI Tela 2</th>
-            <th>Teclado Bluetooth</th>
-            <th>Microfone</th>
-            <th>Sistema de Crédito</th>
-            <th>Catálogo Impresso</th>
+            {% if eq.som and eq.som != 'NA' %}<th>Som</th>{% endif %}
+            {% if eq.hdmi_tela_2 and eq.hdmi_tela_2 != 'NA' %}<th>HDMI Tela 2</th>{% endif %}
+            {% if eq.teclado_bluetooth and eq.teclado_bluetooth != 'NA' %}<th>Teclado Bluetooth</th>{% endif %}
+            {% if eq.microfone and eq.microfone != 'NA' %}<th>Microfone</th>{% endif %}
+            {% if eq.sistema_credito and eq.sistema_credito != 'NA' %}<th>Sistema de Crédito</th>{% endif %}
+            {% if eq.catalogo_impresso and eq.catalogo_impresso != 'NA' %}<th>Catálogo Impresso</th>{% endif %}
           </tr></thead>
           <tbody><tr>
-            <td>{{ eq.som or 'NA' }}</td>
-            <td>{{ eq.hdmi_tela_2 or 'NA' }}</td>
-            <td>{{ eq.teclado_bluetooth or 'NA' }}</td>
-            <td>{{ eq.microfone or 'Com fio' }}</td>
-            <td>{{ eq.sistema_credito or 'NA' }}</td>
-            <td>{{ eq.catalogo_impresso or 'NA' }}</td>
+            {% if eq.som and eq.som != 'NA' %}<td>{{ eq.som }}</td>{% endif %}
+            {% if eq.hdmi_tela_2 and eq.hdmi_tela_2 != 'NA' %}<td>{{ eq.hdmi_tela_2 }}</td>{% endif %}
+            {% if eq.teclado_bluetooth and eq.teclado_bluetooth != 'NA' %}<td>{{ eq.teclado_bluetooth }}</td>{% endif %}
+            {% if eq.microfone and eq.microfone != 'NA' %}<td>{{ eq.microfone }}</td>{% endif %}
+            {% if eq.sistema_credito and eq.sistema_credito != 'NA' %}<td>{{ eq.sistema_credito }}</td>{% endif %}
+            {% if eq.catalogo_impresso and eq.catalogo_impresso != 'NA' %}<td>{{ eq.catalogo_impresso }}</td>{% endif %}
           </tr></tbody>
         </table>
       </div>
+      {% endif %}
 
       <div class="acoes-documentos">
         <a class="botao pequeno" target="_blank" href="/organiza/equipamentos/{{ eq.id }}/garantia.pdf">Contrato de garantia</a>
