@@ -710,7 +710,9 @@ class NFSERascunho(Base):
     __tablename__ = "nfse_rascunhos"
     id = Column(Integer, primary_key=True)
     cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
-    origem = Column(String(30), nullable=False, default="manual")  # manual | manutencao | conect
+    origem = Column(String(30), nullable=False, default="manual")
+    referencia_externa = Column(String(120), nullable=True, index=True)
+    origem_url = Column(String(500), nullable=True)  # manual | manutencao | conect
     manutencao_id = Column(Integer, ForeignKey("assistencias.id"), nullable=True, index=True)
     competencia = Column(Date, nullable=False, default=date.today)
     codigo_servico = Column(String(30), nullable=False, default=NFSE_CODIGO_SERVICO_PADRAO)
@@ -1034,6 +1036,8 @@ def iniciar_banco():
         with engine.begin() as conn:
             tipo_data_nfse = "DATE"
             campos_nfse = {
+                "referencia_externa": "VARCHAR(120)",
+                "origem_url": "VARCHAR(500)",
                 "evento_data_inicio": tipo_data_nfse,
                 "evento_data_fim": tipo_data_nfse,
                 "evento_descricao": "VARCHAR(255)",
@@ -3319,6 +3323,74 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         "filtro_query": urlencode(parametros_filtro),
     }
 
+
+
+
+@app.get("/organiza/nfse/importar-connect")
+def nfse_importar_connect(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    q = request.query_params
+    empresa_id = (q.get("connect_empresa_id") or "").strip()
+    contrato_id = (q.get("connect_contrato_id") or "").strip()
+    referencia = f"connect:{empresa_id}:{contrato_id}" if empresa_id and contrato_id else ""
+    if referencia:
+        existente = db.query(NFSERascunho).filter(
+            NFSERascunho.origem == "connect",
+            NFSERascunho.referencia_externa == referencia,
+        ).order_by(NFSERascunho.id.desc()).first()
+        if existente:
+            return RedirectResponse(f"/organiza/nfse/{existente.id}?duplicada=1", status_code=303)
+
+    documento = re.sub(r"\D", "", q.get("cliente_documento") or "")
+    if len(documento) not in (11, 14):
+        raise HTTPException(400, "CPF/CNPJ do contrato inválido")
+    cliente = db.query(Cliente).filter(Cliente.documento == documento).order_by(Cliente.id.desc()).first()
+    if not cliente:
+        nome = (q.get("cliente_nome") or "Cliente Connect").strip() or "Cliente Connect"
+        telefone = re.sub(r"\D", "", q.get("cliente_telefone") or "")[-11:] or "00000000000"
+        cliente = Cliente(nome=nome, telefone=telefone, documento=documento, pais="BR", ddi="55")
+        db.add(cliente)
+        db.flush()
+    # O contrato é a origem operacional. Atualiza somente dados enviados pelo Connect.
+    mapa = {
+        "nome": "cliente_nome", "razao_social": "cliente_nome", "email": "cliente_email",
+        "cep": "cliente_cep", "endereco": "cliente_logradouro", "endereco_numero": "cliente_numero",
+        "complemento": "cliente_complemento", "bairro": "cliente_bairro",
+        "municipio": "cliente_municipio", "cidade": "cliente_municipio", "estado": "cliente_uf",
+    }
+    for campo, parametro in mapa.items():
+        valor = (q.get(parametro) or "").strip()
+        if valor:
+            setattr(cliente, campo, valor)
+    telefone = re.sub(r"\D", "", q.get("cliente_telefone") or "")
+    if telefone:
+        cliente.telefone = telefone[-11:]
+    cliente.documento = documento
+
+    data_inicio = data_form(q.get("evento_data_inicio")) or date.today()
+    data_fim = data_form(q.get("evento_data_fim")) or data_inicio
+    valor_total = max(moeda_num(q.get("valor_total")), 0)
+    igual = (q.get("evento_endereco_igual_cliente") or "0") == "1"
+    descricao_evento = (q.get("evento_descricao") or "Aluguel de Karaokê").strip() or "Aluguel de Karaokê"
+    municipio_evento = (q.get("evento_municipio") or cliente.municipio or cliente.cidade or NFSE_MUNICIPIO_PADRAO).strip()
+    uf_evento = (q.get("evento_uf") or cliente.estado or NFSE_UF_PADRAO).strip().upper()[:2]
+    nota = NFSERascunho(
+        cliente_id=cliente.id, origem="connect", referencia_externa=referencia or None,
+        origem_url=str(request.url), competencia=data_inicio, codigo_servico=nfse_codigo_por_tipo(NFSE_TIPO_ALUGUEL),
+        municipio_prestacao=municipio_evento, uf_prestacao=uf_evento,
+        descricao=nfse_descricao_padrao(NFSE_TIPO_ALUGUEL), valor_total=valor_total,
+        evento_data_inicio=data_inicio, evento_data_fim=data_fim, evento_descricao=descricao_evento[:255],
+        evento_endereco_igual_cliente=1 if igual else 0, evento_local_tipo="brasil",
+        evento_cep=(q.get("evento_cep") or "").strip(),
+        evento_logradouro=(q.get("evento_logradouro") or "").strip(),
+        evento_numero=(q.get("evento_numero") or "").strip(),
+        evento_complemento=(q.get("evento_complemento") or "").strip(),
+        evento_bairro=(q.get("evento_bairro") or "").strip(),
+        evento_municipio=municipio_evento, evento_uf=uf_evento, status="RASCUNHO"
+    )
+    db.add(nota)
+    db.commit()
+    db.refresh(nota)
+    return RedirectResponse(f"/organiza/nfse/{nota.id}?connect=1", status_code=303)
 
 @app.get("/organiza/nfse", response_class=HTMLResponse)
 def nfse_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):

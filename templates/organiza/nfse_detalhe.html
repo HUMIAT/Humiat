@@ -1,8 +1,10 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
+{% if request.query_params.get("connect") %}<div class="aviso sucesso">Rascunho criado a partir do Connect. Confira os dados antes de preparar no portal.</div>{% endif %}
+{% if request.query_params.get("duplicada") %}<div class="aviso">Já existia um rascunho para este contrato do Connect; nenhum duplicado foi criado.</div>{% endif %}
 <section class="pagina-clean">
   <div class="titulo-linha">
-    <div><p class="tag">NFS-e #{{ nota.id }}</p><h1>{{ nota.cliente.razao_social or nota.cliente.nome }}</h1><p class="texto-suave">{% if nota.origem == 'manutencao' %}Origem: Manutenção #{{ nota.manutencao_id }}{% else %}Origem: Manual{% endif %}</p></div>
+    <div><p class="tag">NFS-e #{{ nota.id }}</p><h1>{{ nota.cliente.razao_social or nota.cliente.nome }}</h1><p class="texto-suave">{% if nota.origem == 'manutencao' %}Origem: Manutenção #{{ nota.manutencao_id }}{% elif nota.origem == 'connect' %}Origem: Connect{% if nota.referencia_externa %} · {{ nota.referencia_externa|replace('connect:', 'Contrato ') }}{% endif %}{% else %}Origem: Manual{% endif %}</p></div>
     <a class="botao" href="/organiza/nfse">Voltar</a>
   </div>
   {% if request.query_params.get('salva') %}<div class="alerta sucesso">Rascunho salvo.</div>{% endif %}
