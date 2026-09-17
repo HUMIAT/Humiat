@@ -109,10 +109,21 @@
       const r=await fetch('https://viacep.com.br/ws/'+n+'/json/');
       const d=await r.json();
       if(!r.ok || d.erro) throw new Error('CEP não encontrado.');
+      // O CEP valida/normaliza os campos. Se o ViaCEP não devolver algum
+      // componente, preserva o valor que já veio da consulta do CNPJ.
+      const atual = id => (document.getElementById(id)?.value || '');
       const mapa = prefixo ? {
-        entrega_endereco:d.logradouro||'', entrega_bairro:d.bairro||'', entrega_municipio:d.localidade||'', entrega_estado:d.uf||'', entrega_municipio_ibge:d.ibge||''
+        entrega_endereco:d.logradouro||atual('entrega_endereco'),
+        entrega_bairro:d.bairro||atual('entrega_bairro'),
+        entrega_municipio:d.localidade||atual('entrega_municipio'),
+        entrega_estado:d.uf||atual('entrega_estado'),
+        entrega_municipio_ibge:d.ibge||atual('entrega_municipio_ibge')
       } : {
-        endereco:d.logradouro||'', bairro:d.bairro||'', municipio:d.localidade||'', estado:d.uf||'', municipio_ibge:d.ibge||''
+        endereco:d.logradouro||atual('endereco'),
+        bairro:d.bairro||atual('bairro'),
+        municipio:d.localidade||atual('municipio'),
+        estado:d.uf||atual('estado'),
+        municipio_ibge:d.ibge||atual('municipio_ibge')
       };
       Object.entries(mapa).forEach(([id,v])=>{ const el=document.getElementById(id); if(el) el.value=v; });
       if(status) status.textContent='CEP validado.';
@@ -148,9 +159,17 @@
       document.getElementById('situacao_icms').value=d.situacao_icms||'NAO_CONFIRMADO';
       document.getElementById('cnpj-situacao').textContent=d.situacao_cadastral||'-';
       box.style.display='';
+      // Mostra imediatamente o endereço retornado pelo CNPJ.ws. Em seguida,
+      // quando houver CEP, valida os campos de localização no ViaCEP sem apagar
+      // número/complemento vindos do CNPJ.
       if(d.cep){ document.getElementById('cep').value=d.cep; formatarCep(document.getElementById('cep')); }
+      if(d.endereco) document.getElementById('endereco').value=d.endereco;
       if(d.numero) document.getElementById('endereco_numero').value=d.numero;
       if(d.complemento) document.getElementById('complemento').value=d.complemento;
+      if(d.bairro) document.getElementById('bairro').value=d.bairro;
+      if(d.municipio) document.getElementById('municipio').value=d.municipio;
+      if(d.municipio_ibge) document.getElementById('municipio_ibge').value=d.municipio_ibge;
+      if(d.uf) document.getElementById('estado').value=d.uf;
       if(d.cep) await buscarCep('');
       if(d.aviso_ie || (!d.inscricao_estadual && d.situacao_icms==='NAO_CONFIRMADO')) sintegra.style.display='';
       msg.textContent='CNPJ validado. Confira os dados antes de salvar.';

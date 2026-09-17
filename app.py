@@ -1877,9 +1877,9 @@ def cliente_atualizar_cnpj(
         )
     try:
         dados = consultar_cnpj_publico(cnpj)
-        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=False)
+        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
         db.commit()
-        msg = "Dados empresariais atualizados pelo CNPJ. O endereço continua sendo validado pelo CEP no cadastro do cliente."
+        msg = "Dados empresariais e endereço cadastral atualizados pelo CNPJ. Confira número e complemento."
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_sucesso={quote_plus(msg)}", status_code=303)
     except (ValueError, RuntimeError) as exc:
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_erro={quote_plus(str(exc))}", status_code=303)
@@ -3637,10 +3637,10 @@ async def cadastro_publico_consultar_cnpj(token: str, request: Request, db: Sess
     cnpj = limpar_documento(str((body or {}).get("cnpj") or ""))
     try:
         dados = consultar_cnpj_publico(cnpj)
-        # A consulta de CNPJ preenche os dados empresariais/fiscais. O endereço
-        # do cliente é sempre consolidado pelo CEP na página pública, para que
-        # logradouro/bairro/município/UF não sejam digitados manualmente.
-        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=False)
+        # A consulta de CNPJ também traz o endereço cadastral da empresa.
+        # Ele é salvo como ponto de partida e, na página pública, o CEP continua
+        # sendo a fonte de validação de logradouro/bairro/município/UF.
+        aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
         db.commit()
         serial = {**dados, "consultado_em": dados["consultado_em"].isoformat()}
         if not dados.get("inscricao_estadual") and dados.get("situacao_icms") == "NAO_CONFIRMADO":
@@ -3692,7 +3692,7 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
         try:
             recente = cliente.cnpj_consultado_em and documento_original == doc and (datetime.now() - cliente.cnpj_consultado_em) < timedelta(minutes=10)
             if not recente:
-                aplicar_dados_cnpj(cliente, consultar_cnpj_publico(doc), atualizar_endereco=False)
+                aplicar_dados_cnpj(cliente, consultar_cnpj_publico(doc), atualizar_endereco=True)
         except (RuntimeError, ValueError):
             aviso = "SINTEGRA não disponível. Tente mais tarde."
 
