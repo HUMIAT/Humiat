@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import html
 import json
 import os
 import secrets
@@ -451,6 +452,152 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
         raise RuntimeError(f"Falha Resend HTTP {exc.code}: {detalhe[:500]}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
+
+
+
+def _enviar_resend_humiat(destino: str, assunto: str, texto: str, html_corpo: str, *, user_agent: str = "HUMIAT/1.0") -> None:
+    """Transporte central de e-mail do HUMIAT pelo Resend.
+
+    O Organiza é o único responsável pelo transporte dos e-mails de acesso do
+    SolVoz. O SolVoz continua responsável apenas pela credencial e pelos tokens.
+    """
+    para = (destino or "").strip().lower()
+    if not para or "@" not in para:
+        raise RuntimeError("E-mail do destinatário inválido")
+    if not RESEND_API_KEY:
+        raise RuntimeError("HUMIAT_RESEND_API_KEY não configurada no servidor")
+    if not EMAIL_FROM:
+        raise RuntimeError("HUMIAT_EMAIL_FROM não configurado no servidor")
+
+    payload = json.dumps({
+        "from": EMAIL_FROM,
+        "to": [para],
+        "subject": str(assunto or "HUMIAT")[:200],
+        "text": str(texto or ""),
+        "html": str(html_corpo or ""),
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        RESEND_API_URL,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": user_agent,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status < 200 or resp.status >= 300:
+                raise RuntimeError(f"Resend retornou HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Falha Resend HTTP {exc.code}: {detalhe[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
+
+
+def enviar_email_solvoz_senha_provisoria(
+    destino: str,
+    nome: str,
+    empresa_nome: str,
+    senha_provisoria: str,
+    acesso_url: str,
+    equipamentos: list[str] | None = None,
+) -> None:
+    """Entrega a senha provisória gerada pelo SolVoz usando o Resend do Organiza."""
+    senha = str(senha_provisoria or "").strip()
+    if not senha:
+        raise RuntimeError("Senha provisória do SolVoz não recebida")
+    nome_exibicao = (nome or "cliente").strip()
+    empresa_exibicao = (empresa_nome or "sua empresa").strip()
+    itens = [str(x).strip() for x in (equipamentos or []) if str(x).strip()]
+    equipamentos_txt = ", ".join(itens) or "Equipamentos vinculados ao cadastro"
+    url = (acesso_url or "").strip()
+    texto = (
+        f"Olá, {nome_exibicao}.\n\n"
+        "Seu acesso administrativo ao SolVoz foi criado.\n\n"
+        f"Empresa: {empresa_exibicao}\n"
+        f"Equipamento(s): {equipamentos_txt}\n"
+        f"Usuário: {(destino or '').strip().lower()}\n"
+        f"Senha provisória: {senha}\n\n"
+        "No primeiro acesso será obrigatório criar uma nova senha. "
+        "A senha definitiva ficará somente no SolVoz.\n\n"
+        f"Acessar SolVoz: {url}\n\n"
+        "SolVoz • HUMIAT"
+    )
+    nome_h = html.escape(nome_exibicao)
+    empresa_h = html.escape(empresa_exibicao)
+    equipamentos_h = html.escape(equipamentos_txt)
+    email_h = html.escape((destino or "").strip().lower())
+    senha_h = html.escape(senha)
+    url_h = html.escape(url, quote=True)
+    html_corpo = f"""
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
+      <h2 style="margin-bottom:8px">Seu acesso ao SolVoz</h2>
+      <p>Olá, {nome_h}.</p>
+      <p>Seu acesso administrativo ao SolVoz foi criado a partir do cadastro da HUMIAT.</p>
+      <p><strong>Empresa:</strong> {empresa_h}<br>
+         <strong>Equipamento(s):</strong> {equipamentos_h}<br>
+         <strong>Usuário:</strong> {email_h}<br>
+         <strong>Senha provisória:</strong> <code style="font-size:16px">{senha_h}</code></p>
+      <p>No primeiro acesso será obrigatório criar uma nova senha. Depois disso, a senha fica somente no SolVoz.</p>
+      <p style="margin:28px 0"><a href="{url_h}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Acessar SolVoz</a></p>
+      <p style="font-size:13px;color:#475569">Este acesso é exclusivo do SolVoz e não libera acesso ao Organiza.</p>
+      <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{url_h}</p>
+    </div>
+    """
+    _enviar_resend_humiat(
+        destino,
+        "Seu acesso ao SolVoz foi criado",
+        texto,
+        html_corpo,
+        user_agent="HUMIAT-Organiza-SolVoz/1.1.23",
+    )
+
+
+def enviar_email_solvoz_recuperacao(
+    destino: str,
+    nome: str,
+    empresa_nome: str,
+    link: str,
+    *,
+    validade_minutos: int = 30,
+) -> None:
+    """Envia pelo Organiza o link de recuperação cuja validade é controlada pelo SolVoz."""
+    nome_exibicao = (nome or "cliente").strip()
+    empresa_exibicao = (empresa_nome or "sua empresa").strip()
+    url = (link or "").strip()
+    minutos = max(1, int(validade_minutos or 30))
+    texto = (
+        f"Olá, {nome_exibicao}.\n\n"
+        f"Recebemos uma solicitação para redefinir sua senha do SolVoz ({empresa_exibicao}).\n"
+        f"Use este link em até {minutos} minutos:\n{url}\n\n"
+        "Se você não solicitou a alteração, ignore esta mensagem.\n\n"
+        "SolVoz • HUMIAT"
+    )
+    nome_h = html.escape(nome_exibicao)
+    empresa_h = html.escape(empresa_exibicao)
+    url_h = html.escape(url, quote=True)
+    html_corpo = f"""
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
+      <h2 style="margin-bottom:8px">Redefinir senha do SolVoz</h2>
+      <p>Olá, {nome_h}.</p>
+      <p>Recebemos uma solicitação para redefinir sua senha do SolVoz da empresa <strong>{empresa_h}</strong>.</p>
+      <p>O link abaixo é válido por <strong>{minutos} minutos</strong> e só pode ser utilizado uma vez.</p>
+      <p style="margin:28px 0"><a href="{url_h}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar nova senha</a></p>
+      <p style="font-size:13px;color:#475569">Se você não solicitou a alteração, ignore este e-mail.</p>
+      <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{url_h}</p>
+    </div>
+    """
+    _enviar_resend_humiat(
+        destino,
+        "SolVoz - redefinição de senha",
+        texto,
+        html_corpo,
+        user_agent="HUMIAT-Organiza-SolVoz/1.1.23",
+    )
 
 
 def _slug(valor: str) -> str:

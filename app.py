@@ -33,6 +33,7 @@ from humiat_id import (
     humiat_usuario_da_requisicao, TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA,
     HumiatEmpresa, HumiatUsuario, HumiatUsuarioEmpresa, HumiatEmpresaProduto, HumiatProduto,
     garantir_empresa_solvoz_humiat,
+    enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao,
 )
 
 from services.comunicacao import (
@@ -285,6 +286,60 @@ def _solvoz_grupos_cliente(cliente) -> list[dict]:
     return list(grupos.values())
 
 
+
+def _solvoz_entregar_senha_provisoria(cliente, resultados: list[dict], grupos: list[dict]) -> list[dict]:
+    """Envia pelo Resend do Organiza a senha provisória criada pelo SolVoz.
+
+    A senha existe em texto puro somente na resposta privada servidor-servidor e
+    nesta chamada de envio. Ela não é salva no banco do Organiza nem registrada
+    em logs.
+    """
+    alvo = next((r for r in resultados if str(r.get("senha_provisoria") or "").strip()), None)
+    if not alvo:
+        # Usuário já existente: houve apenas atualização de vínculos/equipamentos.
+        for item in resultados:
+            item.pop("senha_provisoria", None)
+        return resultados
+
+    senha = str(alvo.get("senha_provisoria") or "")
+    empresas = []
+    equipamentos = []
+    for grupo in grupos:
+        empresa = grupo.get("empresa")
+        nome_empresa = str(getattr(empresa, "nome", "") or "").strip()
+        if nome_empresa and nome_empresa not in empresas:
+            empresas.append(nome_empresa)
+        for eq in grupo.get("equipamentos") or []:
+            descricao = f"{rotulo_maquina(eq)} — {codigo_tecnico(eq)}"
+            if descricao not in equipamentos:
+                equipamentos.append(descricao)
+
+    empresa_nome = ", ".join(empresas) or str((alvo.get("empresa") or {}).get("nome") or "SolVoz")
+    acesso_url = str(alvo.get("acesso_url") or "").strip()
+    email = (getattr(cliente, "email", None) or "").strip().lower()
+    nome = (getattr(cliente, "nome", None) or "").strip()
+
+    try:
+        enviar_email_solvoz_senha_provisoria(
+            email,
+            nome,
+            empresa_nome,
+            senha,
+            acesso_url,
+            equipamentos,
+        )
+        alvo["email_enviado"] = True
+        alvo["email_erro"] = ""
+    except Exception as exc:
+        alvo["email_enviado"] = False
+        alvo["email_erro"] = str(exc)[:500]
+    finally:
+        # Nunca deixe a senha seguir adiante para cache, template ou mensagens.
+        for item in resultados:
+            item.pop("senha_provisoria", None)
+    return resultados
+
+
 def _solvoz_provisionar_cliente(cliente, grupos: list[dict]) -> list[dict]:
     email = (getattr(cliente, "email", None) or "").strip().lower()
     if not email or "@" not in email:
@@ -292,6 +347,7 @@ def _solvoz_provisionar_cliente(cliente, grupos: list[dict]) -> list[dict]:
     if not grupos:
         raise ValueError("O cliente não possui equipamento com Catálogo Online e empresa SolVoz vinculados.")
     resultados = []
+    grupos_processados = []
     for grupo in grupos:
         empresa = grupo["empresa"]
         payload = {
@@ -303,10 +359,20 @@ def _solvoz_provisionar_cliente(cliente, grupos: list[dict]) -> list[dict]:
             "empresa_slug": (getattr(empresa, "slug", None) or "").strip(),
             "equipamentos": list(dict.fromkeys(grupo["codigos"])),
         }
-        resultados.append(_solvoz_api_request(
-            "/api/integracoes/organiza/solvoz/acesso", metodo="POST", payload=payload
-        ))
-    return resultados
+        try:
+            resultado = _solvoz_api_request(
+                "/api/integracoes/organiza/solvoz/acesso", metodo="POST", payload=payload
+            )
+            resultados.append(resultado)
+            grupos_processados.append(grupo)
+        except Exception:
+            # Se a primeira empresa já criou uma senha antes de outra empresa
+            # falhar, ainda entregamos essa credencial. Assim um erro parcial não
+            # deixa uma senha criada no SolVoz sem chegar ao cliente.
+            if resultados:
+                _solvoz_entregar_senha_provisoria(cliente, resultados, grupos_processados)
+            raise
+    return _solvoz_entregar_senha_provisoria(cliente, resultados, grupos)
 
 
 def _solvoz_cache_salvar(db: Session, cliente, resultados: list[dict], *, erro: str = "") -> None:
@@ -321,9 +387,14 @@ def _solvoz_cache_salvar(db: Session, cliente, resultados: list[dict], *, erro: 
         registro.solvoz_usuario_id = int(primeiro.get("usuario_id"))
     registro.status = "ATIVO" if resultados else "ERRO"
     registro.trocar_senha = 1 if any(bool(r.get("trocar_senha_primeiro_acesso")) for r in resultados) else 0
-    registro.email_enviado = 1 if any(bool(r.get("email_enviado")) for r in resultados) else 0
+    houve_nova_credencial = any(bool(r.get("senha_provisoria_gerada")) for r in resultados)
+    if houve_nova_credencial:
+        registro.email_enviado = 1 if any(bool(r.get("email_enviado")) for r in resultados) else 0
     erros = [str(r.get("email_erro") or "").strip() for r in resultados if r.get("email_erro")]
-    registro.ultimo_erro = (erro or (erros[0] if erros else ""))[:500] or None
+    if erro or erros:
+        registro.ultimo_erro = (erro or erros[0])[:500] or None
+    elif houve_nova_credencial:
+        registro.ultimo_erro = None
     registro.atualizado_em = datetime.now()
     db.commit()
 
@@ -1823,12 +1894,16 @@ def cliente_solvoz_reenviar_acesso(
             "/api/integracoes/organiza/solvoz/acesso/reenviar",
             metodo="POST", payload={"email": email},
         )
-        _solvoz_cache_salvar(db, cliente, [resultado])
+        resultados = _solvoz_entregar_senha_provisoria(
+            cliente, [resultado], _solvoz_grupos_cliente(cliente)
+        )
+        resultado = resultados[0]
+        _solvoz_cache_salvar(db, cliente, resultados)
         if resultado.get("email_enviado"):
             msg = "Nova senha provisória enviada para o e-mail do cliente."
             chave = "solvoz_sucesso"
         else:
-            msg = "A senha provisória foi gerada, mas o e-mail não foi enviado: " + (resultado.get("email_erro") or "verifique a configuração de e-mail do SolVoz.")
+            msg = "A senha provisória foi gerada, mas o e-mail não foi enviado: " + (resultado.get("email_erro") or "verifique a configuração do Resend no Organiza.")
             chave = "solvoz_erro"
         return RedirectResponse(
             f"/organiza/clientes/{cliente_id}?{chave}={quote_plus(msg)}", status_code=303
@@ -2730,9 +2805,8 @@ async def solvoz_empresa_criar_acesso(
     if not cliente:
         msg = quote_plus("Selecione o cliente que receberá o acesso ao SolVoz.")
         return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={msg}", status_code=303)
-    # A partir da v1.1.2 o Organiza não cria mais a senha/usuário aqui.
-    # Ele envia os dados do cadastro e dos equipamentos; o próprio SolVoz
-    # cria a credencial, gera a senha provisória e envia o e-mail.
+    # O Organiza mantém o cadastro e o transporte de e-mail. O SolVoz cria a
+    # credencial/senha provisória e devolve a senha somente pela API privada.
     cliente = db.query(Cliente).options(
         selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
     ).filter(Cliente.id == cliente.id).first()
@@ -2749,7 +2823,7 @@ async def solvoz_empresa_criar_acesso(
         msg = f"Acesso SolVoz criado para {cliente.nome}. A senha provisória foi enviada por e-mail."
         chave = "sucesso"
     elif resultado.get("criado"):
-        msg = f"Acesso criado para {cliente.nome}, mas o e-mail não foi enviado: {resultado.get('email_erro') or 'verifique a configuração de e-mail do SolVoz.'}"
+        msg = f"Acesso criado para {cliente.nome}, mas o e-mail não foi enviado: {resultado.get('email_erro') or 'verifique a configuração do Resend no Organiza.'}"
         chave = "erro"
     else:
         msg = f"Acesso SolVoz de {cliente.nome} atualizado e equipamentos vinculados."
@@ -2784,6 +2858,57 @@ def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
     recebido = (x_solvoz_token or "").strip()
     if not recebido or not hmac.compare_digest(recebido, esperado):
         raise HTTPException(401, "Token SolVoz inválido.")
+
+
+
+@app.post("/api/integracoes/solvoz/email/recuperacao")
+async def api_solvoz_email_recuperacao(
+    request: Request,
+    x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
+):
+    """Entrega pelo Resend do Organiza um reset cuja credencial pertence ao SolVoz."""
+    _validar_token_solvoz(x_solvoz_token)
+    try:
+        if "application/json" in (request.headers.get("content-type") or "").lower():
+            data = await request.json()
+        else:
+            data = dict(await request.form())
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    email = str(data.get("email") or "").strip().lower()
+    nome = str(data.get("nome") or "cliente").strip()
+    empresa_nome = str(data.get("empresa_nome") or "SolVoz").strip()
+    link = str(data.get("link") or "").strip()
+    try:
+        validade = max(1, min(120, int(data.get("validade_minutos") or 30)))
+    except Exception:
+        validade = 30
+
+    if not email or "@" not in email:
+        raise HTTPException(400, "E-mail inválido.")
+    if not link:
+        raise HTTPException(400, "Link de recuperação ausente.")
+
+    # Impede que a rota privada vire um relay para links externos.
+    base = urllib.parse.urlparse(SOLVOZ_BASE_URL)
+    alvo = urllib.parse.urlparse(link)
+    if alvo.scheme.lower() != "https" or alvo.netloc.lower() != base.netloc.lower():
+        raise HTTPException(400, "Link de recuperação fora do domínio SolVoz configurado.")
+
+    try:
+        enviar_email_solvoz_recuperacao(
+            email,
+            nome,
+            empresa_nome,
+            link,
+            validade_minutos=validade,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao enviar e-mail pelo Resend do Organiza: {str(exc)[:300]}")
+    return {"ok": True, "email_enviado": True, "responsavel": "ORGANIZA"}
 
 
 @app.post("/api/integracoes/solvoz/empresas")
