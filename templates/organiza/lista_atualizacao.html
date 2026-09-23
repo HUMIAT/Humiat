@@ -1,0 +1,44 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean campanhas-pagina">
+  <div class="titulo-linha campanhas-topo">
+    <div>
+      <p class="tag">Lista</p>
+      <h1>Clientes de Atualização</h1>
+      <p class="texto-suave">Entra automaticamente quem tem pelo menos 1 equipamento ativo com atualização disponível para {{ pacote_atual }}.</p>
+    </div>
+    <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
+  </div>
+
+  <div class="grade-metricas clean-metricas duas">
+    <article class="cartao metrica"><span>✓</span><div><small>Ativos para campanhas</small><strong>{{ ativos }}</strong></div></article>
+    <article class="cartao metrica"><span>↻</span><div><small>Na lista de atualização</small><strong>{{ lista|length }}</strong></div></article>
+  </div>
+
+  <section class="cartao tabela-cartao campanha-clientes">
+    {% for item in lista %}
+      {% set cliente = item.cliente %}
+      <article class="campanha-cliente-linha {% if not cliente.campanhas_ativo %}inativo{% endif %}">
+        <div class="campanha-cliente-info">
+          <strong>{{ cliente.nome }}</strong>
+          <span>+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}</span>
+          <small>
+            {% for eq in item.equipamentos %}
+              {{ rotulo_maquina(eq) }}: {{ eq.pacote or 'sem versão' }}{% if not loop.last %} · {% endif %}
+            {% endfor %}
+          </small>
+        </div>
+        <form method="post" action="/organiza/campanhas/lista-atualizacao/{{ cliente.id }}/alternar">
+          {% if cliente.campanhas_ativo %}
+            <button class="botao pequeno fantasma" type="submit">Inativar campanha</button>
+          {% else %}
+            <button class="botao pequeno" type="submit">Ativar campanha</button>
+          {% endif %}
+        </form>
+      </article>
+    {% else %}
+      <p class="texto-suave vazio">Nenhum cliente possui equipamento ativo com atualização disponível para {{ pacote_atual }}.</p>
+    {% endfor %}
+  </section>
+</section>
+{% endblock %}

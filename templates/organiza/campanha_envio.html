@@ -1,0 +1,66 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean campanha-envio-pagina">
+  <div class="campanha-envio-cabecalho">
+    <a href="/organiza/campanhas/{{ campanha.id }}" aria-label="Voltar para a campanha">← {{ campanha.nome }}</a>
+    <strong>{{ contagens.enviados }} enviados · {{ contagens.pendentes }} restantes</strong>
+  </div>
+
+  {% if destinatario %}
+    {% set total_envio = contagens.total if contagens.total else 1 %}
+    {% set percentual = ((contagens.enviados * 100) / total_envio)|round(0, 'floor') %}
+    <div class="campanha-envio-progresso" aria-label="Progresso da campanha">
+      <span style="width: {{ percentual }}%"></span>
+    </div>
+
+    <section class="cartao campanha-envio-card">
+      <div class="campanha-cliente-atual">
+        <p class="tag">Cliente atual</p>
+        <h1>{{ destinatario.cliente.nome }}</h1>
+        <p class="campanha-telefone">+{{ destinatario.cliente.ddi }} {{ destinatario.cliente.telefone_formatado() }}</p>
+      </div>
+
+      <div class="campanha-envio-acoes">
+        <a class="campanha-whatsapp-btn" href="{{ whatsapp_url }}" data-abrir-whatsapp>
+          <span aria-hidden="true">●</span> Abrir WhatsApp
+        </a>
+
+        <form class="js-envio-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/enviado">
+          <button class="botao primario campanha-enviado-btn" type="submit">Enviado → Próximo</button>
+        </form>
+      </div>
+
+      <form class="js-envio-form campanha-nao-receber-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/nao-receber" onsubmit="return confirm('Este cliente deixará de receber campanhas futuras. Continuar?')">
+        <button class="campanha-nao-receber" type="submit">Não receber mais campanhas</button>
+      </form>
+    </section>
+  {% else %}
+    <section class="cartao campanha-envio-card campanha-concluida">
+      <span class="campanha-check">✓</span>
+      <h1>Campanha concluída</h1>
+      <p>{{ contagens.enviados }} clientes receberam a mensagem.</p>
+      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}">Ver campanha</a>
+    </section>
+  {% endif %}
+</section>
+
+<script>
+document.body.classList.add('modo-campanha-envio');
+document.querySelectorAll('.js-envio-form').forEach((form) => {
+  form.addEventListener('submit', () => {
+    const botao = form.querySelector('button[type="submit"]');
+    if (!botao) return;
+    botao.disabled = true;
+    botao.dataset.textoOriginal = botao.textContent;
+    botao.textContent = 'Processando...';
+  });
+});
+const whatsapp = document.querySelector('[data-abrir-whatsapp]');
+if (whatsapp) {
+  whatsapp.addEventListener('click', () => {
+    whatsapp.classList.add('aberto');
+    setTimeout(() => { whatsapp.textContent = 'WhatsApp aberto'; }, 120);
+  });
+}
+</script>
+{% endblock %}

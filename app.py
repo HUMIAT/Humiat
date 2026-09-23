@@ -1,5 +1,6 @@
 from urllib.parse import quote_plus, urlencode
 import hashlib
+import html
 import hmac
 import os
 import re
@@ -15,12 +16,12 @@ from datetime import date, datetime, time, timedelta
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Header
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Header, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import ClientDisconnect
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, func, or_, inspect, text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, LargeBinary, func, or_, inspect, text
 from sqlalchemy.orm import Session, relationship, selectinload
 
 from config import (
@@ -529,6 +530,8 @@ class Cliente(Base):
     falta_pacote = Column(Integer, nullable=True)
     plano = Column(String(60), nullable=True)
     observacao = Column(Text, nullable=True)
+    # Controle exclusivo de campanhas. Não altera o status operacional do cliente.
+    campanhas_ativo = Column(Integer, nullable=False, default=1)
     token_ficha = Column(String(64), nullable=True, unique=True)
     inscricao_estadual = Column(String(30), nullable=True)
     situacao_icms = Column(String(30), nullable=True)
@@ -624,6 +627,43 @@ class Equipamento(Base):
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
+
+
+class Campanha(Base):
+    __tablename__ = "campanhas"
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(160), nullable=False)
+    lista_tipo = Column(String(30), nullable=False, default="ATUALIZACAO")
+    mensagem = Column(Text, nullable=False)
+    pacote_alvo = Column(String(30), nullable=True)
+    status = Column(String(20), nullable=False, default="RASCUNHO")
+    criado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    imagem_nome = Column(String(180), nullable=True)
+    imagem_mime = Column(String(80), nullable=True)
+    imagem_bytes = Column(LargeBinary, nullable=True)
+    imagem_token = Column(String(64), nullable=True, unique=True, index=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    iniciado_em = Column(DateTime, nullable=True)
+    finalizado_em = Column(DateTime, nullable=True)
+    criado_por = relationship("Usuario")
+    destinatarios = relationship("CampanhaDestinatario", back_populates="campanha", cascade="all, delete-orphan")
+
+
+class CampanhaDestinatario(Base):
+    __tablename__ = "campanha_destinatarios"
+    id = Column(Integer, primary_key=True)
+    campanha_id = Column(Integer, ForeignKey("campanhas.id"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="PENDENTE", index=True)
+    reservado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    reservado_em = Column(DateTime, nullable=True)
+    enviado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    enviado_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    campanha = relationship("Campanha", back_populates="destinatarios")
+    cliente = relationship("Cliente")
+    reservado_por = relationship("Usuario", foreign_keys=[reservado_por_id])
+    enviado_por = relationship("Usuario", foreign_keys=[enviado_por_id])
 
 
 class TransferenciaEquipamento(Base):
@@ -1100,6 +1140,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN pais VARCHAR(2) NOT NULL DEFAULT 'BR'"))
             if "ddi" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN ddi VARCHAR(5) NOT NULL DEFAULT '55'"))
+            if "campanhas_ativo" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN campanhas_ativo INTEGER NOT NULL DEFAULT 1"))
             conn.execute(text("UPDATE clientes SET pais = 'BR' WHERE pais IS NULL OR pais = ''"))
             conn.execute(text("UPDATE clientes SET ddi = '55' WHERE ddi IS NULL OR ddi = ''"))
     if "nfse_rascunhos" in insp.get_table_names():
@@ -2001,6 +2043,313 @@ def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_P
     indice_atual = ano_atual * 2 + semestre_atual
     indice_pacote = ano_pacote * 2 + semestre_pacote
     return max(indice_atual - indice_pacote, 0)
+
+
+def _equipamento_tem_atualizacao(eq: Equipamento, pacote_alvo: str) -> bool:
+    """Lista de Atualização: equipamento ativo e com atualização disponível."""
+    if (eq.status or "").strip().lower() != "ativo":
+        return False
+    falta = calcular_falta_pacote((eq.pacote or "").strip() or None, pacote_alvo)
+    return bool(falta is not None and falta > 0)
+
+
+def _clientes_lista_atualizacao(db: Session, pacote_alvo: str | None = None) -> list[dict]:
+    pacote_alvo = pacote_alvo or obter_pacote_atual(db)
+    clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome.asc()).all()
+    lista = []
+    for cliente in clientes:
+        pendentes = [eq for eq in cliente.equipamentos if _equipamento_tem_atualizacao(eq, pacote_alvo)]
+        if not pendentes:
+            continue
+        lista.append({"cliente": cliente, "equipamentos": ordenar_equipamentos(pendentes)})
+    return lista
+
+
+def _cliente_elegivel_atualizacao(cliente: Cliente, pacote_alvo: str) -> bool:
+    if not int(getattr(cliente, "campanhas_ativo", 1) or 0):
+        return False
+    return any(_equipamento_tem_atualizacao(eq, pacote_alvo) for eq in (cliente.equipamentos or []))
+
+
+def _mensagem_campanha(campanha: Campanha, cliente: Cliente) -> str:
+    mensagem = (campanha.mensagem or "").strip().replace("{nome}", (cliente.nome or "").strip())
+    if campanha.imagem_token:
+        url_imagem = f"{PUBLIC_BASE_URL}/campanhas/midia/{campanha.imagem_token}"
+        mensagem = f"{mensagem}\n\n{url_imagem}".strip()
+    return mensagem
+
+
+def _whatsapp_campanha_url(campanha: Campanha, cliente: Cliente) -> str:
+    numero = re.sub(r"\D", "", cliente.whatsapp_completo() or "")
+    return f"https://wa.me/{numero}?{urlencode({'text': _mensagem_campanha(campanha, cliente)})}"
+
+
+def _contagens_campanha(db: Session, campanha_id: int) -> dict:
+    linhas = db.query(CampanhaDestinatario.status, func.count(CampanhaDestinatario.id)).filter(
+        CampanhaDestinatario.campanha_id == campanha_id
+    ).group_by(CampanhaDestinatario.status).all()
+    contagens = {status: int(qtd) for status, qtd in linhas}
+    total = sum(contagens.values())
+    enviados = contagens.get("ENVIADO", 0)
+    ignorados = contagens.get("IGNORADO", 0)
+    pendentes = contagens.get("PENDENTE", 0) + contagens.get("EM_ENVIO", 0)
+    return {"total": total, "enviados": enviados, "ignorados": ignorados, "pendentes": pendentes, **contagens}
+
+
+def _reservar_proximo_campanha(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaDestinatario | None:
+    # Se o usuário já pegou um cliente, sempre retoma o mesmo antes de reservar outro.
+    atual = db.query(CampanhaDestinatario).options(
+        selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
+    ).filter(
+        CampanhaDestinatario.campanha_id == campanha.id,
+        CampanhaDestinatario.status == "EM_ENVIO",
+        CampanhaDestinatario.reservado_por_id == usuario.id,
+    ).order_by(CampanhaDestinatario.id.asc()).first()
+    if atual:
+        if _cliente_elegivel_atualizacao(atual.cliente, campanha.pacote_alvo or obter_pacote_atual(db)):
+            return atual
+        atual.status = "IGNORADO"
+        db.commit()
+
+    # Reserva otimista e atômica: dois celulares nunca conseguem reservar a mesma linha.
+    while True:
+        candidato_id = db.query(CampanhaDestinatario.id).filter(
+            CampanhaDestinatario.campanha_id == campanha.id,
+            CampanhaDestinatario.status == "PENDENTE",
+        ).order_by(CampanhaDestinatario.id.asc()).limit(1).scalar()
+        if not candidato_id:
+            return None
+        agora = datetime.now()
+        alterados = db.query(CampanhaDestinatario).filter(
+            CampanhaDestinatario.id == candidato_id,
+            CampanhaDestinatario.status == "PENDENTE",
+        ).update({
+            CampanhaDestinatario.status: "EM_ENVIO",
+            CampanhaDestinatario.reservado_por_id: usuario.id,
+            CampanhaDestinatario.reservado_em: agora,
+        }, synchronize_session=False)
+        db.commit()
+        if not alterados:
+            continue
+        destinatario = db.query(CampanhaDestinatario).options(
+            selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
+        ).filter(CampanhaDestinatario.id == candidato_id).first()
+        if destinatario and _cliente_elegivel_atualizacao(destinatario.cliente, campanha.pacote_alvo or obter_pacote_atual(db)):
+            return destinatario
+        if destinatario:
+            destinatario.status = "IGNORADO"
+            db.commit()
+
+
+@app.get("/organiza/campanhas", response_class=HTMLResponse)
+def campanhas_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanhas = db.query(Campanha).order_by(Campanha.criado_em.desc(), Campanha.id.desc()).all()
+    dados = [{"campanha": c, "contagens": _contagens_campanha(db, c.id)} for c in campanhas]
+    elegiveis = _clientes_lista_atualizacao(db)
+    ativos = sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1)
+    return templates.TemplateResponse("organiza/campanhas.html", {
+        "request": request, "usuario": usuario, "dados": dados,
+        "total_lista_atualizacao": len(elegiveis), "total_lista_ativa": ativos,
+        "pacote_atual": obter_pacote_atual(db),
+    })
+
+
+@app.get("/organiza/campanhas/lista-atualizacao", response_class=HTMLResponse)
+def campanha_lista_atualizacao(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    pacote_atual = obter_pacote_atual(db)
+    lista = _clientes_lista_atualizacao(db, pacote_atual)
+    return templates.TemplateResponse("organiza/lista_atualizacao.html", {
+        "request": request, "usuario": usuario, "lista": lista,
+        "pacote_atual": pacote_atual,
+        "ativos": sum(1 for item in lista if int(item["cliente"].campanhas_ativo or 0) == 1),
+    })
+
+
+@app.post("/organiza/campanhas/lista-atualizacao/{cliente_id}/alternar")
+def campanha_lista_atualizacao_alternar(cliente_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    cliente.campanhas_ativo = 0 if int(cliente.campanhas_ativo or 0) == 1 else 1
+    db.commit()
+    return RedirectResponse("/organiza/campanhas/lista-atualizacao", status_code=303)
+
+
+@app.get("/organiza/campanhas/nova", response_class=HTMLResponse)
+def campanha_nova(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    elegiveis = _clientes_lista_atualizacao(db)
+    return templates.TemplateResponse("organiza/campanha_form.html", {
+        "request": request, "usuario": usuario, "erro": "",
+        "pacote_atual": obter_pacote_atual(db),
+        "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+    })
+
+
+@app.post("/organiza/campanhas/nova")
+async def campanha_criar(
+    request: Request,
+    nome: str = Form(...),
+    lista_tipo: str = Form("ATUALIZACAO"),
+    mensagem: str = Form(...),
+    imagem: UploadFile | None = File(None),
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    nome = (nome or "").strip()
+    mensagem = (mensagem or "").strip()
+    lista_tipo = (lista_tipo or "ATUALIZACAO").strip().upper()
+    erro = ""
+    if not nome:
+        erro = "Informe o nome da campanha."
+    elif lista_tipo != "ATUALIZACAO":
+        erro = "Nesta etapa está disponível somente a lista de Clientes de Atualização."
+    elif not mensagem:
+        erro = "Informe a mensagem da campanha."
+
+    imagem_bytes = None
+    imagem_mime = None
+    imagem_nome = None
+    imagem_token = None
+    if not erro and imagem and imagem.filename:
+        imagem_bytes = await imagem.read()
+        imagem_mime = (imagem.content_type or "").lower()
+        imagem_nome = Path(imagem.filename).name[:180]
+        if not imagem_mime.startswith("image/"):
+            erro = "O arquivo opcional precisa ser uma imagem."
+        elif len(imagem_bytes) > 5 * 1024 * 1024:
+            erro = "A imagem deve ter no máximo 5 MB."
+        else:
+            imagem_token = secrets.token_urlsafe(24)
+
+    if erro:
+        elegiveis = _clientes_lista_atualizacao(db)
+        return templates.TemplateResponse("organiza/campanha_form.html", {
+            "request": request, "usuario": usuario, "erro": erro,
+            "pacote_atual": obter_pacote_atual(db),
+            "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+            "form_nome": nome, "form_mensagem": mensagem,
+        }, status_code=400)
+
+    campanha = Campanha(
+        nome=nome, lista_tipo="ATUALIZACAO", mensagem=mensagem,
+        pacote_alvo=obter_pacote_atual(db), status="RASCUNHO",
+        criado_por_id=usuario.id,
+        imagem_nome=imagem_nome, imagem_mime=imagem_mime,
+        imagem_bytes=imagem_bytes, imagem_token=imagem_token,
+    )
+    db.add(campanha)
+    db.commit()
+    db.refresh(campanha)
+    return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
+
+
+@app.post("/organiza/campanhas/{campanha_id}/iniciar")
+def campanha_iniciar(campanha_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    if campanha.status == "RASCUNHO":
+        pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+        lista = _clientes_lista_atualizacao(db, pacote_alvo)
+        clientes = [item["cliente"] for item in lista if int(item["cliente"].campanhas_ativo or 0) == 1]
+        if not clientes:
+            return RedirectResponse(f"/organiza/campanhas/{campanha.id}?erro=nenhum_cliente", status_code=303)
+        existentes = {cid for (cid,) in db.query(CampanhaDestinatario.cliente_id).filter(CampanhaDestinatario.campanha_id == campanha.id).all()}
+        for cliente in clientes:
+            if cliente.id not in existentes:
+                db.add(CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE"))
+        campanha.status = "ATIVA"
+        campanha.iniciado_em = datetime.now()
+        db.commit()
+    return RedirectResponse(f"/organiza/campanhas/{campanha.id}/proximo", status_code=303)
+
+
+@app.get("/organiza/campanhas/{campanha_id}", response_class=HTMLResponse)
+def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db)) if campanha.status == "RASCUNHO" else []
+    return templates.TemplateResponse("organiza/campanha_detalhe.html", {
+        "request": request, "usuario": usuario, "campanha": campanha,
+        "contagens": _contagens_campanha(db, campanha.id),
+        "total_previsto": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.get("/organiza/campanhas/{campanha_id}/proximo", response_class=HTMLResponse)
+def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    if campanha.status != "ATIVA":
+        return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
+    destinatario = _reservar_proximo_campanha(db, campanha, usuario)
+    contagens = _contagens_campanha(db, campanha.id)
+    if not destinatario and contagens["pendentes"] == 0:
+        campanha.status = "FINALIZADA"
+        campanha.finalizado_em = datetime.now()
+        db.commit()
+    return templates.TemplateResponse("organiza/campanha_envio.html", {
+        "request": request, "usuario": usuario, "campanha": campanha,
+        "destinatario": destinatario, "contagens": contagens,
+        "whatsapp_url": _whatsapp_campanha_url(campanha, destinatario.cliente) if destinatario else "",
+    })
+
+
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/enviado")
+def campanha_marcar_enviado(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    destinatario = db.query(CampanhaDestinatario).filter(
+        CampanhaDestinatario.id == destinatario_id,
+        CampanhaDestinatario.campanha_id == campanha_id,
+    ).first()
+    if not destinatario:
+        raise HTTPException(404)
+    if destinatario.status == "EM_ENVIO" and destinatario.reservado_por_id == usuario.id:
+        destinatario.status = "ENVIADO"
+        destinatario.enviado_por_id = usuario.id
+        destinatario.enviado_em = datetime.now()
+        db.commit()
+    return RedirectResponse(f"/organiza/campanhas/{campanha_id}/proximo", status_code=303)
+
+
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/nao-receber")
+def campanha_nao_receber(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    destinatario = db.query(CampanhaDestinatario).options(selectinload(CampanhaDestinatario.cliente)).filter(
+        CampanhaDestinatario.id == destinatario_id,
+        CampanhaDestinatario.campanha_id == campanha_id,
+    ).first()
+    if not destinatario:
+        raise HTTPException(404)
+    if destinatario.reservado_por_id == usuario.id and destinatario.status == "EM_ENVIO":
+        destinatario.cliente.campanhas_ativo = 0
+        destinatario.status = "IGNORADO"
+        db.query(CampanhaDestinatario).filter(
+            CampanhaDestinatario.cliente_id == destinatario.cliente_id,
+            CampanhaDestinatario.status == "PENDENTE",
+        ).update({CampanhaDestinatario.status: "IGNORADO"}, synchronize_session=False)
+        db.commit()
+    return RedirectResponse(f"/organiza/campanhas/{campanha_id}/proximo", status_code=303)
+
+
+@app.get("/campanhas/midia/{token}", response_class=HTMLResponse)
+def campanha_midia_publica(token: str, db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.imagem_token == token).first()
+    if not campanha or not campanha.imagem_bytes:
+        raise HTTPException(404)
+    titulo = html.escape(campanha.nome or "Karaokê RJ")
+    imagem_url = f"{PUBLIC_BASE_URL}/campanhas/midia/{token}/arquivo"
+    conteudo = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{titulo}</title><meta property="og:title" content="{titulo}"><meta property="og:type" content="website"><meta property="og:image" content="{imagem_url}"></head><body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="{imagem_url}" alt="{titulo}" style="max-width:100%;height:auto"></body></html>"""
+    return HTMLResponse(conteudo)
+
+
+@app.get("/campanhas/midia/{token}/arquivo")
+def campanha_midia_arquivo(token: str, db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.imagem_token == token).first()
+    if not campanha or not campanha.imagem_bytes:
+        raise HTTPException(404)
+    return Response(content=campanha.imagem_bytes, media_type=campanha.imagem_mime or "image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 def nfse_descricao_manutencao(manutencao: Manutencao, orcamento: Orcamento | None) -> str:

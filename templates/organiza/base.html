@@ -25,6 +25,7 @@
     <nav class="side-nav">
       <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z"/><path d="M9 21v-7h6v7"/></svg></span> Dashboard</a>
       <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Clientes</a>
+      <a class="{% if request.url.path.startswith('/organiza/campanhas') %}ativo{% endif %}" href="/organiza/campanhas"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5M8 17h7"/></svg></span> Campanhas</a>
       <a class="{% if request.url.path.startswith('/organiza/central') or request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/central"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg></span> Central Operacional</a>
       <a class="{% if request.url.path.startswith('/organiza/vendas') or request.url.path.startswith('/organiza/relatorios/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h12l3 5v15H3V7z"/><path d="M3 7h18M8 11h8M8 15h8"/></svg></span> Vendas</a>
       <a class="{% if request.url.path.startswith('/organiza/nfse') %}ativo{% endif %}" href="/organiza/nfse"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h9l3 3v17H6z"/><path d="M9 10h6M9 14h6M9 18h4"/></svg></span> NFS-e</a>
@@ -51,6 +52,9 @@
     </a>
     <a class="{% if request.url.path.startswith('/organiza/clientes') %}ativo{% endif %}" href="/organiza/clientes">
       <span>👥</span><small>Clientes</small>
+    </a>
+    <a class="{% if request.url.path.startswith('/organiza/campanhas') %}ativo{% endif %}" href="/organiza/campanhas">
+      <span>✉</span><small>Campanhas</small>
     </a>
     <a class="plus {% if request.url.path == '/organiza/manutencoes/nova' %}ativo{% endif %}" href="/organiza/manutencoes/nova" aria-label="Nova manutenção">+</a>
     <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda">

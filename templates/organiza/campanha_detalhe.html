@@ -1,0 +1,40 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean campanhas-pagina campanha-detalhe">
+  <div class="titulo-linha campanhas-topo">
+    <div>
+      <p class="tag">Campanha</p>
+      <h1>{{ campanha.nome }}</h1>
+      <p class="texto-suave">Clientes de Atualização · pacote {{ campanha.pacote_alvo }}</p>
+    </div>
+    <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
+  </div>
+
+  {% if erro == 'nenhum_cliente' %}<div class="alerta erro">Não há clientes ativos para esta campanha.</div>{% endif %}
+
+  <section class="cartao campanha-resumo-card">
+    <div class="campanha-resumo-topo">
+      <div><small>Status</small><strong>{{ campanha.status }}</strong></div>
+      {% if campanha.status == 'RASCUNHO' %}
+        <div><small>Clientes que entrarão</small><strong>{{ total_previsto }}</strong></div>
+      {% else %}
+        <div><small>Enviados</small><strong>{{ contagens.enviados }} / {{ contagens.total }}</strong></div>
+      {% endif %}
+    </div>
+    <div class="campanha-mensagem-preview">{{ campanha.mensagem }}</div>
+    {% if campanha.imagem_token %}
+      <img class="campanha-imagem-preview" src="/campanhas/midia/{{ campanha.imagem_token }}/arquivo" alt="Imagem da campanha">
+    {% endif %}
+  </section>
+
+  {% if campanha.status == 'RASCUNHO' %}
+    <form method="post" action="/organiza/campanhas/{{ campanha.id }}/iniciar" class="campanha-iniciar-form campanha-acao-principal-mobile">
+      <button class="botao primario campanha-botao-grande" type="submit">Iniciar campanha</button>
+    </form>
+  {% elif campanha.status == 'ATIVA' %}
+    <div class="campanha-acao-principal-mobile"><a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Continuar campanha</a></div>
+  {% else %}
+    <div class="alerta sucesso">Campanha finalizada. {{ contagens.enviados }} clientes receberam a mensagem.</div>
+  {% endif %}
+</section>
+{% endblock %}
