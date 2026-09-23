@@ -3713,3 +3713,90 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .campanha-clientes{border-radius:16px}.campanha-cliente-linha{padding:14px;gap:9px}.campanha-cliente-info strong{font-size:1rem}.campanha-cliente-info span{font-size:.9rem}.campanha-cliente-info small{font-size:.78rem;line-height:1.35}.campanha-cliente-linha form,.campanha-cliente-linha button{width:100%}.campanha-cliente-linha button{min-height:46px}
 }
 @media(max-width:390px){.campanha-resumo-topo{grid-template-columns:1fr}.campanha-lista-resumo{display:grid}.campanha-lista-numeros{text-align:left}.campanha-lista-numeros b{display:inline;margin-right:6px}.campanha-lista-numeros small{display:inline}}
+
+
+/* =========================================================
+   ORGANIZA 1.1.26 - Navegação mobile completa
+   O menu do desktop vira painel lateral recolhível no celular.
+   ========================================================= */
+.mobile-appbar,.mobile-menu-backdrop,.mobile-menu-close{display:none}
+
+@media(max-width:1100px){
+  body.organiza-corpo{overflow-x:hidden}
+  .app-shell{display:block;min-height:100vh;background:var(--org-bg)}
+
+  /* Substitui o menu mobile reduzido pelo menu completo do desktop. */
+  .mobile-nav{display:none!important}
+  .mobile-appbar{
+    position:sticky;top:0;z-index:850;
+    min-height:64px;
+    display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;
+    padding:calc(8px + env(safe-area-inset-top)) 12px 8px;
+    background:rgba(255,255,255,.96);border-bottom:1px solid var(--org-line);
+    box-shadow:0 6px 20px rgba(15,23,42,.07);backdrop-filter:blur(14px);
+  }
+  .mobile-menu-button{
+    min-height:46px;display:inline-flex;align-items:center;gap:8px;
+    border:1px solid #cbd5e1;border-radius:13px;background:#fff;color:#0f172a;
+    padding:0 13px;font:inherit;font-size:.92rem;font-weight:900;cursor:pointer;
+  }
+  .mobile-menu-button span{font-size:1.35rem;line-height:1}
+  .mobile-appbar-brand{min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
+  .mobile-appbar-brand img{width:34px;height:34px;border-radius:9px;flex:0 0 auto}
+  .mobile-appbar-brand span{display:grid;min-width:0;line-height:1.05}
+  .mobile-appbar-brand strong{font-size:.9rem;letter-spacing:.08em}
+  .mobile-appbar-brand small{font-size:.66rem;color:#64748b;margin-top:3px}
+  .mobile-user-mini{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:#0f172a;color:#fff;font-weight:900}
+
+  .app-main{padding:16px 12px calc(28px + env(safe-area-inset-bottom))}
+
+  .app-sidebar{
+    display:flex!important;position:fixed;z-index:1000;inset:0 auto 0 0;
+    width:min(88vw,340px);height:100dvh;max-height:100dvh;
+    padding:calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+    transform:translateX(-104%);transition:transform .22s ease;
+    box-shadow:24px 0 50px rgba(2,6,23,.34);overflow-y:auto;overscroll-behavior:contain;
+  }
+  body.menu-mobile-aberto .app-sidebar{transform:translateX(0)}
+  body.menu-mobile-aberto{overflow:hidden}
+  .mobile-menu-backdrop{
+    display:block;position:fixed;inset:0;z-index:990;background:rgba(2,6,23,.56);
+    opacity:0;visibility:hidden;transition:opacity .2s ease,visibility .2s ease;
+  }
+  body.menu-mobile-aberto .mobile-menu-backdrop{opacity:1;visibility:visible}
+
+  .side-head{display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:8px;margin-bottom:12px}
+  .side-logo{margin-bottom:0;min-width:0}
+  .side-logo img{width:42px;height:42px}
+  .side-logo strong{font-size:1rem}
+  .side-logo small{white-space:normal;line-height:1.25}
+  .mobile-menu-close{
+    display:grid;width:44px;height:44px;place-items:center;border:1px solid rgba(255,255,255,.18);
+    border-radius:13px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-size:1.7rem;line-height:1;cursor:pointer;
+  }
+  .side-nav,.side-bottom{gap:6px}
+  .side-nav a,.side-bottom a{min-height:48px;height:auto;padding:10px 12px;border-radius:12px;font-size:.83rem;line-height:1.2}
+  .side-nav a.menu-principal{min-height:48px}
+  .side-bottom{padding-top:12px;margin-top:12px;border-top:1px solid rgba(255,255,255,.12)}
+  .side-user{margin-top:8px;padding:10px 6px 2px}
+  .side-user .avatar{width:38px;height:38px}
+}
+
+@media(max-width:430px){
+  .mobile-appbar{grid-template-columns:auto 1fr 38px;padding-left:9px;padding-right:9px}
+  .mobile-menu-button{padding:0 11px;min-height:44px}
+  .mobile-menu-button strong{font-size:.84rem}
+  .mobile-user-mini{width:38px;height:38px}
+  .mobile-appbar-brand img{width:30px;height:30px}
+  .mobile-appbar-brand strong{font-size:.82rem}
+  .app-main{padding-left:10px;padding-right:10px}
+  .app-sidebar{width:min(92vw,330px)}
+}
+
+/* Ajustes dos fluxos mobile existentes após remover a barra inferior reduzida. */
+@media(max-width:760px){
+  .campanhas-pagina{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+  .campanha-form-pagina,.campanha-detalhe{padding-bottom:calc(82px + env(safe-area-inset-bottom))}
+  .campanha-acao-principal-mobile{bottom:calc(10px + env(safe-area-inset-bottom))}
+  body.modo-campanha-envio .campanha-envio-cabecalho{top:calc(64px + env(safe-area-inset-top))}
+}
