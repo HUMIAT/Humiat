@@ -6,6 +6,11 @@
   <title>Painel Humiat</title>
   <link rel="icon" href="/static/icons/humiat/favicon.ico">
   <link rel="stylesheet" href="/static/css/humiat-id.css">
+  <style>
+    .app-card.is-disabled{opacity:.82}.app-card.is-disabled .app-icon{filter:grayscale(1)}
+    .disabled-action{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:10px;border:1px solid var(--line);color:var(--muted);background:#f4f6f8;font-weight:800;cursor:not-allowed}
+    .quick-actions{display:flex;gap:9px;flex-wrap:wrap}.quick-note{font-size:12px;color:var(--muted);margin-top:8px}
+  </style>
 </head>
 <body class="portal-body">
 <header class="portal-top">
@@ -15,10 +20,14 @@
 
 <main class="portal-main">
   <section class="portal-hello">
-    <p class="eyebrow">Humiat</p>
+    <p class="eyebrow">Humiat ID</p>
     <h1>Olá, {{ usuario.nome }}.</h1>
-    <p>Seus produtos, sua empresa e seus acessos em um só lugar.</p>
+    <p>Seus acessos em um só lugar. Os sistemas sem acesso continuam visíveis para você conhecer.</p>
   </section>
+
+  {% if request.query_params.get('erro') %}
+  <div class="id-alert" style="margin-bottom:16px">{{ request.query_params.get('erro') }}</div>
+  {% endif %}
 
   {% if empresas|length > 1 %}
   <section class="company-switch">
@@ -32,59 +41,84 @@
   {% endif %}
 
   {% if empresa %}
-    {% set tem_solvoz = namespace(v=false) %}
-    {% for p in produtos %}{% if p.codigo == 'SOLVOZ' %}{% set tem_solvoz.v = true %}{% endif %}{% endfor %}
-
-    <section class="client-company-head">
+  <section class="client-company-head">
+    <div>
+      <p class="eyebrow">{{ empresa.nome }}</p>
+      <h2>Empresa vinculada</h2>
+      <p>Os botões ativos refletem exatamente os acessos liberados no seu cadastro.</p>
+    </div>
+    {% if meus_acessos.get('SOLVOZ', {}).get('solvoz_catalogo', false) %}
+    <article class="client-qr-card">
+      <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
       <div>
-        <p class="eyebrow">{{ empresa.nome }}</p>
-        <h2>Empresa vinculada</h2>
-        <p>Abra somente os sistemas e perfis liberados no seu cadastro do Organiza.</p>
+        <span class="status-dot">Seu QR Code</span>
+        <strong>Catálogo SolVoz</strong>
+        <small>Use este código para abrir o catálogo da sua empresa.</small>
+        <div class="client-qr-actions">
+          <a href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar QR</a>
+          <a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Abrir Cliente Catálogo</a>
+        </div>
       </div>
-      {% if tem_solvoz.v and meus_acessos.get('SOLVOZ', {}).get('solvoz_catalogo', false) %}
-      <article class="client-qr-card">
-        <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
+    </article>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section>
+    <div class="section-title">
+      <div><p class="eyebrow">Produtos</p><h2>Meus sistemas</h2></div>
+    </div>
+    <div class="app-grid">
+      {% for p in produtos %}
+      {% set acc = meus_acessos.get(p.codigo, {}) %}
+      {% if p.codigo == 'SOLVOZ' %}
+        {% set liberado = acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) %}
+      {% else %}
+        {% set liberado = acc.get('sistema', false) %}
+      {% endif %}
+      <article class="app-card app-{{ p.codigo|lower }} {% if not liberado %}is-disabled{% endif %}">
+        <div class="app-icon">{{ p.nome[0] }}</div>
         <div>
-          <span class="status-dot">Seu QR Code</span>
-          <strong>Catálogo SolVoz</strong>
-          <small>Mostre este código ao cliente para abrir o catálogo.</small>
-          <div class="client-qr-actions">
-            <a href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar QR</a>
-            <a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Abrir Cliente Catálogo</a>
-          </div>
+          <span class="status-dot">{{ 'Disponível' if liberado else 'Sem acesso' }}</span>
+          <h3>{{ p.nome }}</h3>
+          <p>{{ p.descricao }}</p>
+        </div>
+        <div class="client-access-actions">
+          {% if p.codigo == 'ORGANIZA' %}
+            {% if liberado and organiza_rapido.vinculado %}
+              <div class="quick-actions">
+                <a href="{{ organiza_rapido.chamado_url }}">Abrir chamado</a>
+                <a href="{{ organiza_rapido.cadastro_url }}">Atualizar cadastro</a>
+              </div>
+            {% elif liberado %}
+              <span class="disabled-action">Cadastro ainda não vinculado</span>
+              <div class="quick-note">Peça ao atendimento para vincular seu cadastro ao Humiat ID.</div>
+            {% else %}
+              <span class="disabled-action">Tarefas rápidas indisponíveis</span>
+              <a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça este produto</a>
+            {% endif %}
+          {% elif p.codigo == 'SOLVOZ' %}
+            {% if acc.get('solvoz_comprado', false) and empresa and empresa.slug == 'karaokerj' %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_site">Cliente Site</a>{% endif %}
+            {% if acc.get('solvoz_catalogo', false) and empresa %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
+            {% if not liberado %}
+              <span class="disabled-action">Acesso não liberado</span>
+              <a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça este produto</a>
+            {% endif %}
+          {% else %}
+            {% if liberado and empresa %}
+              <a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}&modo=sistema">Abrir {{ p.nome }}</a>
+            {% elif liberado %}
+              <span class="disabled-action">Empresa não vinculada</span>
+            {% else %}
+              <span class="disabled-action">Acesso não liberado</span>
+              <a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça este produto</a>
+            {% endif %}
+          {% endif %}
         </div>
       </article>
-      {% endif %}
-    </section>
-
-    <section>
-      <div class="section-title">
-        <div><p class="eyebrow">Aplicativos</p><h2>Seus acessos</h2></div>
-      </div>
-      <div class="app-grid">
-        {% for p in produtos %}
-        {% set acc = meus_acessos.get(p.codigo, {}) %}
-        <article class="app-card app-{{ p.codigo|lower }}">
-          <div class="app-icon">{{ p.nome[0] }}</div>
-          <div><span class="status-dot">Ativo</span><h3>{{ p.nome }}</h3><p>{{ p.descricao }}</p></div>
-          <div class="client-access-actions">
-            {% if p.codigo == 'SOLVOZ' %}
-              {% if acc.get('solvoz_comprado', false) and empresa.slug == 'karaokerj' %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_site">Cliente Site</a>{% endif %}
-              {% if acc.get('solvoz_catalogo', false) %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
-            {% else %}
-              {% if acc.get('sistema', false) %}<a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}&modo=sistema">Usuário</a>{% endif %}
-              {% if acc.get('adm', false) %}<a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}&modo=adm">ADM</a>{% endif %}
-            {% endif %}
-          </div>
-        </article>
-        {% else %}
-        <div class="empty-card"><h3>Nenhum produto habilitado</h3><p>Entre em contato com a Humiat para liberar seus produtos.</p></div>
-        {% endfor %}
-      </div>
-    </section>
-  {% else %}
-  <section class="empty-card"><h2>Nenhuma empresa vinculada</h2><p>Entre em contato com a Humiat para liberar seu acesso.</p></section>
-  {% endif %}
+      {% endfor %}
+    </div>
+  </section>
 </main>
 <footer class="portal-footer">Humiat • Tecnologia que conecta. Inovação que transforma.</footer>
 </body>

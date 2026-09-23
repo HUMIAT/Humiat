@@ -25,12 +25,15 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 COOKIE_NAME = "humiat_id"
-SESSION_DAYS = int(os.getenv("HUMIAT_SESSION_DAYS", "14"))
+SESSION_DAYS = 1  # sessão central Humiat ID: 24 horas
 SSO_MINUTES = int(os.getenv("HUMIAT_SSO_MINUTES", "2"))
 SSO_SECRET = os.getenv("HUMIAT_SSO_SECRET", "").strip()
 SOLVOZ_BASE_URL = os.getenv("HUMIAT_SOLVOZ_URL", "https://www.solvoz.com.br").strip().rstrip("/")
 SOLVOZ_API_TIMEOUT = float(os.getenv("HUMIAT_SOLVOZ_API_TIMEOUT", "8") or "8")
 SOLVOZ_DIAGNOSTICS_PATH = os.getenv("HUMIAT_SOLVOZ_DIAGNOSTICS_PATH", "/_sv/uso/7f29c4b8").strip() or "/_sv/uso/7f29c4b8"
+CONNECT_BASE_URL = os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br").strip().rstrip("/")
+CONNECT_LOGOUT_URL = os.getenv("HUMIAT_CONNECT_LOGOUT_URL", f"{CONNECT_BASE_URL}/_connect/logout-humiat").strip()
+SOLVOZ_LOGOUT_URL = os.getenv("HUMIAT_SOLVOZ_LOGOUT_URL", f"{SOLVOZ_BASE_URL}/_sv/logout-humiat").strip()
 
 RESET_MINUTES = int(os.getenv("HUMIAT_RESET_MINUTES", "30") or "30")
 RESEND_API_KEY = os.getenv("HUMIAT_RESEND_API_KEY", "").strip()
@@ -1344,6 +1347,45 @@ def produtos_da_empresa(db: Session, empresa_id: int):
     return db.query(HumiatProduto).filter(HumiatProduto.id.in_(ids), HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
 
 
+def _produto_conheca_url(produto: HumiatProduto) -> str:
+    codigo = (produto.codigo or "").strip().upper()
+    configuradas = {
+        "ORGANIZA": os.getenv("HUMIAT_ORGANIZA_PRODUTO_URL", PUBLIC_BASE_URL).strip(),
+        "CONNECT": os.getenv("HUMIAT_CONNECT_PRODUTO_URL", produto.url_publica or CONNECT_BASE_URL).strip(),
+        "SOLVOZ": os.getenv("HUMIAT_SOLVOZ_PRODUTO_URL", produto.url_publica or SOLVOZ_BASE_URL).strip(),
+        "LOKAFEST": os.getenv("HUMIAT_LOKAFEST_PRODUTO_URL", produto.url_publica or "https://lokafest.com.br").strip(),
+    }
+    return configuradas.get(codigo) or (produto.url_publica or PUBLIC_BASE_URL)
+
+
+def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
+    """Atalhos públicos do Organiza para o cliente ligado ao Humiat ID.
+
+    O portal não duplica dados do Organiza; guarda apenas os links para as
+    rotinas públicas que já existem no cadastro central.
+    """
+    try:
+        row = db.execute(text("""
+            SELECT id, token_ficha, telefone, email
+            FROM clientes
+            WHERE humiat_usuario_id=:uid
+            ORDER BY id
+            LIMIT 1
+        """), {"uid": int(usuario_id)}).mappings().first()
+    except Exception:
+        row = None
+    if not row:
+        return {"vinculado": False, "cadastro_url": "", "chamado_url": ""}
+    token = str(row.get("token_ficha") or "").strip()
+    return {
+        "vinculado": True,
+        "cliente_id": int(row.get("id") or 0),
+        "cadastro_url": f"/humiat/organiza/cadastro",
+        "chamado_url": f"/humiat/organiza/chamado",
+        "tem_token": bool(token),
+    }
+
+
 def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session, empresa_id: int | None = None) -> dict:
     """Contexto do hub Humiat.
 
@@ -1381,6 +1423,7 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "acessos_usuario": acessos_usuario,
         "meus_acessos": meus_acessos,
         "adm_disponivel": adm_disponivel,
+        "conheca_urls": {p.codigo: _produto_conheca_url(p) for p in produtos},
         "vinculos": vinculos,
         "empresa_por_usuario": empresa_por_usuario,
         "admin_humiat": True,
@@ -1523,14 +1566,28 @@ def entrar_humiat(request: Request, email: str = Form(...), senha: str = Form(..
 
 @router.get("/sair")
 def sair_humiat(request: Request, db: Session = Depends(get_db)):
+    """Logout global: encerra Humiat e percorre os produtos integrados."""
     token = request.cookies.get(COOKIE_NAME, "")
     if token:
         sessao = db.query(HumiatSessao).filter(HumiatSessao.token_hash == _hash_token(token)).first()
         if sessao:
             db.delete(sessao)
             db.commit()
-    resposta = RedirectResponse("/entrar", status_code=303)
+
+    retorno = f"{PUBLIC_BASE_URL.rstrip('/')}/entrar"
+    solvoz_logout = SOLVOZ_LOGOUT_URL
+    if solvoz_logout:
+        sep = "&" if "?" in solvoz_logout else "?"
+        solvoz_logout = f"{solvoz_logout}{sep}{urlencode({'retorno': retorno})}"
+    destino = solvoz_logout or retorno
+    if CONNECT_LOGOUT_URL:
+        sep = "&" if "?" in CONNECT_LOGOUT_URL else "?"
+        destino = f"{CONNECT_LOGOUT_URL}{sep}{urlencode({'retorno': destino})}"
+
+    resposta = RedirectResponse(destino, status_code=303)
     resposta.delete_cookie(COOKIE_NAME, path="/")
+    # Compatibilidade: elimina também a sessão local antiga do Organiza no mesmo domínio.
+    resposta.delete_cookie("humiat_sessao", path="/")
     return resposta
 
 
@@ -1557,15 +1614,16 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
     # Cliente dentro do Organiza. A empresa apenas dá o contexto/tenant.
     produtos_todos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
     meus_acessos = {p.codigo: _usuario_produto_permissoes(db, usuario.id, p.codigo) for p in produtos_todos}
-    produtos = [
-        p for p in produtos_todos
-        if any(bool(v) for v in meus_acessos.get(p.codigo, {}).values())
-    ]
+    # Todos os produtos aparecem no portal. A permissão decide se o botão de
+    # acesso fica ativo; sem permissão o cliente pode apenas conhecer o produto.
+    produtos = produtos_todos
     return templates.TemplateResponse(
         "humiat/painel.html",
         {
             "request": request, "usuario": usuario, "empresas": empresas, "empresa": empresa,
             "produtos": produtos, "meus_acessos": meus_acessos, "admin_humiat": False,
+            "conheca_urls": {p.codigo: _produto_conheca_url(p) for p in produtos},
+            "organiza_rapido": _cliente_rapido_humiat(db, usuario.id),
         },
     )
 
@@ -1601,8 +1659,10 @@ def abrir_produto(
         permitido, rotulo = perm["sistema"], "Usuário"
     if not permitido:
         raise HTTPException(status_code=403, detail=f"Seu Humiat ID não possui acesso ao perfil {rotulo} de {produto.nome}.")
-    if not acesso_interno and codigo == "SOLVOZ" and modo == "adm":
-        raise HTTPException(status_code=403, detail="ADM SolVoz é exclusivo da equipe interna.")
+    if modo == "adm" and not acesso_interno:
+        raise HTTPException(status_code=403, detail="Acesso administrativo exclusivo da equipe autorizada.")
+    if codigo == "ORGANIZA" and not acesso_interno:
+        raise HTTPException(status_code=403, detail="No Organiza, o cliente usa somente as tarefas rápidas do Humiat ID.")
 
     empresas = empresas_do_usuario(db, usuario)
     empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else (empresas[0] if len(empresas) == 1 else None)
@@ -1617,9 +1677,11 @@ def abrir_produto(
     db.commit()
 
     if codigo == "ORGANIZA":
-        # O Organiza reconhece a mesma sessão Humiat. Junior/Debora/Luiz são
-        # promovidos a ADM operacional na sincronização inicial.
-        return RedirectResponse("/organiza", status_code=303)
+        # O sistema completo é administrativo. Usuários comuns usam somente
+        # Abrir chamado / Atualizar cadastro no próprio Humiat ID.
+        if acesso_interno and modo == "adm":
+            return RedirectResponse("/organiza", status_code=303)
+        raise HTTPException(status_code=403, detail="Use as tarefas rápidas do Organiza no Humiat ID.")
 
     # Cliente Site e Cliente Catálogo também usam SSO. Para o piloto da equipe
     # interna, ambos entram no contexto da Karaokê RJ sem novo login.

@@ -1551,24 +1551,21 @@ def escolher_acesso(request: Request):
 @app.get("/area-restrita/login")
 def login(request: Request, erro: str = ""):
     # APP 1.1.31: login único. Links antigos seguem para Humiat ID e retornam ao Organiza.
-    return RedirectResponse("/entrar?next=/organiza", status_code=303)
+    return RedirectResponse("/entrar", status_code=303)
 
 
 @app.post("/area-restrita/login")
-def entrar(usuario: str = Form(...), senha: str = Form(...), db: Session = Depends(get_db)):
-    encontrado = db.query(Usuario).filter(Usuario.nome == usuario.strip(), Usuario.ativo == 1).first()
-    if not encontrado or not verificar_senha(senha, encontrado.senha_hash):
-        return RedirectResponse("/area-restrita/login?erro=Usuário ou senha inválidos", status_code=303)
-    resposta = RedirectResponse("/organiza", status_code=303)
-    resposta.set_cookie("humiat_sessao", f"{encontrado.nome}.{assinatura(encontrado.nome)}", httponly=True, samesite="lax", max_age=60 * 60 * 24 * 14)
-    return resposta
+def entrar_legado():
+    # 1.1.35: a senha local deixou de ser uma porta de entrada exposta.
+    # Toda autenticação do Organiza passa pelo Humiat ID central.
+    return RedirectResponse("/entrar", status_code=303)
 
 
 @app.get("/area-restrita/sair")
-def sair():
-    # Logout do Organiza volta para o login do próprio Organiza.
-    resposta = RedirectResponse("/area-restrita/login", status_code=303)
-    resposta.delete_cookie("humiat_sessao")
+def sair_local_organiza():
+    # Sair dentro do produto é local: limpa a compatibilidade antiga e volta ao Hub.
+    resposta = RedirectResponse("/painel", status_code=303)
+    resposta.delete_cookie("humiat_sessao", path="/")
     return resposta
 
 
@@ -4547,6 +4544,59 @@ def venda_link_cadastro(equipamento_id: int, request: Request, usuario: Usuario 
     return templates.TemplateResponse("organiza/venda_cadastro_link.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
         "cadastro_url": cadastro_url, "mensagem": mensagem,
+    })
+
+
+def _humiat_acesso_organiza_rapido(db: Session, usuario_id: int) -> bool:
+    produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == "ORGANIZA", HumiatProduto.ativo == 1).first()
+    if not produto:
+        return False
+    acesso = db.query(HumiatUsuarioProduto).filter(
+        HumiatUsuarioProduto.usuario_id == int(usuario_id),
+        HumiatUsuarioProduto.produto_id == int(produto.id),
+    ).first()
+    return bool(acesso and (acesso.acesso_sistema or acesso.acesso_adm))
+
+
+def _cliente_humiat_atual(request: Request, db: Session) -> Cliente | None:
+    hu = humiat_usuario_da_requisicao(request, db)
+    if not hu or not _humiat_acesso_organiza_rapido(db, int(hu.id)):
+        return None
+    return db.query(Cliente).filter(Cliente.humiat_usuario_id == int(hu.id)).order_by(Cliente.id).first()
+
+
+@app.get("/humiat/organiza/cadastro")
+def humiat_organiza_atualizar_cadastro(request: Request, db: Session = Depends(get_db)):
+    """Tarefa rápida do portal Humiat: abre o cadastro público já vinculado."""
+    cliente = _cliente_humiat_atual(request, db)
+    if not cliente:
+        return RedirectResponse("/entrar", status_code=303) if not humiat_usuario_da_requisicao(request, db) else RedirectResponse("/painel?erro=Cadastro de cliente não vinculado ao Humiat ID", status_code=303)
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
+    return RedirectResponse(f"/cadastro/{cliente.token_ficha}", status_code=303)
+
+
+@app.get("/humiat/organiza/chamado", response_class=HTMLResponse)
+def humiat_organiza_abrir_chamado(request: Request, db: Session = Depends(get_db)):
+    """Tarefa rápida do portal Humiat: inicia chamado sem pedir o telefone de novo."""
+    hu = humiat_usuario_da_requisicao(request, db)
+    if not hu:
+        return RedirectResponse("/entrar", status_code=303)
+    if not _humiat_acesso_organiza_rapido(db, int(hu.id)):
+        raise HTTPException(status_code=403, detail="Tarefas rápidas do Organiza não liberadas para este Humiat ID")
+    cliente = db.query(Cliente).filter(Cliente.humiat_usuario_id == int(hu.id)).order_by(Cliente.id).first()
+    if not cliente:
+        return RedirectResponse("/painel?erro=Cadastro de cliente não vinculado ao Humiat ID", status_code=303)
+    telefone = limpar_telefone(cliente.telefone or "")
+    return templates.TemplateResponse("organiza/manutencao_publica.html", {
+        "request": request,
+        "etapa": "revisar_dados",
+        "erro": "",
+        "telefone": telefone,
+        "cliente": cliente,
+        "ano_atual": date.today().year,
+        "horarios": HORARIOS_ENTREGA_PUBLICA,
     })
 
 

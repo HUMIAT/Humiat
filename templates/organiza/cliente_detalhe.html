@@ -63,9 +63,12 @@
                 <label><input type="checkbox" name="produto_{{ p.id }}_solvoz_site" value="1" {% if acc.get('solvoz_comprado', false) %}checked{% endif %}> Cliente Site</label>
                 <label><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" {% if acc.get('solvoz_catalogo', false) %}checked{% endif %}> Cliente Catálogo</label>
                 {% if humiat_acesso.interno %}<label><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %}> ADM SolVoz</label>{% endif %}
+              {% elif p.codigo == 'ORGANIZA' %}
+                <label><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %}> Tarefas rápidas</label>
+                {% if humiat_acesso.interno %}<label><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %}> ADM Organiza</label>{% endif %}
               {% else %}
                 <label><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %}> Usuário</label>
-                <label><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %}> ADM</label>
+                {% if humiat_acesso.interno %}<label><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %}> ADM</label>{% endif %}
               {% endif %}
             </div>
           </div>

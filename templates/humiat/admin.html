@@ -46,8 +46,7 @@
       {% for p in produtos %}
       {% set acc = meus_acessos.get(p.codigo, {}) %}
       {% set tem_solvoz = p.codigo == 'SOLVOZ' and (acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) or acc.get('adm', false)) %}
-      {% if acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz %}
-      <article class="workspace-card">
+      <article class="workspace-card{% if not (acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz) %} is-disabled{% endif %}">
         <div class="card-title-row">
           <div>
             <span class="card-kicker">{{ p.codigo }}</span>
@@ -57,6 +56,9 @@
             {% if p.codigo == 'SOLVOZ' %}
               {% if acc.get('solvoz_comprado', false) %}<span class="status-badge active">Cliente Site</span>{% endif %}
               {% if acc.get('solvoz_catalogo', false) %}<span class="status-badge active">Cliente catálogo</span>{% endif %}
+              {% if acc.get('adm', false) %}<span class="status-badge active">ADM</span>{% endif %}
+            {% elif p.codigo == 'ORGANIZA' %}
+              {% if acc.get('sistema', false) %}<span class="status-badge active">Tarefas rápidas</span>{% endif %}
               {% if acc.get('adm', false) %}<span class="status-badge active">ADM</span>{% endif %}
             {% else %}
               {% if acc.get('sistema', false) %}<span class="status-badge active">Usuário</span>{% endif %}
@@ -69,7 +71,7 @@
           {% if p.codigo == 'SOLVOZ' %}
             {% if acc.get('solvoz_comprado', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_site">Cliente Site</a>{% endif %}
             {% if acc.get('solvoz_catalogo', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
-          {% elif acc.get('sistema', false) %}
+          {% elif p.codigo != 'ORGANIZA' and acc.get('sistema', false) %}
             <a class="btn-secondary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir sistema</a>
           {% endif %}
           {% if acc.get('adm', false) %}
@@ -80,8 +82,13 @@
             {% endif %}
           {% endif %}
         </div>
+        {% if not (acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz) %}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+          <span class="status-badge">Sem acesso</span>
+          <a class="btn-ghost" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça este produto</a>
+        </div>
+        {% endif %}
       </article>
-      {% endif %}
       {% endfor %}
 
       <article class="workspace-card">
@@ -122,6 +129,9 @@
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" style="width:auto"> Cliente Site</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" style="width:auto"> Cliente Catálogo</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> ADM SolVoz</label>
+      {% elif p.codigo == 'ORGANIZA' %}
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" style="width:auto"> Tarefas rápidas (chamado e cadastro)</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> Acesso ao Organiza / ADM</label>
       {% else %}
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" style="width:auto"> Acesso como usuário</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> Acesso ao ADM</label>
@@ -192,6 +202,9 @@
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" {% if acc.get('solvoz_comprado', false) %}checked{% endif %} style="width:auto"> Cliente Site</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" {% if acc.get('solvoz_catalogo', false) %}checked{% endif %} style="width:auto"> Cliente Catálogo</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %} style="width:auto"> ADM SolVoz</label>
+      {% elif p.codigo == 'ORGANIZA' %}
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %} style="width:auto"> Tarefas rápidas (chamado e cadastro)</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %} style="width:auto"> Acesso ao Organiza / ADM</label>
       {% else %}
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %} style="width:auto"> Acesso como usuário</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %} style="width:auto"> Acesso ao ADM</label>
