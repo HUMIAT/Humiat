@@ -1222,7 +1222,7 @@ def seed_humiat_id():
         if admins_importados:
             print(f"[HUMIAT ID] 1.1.29: {admins_importados} administrador(es) do Organiza vinculados ao Humiat ID.")
         produtos = [
-            ("CONNECT", "Connect", "Contratos, agenda, operação, rotas e financeiro.", os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br"), os.getenv("HUMIAT_CONNECT_SSO_URL", ""), "connect"),
+            ("CONNECT", "Connect", "Contratos, agenda, operação, rotas e financeiro.", os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br"), os.getenv("HUMIAT_CONNECT_SSO_URL", "https://conect.humiat.com.br/_connect/sso/humiat"), "connect"),
             ("LOKAFEST", "LokaFest", "Indicações e oportunidades para festas.", os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br"), os.getenv("HUMIAT_LOKAFEST_SSO_URL", ""), "lokafest"),
             ("SOLVOZ", "SolVoz", "Catálogo musical, identidade e site para locadores.", os.getenv("HUMIAT_SOLVOZ_URL", "https://www.solvoz.com.br"), os.getenv("HUMIAT_SOLVOZ_SSO_URL", "https://www.solvoz.com.br/_sv/sso/humiat"), "solvoz"),
             ("ORGANIZA", "Organiza", "Chamados, manutenção, clientes e operação técnica.", f"{PUBLIC_BASE_URL}/organiza", "", "organiza"),
@@ -1637,9 +1637,9 @@ def abrir_produto(
             HumiatEmpresa.slug == "karaokerj", HumiatEmpresa.ativo == 1
         ).first()
 
-    if acesso_interno and modo == "sistema":
-        # Para a equipe interna, "Sistema" abre a experiência pública/operacional
-        # do produto. O SSO administrativo é usado somente no botão ADM.
+    if acesso_interno and modo == "sistema" and not produto.url_sso:
+        # Produtos ainda sem SSO mantêm a experiência pública. Quando o produto
+        # possui SSO (Connect/SolVoz), o ticket central identifica o usuário.
         if produto.url_publica:
             return RedirectResponse(produto.url_publica, status_code=303)
         raise HTTPException(status_code=503, detail="Produto sem URL pública configurada")
@@ -1656,6 +1656,10 @@ def abrir_produto(
         destino_slug = None
         if codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}:
             destino_slug = (empresa_sso.slug if empresa_sso else "karaokerj")
+        elif codigo == "CONNECT" and empresa:
+            # O Connect recebe o slug mestre do Organiza/Humiat e exige o mesmo
+            # slug em sua empresa local. Não há criação automática de empresa.
+            destino_slug = empresa.slug
         db.add(HumiatSSOTicket(
             token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id,
             produto_codigo=codigo, acesso_modo=modo,
@@ -1735,6 +1739,40 @@ def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Heade
         "acesso": "EMPRESA" if empresa else "INTERNO",
     }
 
+
+@router.post("/api/humiat/integracoes/usuario/validar")
+def validar_usuario_integracao(
+    email: str = Form(...),
+    produto: str = Form("CONNECT"),
+    x_humiat_sso_secret: str = Header(default=""),
+    db: Session = Depends(get_db),
+):
+    """Valida uma identidade central para produtos Humiat.
+
+    Usado pelo ADM do Connect para vincular usuários locais existentes sem
+    duplicá-los. A consulta é privada e exige o mesmo segredo do SSO.
+    """
+    if not SSO_SECRET or not hmac.compare_digest(x_humiat_sso_secret, SSO_SECRET):
+        raise HTTPException(status_code=401, detail="Integração Humiat não autorizada")
+    email_n = (email or "").strip().lower()
+    codigo = (produto or "CONNECT").strip().upper()
+    usuario = db.query(HumiatUsuario).filter(
+        func.lower(HumiatUsuario.email) == email_n, HumiatUsuario.ativo == 1
+    ).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Humiat ID não encontrado")
+    permissoes = _usuario_produto_permissoes(db, int(usuario.id), codigo)
+    if not any(bool(v) for v in permissoes.values()):
+        raise HTTPException(status_code=403, detail=f"Humiat ID sem acesso liberado ao {codigo}")
+    return {
+        "ok": True,
+        "usuario": {
+            "id": int(usuario.id), "nome": usuario.nome, "email": usuario.email,
+            "telefone": usuario.telefone or "", "tipo": usuario.tipo,
+        },
+        "produto": codigo,
+        "permissoes": permissoes,
+    }
 
 
 @router.post("/admin-humiat/solvoz/catalogo/importar")
