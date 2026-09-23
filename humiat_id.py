@@ -112,6 +112,21 @@ class HumiatEmpresaProduto(Base):
     ativo = Column(Integer, nullable=False, default=1)
 
 
+class HumiatUsuarioProduto(Base):
+    """Permissões da identidade Humiat por produto.
+
+    `acesso_sistema` e `acesso_adm` são independentes. Nesta primeira fase a
+    autorização administrativa é aplicada ao SolVoz; a tabela já fica pronta
+    para Connect, Organiza e LokaFest sem criar novas identidades.
+    """
+    __tablename__ = "humiat_usuario_produtos"
+    id = Column(Integer, primary_key=True)
+    usuario_id = Column(Integer, ForeignKey("humiat_usuarios.id"), nullable=False)
+    produto_id = Column(Integer, ForeignKey("humiat_produtos.id"), nullable=False)
+    acesso_sistema = Column(Integer, nullable=False, default=0)
+    acesso_adm = Column(Integer, nullable=False, default=0)
+
+
 class HumiatSessao(Base):
     __tablename__ = "humiat_sessoes"
     id = Column(Integer, primary_key=True)
@@ -168,13 +183,197 @@ def gerar_hash_senha_id(senha: str, salt: Optional[str] = None) -> str:
     return f"{salt}${digest}"
 
 
+def _verificar_hash_organiza_legado(senha: str, senha_hash: str) -> bool:
+    """Valida somente o hash PBKDF2/120k usado pelos usuários antigos do Organiza."""
+    try:
+        bruto = str(senha_hash or "")
+        if bruto.startswith("organiza120$"):
+            bruto = bruto[len("organiza120$"):]
+        salt, esperado = bruto.split("$", 1)
+        digest = hashlib.pbkdf2_hmac("sha256", senha.encode(), salt.encode(), 120_000).hex()
+        return hmac.compare_digest(digest, esperado)
+    except Exception:
+        return False
+
+
 def verificar_senha_id(senha: str, senha_hash: str) -> bool:
     try:
-        salt, esperado = senha_hash.split("$", 1)
+        bruto = str(senha_hash or "")
+        if bruto.startswith("organiza120$"):
+            return _verificar_hash_organiza_legado(senha, bruto)
+        salt, esperado = bruto.split("$", 1)
         atual = gerar_hash_senha_id(senha, salt).split("$", 1)[1]
         return hmac.compare_digest(atual, esperado)
     except Exception:
         return False
+
+
+def _hash_organiza_legado(senha: str, salt: Optional[str] = None) -> str:
+    salt = salt or os.urandom(16).hex()
+    digest = hashlib.pbkdf2_hmac("sha256", senha.encode(), salt.encode(), 120_000).hex()
+    return f"{salt}${digest}"
+
+
+def _sincronizar_senha_usuario_organiza(db: Session, usuario: "HumiatUsuario", senha: str) -> None:
+    """Mantém a mesma senha no login legado do Organiza durante o piloto dos ADMs.
+
+    A autenticação principal passa a ser o Humiat ID, mas o login direto antigo do
+    Organiza continua funcionando enquanto a migração não é encerrada.
+    """
+    if not usuario or not senha:
+        return
+    nome = (usuario.organiza_usuario or "").strip()
+    email = (usuario.email or "").strip().lower()
+    if not nome and not email:
+        return
+    try:
+        if nome:
+            row = db.execute(text("SELECT id FROM usuarios WHERE nome=:nome LIMIT 1"), {"nome": nome}).first()
+        else:
+            row = db.execute(text("SELECT id FROM usuarios WHERE LOWER(COALESCE(email,''))=:email LIMIT 1"), {"email": email}).first()
+        if row:
+            db.execute(text("UPDATE usuarios SET senha_hash=:hash WHERE id=:id"), {"hash": _hash_organiza_legado(senha), "id": int(row[0])})
+    except Exception as exc:
+        print(f"[HUMIAT ID] Não foi possível sincronizar senha com o Organiza: {exc}")
+
+
+def _sincronizar_admins_organiza_no_humiat(db: Session) -> int:
+    """Cria a ponte inicial dos administradores já existentes no Organiza.
+
+    Somente usuários ativos, administradores e com e-mail são importados nesta fase.
+    A senha não é conhecida em texto puro: o hash antigo é marcado como legado e
+    aceito uma única vez pelo Humiat ID; no primeiro login ele é atualizado para o
+    hash atual do Humiat.
+    """
+    criados = 0
+    try:
+        rows = db.execute(text("""
+            SELECT id, nome, email, senha_hash
+            FROM usuarios
+            WHERE ativo=1 AND is_admin=1 AND TRIM(COALESCE(email,''))<>''
+            ORDER BY id
+        """)).mappings().all()
+    except Exception:
+        return 0
+    for row in rows:
+        email = str(row.get("email") or "").strip().lower()
+        nome = str(row.get("nome") or "").strip()
+        if not email or not nome:
+            continue
+        existente = db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first()
+        if existente:
+            if not (existente.organiza_usuario or "").strip():
+                existente.organiza_usuario = nome
+            # Administrador do Organiza no piloto fica sem empresa vinculada no Humiat.
+            db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == existente.id).delete(synchronize_session=False)
+            existente.tipo = TIPO_ADMIN_HUMIAT
+            existente.ativo = 1
+            continue
+        antigo = str(row.get("senha_hash") or "").strip()
+        if not antigo:
+            continue
+        db.add(HumiatUsuario(
+            nome=nome,
+            email=email,
+            senha_hash=f"organiza120${antigo}",
+            tipo=TIPO_ADMIN_HUMIAT,
+            ativo=1,
+            organiza_usuario=nome,
+        ))
+        criados += 1
+    return criados
+
+
+def _nome_usuario_organiza_disponivel(db: Session, nome: str, email: str) -> str:
+    base = (nome or (email.split("@", 1)[0] if email else "usuario") or "usuario").strip()[:70]
+    base = " ".join(base.split()) or "usuario"
+    candidato = base
+    contador = 2
+    while db.execute(text("SELECT 1 FROM usuarios WHERE LOWER(nome)=LOWER(:nome) LIMIT 1"), {"nome": candidato}).first():
+        candidato = f"{base[:64]} {contador}"
+        contador += 1
+    return candidato[:80]
+
+
+def _garantir_usuario_central_organiza(db: Session, nome: str, email: str, senha: str = "", *, admin: bool = False) -> tuple[str, bool]:
+    """Garante a identidade também na tabela central `usuarios` do Organiza.
+
+    Primeiro procura por e-mail. Se já existir, apenas devolve o usuário local e
+    nunca troca a senha silenciosamente. Se não existir, cria o registro mínimo
+    usando a mesma senha informada no Humiat ID.
+    """
+    email_n = (email or "").strip().lower()
+    row = None
+    if email_n:
+        row = db.execute(text("SELECT id,nome,email,senha_hash,is_admin,ativo FROM usuarios WHERE LOWER(COALESCE(email,''))=:email ORDER BY id LIMIT 1"), {"email": email_n}).mappings().first()
+    if row:
+        if not int(row.get("ativo") or 0):
+            db.execute(text("UPDATE usuarios SET ativo=1 WHERE id=:id"), {"id": int(row["id"])})
+        if admin and not int(row.get("is_admin") or 0):
+            # O papel Humiat/ADM de produto não transforma automaticamente o
+            # usuário em administrador operacional do Organiza.
+            pass
+        return str(row.get("nome") or "").strip(), False
+    if not senha or len(senha.strip()) < 8:
+        raise ValueError("Para um usuário novo, informe uma senha inicial com pelo menos 8 caracteres.")
+    nome_local = _nome_usuario_organiza_disponivel(db, nome, email_n)
+    db.execute(text("""
+        INSERT INTO usuarios (
+            nome,telefone,email,cargo,senha_hash,is_admin,
+            pode_criar_tarefa,pode_criar_projeto,pode_criar_usuario,pode_criar_etapa,
+            ativo,departamentos,pode_cadastrar_cliente,pode_cadastrar_item,
+            pode_acessar_compras,pode_acessar_financeiro,pode_cadastrar_banco,pode_acessar_externo
+        ) VALUES (
+            :nome,NULL,:email,:cargo,:senha_hash,0,
+            0,0,0,0,1,NULL,0,0,0,0,0,0
+        )
+    """), {
+        "nome": nome_local,
+        "email": email_n or None,
+        "cargo": "Humiat ID",
+        "senha_hash": _hash_organiza_legado(senha.strip()),
+    })
+    return nome_local, True
+
+
+def _produto_por_codigo(db: Session, codigo: str) -> HumiatProduto | None:
+    return db.query(HumiatProduto).filter(HumiatProduto.codigo == (codigo or "").strip().upper()).first()
+
+
+def _usuario_produto_acesso(db: Session, usuario_id: int, codigo: str) -> tuple[bool, bool]:
+    produto = _produto_por_codigo(db, codigo)
+    if not produto:
+        return False, False
+    item = db.query(HumiatUsuarioProduto).filter(
+        HumiatUsuarioProduto.usuario_id == int(usuario_id),
+        HumiatUsuarioProduto.produto_id == int(produto.id),
+    ).first()
+    return (bool(item.acesso_sistema), bool(item.acesso_adm)) if item else (False, False)
+
+
+def _salvar_usuario_produto_acesso(db: Session, usuario_id: int, produto: HumiatProduto, *, sistema: bool, adm: bool) -> None:
+    item = db.query(HumiatUsuarioProduto).filter(
+        HumiatUsuarioProduto.usuario_id == int(usuario_id),
+        HumiatUsuarioProduto.produto_id == int(produto.id),
+    ).first()
+    if not item:
+        item = HumiatUsuarioProduto(usuario_id=int(usuario_id), produto_id=int(produto.id))
+        db.add(item)
+    item.acesso_sistema = 1 if sistema else 0
+    item.acesso_adm = 1 if adm else 0
+
+
+def _garantir_acesso_admin_solvoz_piloto(db: Session, usuario: HumiatUsuario) -> None:
+    """Preserva o acesso dos ADMs já existentes durante o piloto."""
+    produto = _produto_por_codigo(db, "SOLVOZ")
+    if not produto or not usuario:
+        return
+    item = db.query(HumiatUsuarioProduto).filter(
+        HumiatUsuarioProduto.usuario_id == usuario.id,
+        HumiatUsuarioProduto.produto_id == produto.id,
+    ).first()
+    if not item:
+        db.add(HumiatUsuarioProduto(usuario_id=usuario.id, produto_id=produto.id, acesso_sistema=1, acesso_adm=1))
 
 
 def _ip(request: Request) -> str:
@@ -203,6 +402,13 @@ def migrar_humiat_id_schema(engine) -> None:
         # Usuários de empresa antigos continuam com o mesmo vínculo, apenas deixam
         # de carregar o rótulo/permissão de administrador.
         conn.execute(text("UPDATE humiat_usuarios SET tipo='CLIENTE_EMPRESA' WHERE tipo='ADMIN_EMPRESA'"))
+    # A tabela humiat_usuario_produtos é criada por Base.metadata.create_all no startup.
+    # Mantemos um índice único aditivo quando o banco suportar a operação.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_humiat_usuario_produto ON humiat_usuario_produtos (usuario_id, produto_id)"))
+    except Exception:
+        pass
 
 
 def _novo_token_reset(db: Session, usuario: HumiatUsuario, request: Request | None = None) -> str:
@@ -797,6 +1003,9 @@ def seed_humiat_id():
         removidos = _limpar_vinculos_equipe_interna_legada(db)
         if removidos:
             print(f"[HUMIAT ID] APP 8.7: {removidos} vínculo(s) antigo(s) removido(s) da equipe interna.")
+        admins_importados = _sincronizar_admins_organiza_no_humiat(db)
+        if admins_importados:
+            print(f"[HUMIAT ID] 1.1.29: {admins_importados} administrador(es) do Organiza vinculados ao Humiat ID.")
         produtos = [
             ("CONNECT", "Connect", "Contratos, agenda, operação, rotas e financeiro.", os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br"), os.getenv("HUMIAT_CONNECT_SSO_URL", ""), "connect"),
             ("LOKAFEST", "LokaFest", "Indicações e oportunidades para festas.", os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br"), os.getenv("HUMIAT_LOKAFEST_SSO_URL", ""), "lokafest"),
@@ -847,6 +1056,22 @@ def seed_humiat_id():
                 print(f"[HUMIAT ID] Senha do administrador bootstrap sincronizada: {admin_email}")
         elif not admin_senha:
             print("[HUMIAT ID] Administrador inicial não criado: configure HUMIAT_ADMIN_SENHA no ambiente.")
+        db.flush()
+        # Piloto 1.1.29: somente os administradores que já eram ADM no Organiza
+        # (e o bootstrap Humiat) recebem acesso inicial ao ADM SolVoz. Usuários
+        # novos respeitam exatamente as caixas marcadas no cadastro.
+        for usuario_interno in db.query(HumiatUsuario).filter(HumiatUsuario.ativo == 1).all():
+            if not _usuario_acesso_interno(db, usuario_interno):
+                continue
+            legado_admin = False
+            if (usuario_interno.organiza_usuario or "").strip():
+                row_admin = db.execute(
+                    text("SELECT is_admin FROM usuarios WHERE nome=:nome LIMIT 1"),
+                    {"nome": usuario_interno.organiza_usuario.strip()},
+                ).first()
+                legado_admin = bool(row_admin and int(row_admin[0] or 0))
+            if legado_admin or (usuario_interno.email or "").strip().lower() == admin_email:
+                _garantir_acesso_admin_solvoz_piloto(db, usuario_interno)
         db.commit()
     finally:
         db.close()
@@ -899,58 +1124,29 @@ def produtos_da_empresa(db: Session, empresa_id: int):
 
 
 def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session, empresa_id: int | None = None) -> dict:
+    """Contexto do hub Humiat.
+
+    O hub não administra mais rotinas internas dos produtos. Ele mantém somente
+    identidade/usuários e atalhos SSO para os ADMs.
+    """
     empresas = db.query(HumiatEmpresa).order_by(HumiatEmpresa.ativo.desc(), HumiatEmpresa.nome).all()
-    empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else None
-    if not empresa and empresas:
-        empresa = next((e for e in empresas if e.ativo), empresas[0])
-
-    produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
-    ep = db.query(HumiatEmpresaProduto).all()
-    ativos_por_empresa = {(x.empresa_id, x.produto_id): bool(x.ativo) for x in ep}
-
     usuarios = db.query(HumiatUsuario).order_by(HumiatUsuario.nome).all()
+    produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
+    acessos = db.query(HumiatUsuarioProduto).all()
+    acessos_usuario = {(a.usuario_id, a.produto_id): {"sistema": bool(a.acesso_sistema), "adm": bool(a.acesso_adm)} for a in acessos}
     vinculos = db.query(HumiatUsuarioEmpresa).all()
     empresa_por_usuario = {}
     for v in vinculos:
         empresa_por_usuario.setdefault(v.usuario_id, v.empresa_id)
-
-    usuarios_empresa = []
-    if empresa:
-        ids_empresa = {v.usuario_id for v in vinculos if v.empresa_id == empresa.id}
-        usuarios_empresa = [u for u in usuarios if u.id in ids_empresa]
-
-    status_produtos = {}
-    if empresa:
-        status_produtos = {p.id: bool(ativos_por_empresa.get((empresa.id, p.id), False)) for p in produtos}
-
-    solvoz = None
-    solvoz_erro = ""
-    solvoz_habilitado = bool(empresa and _empresa_tem_produto(db, empresa.id, "SOLVOZ"))
-    if solvoz_habilitado:
-        solvoz, solvoz_erro = _solvoz_resumo(empresa.slug)
-
-    catalogo_solvoz, catalogo_solvoz_erro = _solvoz_catalogo_resumo()
-
     return {
         "request": request,
         "usuario": usuario,
         "empresas": empresas,
-        "empresa": empresa,
-        "produtos": produtos,
-        "empresa_produtos": ep,
-        "ativos_por_empresa": ativos_por_empresa,
         "usuarios": usuarios,
-        "usuarios_empresa": usuarios_empresa,
+        "produtos": produtos,
+        "acessos_usuario": acessos_usuario,
         "vinculos": vinculos,
         "empresa_por_usuario": empresa_por_usuario,
-        "solvoz": solvoz,
-        "solvoz_erro": solvoz_erro,
-        "solvoz_habilitado": solvoz_habilitado,
-        "catalogo_solvoz": catalogo_solvoz,
-        "catalogo_solvoz_erro": catalogo_solvoz_erro,
-        "status_produtos": status_produtos,
-        "solvoz_base_url": SOLVOZ_BASE_URL,
-        "solvoz_diagnostics_url": f"{SOLVOZ_BASE_URL}{SOLVOZ_DIAGNOSTICS_PATH}",
         "admin_humiat": True,
     }
 
@@ -1019,6 +1215,8 @@ def concluir_reset_humiat(request: Request, token: str = Form(...), senha: str =
     if not usuario:
         return RedirectResponse("/redefinir-senha?erro=Link expirado ou inválido", status_code=303)
     usuario.senha_hash = gerar_hash_senha_id(senha)
+    if _usuario_acesso_interno(db, usuario):
+        _sincronizar_senha_usuario_organiza(db, usuario, senha)
     item.usado_em = datetime.utcnow()
     # Encerra sessões antigas após troca de senha.
     db.query(HumiatSessao).filter(HumiatSessao.usuario_id == usuario.id).delete(synchronize_session=False)
@@ -1036,6 +1234,12 @@ def entrar_humiat(request: Request, email: str = Form(...), senha: str = Form(..
         db.commit()
         destino_erro = "/entrar?" + urllib.parse.urlencode({"erro": "E-mail ou senha inválidos", "next": next or "/painel"})
         return RedirectResponse(destino_erro, status_code=303)
+
+    # Primeiro login de um ADM importado do Organiza: converte o hash legado
+    # para o padrão atual do Humiat sem pedir troca de senha ao usuário.
+    if str(usuario.senha_hash or "").startswith("organiza120$"):
+        usuario.senha_hash = gerar_hash_senha_id(senha)
+        _sincronizar_senha_usuario_organiza(db, usuario, senha)
 
     token = secrets.token_urlsafe(40)
     db.add(HumiatSessao(token_hash=_hash_token(token), usuario_id=usuario.id, expira_em=datetime.utcnow() + timedelta(days=SESSION_DAYS), ultimo_acesso=datetime.utcnow(), ip=_ip(request), user_agent=request.headers.get("user-agent", "")[:300]))
@@ -1099,6 +1303,11 @@ def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, 
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
 
+    if acesso_interno:
+        _sistema, _adm = _usuario_produto_acesso(db, usuario.id, codigo)
+        if not _adm:
+            raise HTTPException(status_code=403, detail=f"Seu Humiat ID não possui acesso ao ADM {produto.nome}.")
+
     empresas = empresas_do_usuario(db, usuario)
     empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else (empresas[0] if len(empresas) == 1 else None)
     if not acesso_interno:
@@ -1144,6 +1353,10 @@ def acessar_solvoz_empresa(empresa_slug: str, request: Request, db: Session = De
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     acesso_interno = _usuario_acesso_interno(db, usuario)
+    if acesso_interno:
+        _sistema, _adm = _usuario_produto_acesso(db, usuario.id, "SOLVOZ")
+        if not _adm:
+            raise HTTPException(status_code=403, detail="Seu Humiat ID não possui acesso ao ADM SolVoz.")
     if not acesso_interno:
         permitido = db.query(HumiatUsuarioEmpresa).filter(
             HumiatUsuarioEmpresa.usuario_id == usuario.id,
@@ -1426,19 +1639,52 @@ def alternar_status_empresa(
 
 
 @router.post("/admin-humiat/usuarios")
-def criar_usuario_humiat(request: Request, nome: str = Form(...), email: str = Form(...), senha: str = Form(...), tipo: str = Form(TIPO_CLIENTE_EMPRESA), empresa_id: str = Form(""), usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db)):
+def criar_usuario_humiat(
+    request: Request,
+    nome: str = Form(...),
+    email: str = Form(...),
+    senha: str = Form(""),
+    tipo: str = Form(TIPO_CLIENTE_EMPRESA),
+    empresa_id: str = Form(""),
+    solvoz_sistema: str = Form("0"),
+    solvoz_adm: str = Form("0"),
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
     email = email.strip().lower()
-    if db.query(HumiatUsuario).filter(HumiatUsuario.email == email).first():
+    if db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first():
         return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&erro=E-mail já cadastrado", status_code=303)
     empresa_vinculada = int(empresa_id) if empresa_id.strip().isdigit() else None
-    # APP 8.7: não há seletor de cargo. Empresa preenchida = Área da Empresa;
-    # sem empresa = equipe interna/perfil completo. `tipo` fica só no banco legado.
     tipo = TIPO_CLIENTE_EMPRESA if empresa_vinculada else TIPO_ADMIN_HUMIAT
-    novo = HumiatUsuario(nome=nome.strip(), email=email, senha_hash=gerar_hash_senha_id(senha), tipo=tipo, ativo=1, organiza_usuario=None)
+
+    # A identidade precisa existir no Organiza/Humiat. Se já houver usuário com
+    # este e-mail no Organiza, apenas vincula e preserva a senha existente.
+    try:
+        row_legado = db.execute(text("SELECT nome,senha_hash FROM usuarios WHERE LOWER(COALESCE(email,''))=:email ORDER BY id LIMIT 1"), {"email": email}).mappings().first()
+        if row_legado:
+            organiza_usuario = str(row_legado.get("nome") or "").strip()
+            hash_humiat = f"organiza120${str(row_legado.get('senha_hash') or '').strip()}"
+        else:
+            organiza_usuario, _ = _garantir_usuario_central_organiza(db, nome, email, senha, admin=False)
+            hash_humiat = gerar_hash_senha_id(senha.strip())
+    except ValueError as exc:
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc))}", status_code=303)
+
+    novo = HumiatUsuario(
+        nome=nome.strip(), email=email, senha_hash=hash_humiat,
+        tipo=tipo, ativo=1, organiza_usuario=organiza_usuario,
+    )
     db.add(novo); db.flush()
     if empresa_vinculada:
         db.add(HumiatUsuarioEmpresa(usuario_id=novo.id, empresa_id=empresa_vinculada))
-    _auditar(db, request, "CRIAR_USUARIO", usuario.id, int(empresa_id) if empresa_id.strip().isdigit() else None, email)
+
+    produto_solvoz = _produto_por_codigo(db, "SOLVOZ")
+    if produto_solvoz:
+        _salvar_usuario_produto_acesso(
+            db, novo.id, produto_solvoz,
+            sistema=(solvoz_sistema == "1"), adm=(solvoz_adm == "1"),
+        )
+    _auditar(db, request, "CRIAR_USUARIO", usuario.id, empresa_vinculada, f"{email}; solvoz_sistema={solvoz_sistema}; solvoz_adm={solvoz_adm}")
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_criado", status_code=303)
 
@@ -1453,6 +1699,8 @@ def editar_usuario_humiat(
     tipo: str = Form(TIPO_CLIENTE_EMPRESA),
     empresa_id: str = Form(""),
     ativo: str = Form("0"),
+    solvoz_sistema: str = Form("0"),
+    solvoz_adm: str = Form("0"),
     usuario: HumiatUsuario = Depends(exigir_admin_humiat),
     db: Session = Depends(get_db),
 ):
@@ -1482,17 +1730,39 @@ def editar_usuario_humiat(
     alvo.email = email_normalizado
     alvo.tipo = tipo
     alvo.ativo = novo_ativo
+    if (alvo.organiza_usuario or "").strip():
+        try:
+            db.execute(text("UPDATE usuarios SET email=:email WHERE nome=:nome"), {"email": email_normalizado, "nome": alvo.organiza_usuario.strip()})
+        except Exception:
+            pass
+    if not (alvo.organiza_usuario or "").strip():
+        try:
+            organiza_usuario, _ = _garantir_usuario_central_organiza(db, alvo.nome, alvo.email, senha.strip(), admin=False)
+            alvo.organiza_usuario = organiza_usuario
+        except ValueError as exc:
+            return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc))}", status_code=303)
     if senha.strip():
         if len(senha.strip()) < 8:
             return RedirectResponse("/painel?erro=A nova senha deve ter pelo menos 8 caracteres", status_code=303)
         alvo.senha_hash = gerar_hash_senha_id(senha.strip())
+        if not empresa_vinculada:
+            _sincronizar_senha_usuario_organiza(db, alvo, senha.strip())
 
     db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == alvo.id).delete(synchronize_session=False)
     empresa_auditoria = empresa_vinculada
     if empresa_vinculada:
         db.add(HumiatUsuarioEmpresa(usuario_id=alvo.id, empresa_id=empresa_vinculada))
 
-    _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}")
+    produto_solvoz = _produto_por_codigo(db, "SOLVOZ")
+    if produto_solvoz:
+        # Evita o administrador remover o próprio acesso ao ADM durante o piloto.
+        adm_permitido = (solvoz_adm == "1") or (alvo.id == usuario.id)
+        _salvar_usuario_produto_acesso(
+            db, alvo.id, produto_solvoz,
+            sistema=(solvoz_sistema == "1"), adm=adm_permitido,
+        )
+
+    _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}; solvoz_sistema={solvoz_sistema}; solvoz_adm={solvoz_adm}")
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_atualizado", status_code=303)
 
@@ -1719,6 +1989,8 @@ def redefinir_senha(
     if not alvo:
         raise HTTPException(status_code=404)
     alvo.senha_hash = gerar_hash_senha_id(senha)
+    if _usuario_acesso_interno(db, alvo):
+        _sincronizar_senha_usuario_organiza(db, alvo, senha)
     _auditar(db, request, "REDEFINIR_SENHA", admin.id, detalhe=alvo.email)
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={retorno_empresa_id}&ok=senha_redefinida", status_code=303)

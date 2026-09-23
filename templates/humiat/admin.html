@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Humiat — Painel interno</title>
+  <title>Humiat — Painel global</title>
   <link rel="icon" href="/static/icons/humiat/favicon.ico">
   <link rel="stylesheet" href="/static/css/humiat-id.css">
 </head>
@@ -16,13 +16,13 @@
 <main class="admin-unified">
   <section class="admin-unified-head">
     <div>
-      <p class="eyebrow">Painel interno</p>
-      <h1>Empresas</h1>
-      <p>Selecione uma empresa e administre tudo sem sair desta tela.</p>
+      <p class="eyebrow">Humiat ID</p>
+      <h1>Hub administrativo</h1>
+      <p>Entre nos sistemas Humiat com a mesma identidade. Nesta primeira fase, o hub concentra os usuários administrativos e o acesso ao ADM SolVoz.</p>
     </div>
     <div class="admin-head-actions">
-      <button type="button" class="btn-secondary" data-dialog-open="novo-usuario">+ Novo usuário</button>
-      <button type="button" class="btn-primary" data-dialog-open="nova-empresa">+ Nova empresa</button>
+      <button type="button" class="btn-secondary" data-dialog-open="todos-usuarios">Usuários</button>
+      <a class="btn-primary" href="/painel/produto/SOLVOZ">ADM SolVoz</a>
     </div>
   </section>
 
@@ -32,508 +32,66 @@
   {% if request.query_params.get('ok') %}
   <div class="id-success admin-alert">
     {% set ok = request.query_params.get('ok') %}
-    {% if ok == 'empresa_clonada' %}Empresa clonada. Ela nasceu inativa para você revisar antes de publicar.
-    {% elif ok == 'empresa_criada' %}Empresa criada com sucesso.
-    {% elif ok == 'usuario_criado' %}Usuário criado com sucesso.
+    {% if ok == 'usuario_criado' %}Usuário criado com sucesso.
     {% elif ok == 'usuario_atualizado' %}Usuário atualizado.
     {% elif ok == 'senha_redefinida' %}Senha redefinida.
-    {% elif ok == 'produto_atualizado' %}Acesso ao produto atualizado.
-    {% elif ok == 'status_atualizado' %}Status da empresa atualizado.
-    {% elif ok == 'cores_salvas' %}Identidade visual do SolVoz atualizada.
-    {% elif ok == 'maquinas_sincronizadas' %}Máquinas do Organiza sincronizadas: {{ request.query_params.get('qtd', '0') }} importada(s).
-    {% elif ok == 'catalogo_importado' %}Banco de músicas atualizado: {{ request.query_params.get('total', '0') }} processadas, {{ request.query_params.get('novos', '0') }} novas e {{ request.query_params.get('atualizados', '0') }} atualizadas.
     {% else %}Alteração salva com sucesso.{% endif %}
   </div>
   {% endif %}
 
-
-  <article class="workspace-card" style="margin-bottom:18px">
-    <div class="card-title-row">
-      <div>
-        <span class="card-kicker">SolVoz • Banco de músicas</span>
-        <h3>Atualizar músicas pelo Excel</h3>
-      </div>
-      {% if catalogo_solvoz and catalogo_solvoz.ok %}
-      <span class="status-badge active">{{ catalogo_solvoz.total or 0 }} músicas</span>
-      {% endif %}
-    </div>
-
-    {% if catalogo_solvoz and catalogo_solvoz.ok %}
-    <div class="machine-summary-grid machine-summary-grid--compact" style="margin-bottom:14px">
-      <div class="machine-stat"><strong>{{ catalogo_solvoz.total or 0 }}</strong><span>músicas no banco</span></div>
-      <div class="machine-stat"><strong>{{ catalogo_solvoz.com_tempo or 0 }}</strong><span>com duração</span></div>
-      <div class="machine-stat"><strong>{{ catalogo_solvoz.sem_tempo or 0 }}</strong><span>sem duração</span></div>
-    </div>
-    {% elif catalogo_solvoz_erro %}
-    <div class="integration-error" style="margin-bottom:14px">
-      <strong>Não consegui consultar o catálogo do SolVoz.</strong>
-      <span>{{ catalogo_solvoz_erro }}</span>
-    </div>
-    {% endif %}
-
-    <form method="post" action="/admin-humiat/solvoz/catalogo/importar" enctype="multipart/form-data"
-          onsubmit="return confirm('Confirma adicionar/atualizar as músicas desta planilha? Nenhum código existente será removido.');"
-          style="display:grid;grid-template-columns:minmax(280px,1fr) auto;gap:12px;align-items:end">
-      {% if empresa %}<input type="hidden" name="empresa_id" value="{{ empresa.id }}">{% endif %}
-      <label>
-        <span style="display:block;font-weight:800;margin-bottom:6px">Selecione a planilha Excel</span>
-        <input type="file" name="arquivo" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
-        <small style="display:block;margin-top:5px;opacity:.7">Pode ser a planilha completa ou uma atualização. O código identifica a música.</small>
-      </label>
-
-      <button class="btn-primary" type="submit">Atualizar banco</button>
-    </form>
-
-    <p class="muted-copy" style="margin-top:12px">
-      Código novo é incluído; código existente é atualizado; músicas que não estiverem na planilha não são apagadas.
-      A versão continua sendo individual de cada música. Se houver <b>TEMPO</b>, ele é salvo em segundos.
-    </p>
-  </article>
-
-  <div class="admin-workbench">
-    <aside class="company-rail">
-      <div class="rail-head">
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-bottom:18px">
+    <article class="workspace-card">
+      <div class="card-title-row">
         <div>
-          <span class="rail-label">Empresas</span>
-          <strong>{{ empresas|length }}</strong>
+          <span class="card-kicker">Produto</span>
+          <h3>ADM SolVoz</h3>
         </div>
-        <button type="button" class="icon-btn" title="Nova empresa" data-dialog-open="nova-empresa">+</button>
       </div>
-      <label class="company-search">
-        <span>Buscar</span>
-        <input id="companySearch" type="search" placeholder="Nome ou slug">
-      </label>
-      <nav class="company-list" id="companyList">
-        {% for e in empresas %}
-        <a href="/painel?empresa_id={{ e.id }}" class="company-row {% if empresa and empresa.id == e.id %}active{% endif %} {% if not e.ativo %}is-inactive{% endif %}" data-company-search="{{ e.nome }} {{ e.slug }}">
-          <span class="company-dot {% if e.ativo %}on{% endif %}"></span>
-          <span class="company-row-copy">
-            <strong>{{ e.nome }}</strong>
-            <small>/{{ e.slug }}</small>
-          </span>
-          {% if not e.ativo %}<span class="mini-status">Revisão</span>{% endif %}
-        </a>
-        {% else %}
-        <div class="rail-empty">Nenhuma empresa cadastrada.</div>
-        {% endfor %}
-      </nav>
-      <button type="button" class="rail-users-link" data-dialog-open="todos-usuarios">Gerenciar todos os usuários <span>→</span></button>
-    </aside>
+      <p class="muted-copy">Abra o painel completo do SolVoz. Diagnósticos, importação do banco musical e rotinas por empresa ficam dentro do próprio produto.</p>
+      <div style="margin-top:16px">
+        <a class="btn-primary" href="/painel/produto/SOLVOZ">Abrir ADM SolVoz</a>
+      </div>
+    </article>
 
-    <section class="company-workspace">
-      {% if empresa %}
-      <header class="workspace-head">
+
+
+    <article class="workspace-card">
+      <div class="card-title-row">
         <div>
-          <div class="workspace-kicker">
-            <span class="status-badge {% if empresa.ativo %}active{% else %}review{% endif %}">
-              {% if empresa.ativo %}Ativa{% else %}Em revisão{% endif %}
-            </span>
-            <span>/{{ empresa.slug }}</span>
-          </div>
-          <h2>{{ empresa.nome }}</h2>
-          <p>Todas as ações abaixo pertencem a esta empresa.</p>
+          <span class="card-kicker">Global</span>
+          <h3>Usuários</h3>
         </div>
-        <div class="workspace-actions">
-          {% if solvoz_habilitado and empresa.ativo %}
-          <a class="btn-primary" href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}">Abrir e editar SolVoz</a>
-          {% elif solvoz_habilitado %}
-          <button class="btn-primary" type="button" disabled title="Ative a empresa antes de abrir para o cliente">Abrir SolVoz</button>
-          {% endif %}
-          <a class="btn-secondary" href="/admin-humiat/diagnosticos-solvoz" target="_blank" rel="noopener">Diagnósticos</a>
-          <button type="button" class="btn-secondary" data-dialog-open="clonar-empresa">⧉ Clonar empresa</button>
-          <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/status">
-            <button class="btn-ghost {% if empresa.ativo %}danger-soft{% endif %}" type="submit">
-              {% if empresa.ativo %}Colocar em revisão{% else %}Ativar empresa{% endif %}
-            </button>
-          </form>
-        </div>
-      </header>
-
-      <div class="workspace-grid">
-        <article class="workspace-card products-card">
-          <div class="card-title-row">
-            <div><span class="card-kicker">Acessos</span><h3>Produtos</h3></div>
-            <span class="card-hint">Clique para ligar/desligar</span>
-          </div>
-          <div class="product-switch-grid">
-            {% for p in produtos %}
-            {% set ativo = status_produtos.get(p.id, false) %}
-            <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/produto/{{ p.id }}">
-              <button class="product-switch {% if ativo %}on{% endif %}" type="submit">
-                <span class="switch-name">{{ p.nome }}</span>
-                <span class="switch-state">{% if ativo %}ON{% else %}OFF{% endif %}</span>
-              </button>
-            </form>
-            {% endfor %}
-          </div>
-        </article>
-
-        <article class="workspace-card qr-card">
-          <div class="card-title-row">
-            <div><span class="card-kicker">Cliente</span><h3>QR Code</h3></div>
-          </div>
-          {% if solvoz_habilitado %}
-            {% if empresa.ativo %}
-            <div class="qr-compact">
-              <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
-              <div>
-                <strong>Catálogo do cliente</strong>
-                <small>{{ solvoz_base_url }}/{{ empresa.slug }}/catalogo</small>
-                <div class="qr-actions">
-                  <button type="button" class="text-btn" data-dialog-open="qr-empresa">Ampliar</button>
-                  <a class="text-btn" href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar PNG</a>
-                </div>
-              </div>
-            </div>
-            {% else %}
-            <p class="muted-copy">Ative a empresa para liberar o QR Code ao cliente.</p>
-            {% endif %}
-          {% else %}
-          <p class="muted-copy">Habilite o SolVoz para gerar o QR Code do catálogo.</p>
-          {% endif %}
-        </article>
+        <span class="status-badge active">{{ usuarios|length }}</span>
       </div>
-
-      {% if solvoz_habilitado %}
-      <article class="workspace-card identity-card">
-        <div class="card-title-row">
-          <div><span class="card-kicker">SolVoz</span><h3>Identidade e cores</h3></div>
-          {% if solvoz and solvoz.empresa %}
-          <span class="status-badge {% if solvoz.empresa.ativo %}active{% else %}review{% endif %}">
-            Site {% if solvoz.empresa.ativo %}publicado{% else %}em revisão{% endif %}
-          </span>
-          {% endif %}
-        </div>
-        {% if solvoz and solvoz.empresa %}
-        <form class="identity-form" method="post" action="/admin-humiat/empresa/{{ empresa.id }}/solvoz/identidade">
-          <label class="theme-field">Tema
-            <select name="tema">
-              {% for t in solvoz.temas %}
-              <option value="{{ t.id }}"
-                data-brand="{{ t.cores.brand }}"
-                data-brand-2="{{ t.cores.brand_2 }}"
-                data-accent="{{ t.cores.accent }}"
-                data-bg="{{ t.cores.bg }}"
-                data-surface="{{ t.cores.surface }}"
-                data-text="{{ t.cores.text }}"
-                {% if t.id == solvoz.empresa.tema %}selected{% endif %}>{{ t.icone }} {{ t.nome }}</option>
-              {% endfor %}
-            </select>
-          </label>
-
-          <div class="theme-source-note">
-            <strong>Estas 6 cores controlam todo o app.</strong>
-            <span>Início, Catálogo, PDFs, modais, cards, botões e navegação usam esta mesma identidade. Tons auxiliares são calculados automaticamente.</span>
-          </div>
-
-          <div class="color-grid color-grid--semantic">
-            {% set c = solvoz.empresa.cores %}
-            <label>
-              <b>Principal</b><small>Ações principais e seleção</small>
-              <span><input type="color" name="brand" value="{{ c.brand }}"><code>{{ c.brand }}</code></span>
-            </label>
-            <label>
-              <b>Secundária</b><small>Apoio visual e bordas</small>
-              <span><input type="color" name="brand_2" value="{{ c.brand_2 }}"><code>{{ c.brand_2 }}</code></span>
-            </label>
-            <label>
-              <b>Destaque</b><small>Enviar, foco e elementos especiais</small>
-              <span><input type="color" name="accent" value="{{ c.accent }}"><code>{{ c.accent }}</code></span>
-            </label>
-            <label>
-              <b>Fundo</b><small>Fundo de todas as telas do app</small>
-              <span><input type="color" name="bg" value="{{ c.bg }}"><code>{{ c.bg }}</code></span>
-            </label>
-            <label>
-              <b>Superfície</b><small>Cards, modais, campos e painéis</small>
-              <span><input type="color" name="surface" value="{{ c.surface }}"><code>{{ c.surface }}</code></span>
-            </label>
-            <label>
-              <b>Texto</b><small>Texto principal; tons suaves são derivados</small>
-              <span><input type="color" name="text" value="{{ c.text }}"><code>{{ c.text }}</code></span>
-            </label>
-          </div>
-          <div class="identity-actions">
-            <button class="btn-primary" type="submit">Salvar cores</button>
-            {% if solvoz.empresa.url_inicio %}<a class="btn-ghost" href="{{ solvoz.empresa.url_inicio }}" target="_blank" rel="noopener">Ver início ↗</a>{% endif %}
-            {% if solvoz.empresa.url_catalogo %}<a class="btn-ghost" href="{{ solvoz.empresa.url_catalogo }}" target="_blank" rel="noopener">Ver catálogo ↗</a>{% endif %}
-          </div>
-        </form>
-        {% else %}
-        <div class="integration-error">
-          <strong>Não consegui carregar a configuração do SolVoz.</strong>
-          <span>{{ solvoz_erro or 'Verifique a integração entre Humiat e SolVoz.' }}</span>
-        </div>
-        {% endif %}
-      </article>
-      {% endif %}
-
-      {% if solvoz_habilitado %}
-      <article class="workspace-card machines-card" id="maquinas">
-        <div class="card-title-row">
-          <div>
-            <span class="card-kicker">SolVoz + Organiza</span>
-            <h3>Máquinas do Organiza</h3>
-          </div>
-          <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/solvoz/maquinas/sincronizar">
-            <button class="btn-primary" type="submit">Sincronizar Organiza</button>
-          </form>
-        </div>
-
-        {% if solvoz and solvoz.maquinas %}
-        <div class="machine-summary-grid machine-summary-grid--compact">
-          <div class="machine-stat">
-            <strong>{{ solvoz.maquinas.ativas or 0 }}</strong>
-            <span>máquinas vinculadas</span>
-          </div>
-          <div class="machine-stat">
-            <strong>{{ solvoz.maquinas.total or 0 }}</strong>
-            <span>registros no SolVoz</span>
-          </div>
-        </div>
-        {% if solvoz.maquinas.ultima_sincronizacao %}
-        <p class="muted-copy">Última sincronização: {{ solvoz.maquinas.ultima_sincronizacao_br or solvoz.maquinas.ultima_sincronizacao }}</p>
-        {% else %}
-        <p class="muted-copy">Ainda não houve sincronização desta empresa com o Organiza.</p>
-        {% endif %}
-
-        {% if solvoz.maquinas.lista %}
-        <div style="display:grid;gap:10px;margin-top:16px">
-          {% for m in solvoz.maquinas.lista %}
-          <details style="border:1px solid rgba(148,163,184,.22);border-radius:14px;background:rgba(7,17,31,.55);padding:0 14px">
-            <summary style="display:grid;grid-template-columns:minmax(110px,1fr) auto auto;gap:10px;align-items:center;cursor:pointer;padding:13px 0;list-style:none">
-              <div>
-                <strong>{{ m.codigo }}</strong>
-                <small style="display:block;opacity:.7;margin-top:2px">{{ m.plano or 'PLUS' }}{% if m.pacote %} • {{ m.pacote }}{% endif %}</small>
-              </div>
-              <span style="font-size:12px;opacity:.75">
-                {% if m.ultima_comunicacao %}última comunicação: {{ m.segundos_sem_atualizar or 0 }}s{% else %}sem comunicação{% endif %}
-              </span>
-              <span class="status-badge {% if m.online %}active{% else %}review{% endif %}">
-                {% if m.online %}ONLINE{% else %}OFFLINE{% endif %}
-              </span>
-            </summary>
-            <div style="padding:0 0 14px">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
-                <div>
-                  <small style="opacity:.65">Fila real</small>
-                  <strong style="display:block">{{ m.fila_qtd or 0 }} música(s)</strong>
-                </div>
-                <div>
-                  <small style="opacity:.65">Pedidos pendentes</small>
-                  <strong style="display:block">{{ m.pendentes or 0 }}</strong>
-                </div>
-                <div>
-                  <small style="opacity:.65">Último pedido</small>
-                  <strong style="display:block">
-                    {% if m.ultimo_pedido %}
-                      {{ '%05d'|format(m.ultimo_pedido.codigo|int) }} • {{ m.ultimo_pedido.status }}
-                    {% else %}—{% endif %}
-                  </strong>
-                  {% if m.ultimo_pedido and m.ultimo_pedido.nome %}
-                  <small style="display:block;margin-top:3px;opacity:.8">Cantor: {{ m.ultimo_pedido.nome }}</small>
-                  {% endif %}
-                </div>
-                <div>
-                  <small style="opacity:.65">Notas recebidas</small>
-                  <strong style="display:block">{{ m.ranking_total or 0 }}</strong>
-                  <small style="display:block;margin-top:3px;opacity:.72">
-                    {% if m.ranking_total %}monitor alimentando ranking{% else %}aguardando primeira nota{% endif %}
-                  </small>
-                </div>
-                <div>
-                  <small style="opacity:.65">Identificação</small>
-                  <strong style="display:block">{{ m.identificacao or m.cliente_nome or '—' }}</strong>
-                </div>
-              </div>
-
-              {% if m.pedidos_pendentes or m.ranking_top or m.ranking_ultimas %}
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:14px">
-
-                <div style="border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;background:rgba(2,10,20,.22)">
-                  <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
-                    <strong>Pedidos aguardando</strong>
-                    <span class="mini-status">{{ m.pedidos_pendentes|length if m.pedidos_pendentes else 0 }}</span>
-                  </div>
-                  {% if m.pedidos_pendentes %}
-                    {% for p in m.pedidos_pendentes %}
-                    <div style="display:grid;grid-template-columns:32px 68px 1fr;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.14)">
-                      <small style="opacity:.6">{{ loop.index }}</small>
-                      <strong>{{ '%05d'|format(p.codigo|int) }}</strong>
-                      <span>{{ p.nome or 'Sem nome' }}</span>
-                    </div>
-                    {% endfor %}
-                  {% else %}
-                    <small style="opacity:.68">Nenhum pedido aguardando o monitor.</small>
-                  {% endif %}
-                </div>
-
-                <div style="border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;background:rgba(2,10,20,.22)">
-                  <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
-                    <strong>🏆 Top 10</strong>
-                    <span class="mini-status">{{ m.ranking_total or 0 }} notas</span>
-                  </div>
-                  {% if m.ranking_top %}
-                    {% for r in m.ranking_top %}
-                    <div style="display:grid;grid-template-columns:36px 1fr 48px;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.14)">
-                      <strong>{{ loop.index }}º</strong>
-                      <span>{{ r.nome or 'Cantor' }}</span>
-                      <strong style="text-align:right;font-size:17px">{{ r.nota or 0 }}</strong>
-                    </div>
-                    {% endfor %}
-                  {% else %}
-                    <small style="opacity:.68">Nenhuma nota recebida do monitor ainda.</small>
-                  {% endif %}
-                </div>
-
-                <div style="border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:12px;background:rgba(2,10,20,.22)">
-                  <strong style="display:block;margin-bottom:8px">Últimas notas do monitor</strong>
-                  {% if m.ranking_ultimas %}
-                    {% for r in m.ranking_ultimas %}
-                    <div style="display:grid;grid-template-columns:1fr 48px;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.14)">
-                      <span>{{ r.nome or 'Cantor' }}</span>
-                      <strong style="text-align:right">{{ r.nota or 0 }}</strong>
-                    </div>
-                    {% endfor %}
-                  {% else %}
-                    <small style="opacity:.68">Nenhuma apresentação registrada.</small>
-                  {% endif %}
-                </div>
-
-              </div>
-              {% endif %}
-            </div>
-          </details>
-          {% endfor %}
-        </div>
-        <div style="margin-top:12px">
-          <a class="btn-ghost" href="/painel?empresa_id={{ empresa.id }}#maquinas">↻ Atualizar status</a>
-        </div>
-        {% endif %}
-        {% else %}
-        <p class="muted-copy">Sincronize para trazer as máquinas implantadas no Organiza para esta empresa.</p>
-        {% endif %}
-      </article>
-      {% endif %}
-
-      <article class="workspace-card users-card">
-        <div class="card-title-row">
-          <div><span class="card-kicker">Acesso</span><h3>Usuários desta empresa</h3></div>
-          <button type="button" class="btn-secondary compact" data-dialog-open="novo-usuario">+ Adicionar usuário</button>
-        </div>
-        <div class="company-users">
-          {% for u in usuarios_empresa %}
-          <details class="company-user {% if not u.ativo %}is-inactive{% endif %}">
-            <summary>
-              <div class="avatar">{{ (u.nome or 'U')[0]|upper }}</div>
-              <div class="user-summary-copy">
-                <strong>{{ u.nome }}</strong>
-                <small>{{ u.email }}</small>
-              </div>
-              <span class="user-role">Área da empresa</span>
-              <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
-              <span class="chevron">⌄</span>
-            </summary>
-            <div class="user-edit-panel">
-              <form method="post" action="/admin-humiat/usuario/{{ u.id }}/editar" class="edit-user-form">
-                <input type="hidden" name="retorno_empresa_id" value="{{ empresa.id }}">
-                <label>Nome<input name="nome" value="{{ u.nome }}" required></label>
-                <label>E-mail<input type="email" name="email" value="{{ u.email }}" required></label>
-                <label>Empresa
-                  <select name="empresa_id">
-                    <option value="">— sem empresa —</option>
-                    {% for e in empresas %}<option value="{{ e.id }}" {% if e.id == empresa.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
-                  </select>
-                </label>
-                <label>Status
-                  <select name="ativo"><option value="1" {% if u.ativo %}selected{% endif %}>Ativo</option><option value="0" {% if not u.ativo %}selected{% endif %}>Inativo</option></select>
-                </label>
-                <button class="btn-primary" type="submit">Salvar usuário</button>
-              </form>
-              <form method="post" action="/admin-humiat/usuario/{{ u.id }}/senha" class="password-form">
-                <input type="hidden" name="retorno_empresa_id" value="{{ empresa.id }}">
-                <label>Redefinir senha<input type="password" name="senha" minlength="8" required placeholder="Nova senha"></label>
-                <button class="btn-secondary" type="submit">Redefinir senha</button>
-              </form>
-            </div>
-          </details>
-          {% else %}
-          <div class="empty-inline">Nenhum usuário vinculado a esta empresa. <button type="button" class="text-btn" data-dialog-open="novo-usuario">Criar agora</button></div>
-          {% endfor %}
-        </div>
-      </article>
-      {% else %}
-      <div class="workspace-empty">
-        <h2>Nenhuma empresa selecionada</h2>
-        <p>Crie a primeira empresa para começar.</p>
-        <button type="button" class="btn-primary" data-dialog-open="nova-empresa">+ Nova empresa</button>
+      <p class="muted-copy">Usuários administrativos do Humiat ID. Os ADMs existentes do Organiza são vinculados automaticamente nesta fase piloto.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+        <button type="button" class="btn-secondary" data-dialog-open="todos-usuarios">Gerenciar usuários</button>
+        <button type="button" class="btn-ghost" data-dialog-open="novo-usuario">+ Novo usuário</button>
       </div>
-      {% endif %}
-    </section>
-  </div>
+    </article>
+  </section>
+
+
 </main>
-
-<dialog class="admin-dialog" id="nova-empresa">
-  <form method="post" action="/admin-humiat/empresas" class="dialog-card">
-    <div class="dialog-head"><div><span class="card-kicker">Cadastro</span><h2>Nova empresa</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    <p class="dialog-copy">Cria uma empresa nova, sem copiar dados de outro cliente.</p>
-    <label>Nome<input name="nome" id="novaEmpresaNome" required autocomplete="off" placeholder="Ex.: Karaokê da Serra"></label>
-    <label>Slug<input name="slug" id="novaEmpresaSlug" required autocomplete="off" placeholder="karaoke-da-serra"><small>Será usado nos endereços públicos.</small></label>
-    <label class="check-row"><input type="checkbox" name="criar_solvoz" value="1" checked><span><strong>Criar também no SolVoz</strong><small>Estrutura em branco, pronta para configurar.</small></span></label>
-    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Criar empresa</button></div>
-  </form>
-</dialog>
-
-{% if empresa %}
-<dialog class="admin-dialog" id="clonar-empresa">
-  <form method="post" action="/admin-humiat/empresa/{{ empresa.id }}/clonar" class="dialog-card dialog-wide">
-    <div class="dialog-head"><div><span class="card-kicker">Cópia</span><h2>Clonar {{ empresa.nome }}</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    <p class="dialog-copy">A empresa atual será usada como modelo. O clone nasce <strong>inativo</strong> para revisão. Usuários não são copiados.</p>
-    <div class="dialog-two">
-      <label>Nome da nova empresa<input name="nome" id="cloneEmpresaNome" required autocomplete="off" placeholder="Nome da nova empresa"></label>
-      <label>Slug<input name="slug" id="cloneEmpresaSlug" required autocomplete="off" placeholder="novo-slug"></label>
-    </div>
-    {% if solvoz_habilitado %}
-    <fieldset class="clone-options">
-      <legend>Copiar do SolVoz</legend>
-      <label class="check-row"><input type="checkbox" name="copiar_inicio" value="1" checked><span><strong>Início do App</strong><small>Textos, ícones e configurações visuais.</small></span></label>
-      <label class="check-row"><input type="checkbox" name="copiar_home" value="1" checked><span><strong>Home e seções</strong><small>Seções, cards, imagens e estrutura.</small></span></label>
-      <label class="check-row"><input type="checkbox" name="copiar_redes" value="1" checked><span><strong>Redes sociais</strong></span></label>
-      <label class="check-row"><input type="checkbox" name="copiar_logo" value="1" checked><span><strong>Logo</strong></span></label>
-      <label class="check-row"><input type="checkbox" name="copiar_cores" value="1" checked><span><strong>Tema e cores</strong></span></label>
-    </fieldset>
-    {% else %}
-    <div class="integration-note">O SolVoz está OFF nesta empresa. Serão copiados somente o cadastro Humiat e os acessos aos produtos.</div>
-    {% endif %}
-    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Clonar empresa</button></div>
-  </form>
-</dialog>
-
-<dialog class="admin-dialog qr-dialog" id="qr-empresa">
-  <div class="dialog-card qr-dialog-card">
-    <div class="dialog-head"><div><span class="card-kicker">Cliente</span><h2>QR Code — {{ empresa.nome }}</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    {% if solvoz_habilitado and empresa.ativo %}
-    <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
-    <code>{{ solvoz_base_url }}/{{ empresa.slug }}/catalogo</code>
-    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button><a class="btn-primary" href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar PNG</a></div>
-    {% endif %}
-  </div>
-</dialog>
-{% endif %}
 
 <dialog class="admin-dialog" id="novo-usuario">
   <form method="post" action="/admin-humiat/usuarios" class="dialog-card">
     <div class="dialog-head"><div><span class="card-kicker">Acesso</span><h2>Novo usuário</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    {% if empresa %}<p class="dialog-copy">Empresa atual: <strong>{{ empresa.nome }}</strong>. Você pode alterar abaixo.</p>{% endif %}
     <label>Nome<input name="nome" required></label>
     <label>E-mail<input type="email" name="email" required></label>
-    <label>Senha inicial<input type="password" name="senha" required minlength="8"></label>
+    <label>Senha inicial <small style="display:block;color:var(--muted);margin-top:4px">Se o e-mail já existir no Organiza, a senha atual é preservada. Para usuário novo, informe pelo menos 8 caracteres.</small><input type="password" name="senha" minlength="8" placeholder="Obrigatória somente para usuário novo"></label>
     <label>Empresa <small style="display:block;color:var(--muted);margin-top:4px">Deixe sem empresa para equipe interna/perfil completo.</small>
       <select name="empresa_id">
         <option value="">— sem empresa (equipe interna) —</option>
-        {% for e in empresas %}<option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
+        {% for e in empresas %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}
       </select>
     </label>
+    <fieldset style="border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 8px">
+      <legend style="padding:0 6px;font-weight:800">SolVoz</legend>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_sistema" value="1" style="width:auto"> Acesso ao sistema</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_adm" value="1" style="width:auto"> Acesso ao ADM</label>
+      <small style="color:var(--muted)">As permissões são independentes. Nesta fase piloto, o ADM SolVoz já usa esta autorização.</small>
+    </fieldset>
     <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Criar usuário</button></div>
   </form>
 </dialog>
@@ -546,13 +104,16 @@
       {% set eid = empresa_por_usuario.get(u.id) %}
       {% set empresa_nome = namespace(v='Sem empresa') %}
       {% for e in empresas %}{% if e.id == eid %}{% set empresa_nome.v = e.nome %}{% endif %}{% endfor %}
+      {% set sv = namespace(sistema=false, adm=false) %}
+      {% for p in produtos %}{% if p.codigo == 'SOLVOZ' %}{% set acc = acessos_usuario.get((u.id, p.id), {}) %}{% set sv.sistema = acc.get('sistema', false) %}{% set sv.adm = acc.get('adm', false) %}{% endif %}{% endfor %}
       <div class="all-user-row {% if not u.ativo %}is-inactive{% endif %}">
         <div class="avatar">{{ (u.nome or 'U')[0]|upper }}</div>
         <div><strong>{{ u.nome }}</strong><small>{{ u.email }}</small></div>
         <span>{{ empresa_nome.v }}</span>
         <span>{% if eid %}Área da empresa{% else %}Equipe interna{% endif %}</span>
         <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
-        <button type="button" class="text-btn" data-dialog-open="editar-usuario-{{ u.id }}">Editar</button>{% if eid %}<a class="text-btn" href="/painel?empresa_id={{ eid }}">Abrir empresa</a>{% endif %}
+        <span style="font-size:12px">SolVoz: {% if sv.adm %}<b>ADM</b>{% endif %}{% if sv.adm and sv.sistema %} + {% endif %}{% if sv.sistema %}<b>Sistema</b>{% endif %}{% if not sv.adm and not sv.sistema %}—{% endif %}</span>
+        <button type="button" class="text-btn" data-dialog-open="editar-usuario-{{ u.id }}">Editar</button>
       </div>
       {% endfor %}
     </div>
@@ -562,6 +123,8 @@
 
 {% for u in usuarios %}
 {% set eid = empresa_por_usuario.get(u.id) %}
+{% set sv = namespace(sistema=false, adm=false) %}
+{% for p in produtos %}{% if p.codigo == 'SOLVOZ' %}{% set acc = acessos_usuario.get((u.id, p.id), {}) %}{% set sv.sistema = acc.get('sistema', false) %}{% set sv.adm = acc.get('adm', false) %}{% endif %}{% endfor %}
 <dialog class="admin-dialog" id="editar-usuario-{{ u.id }}">
   <form method="post" action="/admin-humiat/usuarios/{{ u.id }}/editar" class="dialog-card">
     <div class="dialog-head"><div><span class="card-kicker">Acesso</span><h2>Editar usuário</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
@@ -574,6 +137,11 @@
         {% for e in empresas %}<option value="{{ e.id }}" {% if eid == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
       </select>
     </label>
+    <fieldset style="border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 8px">
+      <legend style="padding:0 6px;font-weight:800">SolVoz</legend>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_sistema" value="1" {% if sv.sistema %}checked{% endif %} style="width:auto"> Acesso ao sistema</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_adm" value="1" {% if sv.adm %}checked{% endif %} style="width:auto"> Acesso ao ADM</label>
+    </fieldset>
     <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="ativo" value="1" {% if u.ativo %}checked{% endif %} style="width:auto"> Usuário ativo</label>
     <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Salvar alterações</button></div>
   </form>
@@ -600,60 +168,8 @@
     }
   });
   document.querySelectorAll('dialog').forEach(dialog => {
-    dialog.addEventListener('click', e => {
-      if (e.target === dialog) dialog.close();
-    });
+    dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
   });
-
-  const search = document.getElementById('companySearch');
-  if (search) search.addEventListener('input', () => {
-    const value = search.value.trim().toLowerCase();
-    document.querySelectorAll('[data-company-search]').forEach(row => {
-      row.hidden = !row.dataset.companySearch.toLowerCase().includes(value);
-    });
-  });
-
-  function slugify(value) {
-    return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  }
-  [['novaEmpresaNome','novaEmpresaSlug'],['cloneEmpresaNome','cloneEmpresaSlug']].forEach(([nameId, slugId]) => {
-    const name = document.getElementById(nameId), slug = document.getElementById(slugId);
-    if (!name || !slug) return;
-    let manual = false;
-    slug.addEventListener('input', () => manual = slug.value.trim() !== '' && slug.value !== slugify(name.value));
-    name.addEventListener('input', () => { if (!manual) slug.value = slugify(name.value); });
-  });
-
-  document.querySelectorAll('.color-grid input[type=color]').forEach(input => {
-    const code = input.parentElement.querySelector('code');
-    input.addEventListener('input', () => { if (code) code.textContent = input.value; });
-  });
-
-  const themeSelect = document.querySelector('.identity-form select[name="tema"]');
-  if (themeSelect) {
-    const datasetMap = {
-      brand: 'brand',
-      brand_2: 'brand2',
-      accent: 'accent',
-      bg: 'bg',
-      surface: 'surface',
-      text: 'text'
-    };
-    themeSelect.addEventListener('change', () => {
-      const opt = themeSelect.options[themeSelect.selectedIndex];
-      Object.entries(datasetMap).forEach(([name, dataKey]) => {
-        const value = opt.dataset[dataKey];
-        const input = document.querySelector('.identity-form [name="' + name + '"]');
-        if (!value || !input) return;
-        input.value = value;
-        if (input.type === 'color') {
-          const code = input.parentElement.querySelector('code');
-          if (code) code.textContent = value;
-        }
-      });
-    });
-  }
 })();
 </script>
 </body>
