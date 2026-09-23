@@ -957,7 +957,10 @@ def usuario_logado(request: Request, db: Session = Depends(get_db)) -> Usuario:
             usuario = db.query(Usuario).filter(Usuario.nome == legado, Usuario.ativo == 1).first()
             if usuario:
                 return usuario
-    raise HTTPException(status_code=303, headers={"Location": "/entrar"})
+    destino = request.url.path or "/organiza"
+    if request.url.query:
+        destino += "?" + request.url.query
+    raise HTTPException(status_code=303, headers={"Location": "/entrar?" + urllib.parse.urlencode({"next": destino})})
 
 
 def exigir_admin(usuario: Usuario):
@@ -1278,16 +1281,16 @@ def saude():
     return {"status": "ok", "versao": ORGANIZA_VERSAO}
 
 
-@app.get("/acesso", response_class=HTMLResponse)
+@app.get("/acesso")
 def escolher_acesso(request: Request):
-    """Tela única de escolha entre o Humiat ID e o acesso interno do Organiza."""
-    return templates.TemplateResponse("humiat/acesso.html", {"request": request})
+    """Compatibilidade: a antiga escolha de áreas foi substituída pelo Humiat ID único."""
+    return RedirectResponse("/entrar", status_code=303)
 
 
-@app.get("/area-restrita/login", response_class=HTMLResponse)
+@app.get("/area-restrita/login")
 def login(request: Request, erro: str = ""):
-    # Login tradicional do Organiza permanece independente do Humiat ID.
-    return templates.TemplateResponse("organiza/login.html", {"request": request, "erro": erro})
+    # APP 1.1.31: login único. Links antigos seguem para Humiat ID e retornam ao Organiza.
+    return RedirectResponse("/entrar?next=/organiza", status_code=303)
 
 
 @app.post("/area-restrita/login")

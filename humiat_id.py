@@ -198,6 +198,8 @@ class HumiatSSOTicket(Base):
     usuario_id = Column(Integer, ForeignKey("humiat_usuarios.id"), nullable=False)
     empresa_id = Column(Integer, ForeignKey("humiat_empresas.id"), nullable=True)
     produto_codigo = Column(String(30), nullable=False)
+    acesso_modo = Column(String(30), nullable=False, default="sistema")
+    destino_slug = Column(String(120), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     expira_em = Column(DateTime, nullable=False)
     usado_em = Column(DateTime, nullable=True)
@@ -514,7 +516,7 @@ def migrar_humiat_id_schema(engine) -> None:
         # Usuários de empresa antigos continuam com o mesmo vínculo, apenas deixam
         # de carregar o rótulo/permissão de administrador.
         conn.execute(text("UPDATE humiat_usuarios SET tipo='CLIENTE_EMPRESA' WHERE tipo='ADMIN_EMPRESA'"))
-    # Perfis específicos do SolVoz (ADM + Cliente Comprado + Cliente do Catálogo).
+    # Perfis específicos do SolVoz (ADM + Cliente Site + Cliente Catálogo).
     # Bancos existentes recebem as colunas sem recriar a tabela.
     insp = inspect(engine)
     if "humiat_usuario_produtos" in insp.get_table_names():
@@ -524,6 +526,16 @@ def migrar_humiat_id_schema(engine) -> None:
                 conn.execute(text("ALTER TABLE humiat_usuario_produtos ADD COLUMN acesso_solvoz_comprado INTEGER NOT NULL DEFAULT 0"))
             if "acesso_solvoz_catalogo" not in cols_prod:
                 conn.execute(text("ALTER TABLE humiat_usuario_produtos ADD COLUMN acesso_solvoz_catalogo INTEGER NOT NULL DEFAULT 0"))
+
+    # APP 1.1.31 — o ticket SSO informa qual perfil/destino do produto foi solicitado.
+    insp = inspect(engine)
+    if "humiat_sso_tickets" in insp.get_table_names():
+        cols_ticket = {c["name"] for c in insp.get_columns("humiat_sso_tickets")}
+        with engine.begin() as conn:
+            if "acesso_modo" not in cols_ticket:
+                conn.execute(text("ALTER TABLE humiat_sso_tickets ADD COLUMN acesso_modo VARCHAR(30) NOT NULL DEFAULT 'sistema'"))
+            if "destino_slug" not in cols_ticket:
+                conn.execute(text("ALTER TABLE humiat_sso_tickets ADD COLUMN destino_slug VARCHAR(120)"))
 
     # A tabela humiat_usuario_produtos é criada por Base.metadata.create_all no startup.
     # Mantemos um índice único aditivo quando o banco suportar a operação.
@@ -1182,7 +1194,7 @@ def seed_humiat_id():
         db.flush()
         acessos_iniciais = _garantir_acessos_iniciais_equipe(db)
         if acessos_iniciais:
-            print(f"[HUMIAT ID] 1.1.30: {acessos_iniciais} acesso(s) iniciais de Junior/Debora/Luiz criados.")
+            print(f"[HUMIAT ID] 1.1.31: {acessos_iniciais} acesso(s) iniciais de Junior/Debora/Luiz criados.")
         # SessionLocal usa autoflush=False. Persistimos os vínculos iniciais antes
         # de consultar o piloto legado para não tentar inserir SolVoz duas vezes.
         db.flush()
@@ -1444,10 +1456,13 @@ def abrir_produto(
 ):
     codigo = codigo.strip().upper()
     modo = (modo or "adm").strip().lower()
-    modos_validos = {"adm", "sistema", "cliente_comprado", "cliente_catalogo"}
+    # Alias legado preservado para links antigos. Na interface o nome oficial é Cliente Site.
+    if modo == "cliente_comprado":
+        modo = "cliente_site"
+    modos_validos = {"adm", "sistema", "cliente_site", "cliente_catalogo"}
     if modo not in modos_validos:
         raise HTTPException(status_code=400, detail="Modo de acesso inválido")
-    if codigo != "SOLVOZ" and modo in {"cliente_comprado", "cliente_catalogo"}:
+    if codigo != "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}:
         raise HTTPException(status_code=400, detail="Perfil disponível somente no SolVoz")
     acesso_interno = _usuario_acesso_interno(db, usuario)
     produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == codigo, HumiatProduto.ativo == 1).first()
@@ -1458,10 +1473,10 @@ def abrir_produto(
         perm = _usuario_produto_permissoes(db, usuario.id, codigo)
         if modo == "adm":
             permitido, rotulo = perm["adm"], "ADM"
-        elif modo == "cliente_comprado":
-            permitido, rotulo = perm["solvoz_comprado"], "Cliente Comprado"
+        elif modo == "cliente_site":
+            permitido, rotulo = perm["solvoz_comprado"], "Cliente Site"
         elif modo == "cliente_catalogo":
-            permitido, rotulo = perm["solvoz_catalogo"], "Cliente do Catálogo"
+            permitido, rotulo = perm["solvoz_catalogo"], "Cliente Catálogo"
         else:
             permitido, rotulo = perm["sistema"], "sistema"
         if not permitido:
@@ -1488,13 +1503,13 @@ def abrir_produto(
         # promovidos a ADM operacional na sincronização inicial.
         return RedirectResponse("/organiza", status_code=303)
 
-    if codigo == "SOLVOZ" and acesso_interno and modo == "cliente_comprado":
-        destino = os.getenv("HUMIAT_SOLVOZ_CLIENTE_COMPRADO_URL", f"{SOLVOZ_BASE_URL}/karaokerj/minha-conta").strip()
-        return RedirectResponse(destino, status_code=303)
-
-    if codigo == "SOLVOZ" and acesso_interno and modo == "cliente_catalogo":
-        destino = os.getenv("HUMIAT_SOLVOZ_CLIENTE_CATALOGO_URL", f"{SOLVOZ_BASE_URL}/karaokerj/catalogo").strip()
-        return RedirectResponse(destino, status_code=303)
+    # Cliente Site e Cliente Catálogo também usam SSO. Para o piloto da equipe
+    # interna, ambos entram no contexto da Karaokê RJ sem novo login.
+    empresa_sso = empresa
+    if codigo == "SOLVOZ" and acesso_interno and modo in {"cliente_site", "cliente_catalogo"}:
+        empresa_sso = db.query(HumiatEmpresa).filter(
+            HumiatEmpresa.slug == "karaokerj", HumiatEmpresa.ativo == 1
+        ).first()
 
     if acesso_interno and modo == "sistema":
         # Para a equipe interna, "Sistema" abre a experiência pública/operacional
@@ -1511,8 +1526,13 @@ def abrir_produto(
 
     if produto.url_sso:
         token = secrets.token_urlsafe(40)
-        ticket_empresa_id = None if acesso_interno else (empresa.id if empresa else None)
-        db.add(HumiatSSOTicket(token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id, produto_codigo=codigo, expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)))
+        ticket_empresa_id = (empresa_sso.id if empresa_sso else None) if (codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}) else (None if acesso_interno else (empresa.id if empresa else None))
+        db.add(HumiatSSOTicket(
+            token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id,
+            produto_codigo=codigo, acesso_modo=modo,
+            destino_slug="karaokerj" if (codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}) else None,
+            expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)
+        ))
         db.commit()
         sep = "&" if "?" in produto.url_sso else "?"
         return RedirectResponse(f"{produto.url_sso}{sep}{urlencode({'humiat_ticket': token})}", status_code=303)
@@ -1553,7 +1573,8 @@ def acessar_solvoz_empresa(empresa_slug: str, request: Request, db: Session = De
     token = secrets.token_urlsafe(40)
     db.add(HumiatSSOTicket(
         token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=None if acesso_interno else empresa.id,
-        produto_codigo="SOLVOZ", expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES),
+        produto_codigo="SOLVOZ", acesso_modo="adm" if acesso_interno else "cliente_catalogo",
+        destino_slug=slug_n, expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES),
     ))
     _auditar(db, request, "ABRIR_SOLVOZ_EMPRESA", usuario_id=usuario.id, empresa_id=empresa.id)
     db.commit()
@@ -1577,6 +1598,8 @@ def validar_ticket_sso(ticket: str = Form(...), x_humiat_sso_secret: str = Heade
         "usuario": {"id": usuario.id, "nome": usuario.nome, "email": usuario.email, "tipo": usuario.tipo, "documento": usuario.documento or "", "telefone": usuario.telefone or ""},
         "empresa": ({"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug} if empresa else None),
         "produto": item.produto_codigo,
+        "modo": (getattr(item, "acesso_modo", None) or "sistema"),
+        "destino_slug": (getattr(item, "destino_slug", None) or (empresa.slug if empresa else "")),
         "acesso": "EMPRESA" if empresa else "INTERNO",
     }
 

@@ -55,7 +55,7 @@
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
             {% if p.codigo == 'SOLVOZ' %}
-              {% if acc.get('solvoz_comprado', false) %}<span class="status-badge active">Cliente comprado</span>{% endif %}
+              {% if acc.get('solvoz_comprado', false) %}<span class="status-badge active">Cliente Site</span>{% endif %}
               {% if acc.get('solvoz_catalogo', false) %}<span class="status-badge active">Cliente catálogo</span>{% endif %}
               {% if acc.get('adm', false) %}<span class="status-badge active">ADM</span>{% endif %}
             {% else %}
@@ -67,8 +67,8 @@
         <p class="muted-copy">{{ p.descricao }}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
           {% if p.codigo == 'SOLVOZ' %}
-            {% if acc.get('solvoz_comprado', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_comprado">Cliente comprado</a>{% endif %}
-            {% if acc.get('solvoz_catalogo', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente do catálogo</a>{% endif %}
+            {% if acc.get('solvoz_comprado', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_site">Cliente Site</a>{% endif %}
+            {% if acc.get('solvoz_catalogo', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
           {% elif acc.get('sistema', false) %}
             <a class="btn-secondary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir sistema</a>
           {% endif %}
@@ -119,8 +119,8 @@
     <fieldset style="border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 8px">
       <legend style="padding:0 6px;font-weight:800">{{ p.nome }}</legend>
       {% if p.codigo == 'SOLVOZ' %}
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" style="width:auto"> Cliente comprado</label>
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" style="width:auto"> Cliente do catálogo</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" style="width:auto"> Cliente Site</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" style="width:auto"> Cliente Catálogo</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> ADM SolVoz</label>
       {% else %}
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" style="width:auto"> Acesso como usuário</label>
@@ -128,7 +128,7 @@
       {% endif %}
     </fieldset>
     {% endfor %}
-    <small style="color:var(--muted)">As permissões são independentes. No SolVoz existem três perfis próprios: ADM, Cliente Comprado e Cliente do Catálogo.</small>
+    <small style="color:var(--muted)">As permissões são independentes. No SolVoz existem três perfis próprios: ADM, Cliente Site e Cliente Catálogo.</small>
     <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Criar usuário</button></div>
   </form>
 </dialog>
@@ -189,8 +189,8 @@
     <fieldset style="border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 8px">
       <legend style="padding:0 6px;font-weight:800">{{ p.nome }}</legend>
       {% if p.codigo == 'SOLVOZ' %}
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" {% if acc.get('solvoz_comprado', false) %}checked{% endif %} style="width:auto"> Cliente comprado</label>
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" {% if acc.get('solvoz_catalogo', false) %}checked{% endif %} style="width:auto"> Cliente do catálogo</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" {% if acc.get('solvoz_comprado', false) %}checked{% endif %} style="width:auto"> Cliente Site</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" {% if acc.get('solvoz_catalogo', false) %}checked{% endif %} style="width:auto"> Cliente Catálogo</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %} style="width:auto"> ADM SolVoz</label>
       {% else %}
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %} style="width:auto"> Acesso como usuário</label>
