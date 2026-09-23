@@ -48,7 +48,7 @@ TIPO_ADMIN_EMPRESA = "ADMIN_EMPRESA"  # legado, somente para migração/compatib
 # sendo a regra final; esta lista serve somente para limpar vínculos antigos
 # criados por versões anteriores. Pode ser ampliada no Render sem novo deploy.
 _EQUIPE_INTERNA_PADRAO = {"junior", "debora", "luiz"}
-_EQUIPE_INTERNA_EMAILS_PADRAO = {"jr.delphi@gmail.com", "deborapavonerabello@gmail.com"}
+_EQUIPE_INTERNA_EMAILS_PADRAO = {"jr.delphi@gmail.com", "deborapavonerabello@gmail.com", "bidults@gmail.com"}
 
 def _norm_identidade(valor: str | None) -> str:
     return (valor or "").strip().lower()
@@ -60,6 +60,31 @@ def _equipe_interna_usuarios_configurados() -> set[str]:
 def _equipe_interna_emails_configurados() -> set[str]:
     extra = os.getenv("HUMIAT_EQUIPE_INTERNA_EMAILS", "")
     return _EQUIPE_INTERNA_EMAILS_PADRAO | {_norm_identidade(x) for x in extra.split(",") if _norm_identidade(x)}
+
+
+def _eh_equipe_interna_prioritaria(nome: str | None = None, email: str | None = None) -> bool:
+    """Regra inicial do Humiat ID para Junior, Debora e Luiz.
+
+    A comparação por nome aceita sobrenome (ex.: ``Luiz Souza``) e a lista de
+    e-mails pode ser ampliada no Render. A regra serve apenas para o acesso
+    inicial; depois que uma permissão por produto existe, a edição manual é
+    respeitada.
+    """
+    nome_n = _norm_identidade(nome)
+    email_n = _norm_identidade(email)
+    if email_n and email_n in _equipe_interna_emails_configurados():
+        return True
+    for base in _equipe_interna_usuarios_configurados():
+        if nome_n == base or nome_n.startswith(base + " "):
+            return True
+    return False
+
+
+def _usuario_equipe_interna_prioritaria(usuario: "HumiatUsuario") -> bool:
+    return _eh_equipe_interna_prioritaria(
+        (usuario.organiza_usuario or usuario.nome or ""),
+        usuario.email,
+    ) or _eh_equipe_interna_prioritaria(usuario.nome, usuario.email)
 
 
 class HumiatEmpresa(Base):
@@ -125,6 +150,11 @@ class HumiatUsuarioProduto(Base):
     produto_id = Column(Integer, ForeignKey("humiat_produtos.id"), nullable=False)
     acesso_sistema = Column(Integer, nullable=False, default=0)
     acesso_adm = Column(Integer, nullable=False, default=0)
+    # SolVoz possui dois perfis de cliente distintos além do ADM.
+    # Nos demais produtos estes campos ficam em 0 e `acesso_sistema` continua
+    # representando o acesso normal ao produto.
+    acesso_solvoz_comprado = Column(Integer, nullable=False, default=0)
+    acesso_solvoz_catalogo = Column(Integer, nullable=False, default=0)
 
 
 class HumiatSessao(Base):
@@ -238,19 +268,19 @@ def _sincronizar_senha_usuario_organiza(db: Session, usuario: "HumiatUsuario", s
 
 
 def _sincronizar_admins_organiza_no_humiat(db: Session) -> int:
-    """Cria a ponte inicial dos administradores já existentes no Organiza.
+    """Cria a ponte inicial dos usuários internos do Organiza.
 
-    Somente usuários ativos, administradores e com e-mail são importados nesta fase.
-    A senha não é conhecida em texto puro: o hash antigo é marcado como legado e
-    aceito uma única vez pelo Humiat ID; no primeiro login ele é atualizado para o
-    hash atual do Humiat.
+    Importa os administradores já existentes e também Junior, Debora e Luiz,
+    mesmo que um deles ainda estivesse como usuário operacional. Para estes três
+    o Organiza passa a reconhecer o perfil administrativo conforme a regra
+    inicial solicitada para o Humiat ID.
     """
     criados = 0
     try:
         rows = db.execute(text("""
-            SELECT id, nome, email, senha_hash
+            SELECT id, nome, email, senha_hash, is_admin
             FROM usuarios
-            WHERE ativo=1 AND is_admin=1 AND TRIM(COALESCE(email,''))<>''
+            WHERE ativo=1 AND TRIM(COALESCE(email,''))<>''
             ORDER BY id
         """)).mappings().all()
     except Exception:
@@ -258,8 +288,13 @@ def _sincronizar_admins_organiza_no_humiat(db: Session) -> int:
     for row in rows:
         email = str(row.get("email") or "").strip().lower()
         nome = str(row.get("nome") or "").strip()
+        prioritario = _eh_equipe_interna_prioritaria(nome, email)
+        if not bool(int(row.get("is_admin") or 0)) and not prioritario:
+            continue
         if not email or not nome:
             continue
+        if prioritario and not bool(int(row.get("is_admin") or 0)):
+            db.execute(text("UPDATE usuarios SET is_admin=1 WHERE id=:id"), {"id": int(row["id"])})
         existente = db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first()
         if existente:
             if not (existente.organiza_usuario or "").strip():
@@ -340,18 +375,34 @@ def _produto_por_codigo(db: Session, codigo: str) -> HumiatProduto | None:
     return db.query(HumiatProduto).filter(HumiatProduto.codigo == (codigo or "").strip().upper()).first()
 
 
-def _usuario_produto_acesso(db: Session, usuario_id: int, codigo: str) -> tuple[bool, bool]:
+def _usuario_produto_permissoes(db: Session, usuario_id: int, codigo: str) -> dict:
     produto = _produto_por_codigo(db, codigo)
+    padrao = {"sistema": False, "adm": False, "solvoz_comprado": False, "solvoz_catalogo": False}
     if not produto:
-        return False, False
+        return padrao
     item = db.query(HumiatUsuarioProduto).filter(
         HumiatUsuarioProduto.usuario_id == int(usuario_id),
         HumiatUsuarioProduto.produto_id == int(produto.id),
     ).first()
-    return (bool(item.acesso_sistema), bool(item.acesso_adm)) if item else (False, False)
+    if not item:
+        return padrao
+    return {
+        "sistema": bool(item.acesso_sistema),
+        "adm": bool(item.acesso_adm),
+        "solvoz_comprado": bool(getattr(item, "acesso_solvoz_comprado", 0)),
+        "solvoz_catalogo": bool(getattr(item, "acesso_solvoz_catalogo", 0)),
+    }
 
 
-def _salvar_usuario_produto_acesso(db: Session, usuario_id: int, produto: HumiatProduto, *, sistema: bool, adm: bool) -> None:
+def _usuario_produto_acesso(db: Session, usuario_id: int, codigo: str) -> tuple[bool, bool]:
+    permissoes = _usuario_produto_permissoes(db, usuario_id, codigo)
+    return permissoes["sistema"], permissoes["adm"]
+
+
+def _salvar_usuario_produto_acesso(
+    db: Session, usuario_id: int, produto: HumiatProduto, *, sistema: bool, adm: bool,
+    solvoz_comprado: bool = False, solvoz_catalogo: bool = False,
+) -> None:
     item = db.query(HumiatUsuarioProduto).filter(
         HumiatUsuarioProduto.usuario_id == int(usuario_id),
         HumiatUsuarioProduto.produto_id == int(produto.id),
@@ -359,8 +410,17 @@ def _salvar_usuario_produto_acesso(db: Session, usuario_id: int, produto: Humiat
     if not item:
         item = HumiatUsuarioProduto(usuario_id=int(usuario_id), produto_id=int(produto.id))
         db.add(item)
-    item.acesso_sistema = 1 if sistema else 0
     item.acesso_adm = 1 if adm else 0
+    if (produto.codigo or "").upper() == "SOLVOZ":
+        item.acesso_solvoz_comprado = 1 if solvoz_comprado else 0
+        item.acesso_solvoz_catalogo = 1 if solvoz_catalogo else 0
+        # Compatibilidade com rotas antigas: qualquer perfil de cliente SolVoz
+        # mantém `acesso_sistema` ligado.
+        item.acesso_sistema = 1 if (solvoz_comprado or solvoz_catalogo or sistema) else 0
+    else:
+        item.acesso_sistema = 1 if sistema else 0
+        item.acesso_solvoz_comprado = 0
+        item.acesso_solvoz_catalogo = 0
 
 
 def _garantir_acesso_admin_solvoz_piloto(db: Session, usuario: HumiatUsuario) -> None:
@@ -373,7 +433,59 @@ def _garantir_acesso_admin_solvoz_piloto(db: Session, usuario: HumiatUsuario) ->
         HumiatUsuarioProduto.produto_id == produto.id,
     ).first()
     if not item:
-        db.add(HumiatUsuarioProduto(usuario_id=usuario.id, produto_id=produto.id, acesso_sistema=1, acesso_adm=1))
+        db.add(HumiatUsuarioProduto(usuario_id=usuario.id, produto_id=produto.id, acesso_sistema=1, acesso_adm=1, acesso_solvoz_comprado=1, acesso_solvoz_catalogo=1))
+
+
+def _garantir_acessos_iniciais_equipe(db: Session) -> int:
+    """Dá a Junior, Debora e Luiz acesso inicial completo aos produtos.
+
+    Apenas vínculos AUSENTES são criados. Se uma permissão já existir, inclusive
+    desligada manualmente, ela não é sobrescrita em reinicializações futuras.
+    """
+    produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).all()
+    criados = 0
+    for usuario in db.query(HumiatUsuario).filter(HumiatUsuario.ativo == 1).all():
+        if not _usuario_equipe_interna_prioritaria(usuario):
+            continue
+        db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario.id).delete(synchronize_session=False)
+        usuario.tipo = TIPO_ADMIN_HUMIAT
+        for produto in produtos:
+            item = db.query(HumiatUsuarioProduto).filter(
+                HumiatUsuarioProduto.usuario_id == usuario.id,
+                HumiatUsuarioProduto.produto_id == produto.id,
+            ).first()
+            eh_solvoz = (produto.codigo or "").upper() == "SOLVOZ"
+            if item:
+                # Regra inicial explícita: Junior, Debora e Luiz começam com
+                # acesso total aos produtos integrados. No SolVoz isso inclui
+                # os três perfis próprios.
+                item.acesso_sistema = 1
+                item.acesso_adm = 1
+                if eh_solvoz:
+                    item.acesso_solvoz_comprado = 1
+                    item.acesso_solvoz_catalogo = 1
+                continue
+            db.add(HumiatUsuarioProduto(
+                usuario_id=usuario.id, produto_id=produto.id,
+                acesso_sistema=1, acesso_adm=1,
+                acesso_solvoz_comprado=1 if eh_solvoz else 0,
+                acesso_solvoz_catalogo=1 if eh_solvoz else 0,
+            ))
+            criados += 1
+    return criados
+
+
+def _produto_adm_url(codigo: str) -> str:
+    codigo = (codigo or "").strip().upper()
+    if codigo == "ORGANIZA":
+        return "/organiza"
+    if codigo == "SOLVOZ":
+        return "/painel/produto/SOLVOZ?modo=adm"
+    if codigo == "CONNECT":
+        return os.getenv("HUMIAT_CONNECT_ADM_URL", "").strip()
+    if codigo == "LOKAFEST":
+        return os.getenv("HUMIAT_LOKAFEST_ADM_URL", "").strip()
+    return ""
 
 
 def _ip(request: Request) -> str:
@@ -402,6 +514,17 @@ def migrar_humiat_id_schema(engine) -> None:
         # Usuários de empresa antigos continuam com o mesmo vínculo, apenas deixam
         # de carregar o rótulo/permissão de administrador.
         conn.execute(text("UPDATE humiat_usuarios SET tipo='CLIENTE_EMPRESA' WHERE tipo='ADMIN_EMPRESA'"))
+    # Perfis específicos do SolVoz (ADM + Cliente Comprado + Cliente do Catálogo).
+    # Bancos existentes recebem as colunas sem recriar a tabela.
+    insp = inspect(engine)
+    if "humiat_usuario_produtos" in insp.get_table_names():
+        cols_prod = {c["name"] for c in insp.get_columns("humiat_usuario_produtos")}
+        with engine.begin() as conn:
+            if "acesso_solvoz_comprado" not in cols_prod:
+                conn.execute(text("ALTER TABLE humiat_usuario_produtos ADD COLUMN acesso_solvoz_comprado INTEGER NOT NULL DEFAULT 0"))
+            if "acesso_solvoz_catalogo" not in cols_prod:
+                conn.execute(text("ALTER TABLE humiat_usuario_produtos ADD COLUMN acesso_solvoz_catalogo INTEGER NOT NULL DEFAULT 0"))
+
     # A tabela humiat_usuario_produtos é criada por Base.metadata.create_all no startup.
     # Mantemos um índice único aditivo quando o banco suportar a operação.
     try:
@@ -1057,6 +1180,12 @@ def seed_humiat_id():
         elif not admin_senha:
             print("[HUMIAT ID] Administrador inicial não criado: configure HUMIAT_ADMIN_SENHA no ambiente.")
         db.flush()
+        acessos_iniciais = _garantir_acessos_iniciais_equipe(db)
+        if acessos_iniciais:
+            print(f"[HUMIAT ID] 1.1.30: {acessos_iniciais} acesso(s) iniciais de Junior/Debora/Luiz criados.")
+        # SessionLocal usa autoflush=False. Persistimos os vínculos iniciais antes
+        # de consultar o piloto legado para não tentar inserir SolVoz duas vezes.
+        db.flush()
         # Piloto 1.1.29: somente os administradores que já eram ADM no Organiza
         # (e o bootstrap Humiat) recebem acesso inicial ao ADM SolVoz. Usuários
         # novos respeitam exatamente as caixas marcadas no cadastro.
@@ -1133,7 +1262,20 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
     usuarios = db.query(HumiatUsuario).order_by(HumiatUsuario.nome).all()
     produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
     acessos = db.query(HumiatUsuarioProduto).all()
-    acessos_usuario = {(a.usuario_id, a.produto_id): {"sistema": bool(a.acesso_sistema), "adm": bool(a.acesso_adm)} for a in acessos}
+    acessos_usuario = {
+        (a.usuario_id, a.produto_id): {
+            "sistema": bool(a.acesso_sistema),
+            "adm": bool(a.acesso_adm),
+            "solvoz_comprado": bool(getattr(a, "acesso_solvoz_comprado", 0)),
+            "solvoz_catalogo": bool(getattr(a, "acesso_solvoz_catalogo", 0)),
+        } for a in acessos
+    }
+    meus_acessos = {
+        p.codigo: acessos_usuario.get((usuario.id, p.id), {
+            "sistema": False, "adm": False, "solvoz_comprado": False, "solvoz_catalogo": False
+        }) for p in produtos
+    }
+    adm_disponivel = {p.codigo: bool(_produto_adm_url(p.codigo) or p.url_sso) for p in produtos}
     vinculos = db.query(HumiatUsuarioEmpresa).all()
     empresa_por_usuario = {}
     for v in vinculos:
@@ -1145,6 +1287,8 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "usuarios": usuarios,
         "produtos": produtos,
         "acessos_usuario": acessos_usuario,
+        "meus_acessos": meus_acessos,
+        "adm_disponivel": adm_disponivel,
         "vinculos": vinculos,
         "empresa_por_usuario": empresa_por_usuario,
         "admin_humiat": True,
@@ -1294,19 +1438,38 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
 
 
 @router.get("/painel/produto/{codigo}")
-def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)):
+def abrir_produto(
+    codigo: str, request: Request, empresa_id: int | None = None, modo: str = "adm",
+    usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db),
+):
     codigo = codigo.strip().upper()
+    modo = (modo or "adm").strip().lower()
+    modos_validos = {"adm", "sistema", "cliente_comprado", "cliente_catalogo"}
+    if modo not in modos_validos:
+        raise HTTPException(status_code=400, detail="Modo de acesso inválido")
+    if codigo != "SOLVOZ" and modo in {"cliente_comprado", "cliente_catalogo"}:
+        raise HTTPException(status_code=400, detail="Perfil disponível somente no SolVoz")
     acesso_interno = _usuario_acesso_interno(db, usuario)
-    if not acesso_interno and codigo != "SOLVOZ":
-        raise HTTPException(status_code=403, detail="Este acesso é exclusivo do SolVoz")
     produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == codigo, HumiatProduto.ativo == 1).first()
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
 
     if acesso_interno:
-        _sistema, _adm = _usuario_produto_acesso(db, usuario.id, codigo)
-        if not _adm:
-            raise HTTPException(status_code=403, detail=f"Seu Humiat ID não possui acesso ao ADM {produto.nome}.")
+        perm = _usuario_produto_permissoes(db, usuario.id, codigo)
+        if modo == "adm":
+            permitido, rotulo = perm["adm"], "ADM"
+        elif modo == "cliente_comprado":
+            permitido, rotulo = perm["solvoz_comprado"], "Cliente Comprado"
+        elif modo == "cliente_catalogo":
+            permitido, rotulo = perm["solvoz_catalogo"], "Cliente do Catálogo"
+        else:
+            permitido, rotulo = perm["sistema"], "sistema"
+        if not permitido:
+            raise HTTPException(status_code=403, detail=f"Seu Humiat ID não possui acesso ao perfil {rotulo} de {produto.nome}.")
+    else:
+        # Usuários de empresa, nesta fase, entram somente no modo de sistema.
+        if modo != "sistema" or codigo != "SOLVOZ":
+            raise HTTPException(status_code=403, detail="Acesso não autorizado")
 
     empresas = empresas_do_usuario(db, usuario)
     empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else (empresas[0] if len(empresas) == 1 else None)
@@ -1317,28 +1480,46 @@ def abrir_produto(codigo: str, request: Request, empresa_id: int | None = None, 
         if codigo not in permitidos:
             raise HTTPException(status_code=403, detail="Produto não habilitado para esta empresa")
 
-    _auditar(db, request, "ABRIR_PRODUTO", usuario_id=usuario.id, empresa_id=empresa.id if empresa else None, detalhe=codigo)
+    _auditar(db, request, "ABRIR_PRODUTO", usuario_id=usuario.id, empresa_id=empresa.id if empresa else None, detalhe=f"{codigo}:{modo}")
     db.commit()
 
     if codigo == "ORGANIZA":
-        # O Organiza está no mesmo projeto. O app.py reconhece a sessão Humiat para usuários mapeados.
+        # O Organiza reconhece a mesma sessão Humiat. Junior/Debora/Luiz são
+        # promovidos a ADM operacional na sincronização inicial.
         return RedirectResponse("/organiza", status_code=303)
+
+    if codigo == "SOLVOZ" and acesso_interno and modo == "cliente_comprado":
+        destino = os.getenv("HUMIAT_SOLVOZ_CLIENTE_COMPRADO_URL", f"{SOLVOZ_BASE_URL}/karaokerj/minha-conta").strip()
+        return RedirectResponse(destino, status_code=303)
+
+    if codigo == "SOLVOZ" and acesso_interno and modo == "cliente_catalogo":
+        destino = os.getenv("HUMIAT_SOLVOZ_CLIENTE_CATALOGO_URL", f"{SOLVOZ_BASE_URL}/karaokerj/catalogo").strip()
+        return RedirectResponse(destino, status_code=303)
+
+    if acesso_interno and modo == "sistema":
+        # Para a equipe interna, "Sistema" abre a experiência pública/operacional
+        # do produto. O SSO administrativo é usado somente no botão ADM.
+        if produto.url_publica:
+            return RedirectResponse(produto.url_publica, status_code=303)
+        raise HTTPException(status_code=503, detail="Produto sem URL pública configurada")
+
+    if acesso_interno and modo == "adm" and not produto.url_sso:
+        adm_url = _produto_adm_url(codigo)
+        if adm_url:
+            return RedirectResponse(adm_url, status_code=303)
+        raise HTTPException(status_code=503, detail=f"ADM {produto.nome} ainda não integrado ao hub Humiat")
 
     if produto.url_sso:
         token = secrets.token_urlsafe(40)
-        # Para equipe interna o ticket vai sem empresa. Isso permite ao SolVoz
-        # reconhecer o perfil completo apenas pela ausência de vínculo.
         ticket_empresa_id = None if acesso_interno else (empresa.id if empresa else None)
         db.add(HumiatSSOTicket(token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id, produto_codigo=codigo, expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)))
         db.commit()
         sep = "&" if "?" in produto.url_sso else "?"
         return RedirectResponse(f"{produto.url_sso}{sep}{urlencode({'humiat_ticket': token})}", status_code=303)
 
-    # Enquanto o receptor SSO do produto ainda não foi publicado, mantém acesso ao produto público.
     if produto.url_publica:
         return RedirectResponse(produto.url_publica, status_code=303)
     raise HTTPException(status_code=503, detail="Produto sem URL configurada")
-
 
 
 @router.get("/acessar/solvoz/{empresa_slug}")
@@ -1639,15 +1820,13 @@ def alternar_status_empresa(
 
 
 @router.post("/admin-humiat/usuarios")
-def criar_usuario_humiat(
+async def criar_usuario_humiat(
     request: Request,
     nome: str = Form(...),
     email: str = Form(...),
     senha: str = Form(""),
     tipo: str = Form(TIPO_CLIENTE_EMPRESA),
     empresa_id: str = Form(""),
-    solvoz_sistema: str = Form("0"),
-    solvoz_adm: str = Form("0"),
     usuario: HumiatUsuario = Depends(exigir_admin_humiat),
     db: Session = Depends(get_db),
 ):
@@ -1678,19 +1857,23 @@ def criar_usuario_humiat(
     if empresa_vinculada:
         db.add(HumiatUsuarioEmpresa(usuario_id=novo.id, empresa_id=empresa_vinculada))
 
-    produto_solvoz = _produto_por_codigo(db, "SOLVOZ")
-    if produto_solvoz:
-        _salvar_usuario_produto_acesso(
-            db, novo.id, produto_solvoz,
-            sistema=(solvoz_sistema == "1"), adm=(solvoz_adm == "1"),
-        )
-    _auditar(db, request, "CRIAR_USUARIO", usuario.id, empresa_vinculada, f"{email}; solvoz_sistema={solvoz_sistema}; solvoz_adm={solvoz_adm}")
+    form = await request.form()
+    resumo_acessos = []
+    for produto in db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all():
+        sistema = str(form.get(f"produto_{produto.id}_sistema") or "0") == "1"
+        adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1"
+        comprado = str(form.get(f"produto_{produto.id}_solvoz_comprado") or "0") == "1"
+        catalogo = str(form.get(f"produto_{produto.id}_solvoz_catalogo") or "0") == "1"
+        _salvar_usuario_produto_acesso(db, novo.id, produto, sistema=sistema, adm=adm, solvoz_comprado=comprado, solvoz_catalogo=catalogo)
+        if sistema or adm or comprado or catalogo:
+            resumo_acessos.append(f"{produto.codigo}:S{int(sistema)}A{int(adm)}C{int(comprado)}K{int(catalogo)}")
+    _auditar(db, request, "CRIAR_USUARIO", usuario.id, empresa_vinculada, f"{email}; " + ",".join(resumo_acessos))
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_criado", status_code=303)
 
 
 @router.post("/admin-humiat/usuarios/{usuario_id}/editar")
-def editar_usuario_humiat(
+async def editar_usuario_humiat(
     usuario_id: int,
     request: Request,
     nome: str = Form(...),
@@ -1699,8 +1882,6 @@ def editar_usuario_humiat(
     tipo: str = Form(TIPO_CLIENTE_EMPRESA),
     empresa_id: str = Form(""),
     ativo: str = Form("0"),
-    solvoz_sistema: str = Form("0"),
-    solvoz_adm: str = Form("0"),
     usuario: HumiatUsuario = Depends(exigir_admin_humiat),
     db: Session = Depends(get_db),
 ):
@@ -1753,16 +1934,18 @@ def editar_usuario_humiat(
     if empresa_vinculada:
         db.add(HumiatUsuarioEmpresa(usuario_id=alvo.id, empresa_id=empresa_vinculada))
 
-    produto_solvoz = _produto_por_codigo(db, "SOLVOZ")
-    if produto_solvoz:
-        # Evita o administrador remover o próprio acesso ao ADM durante o piloto.
-        adm_permitido = (solvoz_adm == "1") or (alvo.id == usuario.id)
-        _salvar_usuario_produto_acesso(
-            db, alvo.id, produto_solvoz,
-            sistema=(solvoz_sistema == "1"), adm=adm_permitido,
-        )
+    form = await request.form()
+    resumo_acessos = []
+    for produto in db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all():
+        sistema = str(form.get(f"produto_{produto.id}_sistema") or "0") == "1"
+        adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1"
+        comprado = str(form.get(f"produto_{produto.id}_solvoz_comprado") or "0") == "1"
+        catalogo = str(form.get(f"produto_{produto.id}_solvoz_catalogo") or "0") == "1"
+        _salvar_usuario_produto_acesso(db, alvo.id, produto, sistema=sistema, adm=adm, solvoz_comprado=comprado, solvoz_catalogo=catalogo)
+        if sistema or adm or comprado or catalogo:
+            resumo_acessos.append(f"{produto.codigo}:S{int(sistema)}A{int(adm)}C{int(comprado)}K{int(catalogo)}")
 
-    _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}; solvoz_sistema={solvoz_sistema}; solvoz_adm={solvoz_adm}")
+    _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}; " + ",".join(resumo_acessos))
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_atualizado", status_code=303)
 

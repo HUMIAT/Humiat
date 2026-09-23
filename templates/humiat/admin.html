@@ -18,11 +18,10 @@
     <div>
       <p class="eyebrow">Humiat ID</p>
       <h1>Hub administrativo</h1>
-      <p>Entre nos sistemas Humiat com a mesma identidade. Nesta primeira fase, o hub concentra os usuários administrativos e o acesso ao ADM SolVoz.</p>
+      <p>Entre nos sistemas Humiat com a mesma identidade. O hub mostra os acessos de sistema e de administração liberados para o seu Humiat ID.</p>
     </div>
     <div class="admin-head-actions">
       <button type="button" class="btn-secondary" data-dialog-open="todos-usuarios">Usuários</button>
-      <a class="btn-primary" href="/painel/produto/SOLVOZ">ADM SolVoz</a>
     </div>
   </section>
 
@@ -39,38 +38,68 @@
   </div>
   {% endif %}
 
-  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-bottom:18px">
-    <article class="workspace-card">
-      <div class="card-title-row">
-        <div>
-          <span class="card-kicker">Produto</span>
-          <h3>ADM SolVoz</h3>
+  <section style="margin-bottom:18px">
+    <div class="section-title" style="margin-bottom:12px">
+      <div><p class="eyebrow">Humiat ID</p><h2>Meus sistemas</h2></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">
+      {% for p in produtos %}
+      {% set acc = meus_acessos.get(p.codigo, {}) %}
+      {% set tem_solvoz = p.codigo == 'SOLVOZ' and (acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) or acc.get('adm', false)) %}
+      {% if acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz %}
+      <article class="workspace-card">
+        <div class="card-title-row">
+          <div>
+            <span class="card-kicker">{{ p.codigo }}</span>
+            <h3>{{ p.nome }}</h3>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            {% if p.codigo == 'SOLVOZ' %}
+              {% if acc.get('solvoz_comprado', false) %}<span class="status-badge active">Cliente comprado</span>{% endif %}
+              {% if acc.get('solvoz_catalogo', false) %}<span class="status-badge active">Cliente catálogo</span>{% endif %}
+              {% if acc.get('adm', false) %}<span class="status-badge active">ADM</span>{% endif %}
+            {% else %}
+              {% if acc.get('sistema', false) %}<span class="status-badge active">Usuário</span>{% endif %}
+              {% if acc.get('adm', false) %}<span class="status-badge active">ADM</span>{% endif %}
+            {% endif %}
+          </div>
         </div>
-      </div>
-      <p class="muted-copy">Abra o painel completo do SolVoz. Diagnósticos, importação do banco musical e rotinas por empresa ficam dentro do próprio produto.</p>
-      <div style="margin-top:16px">
-        <a class="btn-primary" href="/painel/produto/SOLVOZ">Abrir ADM SolVoz</a>
-      </div>
-    </article>
-
-
-
-    <article class="workspace-card">
-      <div class="card-title-row">
-        <div>
-          <span class="card-kicker">Global</span>
-          <h3>Usuários</h3>
+        <p class="muted-copy">{{ p.descricao }}</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+          {% if p.codigo == 'SOLVOZ' %}
+            {% if acc.get('solvoz_comprado', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_comprado">Cliente comprado</a>{% endif %}
+            {% if acc.get('solvoz_catalogo', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente do catálogo</a>{% endif %}
+          {% elif acc.get('sistema', false) %}
+            <a class="btn-secondary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir sistema</a>
+          {% endif %}
+          {% if acc.get('adm', false) %}
+            {% if adm_disponivel.get(p.codigo, false) %}
+            <a class="btn-primary" href="/painel/produto/{{ p.codigo }}?modo=adm">Abrir ADM</a>
+            {% else %}
+            <span class="status-badge" title="Permissão já registrada; falta integrar o ADM ao hub">ADM autorizado • integração pendente</span>
+            {% endif %}
+          {% endif %}
         </div>
-        <span class="status-badge active">{{ usuarios|length }}</span>
-      </div>
-      <p class="muted-copy">Usuários administrativos do Humiat ID. Os ADMs existentes do Organiza são vinculados automaticamente nesta fase piloto.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
-        <button type="button" class="btn-secondary" data-dialog-open="todos-usuarios">Gerenciar usuários</button>
-        <button type="button" class="btn-ghost" data-dialog-open="novo-usuario">+ Novo usuário</button>
-      </div>
-    </article>
+      </article>
+      {% endif %}
+      {% endfor %}
+
+      <article class="workspace-card">
+        <div class="card-title-row">
+          <div>
+            <span class="card-kicker">Identidade</span>
+            <h3>Usuários</h3>
+          </div>
+          <span class="status-badge active">{{ usuarios|length }}</span>
+        </div>
+        <p class="muted-copy">Cadastros centrais do Humiat ID e permissões independentes de Sistema e ADM para cada produto.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+          <button type="button" class="btn-secondary" data-dialog-open="todos-usuarios">Gerenciar usuários</button>
+          <button type="button" class="btn-ghost" data-dialog-open="novo-usuario">+ Novo usuário</button>
+        </div>
+      </article>
+    </div>
   </section>
-
 
 </main>
 
@@ -86,12 +115,20 @@
         {% for e in empresas %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}
       </select>
     </label>
+    {% for p in produtos %}
     <fieldset style="border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 8px">
-      <legend style="padding:0 6px;font-weight:800">SolVoz</legend>
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_sistema" value="1" style="width:auto"> Acesso ao sistema</label>
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_adm" value="1" style="width:auto"> Acesso ao ADM</label>
-      <small style="color:var(--muted)">As permissões são independentes. Nesta fase piloto, o ADM SolVoz já usa esta autorização.</small>
+      <legend style="padding:0 6px;font-weight:800">{{ p.nome }}</legend>
+      {% if p.codigo == 'SOLVOZ' %}
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" style="width:auto"> Cliente comprado</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" style="width:auto"> Cliente do catálogo</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> ADM SolVoz</label>
+      {% else %}
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" style="width:auto"> Acesso como usuário</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> Acesso ao ADM</label>
+      {% endif %}
     </fieldset>
+    {% endfor %}
+    <small style="color:var(--muted)">As permissões são independentes. No SolVoz existem três perfis próprios: ADM, Cliente Comprado e Cliente do Catálogo.</small>
     <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Criar usuário</button></div>
   </form>
 </dialog>
@@ -104,15 +141,27 @@
       {% set eid = empresa_por_usuario.get(u.id) %}
       {% set empresa_nome = namespace(v='Sem empresa') %}
       {% for e in empresas %}{% if e.id == eid %}{% set empresa_nome.v = e.nome %}{% endif %}{% endfor %}
-      {% set sv = namespace(sistema=false, adm=false) %}
-      {% for p in produtos %}{% if p.codigo == 'SOLVOZ' %}{% set acc = acessos_usuario.get((u.id, p.id), {}) %}{% set sv.sistema = acc.get('sistema', false) %}{% set sv.adm = acc.get('adm', false) %}{% endif %}{% endfor %}
       <div class="all-user-row {% if not u.ativo %}is-inactive{% endif %}">
         <div class="avatar">{{ (u.nome or 'U')[0]|upper }}</div>
         <div><strong>{{ u.nome }}</strong><small>{{ u.email }}</small></div>
         <span>{{ empresa_nome.v }}</span>
         <span>{% if eid %}Área da empresa{% else %}Equipe interna{% endif %}</span>
         <span class="user-status">{% if u.ativo %}Ativo{% else %}Inativo{% endif %}</span>
-        <span style="font-size:12px">SolVoz: {% if sv.adm %}<b>ADM</b>{% endif %}{% if sv.adm and sv.sistema %} + {% endif %}{% if sv.sistema %}<b>Sistema</b>{% endif %}{% if not sv.adm and not sv.sistema %}—{% endif %}</span>
+        <span style="font-size:12px;display:flex;gap:5px;flex-wrap:wrap">
+          {% set ns = namespace(qtd=0) %}
+          {% for p in produtos %}
+            {% set acc = acessos_usuario.get((u.id, p.id), {}) %}
+            {% if acc.get('sistema', false) or acc.get('adm', false) or acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) %}
+              {% set ns.qtd = ns.qtd + 1 %}
+              {% if p.codigo == 'SOLVOZ' %}
+                <b>{{ p.nome }}:{% if acc.get('adm', false) %} ADM{% endif %}{% if acc.get('solvoz_comprado', false) %} Comprado{% endif %}{% if acc.get('solvoz_catalogo', false) %} Catálogo{% endif %}</b>
+              {% else %}
+                <b>{{ p.nome }}:{% if acc.get('sistema', false) %} U{% endif %}{% if acc.get('adm', false) %} A{% endif %}</b>
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.qtd == 0 %}—{% endif %}
+        </span>
         <button type="button" class="text-btn" data-dialog-open="editar-usuario-{{ u.id }}">Editar</button>
       </div>
       {% endfor %}
@@ -123,8 +172,6 @@
 
 {% for u in usuarios %}
 {% set eid = empresa_por_usuario.get(u.id) %}
-{% set sv = namespace(sistema=false, adm=false) %}
-{% for p in produtos %}{% if p.codigo == 'SOLVOZ' %}{% set acc = acessos_usuario.get((u.id, p.id), {}) %}{% set sv.sistema = acc.get('sistema', false) %}{% set sv.adm = acc.get('adm', false) %}{% endif %}{% endfor %}
 <dialog class="admin-dialog" id="editar-usuario-{{ u.id }}">
   <form method="post" action="/admin-humiat/usuarios/{{ u.id }}/editar" class="dialog-card">
     <div class="dialog-head"><div><span class="card-kicker">Acesso</span><h2>Editar usuário</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
@@ -137,11 +184,20 @@
         {% for e in empresas %}<option value="{{ e.id }}" {% if eid == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}
       </select>
     </label>
+    {% for p in produtos %}
+    {% set acc = acessos_usuario.get((u.id, p.id), {}) %}
     <fieldset style="border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 8px">
-      <legend style="padding:0 6px;font-weight:800">SolVoz</legend>
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_sistema" value="1" {% if sv.sistema %}checked{% endif %} style="width:auto"> Acesso ao sistema</label>
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="solvoz_adm" value="1" {% if sv.adm %}checked{% endif %} style="width:auto"> Acesso ao ADM</label>
+      <legend style="padding:0 6px;font-weight:800">{{ p.nome }}</legend>
+      {% if p.codigo == 'SOLVOZ' %}
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_comprado" value="1" {% if acc.get('solvoz_comprado', false) %}checked{% endif %} style="width:auto"> Cliente comprado</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" {% if acc.get('solvoz_catalogo', false) %}checked{% endif %} style="width:auto"> Cliente do catálogo</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %} style="width:auto"> ADM SolVoz</label>
+      {% else %}
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %} style="width:auto"> Acesso como usuário</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %} style="width:auto"> Acesso ao ADM</label>
+      {% endif %}
     </fieldset>
+    {% endfor %}
     <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="ativo" value="1" {% if u.ativo %}checked{% endif %} style="width:auto"> Usuário ativo</label>
     <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Cancelar</button><button class="btn-primary" type="submit">Salvar alterações</button></div>
   </form>
