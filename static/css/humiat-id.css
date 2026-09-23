@@ -233,3 +233,8 @@
 
 /* Humiat ID - recuperação de senha */
 .id-forgot{display:block;text-align:center;margin-top:2px;font-size:.92rem;font-weight:700;color:var(--id-accent,#7c3aed);text-decoration:none}.id-forgot:hover{text-decoration:underline}.id-success{border-color:rgba(34,197,94,.35)!important;background:rgba(34,197,94,.10)!important}
+
+/* Humiat ID 1.1.33 — ações por perfil no hub do cliente */
+.client-access-actions{margin-top:auto;display:grid;gap:8px}
+.client-access-actions a{display:flex;align-items:center;justify-content:center;min-height:42px;padding:10px 12px;border:1px solid rgba(54,229,255,.28);border-radius:11px;background:rgba(54,229,255,.055);color:#d8fbff;font-weight:850;font-size:.8rem;text-decoration:none;transition:.18s ease}
+.client-access-actions a:hover{background:rgba(54,229,255,.11);border-color:rgba(54,229,255,.5);transform:translateY(-1px)}

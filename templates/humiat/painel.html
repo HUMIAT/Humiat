@@ -38,10 +38,10 @@
     <section class="client-company-head">
       <div>
         <p class="eyebrow">{{ empresa.nome }}</p>
-        <h2>Minha empresa</h2>
-        <p>Abra seus aplicativos e acesse o QR Code do seu catálogo.</p>
+        <h2>Empresa vinculada</h2>
+        <p>Abra somente os sistemas e perfis liberados no seu cadastro do Organiza.</p>
       </div>
-      {% if tem_solvoz.v %}
+      {% if tem_solvoz.v and meus_acessos.get('SOLVOZ', {}).get('solvoz_catalogo', false) %}
       <article class="client-qr-card">
         <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
         <div>
@@ -50,7 +50,7 @@
           <small>Mostre este código ao cliente para abrir o catálogo.</small>
           <div class="client-qr-actions">
             <a href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar QR</a>
-            <a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}">Abrir SolVoz</a>
+            <a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Abrir Cliente Catálogo</a>
           </div>
         </div>
       </article>
@@ -63,10 +63,19 @@
       </div>
       <div class="app-grid">
         {% for p in produtos %}
+        {% set acc = meus_acessos.get(p.codigo, {}) %}
         <article class="app-card app-{{ p.codigo|lower }}">
           <div class="app-icon">{{ p.nome[0] }}</div>
           <div><span class="status-dot">Ativo</span><h3>{{ p.nome }}</h3><p>{{ p.descricao }}</p></div>
-          <a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}">Abrir {{ p.nome }}</a>
+          <div class="client-access-actions">
+            {% if p.codigo == 'SOLVOZ' %}
+              {% if acc.get('solvoz_comprado', false) and empresa.slug == 'karaokerj' %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_site">Cliente Site</a>{% endif %}
+              {% if acc.get('solvoz_catalogo', false) %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
+            {% else %}
+              {% if acc.get('sistema', false) %}<a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}&modo=sistema">Usuário</a>{% endif %}
+              {% if acc.get('adm', false) %}<a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}&modo=adm">ADM</a>{% endif %}
+            {% endif %}
+          </div>
         </article>
         {% else %}
         <div class="empty-card"><h3>Nenhum produto habilitado</h3><p>Entre em contato com a Humiat para liberar seus produtos.</p></div>

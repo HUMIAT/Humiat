@@ -1,6 +1,8 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ cliente.nome }}</h1><p class="texto-suave">+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p></div><div class="acoes-titulo"><a class="botao" href="/organiza/clientes">Voltar</a><a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a><a class="botao" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Manutenção</a><a class="botao" href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">+ Venda</a><a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nEsse procedimento é importante para emissão de documentos, garantia e futuros atendimentos.\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a></div></div>
+{% if humiat_sucesso %}<div class="alerta sucesso">{{ humiat_sucesso }}</div>{% endif %}
+{% if humiat_erro %}<div class="alerta erro">{{ humiat_erro }}</div>{% endif %}
 {% if solvoz_sucesso %}<div class="alerta sucesso">{{ solvoz_sucesso }}</div>{% endif %}
 {% if solvoz_erro %}<div class="alerta erro">{{ solvoz_erro }}</div>{% endif %}
 {% if cnpj_sucesso %}<div class="alerta sucesso">{{ cnpj_sucesso }}</div>{% endif %}
@@ -31,35 +33,54 @@
   </article>
   <div class="resumo-coluna">
     <article class="cartao resumo-unico"><small>Equipamentos vinculados</small><strong>{{ cliente.equipamentos|length }}</strong></article>
-    <article class="cartao solvoz-acesso-card">
+    <article class="cartao solvoz-acesso-card humiat-acesso-card">
       <div class="solvoz-acesso-topo">
-        <div><p class="tag">Acesso SolVoz</p><strong>{{ solvoz_acesso.usuario or 'Sem e-mail' }}</strong></div>
-        {% if solvoz_acesso.status == 'ATIVO' %}<span class="solvoz-selo ativo">Ativo</span>
-        {% elif solvoz_acesso.status == 'INATIVO' %}<span class="solvoz-selo erro">Inativo</span>
-        {% elif solvoz_acesso.status == 'ERRO' %}<span class="solvoz-selo erro">Erro</span>
-        {% else %}<span class="solvoz-selo pendente">Sem acesso</span>{% endif %}
-      </div>
-      {% if solvoz_acesso.status == 'ATIVO' %}
-        <p class="texto-suave">Administrador da própria empresa no SolVoz.</p>
-        {% if solvoz_acesso.trocar_senha %}<p class="solvoz-aviso">Aguardando a troca da senha no primeiro acesso.</p>{% endif %}
-        {% if solvoz_acesso.equipamentos %}<small class="solvoz-equip-lista">{{ solvoz_acesso.equipamentos|join(' • ') }}</small>{% endif %}
-        <div class="solvoz-acoes">
-          <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso"><button class="botao pequeno" type="submit">Atualizar equipamentos</button></form>
-          <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso/reenviar"><button class="botao pequeno" type="submit">Reenviar senha</button></form>
+        <div>
+          <p class="tag">Humiat ID</p>
+          <strong>{{ humiat_acesso.usuario.email if humiat_acesso.usuario else (cliente.email or 'Sem e-mail') }}</strong>
         </div>
-      {% elif solvoz_acesso.status == 'SEM_EMAIL' %}
-        <p class="texto-suave">Cadastre um e-mail válido no cliente para criar o usuário.</p>
-      {% elif solvoz_acesso.status == 'SEM_EQUIPAMENTO' %}
-        <p class="texto-suave">Vincule um equipamento com Catálogo Online e empresa SolVoz.</p>
-      {% elif solvoz_acesso.status == 'NAO_CONFIGURADO' %}
-        <p class="texto-suave">Configure o token da integração Organiza → SolVoz.</p>
-      {% elif solvoz_acesso.status == 'ERRO' %}
-        <p class="texto-suave">{{ solvoz_acesso.erro }}</p>
-        <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso"><button class="botao pequeno" type="submit">Tentar novamente</button></form>
+        {% if humiat_acesso.usuario and humiat_acesso.ativo %}<span class="solvoz-selo ativo">Ativo</span>
+        {% elif humiat_acesso.usuario %}<span class="solvoz-selo erro">Inativo</span>
+        {% else %}<span class="solvoz-selo pendente">Sem Humiat ID</span>{% endif %}
+      </div>
+      <p class="texto-suave">Um único login para todos os sistemas. Os acessos abaixo pertencem a este cadastro de cliente.</p>
+      {% if humiat_acesso.interno %}<p class="solvoz-aviso">Equipe interna: este cadastro usa o mesmo Humiat ID administrativo.</p>{% endif %}
+      {% if not cliente.email %}
+        <p class="texto-suave">Cadastre um e-mail válido no cliente para gerar o Humiat ID.</p>
       {% else %}
-        <p class="texto-suave">O SolVoz usará o e-mail do cadastro, vinculará os equipamentos e enviará uma senha provisória.</p>
-        {% if solvoz_acesso.equipamentos %}<small class="solvoz-equip-lista">{{ solvoz_acesso.equipamentos|join(' • ') }}</small>{% endif %}
-        <form method="post" action="/organiza/clientes/{{ cliente.id }}/solvoz-acesso"><button class="botao primario pequeno" type="submit">Criar acesso SolVoz</button></form>
+      <form method="post" action="/organiza/clientes/{{ cliente.id }}/humiat-acesso" class="humiat-cliente-form">
+        <label class="humiat-switch-principal">
+          <input type="checkbox" name="humiat_ativo" value="1" {% if humiat_acesso.usuario is none or humiat_acesso.ativo %}checked{% endif %}>
+          <span><strong>Humiat ID ativo</strong><small>Desmarque para bloquear o login sem apagar o cadastro.</small></span>
+        </label>
+        <div class="humiat-produtos-cliente">
+          {% for p in humiat_acesso.produtos %}
+          {% set acc = humiat_acesso.acessos.get(p.codigo, {}) %}
+          <div class="humiat-produto-linha">
+            <strong>{{ p.nome }}</strong>
+            <div class="humiat-checks">
+              {% if p.codigo == 'SOLVOZ' %}
+                <label><input type="checkbox" name="produto_{{ p.id }}_solvoz_site" value="1" {% if acc.get('solvoz_comprado', false) %}checked{% endif %}> Cliente Site</label>
+                <label><input type="checkbox" name="produto_{{ p.id }}_solvoz_catalogo" value="1" {% if acc.get('solvoz_catalogo', false) %}checked{% endif %}> Cliente Catálogo</label>
+                {% if humiat_acesso.interno %}<label><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %}> ADM SolVoz</label>{% endif %}
+              {% else %}
+                <label><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if acc.get('sistema', false) %}checked{% endif %}> Usuário</label>
+                <label><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" {% if acc.get('adm', false) %}checked{% endif %}> ADM</label>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="solvoz-acoes humiat-acoes">
+          <button class="botao primario pequeno" type="submit">Salvar acessos</button>
+        </div>
+      </form>
+      {% if humiat_acesso.usuario %}
+      <form method="post" action="/organiza/clientes/{{ cliente.id }}/humiat-acesso/reenviar" style="margin-top:10px">
+        <button class="botao pequeno" type="submit">Reenviar link de acesso</button>
+        <small class="texto-suave" style="display:block;margin-top:6px">O cliente refaz a senha única e continua com todos os sistemas liberados acima.</small>
+      </form>
+      {% endif %}
       {% endif %}
     </article>
   </div>

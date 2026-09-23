@@ -33,7 +33,10 @@ from humiat_id import (
     router as humiat_router, seed_humiat_id, migrar_humiat_id_schema,
     humiat_usuario_da_requisicao, TIPO_ADMIN_HUMIAT, TIPO_CLIENTE_EMPRESA,
     HumiatEmpresa, HumiatUsuario, HumiatUsuarioEmpresa, HumiatEmpresaProduto, HumiatProduto,
+    HumiatUsuarioProduto, gerar_hash_senha_id,
     garantir_empresa_solvoz_humiat,
+    permissoes_usuario_humiat, salvar_permissoes_usuario_humiat,
+    usuario_humiat_interno, usuario_humiat_equipe_prioritaria, enviar_link_acesso_humiat,
     enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao,
 )
 
@@ -526,6 +529,9 @@ class Cliente(Base):
     entrega_municipio_ibge = Column(String(12), nullable=True)
     entrega_estado = Column(String(60), nullable=True)
     email = Column(String(140), nullable=True)
+    # Identidade central: o cadastro do cliente no Organiza é a fonte de verdade
+    # e aponta para o único Humiat ID usado em todos os produtos.
+    humiat_usuario_id = Column(Integer, ForeignKey("humiat_usuarios.id"), nullable=True, unique=True, index=True)
     pacote = Column(String(30), nullable=True)
     falta_pacote = Column(Integer, nullable=True)
     plano = Column(String(60), nullable=True)
@@ -1056,6 +1062,250 @@ templates.env.globals["rotulo_maquina"] = rotulo_maquina
 templates.env.globals["codigo_tecnico"] = codigo_tecnico
 
 
+def _humiat_usuario_do_cliente(cliente: Cliente, db: Session) -> HumiatUsuario | None:
+    uid = int(getattr(cliente, "humiat_usuario_id", 0) or 0)
+    if uid:
+        usuario = db.query(HumiatUsuario).filter(HumiatUsuario.id == uid).first()
+        if usuario:
+            return usuario
+    email = (getattr(cliente, "email", None) or "").strip().lower()
+    if email:
+        return db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first()
+    return None
+
+
+def _humiat_empresas_alvo_cliente(
+    cliente: Cliente, db: Session, *, incluir_karaokerj: bool = False
+) -> list[HumiatEmpresa]:
+    """Empresas Humiat que dão contexto aos acessos do cliente.
+
+    O cadastro do Organiza continua sendo a fonte da pessoa. Equipamentos/assinaturas
+    SolVoz definem a empresa usada pelo Cliente Catálogo. A Karaokê RJ só entra como
+    contexto adicional quando o Cliente Site estiver liberado (ou quando não houver
+    outra empresa identificável), evitando que uma renovação de catálogo abra na
+    empresa errada.
+    """
+    empresas: dict[int, HumiatEmpresa] = {}
+    for grupo in _solvoz_grupos_cliente(cliente):
+        origem = grupo.get("empresa")
+        slug = str(getattr(origem, "slug", "") or "").strip().lower()
+        if not slug:
+            continue
+        try:
+            empresa = garantir_empresa_solvoz_humiat(
+                db,
+                str(getattr(origem, "nome", "") or slug).strip(),
+                slug,
+                ativo=int(getattr(origem, "ativo", 1) or 0),
+            )
+            empresas[int(empresa.id)] = empresa
+        except Exception:
+            continue
+
+    if incluir_karaokerj or not empresas:
+        try:
+            padrao = garantir_empresa_solvoz_humiat(db, "Karaokê RJ", "karaokerj", ativo=1)
+            empresas[int(padrao.id)] = padrao
+        except Exception:
+            pass
+    return list(empresas.values())
+
+
+def _humiat_garantir_usuario_cliente(cliente: Cliente, db: Session) -> tuple[HumiatUsuario, bool, bool]:
+    email = (cliente.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("Cadastre um e-mail válido no cliente antes de criar o Humiat ID.")
+
+    usuario = _humiat_usuario_do_cliente(cliente, db)
+    criado = False
+    if usuario and (usuario.email or "").strip().lower() != email:
+        conflito = db.query(HumiatUsuario).filter(
+            func.lower(HumiatUsuario.email) == email,
+            HumiatUsuario.id != int(usuario.id),
+        ).first()
+        if conflito:
+            raise ValueError("Este e-mail já pertence a outro Humiat ID.")
+        usuario.email = email
+
+    if not usuario:
+        usuario = HumiatUsuario(
+            nome=(cliente.nome or email).strip()[:120],
+            email=email,
+            senha_hash=gerar_hash_senha_id(secrets.token_urlsafe(32)),
+            tipo=TIPO_CLIENTE_EMPRESA,
+            ativo=1,
+            organiza_usuario=None,
+            documento=(cliente.documento or "").strip()[:30] or None,
+            telefone=(cliente.whatsapp_completo() or cliente.telefone or "").strip()[:40] or None,
+        )
+        db.add(usuario)
+        db.flush()
+        criado = True
+
+    # A equipe do piloto mantém o mesmo Humiat ID interno, mas agora também fica
+    # visível no cadastro de Clientes para validar exatamente o fluxo real.
+    interno = bool(usuario_humiat_equipe_prioritaria(usuario) or (
+        (usuario.organiza_usuario or "").strip() and usuario_humiat_interno(db, usuario)
+    ))
+    usuario.nome = (cliente.nome or usuario.nome or email).strip()[:120]
+    usuario.email = email
+    usuario.documento = (cliente.documento or usuario.documento or "").strip()[:30] or None
+    usuario.telefone = (cliente.whatsapp_completo() or cliente.telefone or usuario.telefone or "").strip()[:40] or None
+    usuario.ativo = 1
+    if not interno:
+        usuario.tipo = TIPO_CLIENTE_EMPRESA
+        usuario.organiza_usuario = None
+        for empresa in _humiat_empresas_alvo_cliente(cliente, db):
+            vinculo = db.query(HumiatUsuarioEmpresa).filter(
+                HumiatUsuarioEmpresa.usuario_id == int(usuario.id),
+                HumiatUsuarioEmpresa.empresa_id == int(empresa.id),
+            ).first()
+            if not vinculo:
+                db.add(HumiatUsuarioEmpresa(usuario_id=int(usuario.id), empresa_id=int(empresa.id)))
+
+    cliente.humiat_usuario_id = int(usuario.id)
+    db.flush()
+    return usuario, criado, interno
+
+
+def _humiat_contexto_cliente(cliente: Cliente, db: Session) -> dict:
+    usuario = _humiat_usuario_do_cliente(cliente, db)
+    produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
+    acessos = {}
+    if usuario:
+        for produto in produtos:
+            acessos[produto.codigo] = permissoes_usuario_humiat(db, int(usuario.id), produto.codigo)
+    else:
+        for produto in produtos:
+            acessos[produto.codigo] = {
+                "sistema": False, "adm": False, "solvoz_comprado": False, "solvoz_catalogo": False,
+            }
+    return {
+        "usuario": usuario,
+        "produtos": produtos,
+        "acessos": acessos,
+        "ativo": bool(usuario and int(usuario.ativo or 0)),
+        "interno": bool(usuario and usuario_humiat_interno(db, usuario)),
+        "email": (cliente.email or "").strip().lower(),
+    }
+
+
+def _humiat_salvar_acessos_cliente(cliente: Cliente, form: dict, db: Session, request: Request) -> tuple[HumiatUsuario, bool, str]:
+    usuario, criado, interno = _humiat_garantir_usuario_cliente(cliente, db)
+    usuario.ativo = 1 if str(form.get("humiat_ativo") or "0") == "1" else 0
+    produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).all()
+    precisa_cliente_site = False
+    for produto in produtos:
+        codigo = (produto.codigo or "").upper()
+        if codigo == "SOLVOZ":
+            cliente_site = str(form.get(f"produto_{produto.id}_solvoz_site") or "0") == "1"
+            cliente_catalogo = str(form.get(f"produto_{produto.id}_solvoz_catalogo") or "0") == "1"
+            precisa_cliente_site = cliente_site
+            adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1"
+            # O ADM SolVoz é uma função de equipe. Clientes externos usam Site e/ou Catálogo.
+            if not interno:
+                adm = False
+            salvar_permissoes_usuario_humiat(
+                db, int(usuario.id), produto,
+                sistema=(cliente_site or cliente_catalogo), adm=adm,
+                cliente_site=cliente_site, cliente_catalogo=cliente_catalogo,
+            )
+        else:
+            sistema = str(form.get(f"produto_{produto.id}_sistema") or "0") == "1"
+            adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1"
+            salvar_permissoes_usuario_humiat(
+                db, int(usuario.id), produto, sistema=sistema, adm=adm,
+            )
+
+    if not interno:
+        empresas_alvo = _humiat_empresas_alvo_cliente(
+            cliente, db, incluir_karaokerj=precisa_cliente_site
+        )
+        # Garante os vínculos do usuário com exatamente os contextos necessários.
+        for empresa in empresas_alvo:
+            vinculo = db.query(HumiatUsuarioEmpresa).filter(
+                HumiatUsuarioEmpresa.usuario_id == int(usuario.id),
+                HumiatUsuarioEmpresa.empresa_id == int(empresa.id),
+            ).first()
+            if not vinculo:
+                db.add(HumiatUsuarioEmpresa(
+                    usuario_id=int(usuario.id), empresa_id=int(empresa.id)
+                ))
+        for produto in produtos:
+            perm = permissoes_usuario_humiat(db, int(usuario.id), produto.codigo)
+            habilitado = any(bool(v) for v in perm.values())
+            if not habilitado:
+                continue
+            for empresa in empresas_alvo:
+                item = db.query(HumiatEmpresaProduto).filter(
+                    HumiatEmpresaProduto.empresa_id == int(empresa.id),
+                    HumiatEmpresaProduto.produto_id == int(produto.id),
+                ).first()
+                if item:
+                    item.ativo = 1
+                else:
+                    db.add(HumiatEmpresaProduto(
+                        empresa_id=int(empresa.id), produto_id=int(produto.id), ativo=1
+                    ))
+
+    db.commit()
+    mensagem_email = ""
+    if criado and usuario.ativo:
+        try:
+            enviar_link_acesso_humiat(db, usuario, request=request, primeiro_acesso=True)
+            mensagem_email = " Link de primeiro acesso enviado por e-mail."
+        except Exception as exc:
+            mensagem_email = f" O Humiat ID foi criado, mas o e-mail não foi enviado: {str(exc)[:220]}"
+    return usuario, criado, mensagem_email
+
+
+def _vincular_equipe_interna_ao_cadastro_clientes(db: Session) -> int:
+    """Coloca Junior/Débora/Luiz no mesmo cadastro usado pelos clientes reais.
+
+    Não cria uma segunda identidade: apenas encontra/cria a ficha de Cliente e
+    grava nela o Humiat ID que já existia. Assim o piloto valida a regra final.
+    """
+    alterados = 0
+    for hu in db.query(HumiatUsuario).filter(HumiatUsuario.ativo == 1).all():
+        if not usuario_humiat_equipe_prioritaria(hu):
+            continue
+        local = None
+        if (hu.email or "").strip():
+            local = db.query(Usuario).filter(func.lower(Usuario.email) == (hu.email or "").strip().lower()).first()
+        if not local and (hu.organiza_usuario or "").strip():
+            local = db.query(Usuario).filter(Usuario.nome == hu.organiza_usuario.strip()).first()
+        telefone_bruto = (getattr(local, "telefone", None) or hu.telefone or "").strip()
+        try:
+            pais, ddi, telefone = normalizar_contato("BR", "55", telefone_bruto)
+        except Exception:
+            pais, ddi, telefone = "BR", "55", re.sub(r"\D", "", telefone_bruto)
+        if not telefone or not telefone_valido(telefone, pais, ddi):
+            # Sem telefone não inventamos dados só para satisfazer a migração.
+            continue
+
+        cliente = db.query(Cliente).filter(Cliente.humiat_usuario_id == int(hu.id)).first()
+        if not cliente and (hu.email or "").strip():
+            cliente = db.query(Cliente).filter(func.lower(Cliente.email) == (hu.email or "").strip().lower()).first()
+        if not cliente:
+            cliente = db.query(Cliente).filter(Cliente.ddi == ddi, Cliente.telefone == telefone).first()
+        if not cliente:
+            cliente = Cliente(
+                nome=(hu.nome or getattr(local, "nome", None) or "Usuário Humiat").strip(),
+                pais=pais, ddi=ddi, telefone=telefone,
+                empresa="Karaokê RJ", email=(hu.email or "").strip().lower() or None,
+                humiat_usuario_id=int(hu.id), campanhas_ativo=0,
+            )
+            db.add(cliente)
+            alterados += 1
+        elif int(cliente.humiat_usuario_id or 0) != int(hu.id):
+            cliente.humiat_usuario_id = int(hu.id)
+            alterados += 1
+        if not hu.telefone:
+            hu.telefone = numero_internacional(cliente)
+    db.flush()
+    return alterados
+
+
 @app.on_event("startup")
 def iniciar_banco():
     Base.metadata.create_all(bind=engine)
@@ -1146,8 +1396,15 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN ddi VARCHAR(5) NOT NULL DEFAULT '55'"))
             if "campanhas_ativo" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN campanhas_ativo INTEGER NOT NULL DEFAULT 1"))
+            if "humiat_usuario_id" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN humiat_usuario_id INTEGER"))
             conn.execute(text("UPDATE clientes SET pais = 'BR' WHERE pais IS NULL OR pais = ''"))
             conn.execute(text("UPDATE clientes SET ddi = '55' WHERE ddi IS NULL OR ddi = ''"))
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_humiat_usuario ON clientes (humiat_usuario_id) WHERE humiat_usuario_id IS NOT NULL"))
+        except Exception:
+            pass
     if "campanhas" in insp.get_table_names():
         existentes_campanhas = {c["name"] for c in insp.get_columns("campanhas")}
         with engine.begin() as conn:
@@ -1249,6 +1506,10 @@ def iniciar_banco():
             cliente_existente.pais, cliente_existente.ddi, cliente_existente.telefone = normalizar_contato(
                 cliente_existente.pais, cliente_existente.ddi, cliente_existente.telefone
             )
+
+        vinculados_piloto = _vincular_equipe_interna_ao_cadastro_clientes(db)
+        if vinculados_piloto:
+            print(f"[HUMIAT ID] 1.1.33: {vinculados_piloto} ficha(s) da equipe interna vinculada(s) ao cadastro de Clientes.")
 
         # Migra o antigo item "Manutenção" para o campo fixo do orçamento.
         for orcamento_existente in db.query(Orcamento).options(selectinload(Orcamento.itens)).all():
@@ -1877,11 +2138,79 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
         "equipamentos": equipamentos, "status_filtro": status_filtro, "tipo_filtro": tipo_filtro,
         "solvoz_acesso": _solvoz_contexto_cliente(cliente, db),
+        "humiat_acesso": _humiat_contexto_cliente(cliente, db),
         "solvoz_sucesso": request.query_params.get("solvoz_sucesso", ""),
         "solvoz_erro": request.query_params.get("solvoz_erro", ""),
+        "humiat_sucesso": request.query_params.get("humiat_sucesso", ""),
+        "humiat_erro": request.query_params.get("humiat_erro", ""),
         "cnpj_sucesso": request.query_params.get("cnpj_sucesso", ""),
         "cnpj_erro": request.query_params.get("cnpj_erro", ""),
     })
+
+
+@app.post("/organiza/clientes/{cliente_id}/humiat-acesso")
+async def cliente_humiat_salvar_acesso(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    cliente = db.query(Cliente).options(
+        selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
+    ).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    try:
+        form = dict(await request.form())
+        hu, criado, detalhe_email = _humiat_salvar_acessos_cliente(cliente, form, db, request)
+        acao = "Humiat ID criado" if criado else "Acessos Humiat ID atualizados"
+        msg = f"{acao} para {hu.email}.{detalhe_email}".strip()
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?humiat_sucesso={quote_plus(msg)}", status_code=303
+        )
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?humiat_erro={quote_plus(str(exc))}", status_code=303
+        )
+
+
+@app.post("/organiza/clientes/{cliente_id}/humiat-acesso/reenviar")
+def cliente_humiat_reenviar_acesso(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    hu = _humiat_usuario_do_cliente(cliente, db)
+    if not hu:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?humiat_erro={quote_plus('Salve os acessos do cliente antes de reenviar o link.')}",
+            status_code=303,
+        )
+    if not int(hu.ativo or 0):
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?humiat_erro={quote_plus('O Humiat ID está inativo. Ative o acesso e salve antes de reenviar o link.')}",
+            status_code=303,
+        )
+    try:
+        enviar_link_acesso_humiat(db, hu, request=request, primeiro_acesso=False)
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?humiat_sucesso={quote_plus('Novo link enviado por e-mail. O cliente poderá refazer a senha única e manter todos os acessos liberados.')}",
+            status_code=303,
+        )
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?humiat_erro={quote_plus(str(exc))}", status_code=303
+        )
 
 
 @app.post("/organiza/clientes/{cliente_id}/solvoz-acesso")

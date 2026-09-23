@@ -839,6 +839,86 @@ def _enviar_resend_humiat(destino: str, assunto: str, texto: str, html_corpo: st
         raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
 
 
+
+
+def usuario_humiat_interno(db: Session, usuario: HumiatUsuario) -> bool:
+    """API interna estável para o Organiza consultar se a identidade é da equipe."""
+    return _usuario_acesso_interno(db, usuario)
+
+
+def usuario_humiat_equipe_prioritaria(usuario: HumiatUsuario) -> bool:
+    """Junior, Débora e Luiz: perfis usados no piloto central do Humiat ID."""
+    return _usuario_equipe_interna_prioritaria(usuario)
+
+
+def permissoes_usuario_humiat(db: Session, usuario_id: int, codigo: str) -> dict:
+    return _usuario_produto_permissoes(db, usuario_id, codigo)
+
+
+def salvar_permissoes_usuario_humiat(
+    db: Session, usuario_id: int, produto: HumiatProduto, *, sistema: bool = False, adm: bool = False,
+    cliente_site: bool = False, cliente_catalogo: bool = False,
+) -> None:
+    _salvar_usuario_produto_acesso(
+        db, usuario_id, produto, sistema=sistema, adm=adm,
+        solvoz_comprado=cliente_site, solvoz_catalogo=cliente_catalogo,
+    )
+
+
+def enviar_link_acesso_humiat(
+    db: Session, usuario: HumiatUsuario, *, request: Request | None = None, primeiro_acesso: bool = False,
+) -> str:
+    """Gera um único link Humiat ID para criar/refazer a senha de todos os sistemas.
+
+    Links anteriores ainda não utilizados são invalidados. Assim o atendimento pode
+    clicar em "Reenviar link" quantas vezes for necessário sem deixar vários tokens
+    válidos para o mesmo cliente.
+    """
+    if not usuario or not (usuario.email or '').strip():
+        raise ValueError('O usuário precisa ter um e-mail válido no Humiat ID.')
+    agora = datetime.utcnow()
+    db.query(HumiatSenhaReset).filter(
+        HumiatSenhaReset.usuario_id == int(usuario.id),
+        HumiatSenhaReset.usado_em.is_(None),
+    ).update({HumiatSenhaReset.usado_em: agora}, synchronize_session=False)
+    token = _novo_token_reset(db, usuario, request=request)
+    link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
+    nome = (usuario.nome or 'cliente').strip()
+    titulo = 'Crie sua senha' if primeiro_acesso else 'Refaça seu acesso'
+    texto = (
+        f"Olá, {nome}.\n\n"
+        f"{titulo} do Humiat ID pelo link abaixo.\n"
+        "O mesmo Humiat ID será usado em todos os sistemas liberados para você.\n\n"
+        f"Link válido por {RESET_MINUTES} minutos:\n{link}\n\n"
+        "Se precisar de ajuda, responda ao atendimento que enviou este acesso.\n"
+    )
+    html_nome = html.escape(nome)
+    html_link = html.escape(link, quote=True)
+    html_corpo = f"""
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
+      <h2 style="margin-bottom:8px">Humiat ID</h2>
+      <p>Olá, {html_nome}.</p>
+      <p>{titulo} pelo botão abaixo.</p>
+      <p><strong>Um único login</strong> dá acesso a todos os sistemas que estiverem liberados no seu cadastro.</p>
+      <p style="margin:28px 0"><a href="{html_link}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">{titulo}</a></p>
+      <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
+      <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{html_link}</p>
+    </div>
+    """
+    _enviar_resend_humiat(
+        usuario.email,
+        'Humiat ID - Seu acesso' if primeiro_acesso else 'Humiat ID - Refazer acesso',
+        texto, html_corpo, user_agent='HUMIAT-Organiza/1.1.33',
+    )
+    if request:
+        _auditar(
+            db, request, 'HUMIAT_LINK_ACESSO_ENVIADO', usuario_id=usuario.id,
+            detalhe='primeiro_acesso=1' if primeiro_acesso else 'reenvio=1',
+        )
+    db.commit()
+    return link
+
+
 def enviar_email_solvoz_senha_provisoria(
     destino: str,
     nome: str,
@@ -1381,11 +1461,45 @@ def concluir_reset_humiat(request: Request, token: str = Form(...), senha: str =
     return RedirectResponse("/entrar?erro=Senha redefinida. Entre com a nova senha.", status_code=303)
 
 
+def _tentar_migrar_senha_do_organiza(db: Session, usuario: HumiatUsuario, senha: str) -> bool:
+    """Fallback de migração para identidades Humiat já existentes.
+
+    Algumas contas (ex.: equipe interna criada antes do Humiat ID) já existiam em
+    ``humiat_usuarios`` com uma senha própria, enquanto o usuário real continuava
+    usando a senha do Organiza. Se a senha Humiat falhar, valida a senha atual na
+    tabela central ``usuarios`` pelo mesmo e-mail e, se estiver correta, promove
+    essa senha para o Humiat ID. Isso evita exigir redefinição manual na migração.
+    """
+    if not usuario or not senha or not (usuario.email or "").strip():
+        return False
+    try:
+        row = db.execute(text("""
+            SELECT id, senha_hash
+            FROM usuarios
+            WHERE ativo=1 AND LOWER(COALESCE(email,''))=:email
+            ORDER BY id
+            LIMIT 1
+        """), {"email": (usuario.email or "").strip().lower()}).mappings().first()
+    except Exception:
+        return False
+    if not row or not _verificar_hash_organiza_legado(senha, str(row.get("senha_hash") or "")):
+        return False
+    usuario.senha_hash = gerar_hash_senha_id(senha)
+    if not (usuario.organiza_usuario or "").strip():
+        nome_row = db.execute(text("SELECT nome FROM usuarios WHERE id=:id"), {"id": int(row["id"])}).first()
+        if nome_row and nome_row[0]:
+            usuario.organiza_usuario = str(nome_row[0]).strip()
+    return True
+
+
 @router.post("/entrar")
 def entrar_humiat(request: Request, email: str = Form(...), senha: str = Form(...), next: str = Form(""), db: Session = Depends(get_db)):
     login = email.strip().lower()
     usuario = db.query(HumiatUsuario).filter(HumiatUsuario.email == login, HumiatUsuario.ativo == 1).first()
-    if not usuario or not verificar_senha_id(senha, usuario.senha_hash):
+    senha_ok = bool(usuario and verificar_senha_id(senha, usuario.senha_hash))
+    if usuario and not senha_ok:
+        senha_ok = _tentar_migrar_senha_do_organiza(db, usuario, senha)
+    if not usuario or not senha_ok:
         _auditar(db, request, "LOGIN_FALHOU", detalhe=login)
         db.commit()
         destino_erro = "/entrar?" + urllib.parse.urlencode({"erro": "E-mail ou senha inválidos", "next": next or "/painel"})
@@ -1438,14 +1552,21 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
     elif empresas:
         empresa = empresas[0]
 
-    produtos = produtos_da_empresa(db, empresa.id) if empresa else []
-    # APP 8.7: qualquer usuário com empresa vinculada é cliente daquela empresa
-    # e enxerga somente o SolVoz, independentemente do valor legado de `tipo`.
-    if not _usuario_acesso_interno(db, usuario):
-        produtos = [p for p in produtos if (p.codigo or "").upper() == "SOLVOZ"]
+    # APP 1.1.33: para clientes, a fonte dos acessos deixa de ser uma regra fixa
+    # do produto e passa a ser exatamente o que foi marcado no cadastro do
+    # Cliente dentro do Organiza. A empresa apenas dá o contexto/tenant.
+    produtos_todos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
+    meus_acessos = {p.codigo: _usuario_produto_permissoes(db, usuario.id, p.codigo) for p in produtos_todos}
+    produtos = [
+        p for p in produtos_todos
+        if any(bool(v) for v in meus_acessos.get(p.codigo, {}).values())
+    ]
     return templates.TemplateResponse(
         "humiat/painel.html",
-        {"request": request, "usuario": usuario, "empresas": empresas, "empresa": empresa, "produtos": produtos, "admin_humiat": False},
+        {
+            "request": request, "usuario": usuario, "empresas": empresas, "empresa": empresa,
+            "produtos": produtos, "meus_acessos": meus_acessos, "admin_humiat": False,
+        },
     )
 
 
@@ -1469,22 +1590,19 @@ def abrir_produto(
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
 
-    if acesso_interno:
-        perm = _usuario_produto_permissoes(db, usuario.id, codigo)
-        if modo == "adm":
-            permitido, rotulo = perm["adm"], "ADM"
-        elif modo == "cliente_site":
-            permitido, rotulo = perm["solvoz_comprado"], "Cliente Site"
-        elif modo == "cliente_catalogo":
-            permitido, rotulo = perm["solvoz_catalogo"], "Cliente Catálogo"
-        else:
-            permitido, rotulo = perm["sistema"], "sistema"
-        if not permitido:
-            raise HTTPException(status_code=403, detail=f"Seu Humiat ID não possui acesso ao perfil {rotulo} de {produto.nome}.")
+    perm = _usuario_produto_permissoes(db, usuario.id, codigo)
+    if modo == "adm":
+        permitido, rotulo = perm["adm"], "ADM"
+    elif modo == "cliente_site":
+        permitido, rotulo = perm["solvoz_comprado"], "Cliente Site"
+    elif modo == "cliente_catalogo":
+        permitido, rotulo = perm["solvoz_catalogo"], "Cliente Catálogo"
     else:
-        # Usuários de empresa, nesta fase, entram somente no modo de sistema.
-        if modo != "sistema" or codigo != "SOLVOZ":
-            raise HTTPException(status_code=403, detail="Acesso não autorizado")
+        permitido, rotulo = perm["sistema"], "Usuário"
+    if not permitido:
+        raise HTTPException(status_code=403, detail=f"Seu Humiat ID não possui acesso ao perfil {rotulo} de {produto.nome}.")
+    if not acesso_interno and codigo == "SOLVOZ" and modo == "adm":
+        raise HTTPException(status_code=403, detail="ADM SolVoz é exclusivo da equipe interna.")
 
     empresas = empresas_do_usuario(db, usuario)
     empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else (empresas[0] if len(empresas) == 1 else None)
@@ -1506,7 +1624,15 @@ def abrir_produto(
     # Cliente Site e Cliente Catálogo também usam SSO. Para o piloto da equipe
     # interna, ambos entram no contexto da Karaokê RJ sem novo login.
     empresa_sso = empresa
-    if codigo == "SOLVOZ" and acesso_interno and modo in {"cliente_site", "cliente_catalogo"}:
+    if codigo == "SOLVOZ" and modo == "cliente_site":
+        karaoke = db.query(HumiatEmpresa).filter(
+            HumiatEmpresa.slug == "karaokerj", HumiatEmpresa.ativo == 1
+        ).first()
+        if karaoke and (acesso_interno or any(int(e.id) == int(karaoke.id) for e in empresas)):
+            empresa_sso = karaoke
+    elif codigo == "SOLVOZ" and acesso_interno and modo == "cliente_catalogo":
+        # Piloto interno abre o Catálogo da Karaokê RJ. Clientes reais usam a
+        # empresa selecionada no próprio cadastro/vínculo.
         empresa_sso = db.query(HumiatEmpresa).filter(
             HumiatEmpresa.slug == "karaokerj", HumiatEmpresa.ativo == 1
         ).first()
@@ -1527,10 +1653,13 @@ def abrir_produto(
     if produto.url_sso:
         token = secrets.token_urlsafe(40)
         ticket_empresa_id = (empresa_sso.id if empresa_sso else None) if (codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}) else (None if acesso_interno else (empresa.id if empresa else None))
+        destino_slug = None
+        if codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}:
+            destino_slug = (empresa_sso.slug if empresa_sso else "karaokerj")
         db.add(HumiatSSOTicket(
             token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id,
             produto_codigo=codigo, acesso_modo=modo,
-            destino_slug="karaokerj" if (codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}) else None,
+            destino_slug=destino_slug,
             expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)
         ))
         db.commit()
@@ -1565,6 +1694,9 @@ def acessar_solvoz_empresa(empresa_slug: str, request: Request, db: Session = De
         ).first()
         if not permitido:
             raise HTTPException(status_code=403, detail="Empresa não autorizada para este usuário")
+        perm = _usuario_produto_permissoes(db, usuario.id, "SOLVOZ")
+        if not perm.get("solvoz_catalogo"):
+            raise HTTPException(status_code=403, detail="Seu Humiat ID não possui acesso ao Cliente Catálogo.")
     if not _empresa_tem_produto(db, empresa.id, "SOLVOZ"):
         raise HTTPException(status_code=403, detail="SolVoz não habilitado para esta empresa")
     produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == "SOLVOZ", HumiatProduto.ativo == 1).first()
