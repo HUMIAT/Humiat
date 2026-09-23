@@ -3800,3 +3800,16 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
   .campanha-acao-principal-mobile{bottom:calc(10px + env(safe-area-inset-bottom))}
   body.modo-campanha-envio .campanha-envio-cabecalho{top:calc(64px + env(safe-area-inset-top))}
 }
+
+/* Organiza 1.1.27 - Campanhas com link próprio e edição */
+.campanha-detalhe-acoes{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.campanha-link-preview{display:grid;gap:5px;padding:13px 15px;border:1px solid #dbeafe;border-radius:14px;background:#eff6ff;min-width:0}
+.campanha-link-preview small{color:#64748b;font-weight:700}
+.campanha-link-preview a{color:#1d4ed8;font-weight:800;overflow-wrap:anywhere;text-decoration:none}
+.campanha-link-preview a:hover{text-decoration:underline}
+@media(max-width:760px){
+  .campanha-detalhe-acoes{display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .campanha-detalhe-acoes .botao{width:100%;justify-content:center}
+  .campanha-link-preview{padding:12px;font-size:.88rem}
+}
+@media(max-width:390px){.campanha-detalhe-acoes{grid-template-columns:1fr}}

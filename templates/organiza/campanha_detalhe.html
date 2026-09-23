@@ -7,7 +7,10 @@
       <h1>{{ campanha.nome }}</h1>
       <p class="texto-suave">Clientes de Atualização · pacote {{ campanha.pacote_alvo }}</p>
     </div>
-    <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
+    <div class="campanha-detalhe-acoes">
+      <a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">Editar campanha</a>
+      <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
+    </div>
   </div>
 
   {% if erro == 'nenhum_cliente' %}<div class="alerta erro">Não há clientes ativos para esta campanha.</div>{% endif %}
@@ -22,8 +25,8 @@
       {% endif %}
     </div>
     <div class="campanha-mensagem-preview">{{ campanha.mensagem }}</div>
-    {% if campanha.imagem_token %}
-      <img class="campanha-imagem-preview" src="/campanhas/midia/{{ campanha.imagem_token }}/arquivo" alt="Imagem da campanha">
+    {% if campanha.link %}
+      <div class="campanha-link-preview"><small>Link da campanha</small><a href="{{ campanha.link }}" target="_blank" rel="noopener">{{ campanha.link }}</a></div>
     {% endif %}
   </section>
 

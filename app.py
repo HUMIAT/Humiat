@@ -635,6 +635,7 @@ class Campanha(Base):
     nome = Column(String(160), nullable=False)
     lista_tipo = Column(String(30), nullable=False, default="ATUALIZACAO")
     mensagem = Column(Text, nullable=False)
+    link = Column(String(1000), nullable=True)
     pacote_alvo = Column(String(30), nullable=True)
     status = Column(String(20), nullable=False, default="RASCUNHO")
     criado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
@@ -1144,6 +1145,11 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN campanhas_ativo INTEGER NOT NULL DEFAULT 1"))
             conn.execute(text("UPDATE clientes SET pais = 'BR' WHERE pais IS NULL OR pais = ''"))
             conn.execute(text("UPDATE clientes SET ddi = '55' WHERE ddi IS NULL OR ddi = ''"))
+    if "campanhas" in insp.get_table_names():
+        existentes_campanhas = {c["name"] for c in insp.get_columns("campanhas")}
+        with engine.begin() as conn:
+            if "link" not in existentes_campanhas:
+                conn.execute(text("ALTER TABLE campanhas ADD COLUMN link VARCHAR(1000)"))
     if "nfse_rascunhos" in insp.get_table_names():
         existentes_nfse = {c["name"] for c in insp.get_columns("nfse_rascunhos")}
         with engine.begin() as conn:
@@ -2073,9 +2079,9 @@ def _cliente_elegivel_atualizacao(cliente: Cliente, pacote_alvo: str) -> bool:
 
 def _mensagem_campanha(campanha: Campanha, cliente: Cliente) -> str:
     mensagem = (campanha.mensagem or "").strip().replace("{nome}", (cliente.nome or "").strip())
-    if campanha.imagem_token:
-        url_imagem = f"{PUBLIC_BASE_URL}/campanhas/midia/{campanha.imagem_token}"
-        mensagem = f"{mensagem}\n\n{url_imagem}".strip()
+    link = (getattr(campanha, "link", None) or "").strip()
+    if link:
+        mensagem = f"{mensagem}\n\n{link}".strip()
     return mensagem
 
 
@@ -2182,21 +2188,23 @@ def campanha_nova(request: Request, usuario: Usuario = Depends(usuario_logado), 
         "request": request, "usuario": usuario, "erro": "",
         "pacote_atual": obter_pacote_atual(db),
         "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "form_link": "", "campanha": None, "modo_edicao": False,
     })
 
 
 @app.post("/organiza/campanhas/nova")
-async def campanha_criar(
+def campanha_criar(
     request: Request,
     nome: str = Form(...),
     lista_tipo: str = Form("ATUALIZACAO"),
     mensagem: str = Form(...),
-    imagem: UploadFile | None = File(None),
+    link: str = Form(""),
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
     nome = (nome or "").strip()
     mensagem = (mensagem or "").strip()
+    link = (link or "").strip()
     lista_tipo = (lista_tipo or "ATUALIZACAO").strip().upper()
     erro = ""
     if not nome:
@@ -2205,21 +2213,8 @@ async def campanha_criar(
         erro = "Nesta etapa está disponível somente a lista de Clientes de Atualização."
     elif not mensagem:
         erro = "Informe a mensagem da campanha."
-
-    imagem_bytes = None
-    imagem_mime = None
-    imagem_nome = None
-    imagem_token = None
-    if not erro and imagem and imagem.filename:
-        imagem_bytes = await imagem.read()
-        imagem_mime = (imagem.content_type or "").lower()
-        imagem_nome = Path(imagem.filename).name[:180]
-        if not imagem_mime.startswith("image/"):
-            erro = "O arquivo opcional precisa ser uma imagem."
-        elif len(imagem_bytes) > 5 * 1024 * 1024:
-            erro = "A imagem deve ter no máximo 5 MB."
-        else:
-            imagem_token = secrets.token_urlsafe(24)
+    elif len(link) > 1000:
+        erro = "O link deve ter no máximo 1000 caracteres."
 
     if erro:
         elegiveis = _clientes_lista_atualizacao(db)
@@ -2227,19 +2222,80 @@ async def campanha_criar(
             "request": request, "usuario": usuario, "erro": erro,
             "pacote_atual": obter_pacote_atual(db),
             "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
-            "form_nome": nome, "form_mensagem": mensagem,
+            "form_nome": nome, "form_mensagem": mensagem, "form_link": link,
+            "campanha": None, "modo_edicao": False,
         }, status_code=400)
 
     campanha = Campanha(
-        nome=nome, lista_tipo="ATUALIZACAO", mensagem=mensagem,
+        nome=nome, lista_tipo="ATUALIZACAO", mensagem=mensagem, link=link or None,
         pacote_alvo=obter_pacote_atual(db), status="RASCUNHO",
         criado_por_id=usuario.id,
-        imagem_nome=imagem_nome, imagem_mime=imagem_mime,
-        imagem_bytes=imagem_bytes, imagem_token=imagem_token,
     )
     db.add(campanha)
     db.commit()
     db.refresh(campanha)
+    return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
+
+
+@app.get("/organiza/campanhas/{campanha_id}/editar", response_class=HTMLResponse)
+def campanha_editar(
+    campanha_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+    return templates.TemplateResponse("organiza/campanha_form.html", {
+        "request": request, "usuario": usuario, "erro": "",
+        "pacote_atual": campanha.pacote_alvo or obter_pacote_atual(db),
+        "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "form_nome": campanha.nome, "form_mensagem": campanha.mensagem, "form_link": campanha.link or "",
+        "campanha": campanha, "modo_edicao": True,
+    })
+
+
+@app.post("/organiza/campanhas/{campanha_id}/editar")
+def campanha_salvar_edicao(
+    campanha_id: int,
+    request: Request,
+    nome: str = Form(...),
+    mensagem: str = Form(...),
+    link: str = Form(""),
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+
+    nome = (nome or "").strip()
+    mensagem = (mensagem or "").strip()
+    link = (link or "").strip()
+    erro = ""
+    if not nome:
+        erro = "Informe o nome da campanha."
+    elif not mensagem:
+        erro = "Informe a mensagem da campanha."
+    elif len(link) > 1000:
+        erro = "O link deve ter no máximo 1000 caracteres."
+
+    if erro:
+        elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+        return templates.TemplateResponse("organiza/campanha_form.html", {
+            "request": request, "usuario": usuario, "erro": erro,
+            "pacote_atual": campanha.pacote_alvo or obter_pacote_atual(db),
+            "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+            "form_nome": nome, "form_mensagem": mensagem, "form_link": link,
+            "campanha": campanha, "modo_edicao": True,
+        }, status_code=400)
+
+    campanha.nome = nome
+    campanha.mensagem = mensagem
+    campanha.link = link or None
+    db.commit()
     return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
 
 

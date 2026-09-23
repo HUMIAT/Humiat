@@ -3,16 +3,16 @@
 <section class="pagina-clean campanhas-pagina campanha-form-pagina">
   <div class="titulo-linha campanhas-topo">
     <div>
-      <p class="tag">Nova campanha</p>
-      <h1>Criar campanha</h1>
+      <p class="tag">{% if modo_edicao %}Editar campanha{% else %}Nova campanha{% endif %}</p>
+      <h1>{% if modo_edicao %}Editar campanha{% else %}Criar campanha{% endif %}</h1>
       <p class="texto-suave">{{ total_elegiveis }} clientes ativos na Lista de Atualização.</p>
     </div>
-    <a class="botao fantasma" href="/organiza/campanhas">Cancelar</a>
+    <a class="botao fantasma" href="{% if campanha %}/organiza/campanhas/{{ campanha.id }}{% else %}/organiza/campanhas{% endif %}">Cancelar</a>
   </div>
 
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 
-  <form method="post" enctype="multipart/form-data" class="cartao campanha-form">
+  <form method="post" action="{% if modo_edicao %}/organiza/campanhas/{{ campanha.id }}/editar{% else %}/organiza/campanhas/nova{% endif %}" class="cartao campanha-form">
     <label class="campo-form">
       <span>Nome da campanha</span>
       <input name="nome" value="{{ form_nome or '' }}" placeholder="Ex.: Natal e Ano Novo" required autofocus>
@@ -33,13 +33,13 @@
     </label>
 
     <label class="campo-form">
-      <span>Foto (opcional)</span>
-      <input type="file" name="imagem" accept="image/*">
-      <small>Até 5 MB. Quando houver foto, o link dela será incluído na mensagem para gerar a visualização no WhatsApp.</small>
+      <span>Link (opcional)</span>
+      <input type="url" name="link" value="{{ form_link or '' }}" placeholder="https://karaokerj.com.br/..." inputmode="url" autocomplete="url">
+      <small>Digite o link desta campanha. Pode ser uma página de informações, aluguel, atualização ou compra direta.</small>
     </label>
 
     <div class="campanha-form-acoes campanha-acao-principal-mobile">
-      <button class="botao primario campanha-botao-grande" type="submit">Salvar campanha</button>
+      <button class="botao primario campanha-botao-grande" type="submit">{% if modo_edicao %}Salvar alterações{% else %}Salvar campanha{% endif %}</button>
     </div>
   </form>
 </section>
