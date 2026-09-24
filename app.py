@@ -681,6 +681,14 @@ class CampanhaDestinatario(Base):
     reservado_em = Column(DateTime, nullable=True)
     enviado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     enviado_em = Column(DateTime, nullable=True)
+    # Snapshot calculado ao iniciar a campanha. Evita recalcular a cada cliente
+    # e permite dois atendentes trabalharem na mesma fila sem divergência.
+    mensagem_pronta = Column(Text, nullable=True)
+    telefone_pronto = Column(String(40), nullable=True)
+    link_pronto = Column(String(1000), nullable=True)
+    pacotes_prontos = Column(Text, nullable=True)
+    valor_normal_centavos = Column(Integer, nullable=True)
+    valor_promocional_centavos = Column(Integer, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     campanha = relationship("Campanha", back_populates="destinatarios")
     cliente = relationship("Cliente")
@@ -731,6 +739,14 @@ class CampanhaAluguelDestinatario(Base):
     reservado_em = Column(DateTime, nullable=True)
     enviado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     enviado_em = Column(DateTime, nullable=True)
+    # Snapshot calculado ao iniciar a campanha. Evita recalcular a cada cliente
+    # e permite dois atendentes trabalharem na mesma fila sem divergência.
+    mensagem_pronta = Column(Text, nullable=True)
+    telefone_pronto = Column(String(40), nullable=True)
+    link_pronto = Column(String(1000), nullable=True)
+    pacotes_prontos = Column(Text, nullable=True)
+    valor_normal_centavos = Column(Integer, nullable=True)
+    valor_promocional_centavos = Column(Integer, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     campanha = relationship("Campanha")
     contato = relationship("CampanhaAluguelContato")
@@ -1443,6 +1459,30 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "aluguel_mes" not in existentes_campanhas:
                 conn.execute(text("ALTER TABLE campanhas ADD COLUMN aluguel_mes INTEGER"))
+    # Campanhas 1.1.41: reserva multiatendente + snapshot da mensagem.
+    # Também corrige instalações que já tinham as classes novas, mas ainda não
+    # possuíam as colunas físicas no banco existente.
+    tipo_dt_campanha = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+    for tabela_dest in ("campanha_destinatarios", "campanha_aluguel_destinatarios"):
+        if tabela_dest in insp.get_table_names():
+            existentes_dest = {c["name"] for c in insp.get_columns(tabela_dest)}
+            campos_dest = {
+                "reservado_por_id": "INTEGER",
+                "reservado_em": tipo_dt_campanha,
+                "enviado_por_id": "INTEGER",
+                "enviado_em": tipo_dt_campanha,
+                "mensagem_pronta": "TEXT",
+                "telefone_pronto": "VARCHAR(40)",
+                "link_pronto": "VARCHAR(1000)",
+                "pacotes_prontos": "TEXT",
+                "valor_normal_centavos": "INTEGER",
+                "valor_promocional_centavos": "INTEGER",
+            }
+            with engine.begin() as conn:
+                for coluna, tipo_sql in campos_dest.items():
+                    if coluna not in existentes_dest:
+                        conn.execute(text(f"ALTER TABLE {tabela_dest} ADD COLUMN {coluna} {tipo_sql}"))
+
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
@@ -2460,48 +2500,74 @@ def api_consultar_cnpj_admin(cnpj: str, usuario: Usuario = Depends(usuario_logad
 PACOTE_ATUAL_PADRAO = "2026.1"
 
 
+def _pacote_release_num(valor: str | None) -> int | None:
+    texto = (valor or "").strip().replace("-", ".").replace(",", ".")
+    m = re.fullmatch(r"(\d{4})\.(\d{1,2})", texto)
+    if not m:
+        return None
+    ano, parte = map(int, m.groups())
+    if parte < 0 or parte > 99:
+        return None
+    return ano * 100 + parte
+
+
+def _pacote_label_num(valor: int) -> str:
+    valor = int(valor)
+    return f"{valor // 100}.{valor % 100}"
+
+
 def obter_pacote_atual(db: Session) -> str:
-    configuracao = db.query(ConfiguracaoSistema).filter(
-        ConfiguracaoSistema.chave == "pacote_atual"
-    ).first()
+    configuracao = db.query(Configuracao).filter(Configuracao.chave == "pacote_atual").first()
     valor = (configuracao.valor if configuracao else PACOTE_ATUAL_PADRAO) or PACOTE_ATUAL_PADRAO
-    valor = valor.strip()
-    return valor if re.fullmatch(r"\d{4}\.[12]", valor) else PACOTE_ATUAL_PADRAO
+    valor = valor.strip().replace("-", ".")
+    return valor if _pacote_release_num(valor) is not None else PACOTE_ATUAL_PADRAO
+
+
+def _pacotes_disponiveis_solvoz() -> list[str]:
+    try:
+        promo = _solvoz_atualizacao_promocao_config()
+    except Exception:
+        promo = {}
+    bruto = promo.get("pacotes_disponiveis") if isinstance(promo, dict) else []
+    vistos = set()
+    saida = []
+    for item in (bruto or []):
+        label = str(item or "").strip().replace("-", ".")
+        numero = _pacote_release_num(label)
+        if numero is None or numero in vistos:
+            continue
+        vistos.add(numero)
+        saida.append((numero, _pacote_label_num(numero)))
+    saida.sort(key=lambda x: x[0])
+    return [label for _, label in saida]
 
 
 def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_PADRAO) -> int | None:
-    """Calcula quantas atualizações semestrais faltam até o pacote atual cadastrado."""
-    valor = (pacote or "").strip().upper()
-    atual = re.fullmatch(r"(\d{4})\.([12])", pacote_atual)
-    informado = re.fullmatch(r"(\d{4})\.([12])", valor)
-    if not atual or not informado:
+    """Conta pacotes reais do SolVoz, aceitando versões como 2023.3."""
+    origem = _pacote_release_num(pacote)
+    alvo = _pacote_release_num(pacote_atual)
+    if origem is None or alvo is None:
         return None
-
-    ano_atual, semestre_atual = map(int, atual.groups())
-    ano_pacote, semestre_pacote = map(int, informado.groups())
-    indice_atual = ano_atual * 2 + semestre_atual
-    indice_pacote = ano_pacote * 2 + semestre_pacote
-    return max(indice_atual - indice_pacote, 0)
+    if origem >= alvo:
+        return 0
+    disponiveis = _pacotes_disponiveis_solvoz()
+    if disponiveis:
+        nums = [_pacote_release_num(x) for x in disponiveis]
+        return sum(1 for n in nums if n is not None and origem < n <= alvo)
+    # Fallback apenas para indisponibilidade temporária da integração.
+    return 1
 
 
 def _pacote_indice(valor: str | None) -> int | None:
-    texto = (valor or "").strip().replace("-", ".")
-    m = re.fullmatch(r"(\d{4})\.([12])", texto)
-    if not m:
-        return None
-    ano, semestre = map(int, m.groups())
-    return ano * 2 + semestre
+    return _pacote_release_num(valor)
 
 
 def _pacote_por_indice(indice: int) -> str:
-    ano, resto = divmod(int(indice) - 1, 2)
-    semestre = resto + 1
-    return f"{ano}.{semestre}"
+    return _pacote_label_num(indice)
 
 
 def _pacote_url(valor: str) -> str:
     return (valor or "").strip().replace(".", "-")
-
 
 ATUALIZACAO_PRECO_PACOTE_CENTAVOS = 25000
 ATUALIZACAO_PROMO_TOTAL_CENTAVOS = 25000
@@ -2522,6 +2588,7 @@ def _solvoz_atualizacao_promocao_config() -> dict:
         "desconto_uma_centavos": ATUALIZACAO_PROMO_DESCONTO_UMA_CENTAVOS,
         "valida_ate": "", "valida_ate_br": "",
         "preco_pacote_centavos": ATUALIZACAO_PRECO_PACOTE_CENTAVOS,
+        "pacotes_disponiveis": [],
     }
     try:
         dados = _solvoz_api_request("/api/integracoes/organiza/atualizacao-promocao")
@@ -2553,24 +2620,34 @@ def _valores_atualizacao_cliente(pacotes: list[str]) -> dict:
 
 
 def _pacotes_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> list[str]:
-    """Retorna os pacotes pendentes do equipamento mais desatualizado até o alvo."""
+    """Usa a lista real de releases do SolVoz, que é a mesma fonte do popup."""
     if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO" or not cliente:
         return []
     pacote_alvo = (campanha.pacote_alvo or PACOTE_ATUAL_PADRAO).strip()
-    alvo_indice = _pacote_indice(pacote_alvo)
-    if alvo_indice is None:
+    alvo = _pacote_release_num(pacote_alvo)
+    if alvo is None:
         return []
-    indices_origem = []
+    origens = []
     for eq in (cliente.equipamentos or []):
-        if not _equipamento_tem_atualizacao(eq, pacote_alvo):
+        if (eq.status or "").strip().lower() != "ativo":
             continue
-        indice = _pacote_indice((eq.pacote or "").strip())
-        if indice is not None and indice < alvo_indice:
-            indices_origem.append(indice)
-    if not indices_origem:
+        origem = _pacote_release_num((eq.pacote or "").strip())
+        if origem is not None and origem < alvo:
+            origens.append(origem)
+    if not origens:
         return []
-    inicio = min(indices_origem) + 1
-    return [_pacote_por_indice(i) for i in range(inicio, alvo_indice + 1)]
+    origem = min(origens)
+    disponiveis = _pacotes_disponiveis_solvoz()
+    pacotes = []
+    for label in disponiveis:
+        numero = _pacote_release_num(label)
+        if numero is not None and origem < numero <= alvo:
+            pacotes.append(_pacote_label_num(numero))
+    if pacotes:
+        return pacotes
+    # Fallback conservador: mantém ao menos o alvo; em operação normal a lista
+    # vem do SolVoz e este caminho não é usado.
+    return [_pacote_label_num(alvo)]
 
 
 def _token_contexto_atualizacao(cliente: Cliente, pacotes: list[str]) -> str:
@@ -2588,10 +2665,11 @@ def _token_contexto_atualizacao(cliente: Cliente, pacotes: list[str]) -> str:
 def _registrar_oferta_atualizacao_cliente(
     cliente: Cliente, campanha: Campanha, status: str, order_nsu: str = "",
     valor_normal_centavos: int | None = None, valor_promocional_centavos: int | None = None,
+    pacotes_override: list[str] | None = None,
 ) -> None:
     if not cliente or not campanha:
         return
-    pacotes = _pacotes_atualizacao_cliente(campanha, cliente)
+    pacotes = list(pacotes_override or []) or _pacotes_atualizacao_cliente(campanha, cliente)
     if not pacotes:
         return
     cliente.atualizacao_oferta_status = (status or "OFERTA_ENVIADA")[:30]
@@ -2728,9 +2806,64 @@ def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
     return mensagem
 
 
+def _whatsapp_url_pronta(telefone: str, mensagem: str) -> str:
+    numero = re.sub(r"\D", "", telefone or "")
+    return f"https://wa.me/{numero}?{urlencode({'text': mensagem or ''})}"
+
+
 def _whatsapp_campanha_url(campanha: Campanha, pessoa) -> str:
-    numero = re.sub(r"\D", "", pessoa.whatsapp_completo() or "")
-    return f"https://wa.me/{numero}?{urlencode({'text': _mensagem_campanha(campanha, pessoa)})}"
+    return _whatsapp_url_pronta(pessoa.whatsapp_completo() or "", _mensagem_campanha(campanha, pessoa))
+
+
+def _preparar_snapshot_destinatario(campanha: Campanha, destinatario, pessoa) -> None:
+    """Congela mensagem/link/preço antes do início do envio rápido."""
+    if not campanha or not destinatario or not pessoa:
+        return
+    telefone = re.sub(r"\D", "", pessoa.whatsapp_completo() or "")
+    mensagem = _mensagem_campanha(campanha, pessoa)
+    link = ""
+    pacotes: list[str] = []
+    valor_normal = None
+    valor_promo = None
+    if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
+        pacotes = _pacotes_atualizacao_cliente(campanha, pessoa)
+        link = _link_atualizacao_cliente(campanha, pessoa)
+        valores = _valores_atualizacao_cliente(pacotes) if pacotes else {}
+        valor_normal = int(valores.get("normal_centavos") or 0) if valores else None
+        valor_promo = int(valores.get("cobrado_centavos") or 0) if valores else None
+        if pacotes:
+            _registrar_oferta_atualizacao_cliente(
+                pessoa, campanha, "PREPARADA",
+                valor_normal_centavos=valor_normal,
+                valor_promocional_centavos=valor_promo,
+                pacotes_override=pacotes,
+            )
+    else:
+        link = (campanha.link or "").strip()
+    destinatario.telefone_pronto = telefone[:40] or None
+    destinatario.mensagem_pronta = mensagem
+    destinatario.link_pronto = link[:1000] or None
+    destinatario.pacotes_prontos = json.dumps(pacotes, ensure_ascii=False) if pacotes else None
+    destinatario.valor_normal_centavos = valor_normal
+    destinatario.valor_promocional_centavos = valor_promo
+
+
+def _precalcular_mensagens_campanha(db: Session, campanha: Campanha) -> None:
+    """Calcula toda a fila uma única vez; depois cada clique só salva e avança."""
+    if (campanha.lista_tipo or "").upper() == "ALUGUEL":
+        destinos = db.query(CampanhaAluguelDestinatario).options(
+            selectinload(CampanhaAluguelDestinatario.contato)
+        ).filter(CampanhaAluguelDestinatario.campanha_id == campanha.id).all()
+        for dest in destinos:
+            if not dest.mensagem_pronta and dest.contato:
+                _preparar_snapshot_destinatario(campanha, dest, dest.contato)
+    else:
+        destinos = db.query(CampanhaDestinatario).options(
+            selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
+        ).filter(CampanhaDestinatario.campanha_id == campanha.id).all()
+        for dest in destinos:
+            if not dest.mensagem_pronta and dest.cliente:
+                _preparar_snapshot_destinatario(campanha, dest, dest.cliente)
 
 
 def _modelo_destinatario_campanha(campanha: Campanha | None):
@@ -2747,13 +2880,27 @@ def _contagens_campanha(db: Session, campanha_id: int) -> dict:
     ).group_by(modelo.status).all()
     contagens = {status: int(qtd) for status, qtd in linhas}
     total = sum(contagens.values())
-    enviados = contagens.get("ENVIADO", 0)
+    processados = contagens.get("PROCESSADO", 0) + contagens.get("ENVIADO", 0)
     ignorados = contagens.get("IGNORADO", 0)
     pendentes = contagens.get("PENDENTE", 0) + contagens.get("EM_ENVIO", 0)
-    return {"total": total, "enviados": enviados, "ignorados": ignorados, "pendentes": pendentes, **contagens}
+    return {"total": total, "enviados": processados, "processados": processados, "ignorados": ignorados, "pendentes": pendentes, **contagens}
 
 
 def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaDestinatario | None:
+    # Reserva abandonada volta à fila depois de 30 min. O update condicional
+    # abaixo impede dois atendentes de pegarem o mesmo cliente.
+    limite = datetime.now() - timedelta(minutes=30)
+    db.query(CampanhaDestinatario).filter(
+        CampanhaDestinatario.campanha_id == campanha.id,
+        CampanhaDestinatario.status == "EM_ENVIO",
+        CampanhaDestinatario.reservado_em.isnot(None),
+        CampanhaDestinatario.reservado_em < limite,
+    ).update({
+        CampanhaDestinatario.status: "PENDENTE",
+        CampanhaDestinatario.reservado_por_id: None,
+        CampanhaDestinatario.reservado_em: None,
+    }, synchronize_session=False)
+    db.commit()
     atual = db.query(CampanhaDestinatario).options(
         selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
     ).filter(
@@ -2797,6 +2944,18 @@ def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usua
 
 
 def _reservar_proximo_aluguel(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaAluguelDestinatario | None:
+    limite = datetime.now() - timedelta(minutes=30)
+    db.query(CampanhaAluguelDestinatario).filter(
+        CampanhaAluguelDestinatario.campanha_id == campanha.id,
+        CampanhaAluguelDestinatario.status == "EM_ENVIO",
+        CampanhaAluguelDestinatario.reservado_em.isnot(None),
+        CampanhaAluguelDestinatario.reservado_em < limite,
+    ).update({
+        CampanhaAluguelDestinatario.status: "PENDENTE",
+        CampanhaAluguelDestinatario.reservado_por_id: None,
+        CampanhaAluguelDestinatario.reservado_em: None,
+    }, synchronize_session=False)
+    db.commit()
     atual = db.query(CampanhaAluguelDestinatario).options(
         selectinload(CampanhaAluguelDestinatario.contato)
     ).filter(
@@ -3389,6 +3548,10 @@ def campanha_iniciar(campanha_id: int, usuario: Usuario = Depends(usuario_logado
             for cliente in clientes:
                 if cliente.id not in existentes:
                     db.add(CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE"))
+        # Primeiro persiste todos os destinatários, depois calcula as mensagens
+        # completas de uma vez. O envio vira apenas “salvar e próximo”.
+        db.flush()
+        _precalcular_mensagens_campanha(db, campanha)
         campanha.status = "ATIVA"
         campanha.iniciado_em = datetime.now()
         db.commit()
@@ -3427,6 +3590,9 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
     pessoa = None
     if destinatario:
         pessoa = destinatario.contato if (campanha.lista_tipo or "").upper() == "ALUGUEL" else destinatario.cliente
+        if not destinatario.mensagem_pronta:
+            _preparar_snapshot_destinatario(campanha, destinatario, pessoa)
+            db.commit()
     contagens = _contagens_campanha(db, campanha.id)
     if not destinatario and contagens["pendentes"] == 0:
         campanha.status = "FINALIZADA"
@@ -3435,10 +3601,64 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
     return templates.TemplateResponse("organiza/campanha_envio.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
         "destinatario": destinatario, "pessoa": pessoa, "contagens": contagens,
-        "whatsapp_url": _whatsapp_campanha_url(campanha, pessoa) if pessoa else "",
-        "link_atualizacao": _link_atualizacao_cliente(campanha, pessoa) if pessoa else "",
-        "mensagem_preview": _mensagem_campanha(campanha, pessoa) if pessoa else "",
+        "whatsapp_url": _whatsapp_url_pronta(destinatario.telefone_pronto or "", destinatario.mensagem_pronta or "") if destinatario else "",
+        "link_atualizacao": (destinatario.link_pronto or "") if destinatario else "",
+        "mensagem_preview": (destinatario.mensagem_pronta or "") if destinatario else "",
     })
+
+
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/whatsapp-proximo")
+def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Salva/processa ANTES de devolver o link do WhatsApp."""
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    modelo = _modelo_destinatario_campanha(campanha)
+    destinatario = db.query(modelo).filter(
+        modelo.id == destinatario_id,
+        modelo.campanha_id == campanha_id,
+    ).first()
+    if not destinatario:
+        raise HTTPException(404)
+    if destinatario.status != "EM_ENVIO" or destinatario.reservado_por_id != usuario.id:
+        return JSONResponse({"ok": False, "erro": "Este cliente já foi assumido por outro atendente."}, status_code=409)
+    mensagem = destinatario.mensagem_pronta or ""
+    telefone = destinatario.telefone_pronto or ""
+    destinatario.status = "PROCESSADO"
+    destinatario.enviado_por_id = usuario.id
+    destinatario.enviado_em = datetime.now()
+    if (campanha.lista_tipo or "").upper() == "ATUALIZACAO" and getattr(destinatario, "cliente", None):
+        try:
+            pacotes = json.loads(destinatario.pacotes_prontos or "[]")
+        except Exception:
+            pacotes = []
+        _registrar_oferta_atualizacao_cliente(
+            destinatario.cliente, campanha, "OFERTA_ENVIADA",
+            valor_normal_centavos=destinatario.valor_normal_centavos,
+            valor_promocional_centavos=destinatario.valor_promocional_centavos,
+            pacotes_override=pacotes,
+        )
+    db.commit()
+    return JSONResponse({
+        "ok": True,
+        "whatsapp_url": _whatsapp_url_pronta(telefone, mensagem),
+        "proximo_url": f"/organiza/campanhas/{campanha_id}/proximo",
+    })
+
+
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular")
+def campanha_pular(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    modelo = _modelo_destinatario_campanha(campanha)
+    destinatario = db.query(modelo).filter(modelo.id == destinatario_id, modelo.campanha_id == campanha_id).first()
+    if not destinatario:
+        raise HTTPException(404)
+    if destinatario.status == "EM_ENVIO" and destinatario.reservado_por_id == usuario.id:
+        destinatario.status = "IGNORADO"
+        db.commit()
+    return RedirectResponse(f"/organiza/campanhas/{campanha_id}/proximo", status_code=303)
 
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/enviado")
@@ -4386,12 +4606,21 @@ def api_solvoz_atualizacao_contexto(
     cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
     if not cliente:
         raise HTTPException(404, "Cliente não encontrado.")
+    pacotes = []
+    if cliente.atualizacao_oferta_pacotes:
+        try:
+            bruto = json.loads(cliente.atualizacao_oferta_pacotes)
+            if isinstance(bruto, list):
+                pacotes = [str(x).strip() for x in bruto if str(x).strip()]
+        except Exception:
+            pacotes = []
     return JSONResponse({
         "ok": True,
         "cliente_id": int(cliente.id),
         "nome": (cliente.nome or "").strip(),
         "email": (cliente.email or "").strip().lower(),
         "whatsapp": re.sub(r"\D", "", cliente.whatsapp_completo() or ""),
+        "pacotes": pacotes,
     })
 
 

@@ -3,15 +3,13 @@
 <section class="pagina-clean campanha-envio-pagina">
   <div class="campanha-envio-cabecalho">
     <a href="/organiza/campanhas/{{ campanha.id }}" aria-label="Voltar para a campanha">← {{ campanha.nome }}</a>
-    <strong>{{ contagens.enviados }} enviados · {{ contagens.pendentes }} restantes</strong>
+    <strong>{{ contagens.processados }} processados · {{ contagens.pendentes }} restantes</strong>
   </div>
 
   {% if destinatario and pessoa %}
     {% set total_envio = contagens.total if contagens.total else 1 %}
-    {% set percentual = ((contagens.enviados * 100) / total_envio)|round(0, 'floor') %}
-    <div class="campanha-envio-progresso" aria-label="Progresso da campanha">
-      <span style="width: {{ percentual }}%"></span>
-    </div>
+    {% set percentual = ((contagens.processados * 100) / total_envio)|round(0, 'floor') %}
+    <div class="campanha-envio-progresso" aria-label="Progresso da campanha"><span style="width: {{ percentual }}%"></span></div>
 
     <section class="cartao campanha-envio-card">
       <div class="campanha-cliente-atual">
@@ -21,31 +19,24 @@
       </div>
 
       {% if campanha.lista_tipo == 'ATUALIZACAO' and link_atualizacao %}
-        <div class="campanha-link-preview">
-          <small>Link deste cliente</small>
-          <a href="{{ link_atualizacao }}" target="_blank" rel="noopener">{{ link_atualizacao }}</a>
-        </div>
+        <div class="campanha-link-preview"><small>Link deste cliente</small><a href="{{ link_atualizacao }}" target="_blank" rel="noopener">{{ link_atualizacao }}</a></div>
       {% endif %}
 
       <div class="campanha-envio-acoes">
-        <a class="campanha-whatsapp-btn" href="{{ whatsapp_url }}" data-abrir-whatsapp>
-          <span aria-hidden="true">●</span> Abrir WhatsApp
-        </a>
-
-        <form class="js-envio-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/enviado">
-          <button class="botao primario campanha-enviado-btn" type="submit">Enviado → Próximo</button>
+        <button class="campanha-whatsapp-btn" type="button" id="whatsappProximo" data-url="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/whatsapp-proximo">
+          <span aria-hidden="true">●</span> WhatsApp e Próximo
+        </button>
+        <form class="js-envio-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/pular">
+          <button class="campanha-pular-btn" type="submit">Pular</button>
         </form>
       </div>
-
-      <form class="js-envio-form campanha-nao-receber-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/nao-receber" onsubmit="return confirm('Este cliente deixará de receber campanhas futuras. Continuar?')">
-        <button class="campanha-nao-receber" type="submit">Não receber mais campanhas</button>
-      </form>
+      <p class="campanha-envio-aviso" id="campanhaEnvioAviso" hidden></p>
     </section>
   {% else %}
     <section class="cartao campanha-envio-card campanha-concluida">
       <span class="campanha-check">✓</span>
       <h1>Campanha concluída</h1>
-      <p>{{ contagens.enviados }} clientes receberam a mensagem.</p>
+      <p>{{ contagens.processados }} clientes processados.</p>
       <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}">Ver campanha</a>
     </section>
   {% endif %}
@@ -56,17 +47,39 @@ document.body.classList.add('modo-campanha-envio');
 document.querySelectorAll('.js-envio-form').forEach((form) => {
   form.addEventListener('submit', () => {
     const botao = form.querySelector('button[type="submit"]');
-    if (!botao) return;
-    botao.disabled = true;
-    botao.dataset.textoOriginal = botao.textContent;
-    botao.textContent = 'Processando...';
+    if (botao) { botao.disabled = true; botao.textContent = 'Pulando...'; }
   });
 });
-const whatsapp = document.querySelector('[data-abrir-whatsapp]');
-if (whatsapp) {
-  whatsapp.addEventListener('click', () => {
-    whatsapp.classList.add('aberto');
-    setTimeout(() => { whatsapp.textContent = 'WhatsApp aberto'; }, 120);
+const botao = document.getElementById('whatsappProximo');
+if (botao) {
+  botao.addEventListener('click', async () => {
+    if (botao.disabled) return;
+    // Abre a aba vazia dentro do clique para não ser bloqueada pelo navegador.
+    const janelaWhats = window.open('about:blank', '_blank');
+    const aviso = document.getElementById('campanhaEnvioAviso');
+    botao.disabled = true;
+    const original = botao.innerHTML;
+    botao.textContent = 'Salvando...';
+    try {
+      const resposta = await fetch(botao.dataset.url, {method:'POST', headers:{'Accept':'application/json'}});
+      const dados = await resposta.json();
+      if (!resposta.ok || !dados.ok) throw new Error(dados.erro || 'Não foi possível avançar.');
+      // O servidor já salvou PROCESSADO antes deste ponto. Só agora abre o WhatsApp.
+      if (janelaWhats) {
+        janelaWhats.location.href = dados.whatsapp_url;
+        // A tela atual fica pronta para o próximo atendido.
+        setTimeout(() => { window.location.href = dados.proximo_url; }, 120);
+      } else {
+        // Se o navegador bloquear a nova aba, abre o WhatsApp nesta mesma tela.
+        // Ao voltar para o Organiza, o cliente já estará salvo como processado.
+        window.location.href = dados.whatsapp_url;
+      }
+    } catch (erro) {
+      if (janelaWhats) janelaWhats.close();
+      botao.disabled = false;
+      botao.innerHTML = original;
+      if (aviso) { aviso.hidden = false; aviso.textContent = erro.message || 'Erro ao salvar.'; }
+    }
   });
 }
 </script>

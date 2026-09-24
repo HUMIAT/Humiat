@@ -21,7 +21,7 @@
       {% if campanha.status == 'RASCUNHO' %}
         <div><small>Clientes que entrarão</small><strong>{{ total_previsto }}</strong></div>
       {% else %}
-        <div><small>Enviados</small><strong>{{ contagens.enviados }} / {{ contagens.total }}</strong></div>
+        <div><small>Processados</small><strong>{{ contagens.processados }} / {{ contagens.total }}</strong></div>
       {% endif %}
     </div>
     <div class="campanha-mensagem-preview">{{ campanha.mensagem }}</div>
@@ -39,7 +39,7 @@
   {% elif campanha.status == 'ATIVA' %}
     <div class="campanha-acao-principal-mobile"><a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Continuar campanha</a></div>
   {% else %}
-    <div class="alerta sucesso">Campanha finalizada. {{ contagens.enviados }} clientes receberam a mensagem.</div>
+    <div class="alerta sucesso">Campanha finalizada. {{ contagens.processados }} clientes foram processados na fila.</div>
   {% endif %}
 </section>
 {% endblock %}

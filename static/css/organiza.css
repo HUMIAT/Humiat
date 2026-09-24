@@ -3820,3 +3820,6 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 
 /* Organiza 1.1.36 - Lista de Aluguel */
 .campanha-importacao-form{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px}.campanha-importacao-form>div{display:grid;gap:4px}.campanha-importacao-form p{margin:0}.campanha-importacao-form input[type=file]{max-width:310px}.campanha-importacao-form .botao{white-space:nowrap}@media(max-width:760px){.campanha-importacao-form{align-items:stretch;flex-direction:column}.campanha-importacao-form input[type=file]{max-width:100%;width:100%}.campanha-importacao-form .botao{width:100%}}
+
+/* Organiza 1.1.41 — fila rápida de campanhas */
+.campanha-whatsapp-btn{border:0;width:100%;cursor:pointer;font-family:inherit}.campanha-pular-btn{width:100%;min-height:46px;border:1px solid #dbe2ea;border-radius:13px;background:#fff;color:#64748b;font:inherit;font-weight:800;cursor:pointer}.campanha-pular-btn:hover{background:#f8fafc}.campanha-envio-aviso{margin:0;padding:10px 12px;border-radius:10px;background:#fff1f2;color:#be123c;font-size:.85rem;font-weight:700}
