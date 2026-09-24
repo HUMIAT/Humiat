@@ -3,38 +3,46 @@
 <section class="pagina-clean campanha-envio-pagina">
   <div class="campanha-envio-cabecalho">
     <a href="/organiza/campanhas/{{ campanha.id }}" aria-label="Voltar para a campanha">← {{ campanha.nome }}</a>
-    <strong>{{ contagens.processados }} processados · {{ contagens.pendentes }} restantes</strong>
+    <strong id="campanhaContador">{{ contagens.processados }} processados · {{ contagens.pendentes }} restantes</strong>
   </div>
 
-  {% if destinatario and pessoa %}
-    {% set total_envio = contagens.total if contagens.total else 1 %}
-    {% set percentual = ((contagens.processados * 100) / total_envio)|round(0, 'floor') %}
-    <div class="campanha-envio-progresso" aria-label="Progresso da campanha"><span style="width: {{ percentual }}%"></span></div>
+  {% if lote and fila %}
+    <div class="campanha-lote-info">
+      <strong>Lote {{ lote.numero }} de {{ total_lotes }}</strong>
+      <span>até {{ tamanho_lote }} contatos · reservado para {{ usuario.nome }}</span>
+    </div>
+    <div class="campanha-envio-progresso" aria-label="Progresso do lote"><span id="loteProgresso" style="width:0%"></span></div>
 
-    <section class="cartao campanha-envio-card">
+    <section class="cartao campanha-envio-card" id="campanhaCard">
       <div class="campanha-cliente-atual">
-        <p class="tag">Cliente atual</p>
-        <h1>{{ pessoa.nome }}</h1>
-        <p class="campanha-telefone">+{{ pessoa.ddi }} {{ pessoa.telefone_formatado() }}</p>
+        <p class="tag" id="clientePosicao">Cliente atual</p>
+        <h1 id="clienteNome"></h1>
+        <p class="campanha-telefone" id="clienteTelefone"></p>
       </div>
 
-      {% if campanha.lista_tipo == 'ATUALIZACAO' and link_atualizacao %}
-        <div class="campanha-link-preview"><small>Link deste cliente</small><a href="{{ link_atualizacao }}" target="_blank" rel="noopener">{{ link_atualizacao }}</a></div>
-      {% endif %}
+      <div class="campanha-link-preview" id="clienteLinkWrap" hidden>
+        <small>Link deste cliente</small><a id="clienteLink" href="#" target="_blank" rel="noopener"></a>
+      </div>
 
       <div class="campanha-envio-acoes">
-        <a class="campanha-whatsapp-btn"
-           id="whatsappProximo"
-           href="{{ whatsapp_url }}"
-           target="_blank" rel="noopener"
-           data-processar="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/whatsapp-proximo"
-           data-proximo="/organiza/campanhas/{{ campanha.id }}/proximo?concluir={{ destinatario.id }}">
+        <a class="campanha-whatsapp-btn" id="whatsappProximo" href="#" target="_blank" rel="noopener">
           <span aria-hidden="true">●</span> WhatsApp e Próximo
         </a>
-        <form class="js-envio-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/pular">
-          <button class="campanha-pular-btn" type="submit">Pular</button>
-        </form>
+        <button class="campanha-pular-btn" id="pularRapido" type="button">Pular</button>
       </div>
+    </section>
+
+    <section class="cartao campanha-envio-card campanha-concluida" id="loteConcluido" hidden>
+      <span class="campanha-check">✓</span>
+      <h1>Lote {{ lote.numero }} concluído</h1>
+      <p>Os próximos contatos já estão separados em outro lote.</p>
+      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Abrir próximo lote</a>
+    </section>
+  {% elif campanha.status == 'ATIVA' %}
+    <section class="cartao campanha-envio-card campanha-concluida">
+      <h1>Nenhum lote livre agora</h1>
+      <p>Outro atendente pode estar trabalhando nos lotes disponíveis. Cada lote tem no máximo {{ tamanho_lote }} contatos.</p>
+      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Atualizar</a>
     </section>
   {% else %}
     <section class="cartao campanha-envio-card campanha-concluida">
@@ -46,32 +54,86 @@
   {% endif %}
 </section>
 
+{% if lote and fila %}
 <script>
 document.body.classList.add('modo-campanha-envio');
-document.querySelectorAll('.js-envio-form').forEach((form) => {
-  form.addEventListener('submit', () => {
-    const botao = form.querySelector('button[type="submit"]');
-    if (botao) { botao.disabled = true; botao.textContent = 'Pulando...'; }
-  });
-});
-const whatsappProximo = document.getElementById('whatsappProximo');
-if (whatsappProximo) {
-  whatsappProximo.addEventListener('click', (event) => {
-    event.preventDefault();
-    // O contato já está RESERVADO no banco antes deste botão aparecer; por isso
-    // dois atendentes nunca recebem o mesmo cliente. PROCESSADO é gravado em
-    // segundo plano, sem segurar a abertura do WhatsApp.
-    const processar = whatsappProximo.dataset.processar;
-    if (navigator.sendBeacon) {
-      try { navigator.sendBeacon(processar, new Blob([], {type: 'application/x-www-form-urlencoded'})); } catch (e) {}
-    } else {
-      try { fetch(processar, {method: 'POST', keepalive: true}).catch(() => {}); } catch (e) {}
-    }
-    // Abertura direta: não existe mais a página intermediária “Abrindo WhatsApp”.
-    window.open(whatsappProximo.href, '_blank', 'noopener');
-    // Em paralelo a tela do Organiza já segue para o próximo snapshot local.
-    window.location.replace(whatsappProximo.dataset.proximo);
-  });
+const fila = {{ fila|tojson }};
+let indice = 0;
+let processadosLocais = {{ contagens.processados|int }};
+let pendentesLocais = {{ contagens.pendentes|int }};
+const card = document.getElementById('campanhaCard');
+const concluido = document.getElementById('loteConcluido');
+const nome = document.getElementById('clienteNome');
+const telefone = document.getElementById('clienteTelefone');
+const posicao = document.getElementById('clientePosicao');
+const linkWrap = document.getElementById('clienteLinkWrap');
+const link = document.getElementById('clienteLink');
+const whats = document.getElementById('whatsappProximo');
+const pular = document.getElementById('pularRapido');
+const barra = document.getElementById('loteProgresso');
+const contador = document.getElementById('campanhaContador');
+
+function enviarBackground(url) {
+  if (!url) return;
+  if (navigator.sendBeacon) {
+    try {
+      const ok = navigator.sendBeacon(url, new Blob([], {type:'application/x-www-form-urlencoded'}));
+      if (ok) return;
+    } catch (e) {}
+  }
+  try { fetch(url, {method:'POST', keepalive:true, credentials:'same-origin'}).catch(() => {}); } catch (e) {}
 }
+
+function renderAtual() {
+  if (indice >= fila.length) {
+    card.hidden = true;
+    concluido.hidden = false;
+    barra.style.width = '100%';
+    return;
+  }
+  const atual = fila[indice];
+  nome.textContent = atual.nome || 'Cliente';
+  telefone.textContent = atual.telefone || '';
+  posicao.textContent = `Contato ${indice + 1} de ${fila.length} · lote {{ lote.numero }}`;
+  whats.href = atual.whatsapp_url;
+  whats.dataset.processar = atual.processar_url;
+  pular.dataset.pular = atual.pular_url;
+  if (atual.link) {
+    linkWrap.hidden = false;
+    link.href = atual.link;
+    link.textContent = atual.link;
+  } else {
+    linkWrap.hidden = true;
+  }
+  barra.style.width = `${Math.round((indice / fila.length) * 100)}%`;
+}
+
+function avancarLocal(contouComoProcessado) {
+  if (contouComoProcessado) processadosLocais += 1;
+  pendentesLocais = Math.max(0, pendentesLocais - 1);
+  contador.textContent = `${processadosLocais} processados · ${pendentesLocais} restantes`;
+  indice += 1;
+  renderAtual();
+}
+
+whats.addEventListener('click', () => {
+  const atual = fila[indice];
+  if (!atual) return;
+  // Tudo já está pronto. Primeiro muda o Organiza para o próximo contato,
+  // depois o navegador executa o href e abre o WhatsApp da mensagem anterior.
+  enviarBackground(atual.processar_url);
+  avancarLocal(true);
+  // Não usa preventDefault: o href abre o WhatsApp normalmente em nova aba/app.
+});
+
+pular.addEventListener('click', () => {
+  const atual = fila[indice];
+  if (!atual) return;
+  enviarBackground(atual.pular_url);
+  avancarLocal(false);
+});
+
+renderAtual();
 </script>
+{% endif %}
 {% endblock %}

@@ -18,7 +18,22 @@
   <section class="cartao campanha-resumo-card">
     <div class="campanha-resumo-topo">
       <div><small>Status</small><strong>{{ campanha.status }}</strong></div>
-      {% if campanha.status == 'RASCUNHO' %}
+      {% if lotes %}
+    <section class="cartao campanha-lotes-card">
+      <div class="campanha-lotes-topo"><strong>Lotes automáticos</strong><span>Máximo de {{ tamanho_lote }} contatos por lote</span></div>
+      <div class="campanha-lotes-grid">
+        {% for lote in lotes %}
+          <div class="campanha-lote-item {% if lote.concluido %}concluido{% endif %}">
+            <strong>Lote {{ lote.numero }}</strong>
+            <span>{{ lote.processados }} / {{ lote.total }}</span>
+            {% if lote.reservado_por and not lote.concluido %}<small>{{ lote.reservado_por }}</small>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {% if campanha.status == 'RASCUNHO' %}
         <div><small>Clientes que entrarão</small><strong>{{ total_previsto }}</strong></div>
       {% else %}
         <div><small>Processados</small><strong>{{ contagens.processados }} / {{ contagens.total }}</strong></div>

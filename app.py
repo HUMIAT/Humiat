@@ -689,6 +689,7 @@ class CampanhaDestinatario(Base):
     pacotes_prontos = Column(Text, nullable=True)
     valor_normal_centavos = Column(Integer, nullable=True)
     valor_promocional_centavos = Column(Integer, nullable=True)
+    lote_numero = Column(Integer, nullable=True, index=True)
     criado_em = Column(DateTime, server_default=func.now())
     campanha = relationship("Campanha", back_populates="destinatarios")
     cliente = relationship("Cliente")
@@ -747,11 +748,29 @@ class CampanhaAluguelDestinatario(Base):
     pacotes_prontos = Column(Text, nullable=True)
     valor_normal_centavos = Column(Integer, nullable=True)
     valor_promocional_centavos = Column(Integer, nullable=True)
+    lote_numero = Column(Integer, nullable=True, index=True)
     criado_em = Column(DateTime, server_default=func.now())
     campanha = relationship("Campanha")
     contato = relationship("CampanhaAluguelContato")
     reservado_por = relationship("Usuario", foreign_keys=[reservado_por_id])
     enviado_por = relationship("Usuario", foreign_keys=[enviado_por_id])
+
+
+class CampanhaLote(Base):
+    __tablename__ = "campanha_lotes"
+    id = Column(Integer, primary_key=True)
+    campanha_id = Column(Integer, ForeignKey("campanhas.id"), nullable=False, index=True)
+    numero = Column(Integer, nullable=False, index=True)
+    total = Column(Integer, nullable=False, default=0)
+    reservado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True, index=True)
+    reservado_em = Column(DateTime, nullable=True)
+    concluido_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    campanha = relationship("Campanha")
+    reservado_por = relationship("Usuario")
+
+
+CAMPANHA_LOTE_TAMANHO = 100
 
 
 class TransferenciaEquipamento(Base):
@@ -1477,6 +1496,7 @@ def iniciar_banco():
                 "pacotes_prontos": "TEXT",
                 "valor_normal_centavos": "INTEGER",
                 "valor_promocional_centavos": "INTEGER",
+                "lote_numero": "INTEGER",
             }
             with engine.begin() as conn:
                 for coluna, tipo_sql in campos_dest.items():
@@ -2941,6 +2961,171 @@ def _contagens_campanha(db: Session, campanha_id: int) -> dict:
     return {"total": total, "enviados": processados, "processados": processados, "ignorados": ignorados, "pendentes": pendentes, **contagens}
 
 
+def _garantir_lotes_campanha(db: Session, campanha: Campanha) -> list[CampanhaLote]:
+    """Divide qualquer campanha em lotes fixos de até 100 contatos.
+
+    A divisão é feita uma única vez, por ordem dos destinatários. Assim duas
+    pessoas nunca trabalham no mesmo bloco: cada usuário reserva um lote inteiro.
+    """
+    modelo = _modelo_destinatario_campanha(campanha)
+    linhas = db.query(modelo).filter(modelo.campanha_id == campanha.id).order_by(modelo.id.asc()).all()
+    if not linhas:
+        return []
+    alterou = False
+    for idx, dest in enumerate(linhas):
+        numero = (idx // CAMPANHA_LOTE_TAMANHO) + 1
+        if int(getattr(dest, "lote_numero", 0) or 0) != numero:
+            dest.lote_numero = numero
+            alterou = True
+    totais = {}
+    for dest in linhas:
+        num = int(dest.lote_numero or 1)
+        totais[num] = totais.get(num, 0) + 1
+    existentes = {int(l.numero): l for l in db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id).all()}
+    for numero, total in sorted(totais.items()):
+        lote = existentes.get(numero)
+        if not lote:
+            lote = CampanhaLote(campanha_id=campanha.id, numero=numero, total=total)
+            db.add(lote)
+            alterou = True
+        elif int(lote.total or 0) != total:
+            lote.total = total
+            alterou = True
+    if alterou:
+        db.commit()
+    return db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id).order_by(CampanhaLote.numero.asc()).all()
+
+
+def _lote_pendentes(db: Session, campanha: Campanha, lote_numero: int) -> int:
+    modelo = _modelo_destinatario_campanha(campanha)
+    return int(db.query(func.count(modelo.id)).filter(
+        modelo.campanha_id == campanha.id,
+        modelo.lote_numero == int(lote_numero),
+        modelo.status.in_(["PENDENTE", "EM_ENVIO"]),
+    ).scalar() or 0)
+
+
+def _liberar_lotes_expirados(db: Session, campanha: Campanha) -> None:
+    limite = datetime.now() - timedelta(minutes=30)
+    expirados = db.query(CampanhaLote).filter(
+        CampanhaLote.campanha_id == campanha.id,
+        CampanhaLote.concluido_em.is_(None),
+        CampanhaLote.reservado_por_id.isnot(None),
+        CampanhaLote.reservado_em.isnot(None),
+        CampanhaLote.reservado_em < limite,
+    ).all()
+    if not expirados:
+        return
+    modelo = _modelo_destinatario_campanha(campanha)
+    for lote in expirados:
+        db.query(modelo).filter(
+            modelo.campanha_id == campanha.id,
+            modelo.lote_numero == lote.numero,
+            modelo.status == "EM_ENVIO",
+        ).update({
+            modelo.status: "PENDENTE",
+            modelo.reservado_por_id: None,
+            modelo.reservado_em: None,
+        }, synchronize_session=False)
+        lote.reservado_por_id = None
+        lote.reservado_em = None
+    db.commit()
+
+
+def _obter_lote_usuario(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaLote | None:
+    """Reserva atomicamente um lote inteiro de até 100 para o usuário."""
+    _garantir_lotes_campanha(db, campanha)
+    _liberar_lotes_expirados(db, campanha)
+
+    # Continua no lote já reservado por este usuário enquanto houver itens.
+    atuais = db.query(CampanhaLote).filter(
+        CampanhaLote.campanha_id == campanha.id,
+        CampanhaLote.reservado_por_id == usuario.id,
+        CampanhaLote.concluido_em.is_(None),
+    ).order_by(CampanhaLote.numero.asc()).all()
+    for lote in atuais:
+        if _lote_pendentes(db, campanha, lote.numero) > 0:
+            lote.reservado_em = datetime.now()
+            db.commit()
+            return lote
+        lote.concluido_em = datetime.now()
+        db.commit()
+
+    # Pega o próximo lote livre. O UPDATE condicional evita corrida entre usuários.
+    while True:
+        candidato = db.query(CampanhaLote.id).filter(
+            CampanhaLote.campanha_id == campanha.id,
+            CampanhaLote.reservado_por_id.is_(None),
+            CampanhaLote.concluido_em.is_(None),
+        ).order_by(CampanhaLote.numero.asc()).limit(1).scalar()
+        if not candidato:
+            return None
+        agora = datetime.now()
+        alterados = db.query(CampanhaLote).filter(
+            CampanhaLote.id == candidato,
+            CampanhaLote.reservado_por_id.is_(None),
+            CampanhaLote.concluido_em.is_(None),
+        ).update({
+            CampanhaLote.reservado_por_id: usuario.id,
+            CampanhaLote.reservado_em: agora,
+        }, synchronize_session=False)
+        db.commit()
+        if not alterados:
+            continue
+        lote = db.query(CampanhaLote).filter(CampanhaLote.id == candidato).first()
+        modelo = _modelo_destinatario_campanha(campanha)
+        db.query(modelo).filter(
+            modelo.campanha_id == campanha.id,
+            modelo.lote_numero == lote.numero,
+            modelo.status == "PENDENTE",
+        ).update({
+            modelo.status: "EM_ENVIO",
+            modelo.reservado_por_id: usuario.id,
+            modelo.reservado_em: agora,
+        }, synchronize_session=False)
+        db.commit()
+        return lote
+
+
+def _fila_lote_usuario(db: Session, campanha: Campanha, usuario: Usuario, lote: CampanhaLote) -> list[dict]:
+    modelo = _modelo_destinatario_campanha(campanha)
+    rel = CampanhaAluguelDestinatario.contato if (campanha.lista_tipo or "").upper() == "ALUGUEL" else CampanhaDestinatario.cliente
+    destinos = db.query(modelo).options(selectinload(rel)).filter(
+        modelo.campanha_id == campanha.id,
+        modelo.lote_numero == lote.numero,
+        modelo.status == "EM_ENVIO",
+        modelo.reservado_por_id == usuario.id,
+    ).order_by(modelo.id.asc()).all()
+    fila = []
+    for dest in destinos:
+        pessoa = dest.contato if (campanha.lista_tipo or "").upper() == "ALUGUEL" else dest.cliente
+        if not pessoa:
+            continue
+        fila.append({
+            "id": int(dest.id),
+            "nome": (pessoa.nome or "Cliente").strip(),
+            "telefone": f"+{pessoa.ddi or ''} {pessoa.telefone_formatado()}",
+            "whatsapp_url": _whatsapp_url_pronta(dest.telefone_pronto or "", dest.mensagem_pronta or ""),
+            "link": dest.link_pronto or "",
+            "processar_url": f"/organiza/campanhas/{campanha.id}/destinatarios/{dest.id}/whatsapp-proximo",
+            "pular_url": f"/organiza/campanhas/{campanha.id}/destinatarios/{dest.id}/pular-rapido",
+        })
+    return fila
+
+
+def _resumo_lotes_campanha(db: Session, campanha: Campanha) -> list[dict]:
+    lotes = _garantir_lotes_campanha(db, campanha) if campanha.status != "RASCUNHO" else []
+    saida = []
+    modelo = _modelo_destinatario_campanha(campanha)
+    for lote in lotes:
+        processados = int(db.query(func.count(modelo.id)).filter(
+            modelo.campanha_id == campanha.id, modelo.lote_numero == lote.numero,
+            modelo.status.in_(["PROCESSADO", "ENVIADO", "IGNORADO"]),
+        ).scalar() or 0)
+        saida.append({"numero": lote.numero, "total": lote.total, "processados": processados, "reservado_por": lote.reservado_por.nome if lote.reservado_por else "", "concluido": bool(lote.concluido_em)})
+    return saida
+
+
 def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaDestinatario | None:
     """Reserva somente linhas já preparadas; nenhuma consulta externa ocorre aqui."""
     limite = datetime.now() - timedelta(minutes=30)
@@ -3610,6 +3795,8 @@ def campanha_iniciar(campanha_id: int, usuario: Usuario = Depends(usuario_logado
         campanha.status = "ATIVA"
         campanha.iniciado_em = datetime.now()
         db.commit()
+        # Regra padrão 1.1.46: qualquer campanha é quebrada em lotes de 100.
+        _garantir_lotes_campanha(db, campanha)
     return RedirectResponse(f"/organiza/campanhas/{campanha.id}/proximo", status_code=303)
 
 
@@ -3630,6 +3817,8 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
         "rotulo_lista": _rotulo_lista_campanha(campanha),
         "contagens": _contagens_campanha(db, campanha.id),
         "total_previsto": total_previsto, "meses_aluguel": MESES_ALUGUEL,
+        "lotes": _resumo_lotes_campanha(db, campanha) if campanha.status != "RASCUNHO" else [],
+        "tamanho_lote": CAMPANHA_LOTE_TAMANHO,
         "erro": request.query_params.get("erro", ""),
     })
 
@@ -3641,9 +3830,7 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
         raise HTTPException(404)
     if campanha.status != "ATIVA":
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
-    # Compatibilidade com campanhas iniciadas antes da 1.1.44: se ainda houver
-    # destinatários sem snapshot, prepara a campanha inteira UMA VEZ aqui,
-    # antes de mostrar qualquer contato. Depois disso o envio é 100% local.
+
     modelo = _modelo_destinatario_campanha(campanha)
     faltando = db.query(modelo.id).filter(
         modelo.campanha_id == campanha.id,
@@ -3651,40 +3838,24 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
         modelo.mensagem_pronta.is_(None),
     ).first()
     if faltando:
+        # Compatibilidade com campanhas antigas: prepara uma única vez antes da fila.
         _precalcular_mensagens_campanha(db, campanha)
         db.commit()
 
-    # Se o clique anterior trouxe ?concluir=ID, conclui localmente antes de
-    # reservar o próximo. Não depende do WhatsApp nem de sistema externo.
-    concluir_id = int(request.query_params.get("concluir") or 0)
-    if concluir_id > 0:
-        atual = db.query(modelo).filter(
-            modelo.id == concluir_id,
-            modelo.campanha_id == campanha.id,
-            modelo.status == "EM_ENVIO",
-            modelo.reservado_por_id == usuario.id,
-        ).first()
-        if atual:
-            atual.status = "PROCESSADO"
-            atual.enviado_por_id = usuario.id
-            atual.enviado_em = datetime.now()
-            db.commit()
-
-    destinatario = _reservar_proximo_campanha(db, campanha, usuario)
-    pessoa = None
-    if destinatario:
-        pessoa = destinatario.contato if (campanha.lista_tipo or "").upper() == "ALUGUEL" else destinatario.cliente
+    lote = _obter_lote_usuario(db, campanha, usuario)
+    fila = _fila_lote_usuario(db, campanha, usuario, lote) if lote else []
     contagens = _contagens_campanha(db, campanha.id)
-    if not destinatario and contagens["pendentes"] == 0:
+
+    if not lote and contagens["pendentes"] == 0:
         campanha.status = "FINALIZADA"
         campanha.finalizado_em = datetime.now()
         db.commit()
+
     return templates.TemplateResponse("organiza/campanha_envio.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
-        "destinatario": destinatario, "pessoa": pessoa, "contagens": contagens,
-        "whatsapp_url": _whatsapp_url_pronta(destinatario.telefone_pronto or "", destinatario.mensagem_pronta or "") if destinatario else "",
-        "link_atualizacao": (destinatario.link_pronto or "") if destinatario else "",
-        "mensagem_preview": (destinatario.mensagem_pronta or "") if destinatario else "",
+        "fila": fila, "contagens": contagens, "lote": lote,
+        "total_lotes": len(_garantir_lotes_campanha(db, campanha)),
+        "tamanho_lote": CAMPANHA_LOTE_TAMANHO,
     })
 
 
@@ -3725,7 +3896,36 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
         cliente.atualizacao_oferta_valor_normal_centavos = destinatario.valor_normal_centavos
         cliente.atualizacao_oferta_valor_promocional_centavos = destinatario.valor_promocional_centavos
         cliente.atualizacao_oferta_atualizado_em = datetime.now()
+    lote_numero = int(getattr(destinatario, "lote_numero", 0) or 0)
+    if lote_numero:
+        db.query(CampanhaLote).filter(
+            CampanhaLote.campanha_id == campanha.id,
+            CampanhaLote.numero == lote_numero,
+            CampanhaLote.reservado_por_id == usuario.id,
+        ).update({CampanhaLote.reservado_em: datetime.now()}, synchronize_session=False)
     db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular-rapido")
+def campanha_pular_rapido(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    modelo = _modelo_destinatario_campanha(campanha)
+    destinatario = db.query(modelo).filter(
+        modelo.id == destinatario_id, modelo.campanha_id == campanha_id,
+        modelo.status == "EM_ENVIO", modelo.reservado_por_id == usuario.id,
+    ).first()
+    if destinatario:
+        destinatario.status = "IGNORADO"
+        lote_numero = int(getattr(destinatario, "lote_numero", 0) or 0)
+        if lote_numero:
+            db.query(CampanhaLote).filter(
+                CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == lote_numero,
+                CampanhaLote.reservado_por_id == usuario.id,
+            ).update({CampanhaLote.reservado_em: datetime.now()}, synchronize_session=False)
+        db.commit()
     return Response(status_code=204)
 
 
