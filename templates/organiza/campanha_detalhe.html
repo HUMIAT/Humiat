@@ -8,33 +8,20 @@
       <p class="texto-suave">{{ rotulo_lista }}{% if campanha.lista_tipo != 'ALUGUEL' %} · pacote {{ campanha.pacote_alvo }}{% elif campanha.aluguel_mes %} · último aluguel em {{ meses_aluguel.get(campanha.aluguel_mes, '') }}{% else %} · todos os meses{% endif %}</p>
     </div>
     <div class="campanha-detalhe-acoes">
-      <a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">Editar campanha</a>
+      {% if campanha.status == 'RASCUNHO' %}<a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">Editar campanha</a>{% endif %}
       <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
     </div>
   </div>
 
   {% if erro == 'nenhum_cliente' %}<div class="alerta erro">Não há clientes ativos para esta campanha.</div>{% endif %}
+  {% if erro == 'lote_ocupado' %}<div class="alerta erro">Esse lote acabou de ser escolhido por outro atendente ou você já possui outro lote em andamento. Escolha um lote livre.</div>{% endif %}
+  {% if erro == 'selecione_lote' %}<div class="alerta info">Escolha um lote antes de iniciar o envio.</div>{% endif %}
 
   <section class="cartao campanha-resumo-card">
     <div class="campanha-resumo-topo">
       <div><small>Status</small><strong>{{ campanha.status }}</strong></div>
-      {% if lotes %}
-    <section class="cartao campanha-lotes-card">
-      <div class="campanha-lotes-topo"><strong>Lotes automáticos</strong><span>Máximo de {{ tamanho_lote }} contatos por lote</span></div>
-      <div class="campanha-lotes-grid">
-        {% for lote in lotes %}
-          <div class="campanha-lote-item {% if lote.concluido %}concluido{% endif %}">
-            <strong>Lote {{ lote.numero }}</strong>
-            <span>{{ lote.processados }} / {{ lote.total }}</span>
-            {% if lote.reservado_por and not lote.concluido %}<small>{{ lote.reservado_por }}</small>{% endif %}
-          </div>
-        {% endfor %}
-      </div>
-    </section>
-  {% endif %}
-
-  {% if campanha.status == 'RASCUNHO' %}
-        <div><small>Clientes que entrarão</small><strong>{{ total_previsto }}</strong></div>
+      {% if campanha.status == 'RASCUNHO' %}
+        <div><small>Clientes preparados</small><strong>{{ total_previsto }}</strong></div>
       {% else %}
         <div><small>Processados</small><strong>{{ contagens.processados }} / {{ contagens.total }}</strong></div>
       {% endif %}
@@ -47,27 +34,68 @@
     {% endif %}
   </section>
 
-  {% if campanha.status == 'RASCUNHO' %}
-    <form method="post" action="/organiza/campanhas/{{ campanha.id }}/iniciar" class="campanha-iniciar-form campanha-acao-principal-mobile" id="campanhaPrepararForm">
-      <button class="botao primario campanha-botao-grande" type="submit" id="campanhaPrepararBtn">Preparar e iniciar campanha</button>
-      <small id="campanhaPrepararAviso" hidden style="margin-top:8px;color:#64748b">Preparando todos os clientes, mensagens, valores e links. Isso acontece uma única vez.</small>
+  {% if campanha.status in ['RASCUNHO', 'ATIVA'] and lotes %}
+    <form method="post" action="/organiza/campanhas/{{ campanha.id }}/iniciar" class="cartao campanha-lotes-selecao" id="campanhaLoteForm">
+      <div class="campanha-lotes-topo">
+        <div>
+          <strong>Escolha o lote</strong>
+          <p>Os lotes já estão prontos. Cada atendente deve escolher um lote diferente antes de iniciar.</p>
+        </div>
+        <span>Máximo de {{ tamanho_lote }} contatos por lote</span>
+      </div>
+
+      <div class="campanha-lotes-grid campanha-lotes-grid--selecao">
+        {% for lote in lotes %}
+          {% set meu_lote = lote.reservado_por_id == usuario.id %}
+          {% set ocupado = lote.reservado_por_id and not meu_lote and not lote.concluido %}
+          <label class="campanha-lote-item campanha-lote-selecionavel {% if lote.concluido %}concluido{% elif ocupado %}ocupado{% elif meu_lote %}meu-lote{% endif %}">
+            <input type="radio" name="lote_numero" value="{{ lote.numero }}" {% if lote.concluido or ocupado %}disabled{% endif %}>
+            <span class="campanha-lote-radio" aria-hidden="true"></span>
+            <strong>Lote {{ lote.numero }}</strong>
+            <span>{{ lote.processados }} / {{ lote.total }} processados</span>
+            {% if lote.concluido %}
+              <small>Concluído</small>
+            {% elif ocupado %}
+              <small>Em uso por {{ lote.reservado_por }}</small>
+            {% elif meu_lote %}
+              <small>Seu lote em andamento</small>
+            {% else %}
+              <small>Livre</small>
+            {% endif %}
+          </label>
+        {% endfor %}
+      </div>
+
+      <div class="campanha-lote-acao campanha-acao-principal-mobile">
+        <button class="botao primario campanha-botao-grande" type="submit" id="campanhaIniciarLote" disabled>
+          {% if campanha.status == 'RASCUNHO' %}Iniciar campanha{% else %}Abrir lote selecionado{% endif %}
+        </button>
+        <small id="campanhaLoteAjuda">Clique primeiro em um lote livre.</small>
+      </div>
     </form>
     <script>
     (() => {
-      const form = document.getElementById('campanhaPrepararForm');
-      if (!form) return;
+      const form = document.getElementById('campanhaLoteForm');
+      const btn = document.getElementById('campanhaIniciarLote');
+      const ajuda = document.getElementById('campanhaLoteAjuda');
+      if (!form || !btn) return;
+      const radios = [...form.querySelectorAll('input[name="lote_numero"]')];
+      radios.forEach((radio) => radio.addEventListener('change', () => {
+        btn.disabled = false;
+        const card = radio.closest('.campanha-lote-selecionavel');
+        radios.forEach(r => r.closest('.campanha-lote-selecionavel')?.classList.toggle('selecionado', r.checked));
+        if (ajuda) ajuda.textContent = `Lote ${radio.value} selecionado.`;
+      }));
       form.addEventListener('submit', () => {
-        const btn = document.getElementById('campanhaPrepararBtn');
-        const aviso = document.getElementById('campanhaPrepararAviso');
-        if (btn) { btn.disabled = true; btn.textContent = 'Preparando campanha...'; }
-        if (aviso) aviso.hidden = false;
+        btn.disabled = true;
+        btn.textContent = 'Abrindo lote...';
       });
     })();
     </script>
-  {% elif campanha.status == 'ATIVA' %}
-    <div class="campanha-acao-principal-mobile"><a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Continuar campanha</a></div>
-  {% else %}
+  {% elif campanha.status == 'FINALIZADA' %}
     <div class="alerta sucesso">Campanha finalizada. {{ contagens.processados }} clientes foram processados na fila.</div>
+  {% elif not lotes %}
+    <div class="alerta info">Esta campanha ainda não possui contatos preparados.</div>
   {% endif %}
 </section>
 {% endblock %}

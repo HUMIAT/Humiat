@@ -35,14 +35,14 @@
     <section class="cartao campanha-envio-card campanha-concluida" id="loteConcluido" hidden>
       <span class="campanha-check">✓</span>
       <h1>Lote {{ lote.numero }} concluído</h1>
-      <p>Os próximos contatos já estão separados em outro lote.</p>
-      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Abrir próximo lote</a>
+      <p>Volte para a campanha e escolha explicitamente o próximo lote.</p>
+      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}">Escolher outro lote</a>
     </section>
   {% elif campanha.status == 'ATIVA' %}
     <section class="cartao campanha-envio-card campanha-concluida">
       <h1>Nenhum lote livre agora</h1>
       <p>Outro atendente pode estar trabalhando nos lotes disponíveis. Cada lote tem no máximo {{ tamanho_lote }} contatos.</p>
-      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Atualizar</a>
+      <a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}">Escolher lote</a>
     </section>
   {% else %}
     <section class="cartao campanha-envio-card campanha-concluida">

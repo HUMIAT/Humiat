@@ -59,7 +59,10 @@
     </label>
 
     <div class="campanha-form-acoes campanha-acao-principal-mobile">
-      <button class="botao primario campanha-botao-grande" type="submit">{% if modo_edicao %}Salvar alterações{% else %}Salvar campanha{% endif %}</button>
+      <div class="campanha-criacao-lotes-aviso">
+        <small>{% if modo_edicao %}Ao salvar o rascunho, os lotes e mensagens serão recalculados.{% else %}Ao salvar, o Organiza já prepara todos os contatos, mensagens e lotes de até 100 antes do primeiro envio.{% endif %}</small>
+      </div>
+      <button class="botao primario campanha-botao-grande" type="submit" id="salvarCampanhaBtn">{% if modo_edicao %}Salvar alterações{% else %}Salvar campanha e criar lotes{% endif %}</button>
     </div>
   </form>
 </section>
@@ -77,6 +80,11 @@
     if (avisoAtualizacao) avisoAtualizacao.style.display = aluguel ? 'none' : '';
   }
   if (lista) { lista.addEventListener('change', atualizar); atualizar(); }
+  const form = document.querySelector('.campanha-form');
+  const salvar = document.getElementById('salvarCampanhaBtn');
+  form?.addEventListener('submit', () => {
+    if (salvar) { salvar.disabled = true; salvar.textContent = 'Preparando lotes...'; }
+  });
 })();
 </script>
 {% endblock %}
