@@ -3607,9 +3607,13 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
     })
 
 
-@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/whatsapp-proximo")
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/whatsapp-proximo", response_class=HTMLResponse)
 def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    """Salva/processa ANTES de devolver o link do WhatsApp."""
+    """Salva PROCESSADO antes de abrir o WhatsApp e libera o Organiza imediatamente.
+
+    O WhatsApp é apenas o destino externo da mensagem. O Organiza não espera
+    envio, retorno do app ou confirmação do WhatsApp para avançar a fila.
+    """
     campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
     if not campanha:
         raise HTTPException(404)
@@ -3621,9 +3625,16 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
     if not destinatario:
         raise HTTPException(404)
     if destinatario.status != "EM_ENVIO" or destinatario.reservado_por_id != usuario.id:
-        return JSONResponse({"ok": False, "erro": "Este cliente já foi assumido por outro atendente."}, status_code=409)
+        return HTMLResponse(
+            "<h1>Este cliente já foi assumido por outro atendente.</h1>"
+            "<p>Feche esta aba e continue pela tela do Organiza.</p>",
+            status_code=409,
+        )
+
     mensagem = destinatario.mensagem_pronta or ""
     telefone = destinatario.telefone_pronto or ""
+
+    # 1) O Organiza conclui sua parte primeiro.
     destinatario.status = "PROCESSADO"
     destinatario.enviado_por_id = usuario.id
     destinatario.enviado_em = datetime.now()
@@ -3639,11 +3650,33 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
             pacotes_override=pacotes,
         )
     db.commit()
-    return JSONResponse({
-        "ok": True,
-        "whatsapp_url": _whatsapp_url_pronta(telefone, mensagem),
-        "proximo_url": f"/organiza/campanhas/{campanha_id}/proximo",
-    })
+
+    # 2) Só depois de salvo, esta aba-ponte manda a tela principal para o próximo
+    #    cliente e segue para o WhatsApp. Nenhum retorno do WhatsApp é aguardado.
+    whatsapp_url = _whatsapp_url_pronta(telefone, mensagem)
+    proximo_url = f"/organiza/campanhas/{campanha_id}/proximo"
+    whatsapp_js = json.dumps(whatsapp_url, ensure_ascii=False)
+    proximo_js = json.dumps(proximo_url, ensure_ascii=False)
+    html = f"""<!doctype html>
+<html lang=\"pt-BR\">
+<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Abrindo WhatsApp</title></head>
+<body>
+<p>Abrindo WhatsApp...</p>
+<script>
+(function() {{
+  const proximo = {proximo_js};
+  const whatsapp = {whatsapp_js};
+  try {{
+    if (window.opener && !window.opener.closed) {{
+      window.opener.location.replace(proximo);
+    }}
+  }} catch (e) {{}}
+  window.location.replace(whatsapp);
+}})();
+</script>
+<noscript><a href=\"{whatsapp_url}\">Abrir WhatsApp</a></noscript>
+</body></html>"""
+    return HTMLResponse(html)
 
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular")

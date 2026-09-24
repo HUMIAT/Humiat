@@ -23,14 +23,15 @@
       {% endif %}
 
       <div class="campanha-envio-acoes">
-        <button class="campanha-whatsapp-btn" type="button" id="whatsappProximo" data-url="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/whatsapp-proximo">
-          <span aria-hidden="true">●</span> WhatsApp e Próximo
-        </button>
+        <form class="js-whatsapp-proximo-form" method="post" target="campanha_whatsapp" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/whatsapp-proximo">
+          <button class="campanha-whatsapp-btn" type="submit">
+            <span aria-hidden="true">●</span> WhatsApp e Próximo
+          </button>
+        </form>
         <form class="js-envio-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/pular">
           <button class="campanha-pular-btn" type="submit">Pular</button>
         </form>
       </div>
-      <p class="campanha-envio-aviso" id="campanhaEnvioAviso" hidden></p>
     </section>
   {% else %}
     <section class="cartao campanha-envio-card campanha-concluida">
@@ -50,37 +51,11 @@ document.querySelectorAll('.js-envio-form').forEach((form) => {
     if (botao) { botao.disabled = true; botao.textContent = 'Pulando...'; }
   });
 });
-const botao = document.getElementById('whatsappProximo');
-if (botao) {
-  botao.addEventListener('click', async () => {
-    if (botao.disabled) return;
-    // Abre a aba vazia dentro do clique para não ser bloqueada pelo navegador.
-    const janelaWhats = window.open('about:blank', '_blank');
-    const aviso = document.getElementById('campanhaEnvioAviso');
-    botao.disabled = true;
-    const original = botao.innerHTML;
-    botao.textContent = 'Salvando...';
-    try {
-      const resposta = await fetch(botao.dataset.url, {method:'POST', headers:{'Accept':'application/json'}});
-      const dados = await resposta.json();
-      if (!resposta.ok || !dados.ok) throw new Error(dados.erro || 'Não foi possível avançar.');
-      // O servidor já salvou PROCESSADO antes deste ponto. Só agora abre o WhatsApp.
-      if (janelaWhats) {
-        janelaWhats.location.href = dados.whatsapp_url;
-        // A tela atual fica pronta para o próximo atendido.
-        setTimeout(() => { window.location.href = dados.proximo_url; }, 120);
-      } else {
-        // Se o navegador bloquear a nova aba, abre o WhatsApp nesta mesma tela.
-        // Ao voltar para o Organiza, o cliente já estará salvo como processado.
-        window.location.href = dados.whatsapp_url;
-      }
-    } catch (erro) {
-      if (janelaWhats) janelaWhats.close();
-      botao.disabled = false;
-      botao.innerHTML = original;
-      if (aviso) { aviso.hidden = false; aviso.textContent = erro.message || 'Erro ao salvar.'; }
-    }
+document.querySelectorAll('.js-whatsapp-proximo-form').forEach((form) => {
+  form.addEventListener('submit', () => {
+    const botao = form.querySelector('button[type="submit"]');
+    if (botao) { botao.disabled = true; botao.textContent = 'Salvando...'; }
   });
-}
+});
 </script>
 {% endblock %}
