@@ -15,6 +15,10 @@
   {% endif %}
   {% if erro == 'arquivo' %}<div class="alerta erro">Selecione um arquivo CSV.</div>{% endif %}
   {% if erro == 'leitura' %}<div class="alerta erro">Não foi possível ler o CSV. Verifique as colunas NOME, WHATTSAPP/WHATSAPP e ULTIMO_MES_ALUGUEL.</div>{% endif %}
+  {% if connect_novos or connect_atualizados or connect_ignorados %}
+    <div class="alerta sucesso">Connect atualizado: {{ connect_novos or 0 }} novos · {{ connect_atualizados or 0 }} atualizados · {{ connect_ignorados or 0 }} ignorados.</div>
+  {% endif %}
+  {% if connect_erro %}<div class="alerta erro">Não foi possível atualizar pelo Connect: {{ connect_erro }}</div>{% endif %}
 
   <div class="grade-metricas clean-metricas duas">
     <article class="cartao metrica"><span>✓</span><div><small>Ativos no filtro</small><strong>{{ ativos }}</strong></div></article>
@@ -38,6 +42,14 @@
       <option value="CONNECT" {% if integracao_filtro == 'CONNECT' %}selected{% endif %}>Connect</option>
     </select>
     <button class="botao" type="submit">Filtrar</button>
+  </form>
+
+  <form method="post" action="/organiza/campanhas/lista-aluguel/atualizar-connect" class="cartao campanha-importacao-form">
+    <div>
+      <strong>Atualizar pelo Connect</strong>
+      <p class="texto-suave">Busca agora os contratos válidos da Karaokê RJ no Connect, atualiza nome, telefone e último aluguel e transforma os registros encontrados em integração Connect.</p>
+    </div>
+    <button class="botao primario" type="submit">Atualizar pelo Connect</button>
   </form>
 
   <form method="post" action="/organiza/campanhas/lista-aluguel/importar" enctype="multipart/form-data" class="cartao campanha-importacao-form">

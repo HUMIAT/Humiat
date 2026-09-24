@@ -25,7 +25,9 @@
       {% endif %}
     </div>
     <div class="campanha-mensagem-preview">{{ campanha.mensagem }}</div>
-    {% if campanha.link %}
+    {% if campanha.lista_tipo == 'ATUALIZACAO' %}
+      <div class="campanha-link-preview"><small>Link da campanha</small><span>Dinâmico por cliente, conforme a versão do equipamento até {{ campanha.pacote_alvo }}.</span></div>
+    {% elif campanha.link %}
       <div class="campanha-link-preview"><small>Link da campanha</small><a href="{{ campanha.link }}" target="_blank" rel="noopener">{{ campanha.link }}</a></div>
     {% endif %}
   </section>

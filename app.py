@@ -2458,6 +2458,61 @@ def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_P
     return max(indice_atual - indice_pacote, 0)
 
 
+def _pacote_indice(valor: str | None) -> int | None:
+    texto = (valor or "").strip().replace("-", ".")
+    m = re.fullmatch(r"(\d{4})\.([12])", texto)
+    if not m:
+        return None
+    ano, semestre = map(int, m.groups())
+    return ano * 2 + semestre
+
+
+def _pacote_por_indice(indice: int) -> str:
+    ano, resto = divmod(int(indice) - 1, 2)
+    semestre = resto + 1
+    return f"{ano}.{semestre}"
+
+
+def _pacote_url(valor: str) -> str:
+    return (valor or "").strip().replace(".", "-")
+
+
+def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
+    """Gera o link público de atualizações conforme a versão real do cliente.
+
+    O cliente já possui o pacote gravado no equipamento. A página precisa começar
+    na primeira versão que ele ainda não possui e terminar no pacote alvo da
+    campanha. Ex.: equipamento 2025.2 e alvo 2026.1 -> /2026-1/2026-1.
+    Quando há mais de um equipamento, usa o mais desatualizado para não omitir
+    nenhuma atualização necessária ao cliente.
+    """
+    if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO" or not cliente:
+        return ""
+    pacote_alvo = (campanha.pacote_alvo or PACOTE_ATUAL_PADRAO).strip()
+    alvo_indice = _pacote_indice(pacote_alvo)
+    if alvo_indice is None:
+        return ""
+
+    indices_origem = []
+    for eq in (cliente.equipamentos or []):
+        if not _equipamento_tem_atualizacao(eq, pacote_alvo):
+            continue
+        indice = _pacote_indice((eq.pacote or "").strip())
+        if indice is not None and indice < alvo_indice:
+            indices_origem.append(indice)
+    if not indices_origem:
+        return ""
+
+    inicio_indice = min(indices_origem) + 1
+    if inicio_indice > alvo_indice:
+        return ""
+    pacote_inicio = _pacote_por_indice(inicio_indice)
+    return (
+        "https://www.solvoz.com.br/atualizacoes/karaokerj/"
+        f"{_pacote_url(pacote_inicio)}/{_pacote_url(pacote_alvo)}"
+    )
+
+
 def _equipamento_tem_atualizacao(eq: Equipamento, pacote_alvo: str) -> bool:
     """Lista de Atualização: equipamento ativo e com atualização disponível."""
     if (eq.status or "").strip().lower() != "ativo":
@@ -2536,7 +2591,10 @@ def _rotulo_lista_campanha(campanha: Campanha | None) -> str:
 
 def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
     mensagem = (campanha.mensagem or "").strip().replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
-    link = (getattr(campanha, "link", None) or "").strip()
+    if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
+        link = _link_atualizacao_cliente(campanha, pessoa)
+    else:
+        link = (getattr(campanha, "link", None) or "").strip()
     if link:
         mensagem = f"{mensagem}\n\n{link}".strip()
     return mensagem
@@ -2756,6 +2814,10 @@ def campanha_lista_aluguel(request: Request, mes: int = 0, integracao: str = "",
         "atualizados": request.query_params.get("atualizados", ""),
         "ignorados": request.query_params.get("ignorados", ""),
         "erro": request.query_params.get("erro", ""),
+        "connect_novos": request.query_params.get("connect_novos", ""),
+        "connect_atualizados": request.query_params.get("connect_atualizados", ""),
+        "connect_ignorados": request.query_params.get("connect_ignorados", ""),
+        "connect_erro": request.query_params.get("connect_erro", ""),
         "mes_filtro": mes, "integracao_filtro": integracao, "meses_aluguel": MESES_ALUGUEL,
     })
 
@@ -2835,28 +2897,66 @@ def campanha_lista_aluguel_importar(
     )
 
 
-def _validar_chave_connect(request: Request):
-    esperada = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
-    if not esperada:
-        raise HTTPException(status_code=503, detail="Chave Connect → Organiza não configurada.")
-    recebida = (request.headers.get("X-API-Key") or "").strip()
-    if not recebida or not secrets.compare_digest(recebida, esperada):
-        raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+def _connect_base_url() -> str:
+    bruto = (os.getenv("CONNECT_API_URL") or "").strip().rstrip("/")
+    if not bruto:
+        return ""
+    sufixos = (
+        "/api/integracoes/organiza/lancamentos",
+        "/api/integracoes/organiza/clientes-aluguel/snapshot",
+    )
+    for sufixo in sufixos:
+        if bruto.endswith(sufixo):
+            return bruto[:-len(sufixo)].rstrip("/")
+    return bruto
 
 
-@app.post("/api/integracoes/connect/clientes-aluguel")
-async def integrar_cliente_aluguel_connect(request: Request, db: Session = Depends(get_db)):
-    """Upsert da lista de aluguel. CONNECT sempre prevalece sobre PLANILHA."""
-    _validar_chave_connect(request)
+def _buscar_snapshot_clientes_aluguel_connect() -> list[dict]:
+    base = _connect_base_url()
+    if not base:
+        raise RuntimeError("CONNECT_API_URL não configurada.")
+    chave = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    if not chave:
+        raise RuntimeError("CONNECT_API_KEY/ORGANIZA_API_KEY não configurada.")
+    url = base + "/api/integracoes/organiza/clientes-aluguel/snapshot"
+    req = urllib.request.Request(
+        url, data=b"{}", method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-API-Key": chave,
+            "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSAO}",
+        },
+    )
     try:
-        dados = await request.json()
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            corpo = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Connect respondeu HTTP {exc.code}: {detalhe[:500]}")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Não foi possível acessar o Connect: {exc.reason}")
+    try:
+        dados = json.loads(corpo or "{}")
     except Exception:
-        raise HTTPException(status_code=400, detail="JSON inválido.")
+        raise RuntimeError("Resposta inválida do Connect.")
+    if str(dados.get("empresa_slug") or "").strip().lower() != "karaokerj":
+        raise RuntimeError("O Connect não retornou a empresa Karaokê RJ.")
+    clientes = dados.get("clientes")
+    if not isinstance(clientes, list):
+        raise RuntimeError("Resposta do Connect sem lista de clientes.")
+    return clientes
+
+
+def _aplicar_cliente_aluguel_connect(db: Session, dados: dict) -> tuple[CampanhaAluguelContato, bool]:
+    slug = str(dados.get("empresa_slug") or "").strip().lower()
+    if slug != "karaokerj":
+        raise ValueError("Esta lista aceita somente contratos da Karaokê RJ.")
 
     nome = _nome_aluguel_normalizado(str(dados.get("nome") or ""))
     normalizado = _normalizar_telefone_csv_aluguel(str(dados.get("telefone") or ""))
     if not nome or not normalizado:
-        raise HTTPException(status_code=422, detail="Nome e telefone válidos são obrigatórios.")
+        raise ValueError("Nome e telefone válidos são obrigatórios.")
     pais, ddi, telefone, numero_chave = normalizado
 
     connect_cliente_id = None
@@ -2867,20 +2967,24 @@ async def integrar_cliente_aluguel_connect(request: Request, db: Session = Depen
         if dados.get("connect_solicitacao_id") not in (None, ""):
             connect_solicitacao_id = int(dados.get("connect_solicitacao_id"))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="IDs do Connect inválidos.")
+        raise ValueError("IDs do Connect inválidos.")
 
     data_evento = None
     if dados.get("data_evento"):
         try:
             data_evento = date.fromisoformat(str(dados.get("data_evento"))[:10])
         except ValueError:
-            raise HTTPException(status_code=422, detail="data_evento deve usar AAAA-MM-DD.")
+            raise ValueError("data_evento deve usar AAAA-MM-DD.")
 
     contato = None
     if connect_cliente_id:
-        contato = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.connect_cliente_id == connect_cliente_id).first()
+        contato = db.query(CampanhaAluguelContato).filter(
+            CampanhaAluguelContato.connect_cliente_id == connect_cliente_id
+        ).first()
     if not contato:
-        contato = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.numero_chave == numero_chave).first()
+        contato = db.query(CampanhaAluguelContato).filter(
+            CampanhaAluguelContato.numero_chave == numero_chave
+        ).first()
 
     criado = contato is None
     if criado:
@@ -2902,17 +3006,69 @@ async def integrar_cliente_aluguel_connect(request: Request, db: Session = Depen
     contato.connect_solicitacao_id = connect_solicitacao_id or contato.connect_solicitacao_id
     contato.ultima_sincronizacao_em = datetime.now()
     if data_evento:
-        # O Connect envia a visão atual do cliente (seu contrato válido mais recente).
-        # Por isso pode inclusive voltar para um mês anterior após cancelamento/alteração.
         contato.ultimo_aluguel_em = data_evento
         contato.ultimo_mes_aluguel = data_evento.month
+    return contato, criado
 
+
+def _validar_chave_connect(request: Request):
+    esperada = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    if not esperada:
+        raise HTTPException(status_code=503, detail="Chave Connect → Organiza não configurada.")
+    recebida = (request.headers.get("X-API-Key") or "").strip()
+    if not recebida or not secrets.compare_digest(recebida, esperada):
+        raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+
+@app.post("/api/integracoes/connect/clientes-aluguel")
+async def integrar_cliente_aluguel_connect(request: Request, db: Session = Depends(get_db)):
+    """Upsert da lista de aluguel. Exclusiva da Karaokê RJ; CONNECT prevalece."""
+    _validar_chave_connect(request)
+    try:
+        dados = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON inválido.")
+    try:
+        contato, criado = _aplicar_cliente_aluguel_connect(db, dados)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
     db.refresh(contato)
     return {
         "ok": True, "acao": "criado" if criado else "atualizado", "id": contato.id,
         "integracao": contato.integracao, "ultimo_mes_aluguel": contato.ultimo_mes_aluguel,
     }
+
+
+@app.post("/organiza/campanhas/lista-aluguel/atualizar-connect")
+def campanha_lista_aluguel_atualizar_connect(
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Atualização manual em lote, sempre limitada à empresa Karaokê RJ."""
+    try:
+        clientes = _buscar_snapshot_clientes_aluguel_connect()
+    except RuntimeError as exc:
+        return RedirectResponse(
+            "/organiza/campanhas/lista-aluguel?connect_erro=" + quote_plus(str(exc)),
+            status_code=303,
+        )
+
+    novos = atualizados = ignorados = 0
+    for dados in clientes:
+        try:
+            _, criado = _aplicar_cliente_aluguel_connect(db, dados)
+            if criado:
+                novos += 1
+            else:
+                atualizados += 1
+        except ValueError:
+            ignorados += 1
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/campanhas/lista-aluguel?connect_novos={novos}&connect_atualizados={atualizados}&connect_ignorados={ignorados}",
+        status_code=303,
+    )
 
 
 @app.post("/organiza/campanhas/lista-aluguel/{contato_id}/alternar")
@@ -2984,7 +3140,7 @@ def campanha_criar(
         }, status_code=400)
 
     campanha = Campanha(
-        nome=nome, lista_tipo=lista_tipo, mensagem=mensagem, link=link or None,
+        nome=nome, lista_tipo=lista_tipo, mensagem=mensagem, link=(link or None) if lista_tipo == "ALUGUEL" else None,
         pacote_alvo=obter_pacote_atual(db) if lista_tipo == "ATUALIZACAO" else None,
         aluguel_mes=(aluguel_mes or None) if lista_tipo == "ALUGUEL" else None,
         status="RASCUNHO", criado_por_id=usuario.id,
@@ -3076,7 +3232,7 @@ def campanha_salvar_edicao(
     campanha.pacote_alvo = obter_pacote_atual(db) if lista_tipo == "ATUALIZACAO" else None
     campanha.aluguel_mes = (aluguel_mes or None) if lista_tipo == "ALUGUEL" else None
     campanha.mensagem = mensagem
-    campanha.link = link or None
+    campanha.link = (link or None) if lista_tipo == "ALUGUEL" else None
     db.commit()
     return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
 
@@ -3152,6 +3308,8 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
         "request": request, "usuario": usuario, "campanha": campanha,
         "destinatario": destinatario, "pessoa": pessoa, "contagens": contagens,
         "whatsapp_url": _whatsapp_campanha_url(campanha, pessoa) if pessoa else "",
+        "link_atualizacao": _link_atualizacao_cliente(campanha, pessoa) if pessoa else "",
+        "mensagem_preview": _mensagem_campanha(campanha, pessoa) if pessoa else "",
     })
 
 

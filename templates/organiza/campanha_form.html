@@ -46,10 +46,16 @@
       <small>Opcional: use <b>{nome}</b> para inserir o nome do cliente.</small>
     </label>
 
-    <label class="campo-form">
+    <div class="campo-form" id="aviso-link-atualizacao" {% if (form_lista_tipo or 'ATUALIZACAO') != 'ATUALIZACAO' %}style="display:none"{% endif %}>
+      <span>Link de atualização</span>
+      <div class="alerta info">Gerado automaticamente para cada cliente conforme a versão do equipamento. Ex.: cliente em 2025.2 com alvo 2026.1 recebe <b>solvoz.com.br/atualizacoes/karaokerj/2026-1/2026-1</b>.</div>
+      <small>Se o cliente estiver mais atrasado, o início muda automaticamente para incluir todas as versões que faltam.</small>
+    </div>
+
+    <label class="campo-form" id="campo-link-fixo" {% if (form_lista_tipo or 'ATUALIZACAO') != 'ALUGUEL' %}style="display:none"{% endif %}>
       <span>Link (opcional)</span>
       <input type="url" name="link" value="{{ form_link or '' }}" placeholder="https://karaokerj.com.br/..." inputmode="url" autocomplete="url">
-      <small>Digite o link desta campanha. Pode ser uma página de informações, aluguel, atualização ou compra direta.</small>
+      <small>Para campanhas de aluguel, você pode informar um link fixo. Campanhas de atualização usam link dinâmico por cliente.</small>
     </label>
 
     <div class="campanha-form-acoes campanha-acao-principal-mobile">
@@ -61,7 +67,15 @@
 (function(){
   const lista = document.querySelector('select[name="lista_tipo"]');
   const campo = document.getElementById('campo-mes-aluguel');
-  function atualizar(){ if (campo && lista) campo.style.display = lista.value === 'ALUGUEL' ? '' : 'none'; }
+  const linkFixo = document.getElementById('campo-link-fixo');
+  const avisoAtualizacao = document.getElementById('aviso-link-atualizacao');
+  function atualizar(){
+    if (!lista) return;
+    const aluguel = lista.value === 'ALUGUEL';
+    if (campo) campo.style.display = aluguel ? '' : 'none';
+    if (linkFixo) linkFixo.style.display = aluguel ? '' : 'none';
+    if (avisoAtualizacao) avisoAtualizacao.style.display = aluguel ? 'none' : '';
+  }
   if (lista) { lista.addEventListener('change', atualizar); atualizar(); }
 })();
 </script>

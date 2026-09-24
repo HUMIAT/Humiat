@@ -20,6 +20,13 @@
         <p class="campanha-telefone">+{{ pessoa.ddi }} {{ pessoa.telefone_formatado() }}</p>
       </div>
 
+      {% if campanha.lista_tipo == 'ATUALIZACAO' and link_atualizacao %}
+        <div class="campanha-link-preview">
+          <small>Link deste cliente</small>
+          <a href="{{ link_atualizacao }}" target="_blank" rel="noopener">{{ link_atualizacao }}</a>
+        </div>
+      {% endif %}
+
       <div class="campanha-envio-acoes">
         <a class="campanha-whatsapp-btn" href="{{ whatsapp_url }}" data-abrir-whatsapp>
           <span aria-hidden="true">●</span> Abrir WhatsApp
