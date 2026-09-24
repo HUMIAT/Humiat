@@ -1,0 +1,82 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean campanhas-pagina">
+  <div class="titulo-linha campanhas-topo">
+    <div>
+      <p class="tag">Lista</p>
+      <h1>Clientes de Aluguel</h1>
+      <p class="texto-suave">A planilha funciona como base histórica. Quando o mesmo cliente chega pelo Connect, o Connect passa a ser a fonte atual do registro.</p>
+    </div>
+    <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
+  </div>
+
+  {% if importados or atualizados or ignorados %}
+    <div class="alerta sucesso">Importação concluída: {{ importados or 0 }} novos · {{ atualizados or 0 }} atualizados · {{ ignorados or 0 }} ignorados.</div>
+  {% endif %}
+  {% if erro == 'arquivo' %}<div class="alerta erro">Selecione um arquivo CSV.</div>{% endif %}
+  {% if erro == 'leitura' %}<div class="alerta erro">Não foi possível ler o CSV. Verifique as colunas NOME, WHATTSAPP/WHATSAPP e ULTIMO_MES_ALUGUEL.</div>{% endif %}
+
+  <div class="grade-metricas clean-metricas duas">
+    <article class="cartao metrica"><span>✓</span><div><small>Ativos no filtro</small><strong>{{ ativos }}</strong></div></article>
+    <article class="cartao metrica"><span>☏</span><div><small>Exibidos</small><strong>{{ lista|length }}</strong></div></article>
+  </div>
+
+  <form method="get" action="/organiza/campanhas/lista-aluguel" class="cartao campanha-importacao-form">
+    <div>
+      <strong>Filtrar clientes</strong>
+      <p class="texto-suave">Use o último mês de aluguel e a origem dos dados.</p>
+    </div>
+    <select name="mes">
+      <option value="0">Todos os meses</option>
+      {% for numero, nome in meses_aluguel.items() %}
+        <option value="{{ numero }}" {% if mes_filtro == numero %}selected{% endif %}>{{ '%02d'|format(numero) }} - {{ nome }}</option>
+      {% endfor %}
+    </select>
+    <select name="integracao">
+      <option value="">Todas as integrações</option>
+      <option value="PLANILHA" {% if integracao_filtro == 'PLANILHA' %}selected{% endif %}>Planilha</option>
+      <option value="CONNECT" {% if integracao_filtro == 'CONNECT' %}selected{% endif %}>Connect</option>
+    </select>
+    <button class="botao" type="submit">Filtrar</button>
+  </form>
+
+  <form method="post" action="/organiza/campanhas/lista-aluguel/importar" enctype="multipart/form-data" class="cartao campanha-importacao-form">
+    <div>
+      <strong>Importar planilha de clientes</strong>
+      <p class="texto-suave">CSV com NOME, WHATTSAPP/WHATSAPP e ULTIMO_MES_ALUGUEL. O telefone é a chave inicial; registros já assumidos pelo Connect não são sobrescritos pela planilha.</p>
+    </div>
+    <input type="file" name="arquivo" accept=".csv,text/csv" required>
+    <button class="botao primario" type="submit">Importar CSV</button>
+  </form>
+
+  <section class="cartao tabela-cartao campanha-clientes">
+    {% for contato in lista %}
+      <article class="campanha-cliente-linha {% if not contato.campanhas_ativo %}inativo{% endif %}">
+        <div class="campanha-cliente-info">
+          <strong>{{ contato.nome }}</strong>
+          <span>+{{ contato.ddi }} {{ contato.telefone_formatado() }}</span>
+          <span class="texto-suave">
+            Último aluguel:
+            {% if contato.ultimo_mes_aluguel %}
+              {{ '%02d'|format(contato.ultimo_mes_aluguel) }} - {{ meses_aluguel.get(contato.ultimo_mes_aluguel, '') }}
+              {% if contato.ultimo_aluguel_em %} · {{ contato.ultimo_aluguel_em.strftime('%d/%m/%Y') }}{% endif %}
+            {% else %}
+              não informado
+            {% endif %}
+          </span>
+          <span class="texto-suave">Integração: <strong>{{ 'Connect' if (contato.integracao or '').upper() == 'CONNECT' else 'Planilha' }}</strong>{% if contato.ultima_sincronizacao_em %} · sincronizado em {{ contato.ultima_sincronizacao_em.strftime('%d/%m/%Y %H:%M') }}{% endif %}</span>
+        </div>
+        <form method="post" action="/organiza/campanhas/lista-aluguel/{{ contato.id }}/alternar">
+          {% if contato.campanhas_ativo %}
+            <button class="botao pequeno fantasma" type="submit">Inativar campanha</button>
+          {% else %}
+            <button class="botao pequeno" type="submit">Ativar campanha</button>
+          {% endif %}
+        </form>
+      </article>
+    {% else %}
+      <p class="texto-suave vazio">Nenhum cliente encontrado neste filtro.</p>
+    {% endfor %}
+  </section>
+</section>
+{% endblock %}

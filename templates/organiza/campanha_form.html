@@ -5,7 +5,7 @@
     <div>
       <p class="tag">{% if modo_edicao %}Editar campanha{% else %}Nova campanha{% endif %}</p>
       <h1>{% if modo_edicao %}Editar campanha{% else %}Criar campanha{% endif %}</h1>
-      <p class="texto-suave">{{ total_elegiveis }} clientes ativos na Lista de Atualização.</p>
+      <p class="texto-suave">Escolha uma das duas listas disponíveis.</p>
     </div>
     <a class="botao fantasma" href="{% if campanha %}/organiza/campanhas/{{ campanha.id }}{% else %}/organiza/campanhas{% endif %}">Cancelar</a>
   </div>
@@ -20,10 +20,24 @@
 
     <label class="campo-form">
       <span>Lista</span>
-      <select name="lista_tipo">
-        <option value="ATUALIZACAO">Clientes de Atualização ({{ total_elegiveis }})</option>
+      <select name="lista_tipo" {% if campanha and campanha.status != 'RASCUNHO' %}disabled{% endif %}>
+        <option value="ATUALIZACAO" {% if (form_lista_tipo or 'ATUALIZACAO') == 'ATUALIZACAO' %}selected{% endif %}>Clientes de Atualização ({{ total_atualizacao }})</option>
+        <option value="ALUGUEL" {% if form_lista_tipo == 'ALUGUEL' %}selected{% endif %}>Clientes de Aluguel ({{ total_aluguel }})</option>
       </select>
-      <small>Equipamento ativo + atualização disponível para {{ pacote_atual }}.</small>
+      {% if campanha and campanha.status != 'RASCUNHO' %}<input type="hidden" name="lista_tipo" value="{{ campanha.lista_tipo }}">{% endif %}
+      <small>Atualização usa equipamento ativo + versão pendente. Aluguel usa a lista importada de nome + WhatsApp.</small>
+    </label>
+
+    <label class="campo-form" id="campo-mes-aluguel" {% if (form_lista_tipo or 'ATUALIZACAO') != 'ALUGUEL' %}style="display:none"{% endif %}>
+      <span>Último mês de aluguel</span>
+      <select name="aluguel_mes" id="aluguel-mes" {% if campanha and campanha.status != 'RASCUNHO' %}disabled{% endif %}>
+        <option value="0">Todos os meses</option>
+        {% for numero, nome_mes in meses_aluguel.items() %}
+          <option value="{{ numero }}" data-total="{{ total_aluguel_por_mes.get(numero, 0) }}" {% if (form_aluguel_mes or 0) == numero %}selected{% endif %}>{{ '%02d'|format(numero) }} - {{ nome_mes }} ({{ total_aluguel_por_mes.get(numero, 0) }})</option>
+        {% endfor %}
+      </select>
+      {% if campanha and campanha.status != 'RASCUNHO' %}<input type="hidden" name="aluguel_mes" value="{{ form_aluguel_mes or 0 }}">{% endif %}
+      <small>Ex.: escolha Fevereiro para criar a campanha somente com clientes cujo último aluguel registrado foi em fevereiro.</small>
     </label>
 
     <label class="campo-form">
@@ -43,4 +57,12 @@
     </div>
   </form>
 </section>
+<script>
+(function(){
+  const lista = document.querySelector('select[name="lista_tipo"]');
+  const campo = document.getElementById('campo-mes-aluguel');
+  function atualizar(){ if (campo && lista) campo.style.display = lista.value === 'ALUGUEL' ? '' : 'none'; }
+  if (lista) { lista.addEventListener('change', atualizar); atualizar(); }
+})();
+</script>
 {% endblock %}

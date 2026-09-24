@@ -5,7 +5,7 @@
     <div>
       <p class="tag">Campanha</p>
       <h1>{{ campanha.nome }}</h1>
-      <p class="texto-suave">Clientes de Atualização · pacote {{ campanha.pacote_alvo }}</p>
+      <p class="texto-suave">{{ rotulo_lista }}{% if campanha.lista_tipo != 'ALUGUEL' %} · pacote {{ campanha.pacote_alvo }}{% elif campanha.aluguel_mes %} · último aluguel em {{ meses_aluguel.get(campanha.aluguel_mes, '') }}{% else %} · todos os meses{% endif %}</p>
     </div>
     <div class="campanha-detalhe-acoes">
       <a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">Editar campanha</a>

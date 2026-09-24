@@ -6,7 +6,7 @@
     <strong>{{ contagens.enviados }} enviados · {{ contagens.pendentes }} restantes</strong>
   </div>
 
-  {% if destinatario %}
+  {% if destinatario and pessoa %}
     {% set total_envio = contagens.total if contagens.total else 1 %}
     {% set percentual = ((contagens.enviados * 100) / total_envio)|round(0, 'floor') %}
     <div class="campanha-envio-progresso" aria-label="Progresso da campanha">
@@ -16,8 +16,8 @@
     <section class="cartao campanha-envio-card">
       <div class="campanha-cliente-atual">
         <p class="tag">Cliente atual</p>
-        <h1>{{ destinatario.cliente.nome }}</h1>
-        <p class="campanha-telefone">+{{ destinatario.cliente.ddi }} {{ destinatario.cliente.telefone_formatado() }}</p>
+        <h1>{{ pessoa.nome }}</h1>
+        <p class="campanha-telefone">+{{ pessoa.ddi }} {{ pessoa.telefone_formatado() }}</p>
       </div>
 
       <div class="campanha-envio-acoes">

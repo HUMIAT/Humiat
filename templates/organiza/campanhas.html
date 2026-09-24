@@ -14,9 +14,18 @@
     <div>
       <small>LISTA</small>
       <strong>Clientes de Atualização</strong>
-      <span>Pacote atual {{ pacote_atual }} · somente clientes com equipamento ativo e atualização disponível</span>
+      <span>Pacote atual {{ pacote_atual }} · equipamento ativo + atualização disponível</span>
     </div>
-    <div class="campanha-lista-numeros"><b>{{ total_lista_ativa }}</b><small>ativos para campanhas</small></div>
+    <div class="campanha-lista-numeros"><b>{{ total_lista_atualizacao_ativa }}</b><small>ativos de {{ total_lista_atualizacao }}</small></div>
+  </a>
+
+  <a class="cartao campanha-lista-resumo" href="/organiza/campanhas/lista-aluguel">
+    <div>
+      <small>LISTA</small>
+      <strong>Clientes de Aluguel</strong>
+      <span>Nome + WhatsApp · importação por CSV · duplicidade controlada pelo telefone</span>
+    </div>
+    <div class="campanha-lista-numeros"><b>{{ total_lista_aluguel_ativa }}</b><small>ativos de {{ total_lista_aluguel }}</small></div>
   </a>
 
   <div class="campanhas-lista">
@@ -27,7 +36,11 @@
           <div>
             <small>{{ c.criado_em|datahora }}</small>
             <strong>{{ c.nome }}</strong>
-            <span>Clientes de Atualização · pacote {{ c.pacote_alvo or '-' }}</span>
+            {% if c.lista_tipo == 'ALUGUEL' %}
+              <span>Clientes de Aluguel</span>
+            {% else %}
+              <span>Clientes de Atualização · pacote {{ c.pacote_alvo or '-' }}</span>
+            {% endif %}
           </div>
           <span class="campanha-status {{ c.status|lower }}">{{ c.status }}</span>
         </div>
@@ -43,7 +56,7 @@
     {% else %}
       <div class="cartao campanha-vazio">
         <strong>Nenhuma campanha criada.</strong>
-        <span>Crie a primeira campanha e selecione a lista de Clientes de Atualização.</span>
+        <span>Crie a primeira campanha e escolha Atualização ou Aluguel.</span>
       </div>
     {% endfor %}
   </div>

@@ -1,5 +1,6 @@
 from urllib.parse import quote_plus, urlencode
 import hashlib
+import csv
 import html
 import hmac
 import os
@@ -643,6 +644,9 @@ class Campanha(Base):
     mensagem = Column(Text, nullable=False)
     link = Column(String(1000), nullable=True)
     pacote_alvo = Column(String(30), nullable=True)
+    # Para campanhas de aluguel, permite segmentar pelo último mês de locação.
+    # NULL = todos os meses.
+    aluguel_mes = Column(Integer, nullable=True)
     status = Column(String(20), nullable=False, default="RASCUNHO")
     criado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     imagem_nome = Column(String(180), nullable=True)
@@ -669,6 +673,56 @@ class CampanhaDestinatario(Base):
     criado_em = Column(DateTime, server_default=func.now())
     campanha = relationship("Campanha", back_populates="destinatarios")
     cliente = relationship("Cliente")
+    reservado_por = relationship("Usuario", foreign_keys=[reservado_por_id])
+    enviado_por = relationship("Usuario", foreign_keys=[enviado_por_id])
+
+
+class CampanhaAluguelContato(Base):
+    """Contato exclusivo da Lista de Aluguel para campanhas.
+
+    Não cria nem altera o cadastro operacional de Cliente. A duplicidade da
+    lista é controlada pelo número internacional normalizado.
+    """
+    __tablename__ = "campanha_aluguel_contatos"
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(180), nullable=False)
+    pais = Column(String(2), nullable=False, default="BR")
+    ddi = Column(String(5), nullable=False, default="55")
+    telefone = Column(String(20), nullable=False)
+    numero_chave = Column(String(30), nullable=False, unique=True, index=True)
+    campanhas_ativo = Column(Integer, nullable=False, default=1)
+    # Origem histórica mantida por compatibilidade. O campo de negócio exibido
+    # na tela é `integracao`: PLANILHA ou CONNECT.
+    origem = Column(String(60), nullable=True, default="PLANILHA")
+    integracao = Column(String(20), nullable=False, default="PLANILHA", index=True)
+    ultimo_mes_aluguel = Column(Integer, nullable=True, index=True)
+    ultimo_aluguel_em = Column(Date, nullable=True)
+    ultima_sincronizacao_em = Column(DateTime, nullable=True)
+    connect_cliente_id = Column(Integer, nullable=True, index=True)
+    connect_solicitacao_id = Column(Integer, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def whatsapp_completo(self):
+        return f"{self.ddi or ''}{self.telefone or ''}"
+
+    def telefone_formatado(self):
+        return formatar_telefone_internacional(self.pais, self.telefone)
+
+
+class CampanhaAluguelDestinatario(Base):
+    __tablename__ = "campanha_aluguel_destinatarios"
+    id = Column(Integer, primary_key=True)
+    campanha_id = Column(Integer, ForeignKey("campanhas.id"), nullable=False, index=True)
+    contato_id = Column(Integer, ForeignKey("campanha_aluguel_contatos.id"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="PENDENTE", index=True)
+    reservado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    reservado_em = Column(DateTime, nullable=True)
+    enviado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    enviado_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    campanha = relationship("Campanha")
+    contato = relationship("CampanhaAluguelContato")
     reservado_por = relationship("Usuario", foreign_keys=[reservado_por_id])
     enviado_por = relationship("Usuario", foreign_keys=[enviado_por_id])
 
@@ -1354,6 +1408,30 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "ignorado" not in existentes_integracao:
                 conn.execute(text("ALTER TABLE integracao_conect ADD COLUMN ignorado INTEGER NOT NULL DEFAULT 0"))
+    if "campanha_aluguel_contatos" in insp.get_table_names():
+        existentes_aluguel = {c["name"] for c in insp.get_columns("campanha_aluguel_contatos")}
+        tipo_dt_aluguel = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+        with engine.begin() as conn:
+            if "integracao" not in existentes_aluguel:
+                conn.execute(text("ALTER TABLE campanha_aluguel_contatos ADD COLUMN integracao VARCHAR(20) NOT NULL DEFAULT 'PLANILHA'"))
+            if "ultimo_mes_aluguel" not in existentes_aluguel:
+                conn.execute(text("ALTER TABLE campanha_aluguel_contatos ADD COLUMN ultimo_mes_aluguel INTEGER"))
+            if "ultimo_aluguel_em" not in existentes_aluguel:
+                conn.execute(text("ALTER TABLE campanha_aluguel_contatos ADD COLUMN ultimo_aluguel_em DATE"))
+            if "ultima_sincronizacao_em" not in existentes_aluguel:
+                conn.execute(text(f"ALTER TABLE campanha_aluguel_contatos ADD COLUMN ultima_sincronizacao_em {tipo_dt_aluguel}"))
+            if "connect_cliente_id" not in existentes_aluguel:
+                conn.execute(text("ALTER TABLE campanha_aluguel_contatos ADD COLUMN connect_cliente_id INTEGER"))
+            if "connect_solicitacao_id" not in existentes_aluguel:
+                conn.execute(text("ALTER TABLE campanha_aluguel_contatos ADD COLUMN connect_solicitacao_id INTEGER"))
+            # Registros criados pela versão anterior eram CSV; passam a ser PLANILHA.
+            conn.execute(text("UPDATE campanha_aluguel_contatos SET integracao = 'PLANILHA' WHERE integracao IS NULL OR TRIM(integracao) = ''"))
+            conn.execute(text("UPDATE campanha_aluguel_contatos SET origem = 'PLANILHA' WHERE UPPER(COALESCE(origem, '')) IN ('CSV', 'PLANILHA', '')"))
+    if "campanhas" in insp.get_table_names():
+        existentes_campanhas = {c["name"] for c in insp.get_columns("campanhas")}
+        with engine.begin() as conn:
+            if "aluguel_mes" not in existentes_campanhas:
+                conn.execute(text("ALTER TABLE campanhas ADD COLUMN aluguel_mes INTEGER"))
     if "clientes" in insp.get_table_names():
         existentes_clientes = {c["name"] for c in insp.get_columns("clientes")}
         with engine.begin() as conn:
@@ -2400,29 +2478,87 @@ def _clientes_lista_atualizacao(db: Session, pacote_alvo: str | None = None) -> 
     return lista
 
 
+MESES_ALUGUEL = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
+}
+
+
+def _nome_aluguel_normalizado(valor: str) -> str:
+    """Nome de campanha: sem datas, acentos, emojis ou espaços duplicados."""
+    texto = (valor or "").strip()
+    # Remove datas comuns que vieram anexadas ao nome na planilha histórica.
+    texto = re.sub(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", " ", texto)
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    texto = re.sub(r"[^A-Za-z0-9 .'-]", " ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip(" -.,")
+    return texto[:180]
+
+
+def _mes_aluguel_numero(valor) -> int | None:
+    if valor in (None, ""):
+        return None
+    if isinstance(valor, int):
+        return valor if 1 <= valor <= 12 else None
+    texto = unicodedata.normalize("NFKD", str(valor)).encode("ascii", "ignore").decode("ascii").strip().lower()
+    encontrado = re.match(r"\s*(\d{1,2})", texto)
+    if encontrado:
+        numero = int(encontrado.group(1))
+        return numero if 1 <= numero <= 12 else None
+    nomes = {unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii").lower(): numero for numero, nome in MESES_ALUGUEL.items()}
+    return nomes.get(texto)
+
+
+def _clientes_lista_aluguel(db: Session, mes: int | None = None, integracao: str = "") -> list[CampanhaAluguelContato]:
+    consulta = db.query(CampanhaAluguelContato)
+    if mes and 1 <= int(mes) <= 12:
+        consulta = consulta.filter(CampanhaAluguelContato.ultimo_mes_aluguel == int(mes))
+    integracao = (integracao or "").strip().upper()
+    if integracao in {"PLANILHA", "CONNECT"}:
+        consulta = consulta.filter(func.upper(CampanhaAluguelContato.integracao) == integracao)
+    return consulta.order_by(CampanhaAluguelContato.nome.asc(), CampanhaAluguelContato.id.asc()).all()
+
+
 def _cliente_elegivel_atualizacao(cliente: Cliente, pacote_alvo: str) -> bool:
     if not int(getattr(cliente, "campanhas_ativo", 1) or 0):
         return False
     return any(_equipamento_tem_atualizacao(eq, pacote_alvo) for eq in (cliente.equipamentos or []))
 
 
-def _mensagem_campanha(campanha: Campanha, cliente: Cliente) -> str:
-    mensagem = (campanha.mensagem or "").strip().replace("{nome}", (cliente.nome or "").strip())
+def _contato_elegivel_aluguel(contato: CampanhaAluguelContato) -> bool:
+    return bool(contato and int(getattr(contato, "campanhas_ativo", 1) or 0))
+
+
+def _rotulo_lista_campanha(campanha: Campanha | None) -> str:
+    return "Clientes de Aluguel" if campanha and (campanha.lista_tipo or "").upper() == "ALUGUEL" else "Clientes de Atualização"
+
+
+def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
+    mensagem = (campanha.mensagem or "").strip().replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
     link = (getattr(campanha, "link", None) or "").strip()
     if link:
         mensagem = f"{mensagem}\n\n{link}".strip()
     return mensagem
 
 
-def _whatsapp_campanha_url(campanha: Campanha, cliente: Cliente) -> str:
-    numero = re.sub(r"\D", "", cliente.whatsapp_completo() or "")
-    return f"https://wa.me/{numero}?{urlencode({'text': _mensagem_campanha(campanha, cliente)})}"
+def _whatsapp_campanha_url(campanha: Campanha, pessoa) -> str:
+    numero = re.sub(r"\D", "", pessoa.whatsapp_completo() or "")
+    return f"https://wa.me/{numero}?{urlencode({'text': _mensagem_campanha(campanha, pessoa)})}"
+
+
+def _modelo_destinatario_campanha(campanha: Campanha | None):
+    if campanha and (campanha.lista_tipo or "").upper() == "ALUGUEL":
+        return CampanhaAluguelDestinatario
+    return CampanhaDestinatario
 
 
 def _contagens_campanha(db: Session, campanha_id: int) -> dict:
-    linhas = db.query(CampanhaDestinatario.status, func.count(CampanhaDestinatario.id)).filter(
-        CampanhaDestinatario.campanha_id == campanha_id
-    ).group_by(CampanhaDestinatario.status).all()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    modelo = _modelo_destinatario_campanha(campanha)
+    linhas = db.query(modelo.status, func.count(modelo.id)).filter(
+        modelo.campanha_id == campanha_id
+    ).group_by(modelo.status).all()
     contagens = {status: int(qtd) for status, qtd in linhas}
     total = sum(contagens.values())
     enviados = contagens.get("ENVIADO", 0)
@@ -2431,8 +2567,7 @@ def _contagens_campanha(db: Session, campanha_id: int) -> dict:
     return {"total": total, "enviados": enviados, "ignorados": ignorados, "pendentes": pendentes, **contagens}
 
 
-def _reservar_proximo_campanha(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaDestinatario | None:
-    # Se o usuário já pegou um cliente, sempre retoma o mesmo antes de reservar outro.
+def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaDestinatario | None:
     atual = db.query(CampanhaDestinatario).options(
         selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
     ).filter(
@@ -2446,7 +2581,6 @@ def _reservar_proximo_campanha(db: Session, campanha: Campanha, usuario: Usuario
         atual.status = "IGNORADO"
         db.commit()
 
-    # Reserva otimista e atômica: dois celulares nunca conseguem reservar a mesma linha.
     while True:
         candidato_id = db.query(CampanhaDestinatario.id).filter(
             CampanhaDestinatario.campanha_id == campanha.id,
@@ -2476,15 +2610,113 @@ def _reservar_proximo_campanha(db: Session, campanha: Campanha, usuario: Usuario
             db.commit()
 
 
+def _reservar_proximo_aluguel(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaAluguelDestinatario | None:
+    atual = db.query(CampanhaAluguelDestinatario).options(
+        selectinload(CampanhaAluguelDestinatario.contato)
+    ).filter(
+        CampanhaAluguelDestinatario.campanha_id == campanha.id,
+        CampanhaAluguelDestinatario.status == "EM_ENVIO",
+        CampanhaAluguelDestinatario.reservado_por_id == usuario.id,
+    ).order_by(CampanhaAluguelDestinatario.id.asc()).first()
+    if atual:
+        if _contato_elegivel_aluguel(atual.contato):
+            return atual
+        atual.status = "IGNORADO"
+        db.commit()
+
+    while True:
+        candidato_id = db.query(CampanhaAluguelDestinatario.id).filter(
+            CampanhaAluguelDestinatario.campanha_id == campanha.id,
+            CampanhaAluguelDestinatario.status == "PENDENTE",
+        ).order_by(CampanhaAluguelDestinatario.id.asc()).limit(1).scalar()
+        if not candidato_id:
+            return None
+        agora = datetime.now()
+        alterados = db.query(CampanhaAluguelDestinatario).filter(
+            CampanhaAluguelDestinatario.id == candidato_id,
+            CampanhaAluguelDestinatario.status == "PENDENTE",
+        ).update({
+            CampanhaAluguelDestinatario.status: "EM_ENVIO",
+            CampanhaAluguelDestinatario.reservado_por_id: usuario.id,
+            CampanhaAluguelDestinatario.reservado_em: agora,
+        }, synchronize_session=False)
+        db.commit()
+        if not alterados:
+            continue
+        destinatario = db.query(CampanhaAluguelDestinatario).options(
+            selectinload(CampanhaAluguelDestinatario.contato)
+        ).filter(CampanhaAluguelDestinatario.id == candidato_id).first()
+        if destinatario and _contato_elegivel_aluguel(destinatario.contato):
+            return destinatario
+        if destinatario:
+            destinatario.status = "IGNORADO"
+            db.commit()
+
+
+def _reservar_proximo_campanha(db: Session, campanha: Campanha, usuario: Usuario):
+    if (campanha.lista_tipo or "").upper() == "ALUGUEL":
+        return _reservar_proximo_aluguel(db, campanha, usuario)
+    return _reservar_proximo_atualizacao(db, campanha, usuario)
+
+
+def _normalizar_telefone_csv_aluguel(valor: str) -> tuple[str, str, str, str] | None:
+    texto = (valor or "").strip()
+    texto = re.sub(r"(?:,00|\.0+)$", "", texto)
+    digitos = re.sub(r"\D", "", texto)
+    if digitos.startswith("55") and len(digitos) in (12, 13):
+        pais, ddi, telefone = normalizar_contato("BR", "55", digitos)
+    elif len(digitos) in (10, 11):
+        pais, ddi, telefone = normalizar_contato("BR", "55", digitos)
+    else:
+        return None
+    if not telefone_internacional_valido(pais, ddi, telefone):
+        return None
+    return pais, ddi, telefone, f"{ddi}{telefone}"
+
+
+def _ler_csv_aluguel(conteudo: bytes) -> list[dict]:
+    texto = None
+    for codificacao in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            texto = conteudo.decode(codificacao)
+            break
+        except UnicodeDecodeError:
+            continue
+    if texto is None:
+        raise ValueError("Não foi possível ler a codificação do CSV.")
+    amostra = texto[:4096]
+    try:
+        dialeto = csv.Sniffer().sniff(amostra, delimiters=";,\t")
+        leitor = csv.DictReader(io.StringIO(texto), dialect=dialeto)
+    except csv.Error:
+        leitor = csv.DictReader(io.StringIO(texto), delimiter=";")
+    linhas = []
+    for indice, linha in enumerate(leitor, start=2):
+        mapa = {str(k or "").strip().upper(): (v or "").strip() for k, v in linha.items()}
+        nome = mapa.get("NOME", "").strip()
+        telefone_bruto = mapa.get("WHATTSAPP") or mapa.get("WHATSAPP") or mapa.get("TELEFONE") or ""
+        ultimo_mes = mapa.get("ULTIMO_MES_ALUGUEL") or mapa.get("ULTIMO MES ALUGUEL") or mapa.get("MES_ALUGUEL") or ""
+        ultimo_aluguel = mapa.get("ULTIMO_ALUGUEL") or mapa.get("ULTIMO ALUGUEL") or mapa.get("DATA_ALUGUEL") or ""
+        if not nome and not telefone_bruto:
+            continue
+        linhas.append({
+            "linha": indice, "nome": nome, "telefone_bruto": telefone_bruto,
+            "ultimo_mes": ultimo_mes, "ultimo_aluguel": ultimo_aluguel,
+        })
+    return linhas
+
 @app.get("/organiza/campanhas", response_class=HTMLResponse)
 def campanhas_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     campanhas = db.query(Campanha).order_by(Campanha.criado_em.desc(), Campanha.id.desc()).all()
     dados = [{"campanha": c, "contagens": _contagens_campanha(db, c.id)} for c in campanhas]
-    elegiveis = _clientes_lista_atualizacao(db)
-    ativos = sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1)
+    atualizacao = _clientes_lista_atualizacao(db)
+    aluguel = _clientes_lista_aluguel(db)
     return templates.TemplateResponse("organiza/campanhas.html", {
         "request": request, "usuario": usuario, "dados": dados,
-        "total_lista_atualizacao": len(elegiveis), "total_lista_ativa": ativos,
+        "total_lista_atualizacao": len(atualizacao),
+        "total_lista_atualizacao_ativa": sum(1 for item in atualizacao if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "total_lista_aluguel": len(aluguel),
+        "total_lista_aluguel_ativa": sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1),
         "pacote_atual": obter_pacote_atual(db),
     })
 
@@ -2510,13 +2742,201 @@ def campanha_lista_atualizacao_alternar(cliente_id: int, usuario: Usuario = Depe
     return RedirectResponse("/organiza/campanhas/lista-atualizacao", status_code=303)
 
 
+@app.get("/organiza/campanhas/lista-aluguel", response_class=HTMLResponse)
+def campanha_lista_aluguel(request: Request, mes: int = 0, integracao: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    mes = mes if 1 <= int(mes or 0) <= 12 else 0
+    integracao = (integracao or "").strip().upper()
+    if integracao not in {"PLANILHA", "CONNECT"}:
+        integracao = ""
+    lista = _clientes_lista_aluguel(db, mes=mes or None, integracao=integracao)
+    return templates.TemplateResponse("organiza/lista_aluguel.html", {
+        "request": request, "usuario": usuario, "lista": lista,
+        "ativos": sum(1 for contato in lista if int(contato.campanhas_ativo or 0) == 1),
+        "importados": request.query_params.get("importados", ""),
+        "atualizados": request.query_params.get("atualizados", ""),
+        "ignorados": request.query_params.get("ignorados", ""),
+        "erro": request.query_params.get("erro", ""),
+        "mes_filtro": mes, "integracao_filtro": integracao, "meses_aluguel": MESES_ALUGUEL,
+    })
+
+
+@app.post("/organiza/campanhas/lista-aluguel/importar")
+def campanha_lista_aluguel_importar(
+    arquivo: UploadFile = File(...),
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    nome_arquivo = (arquivo.filename or "").lower()
+    if nome_arquivo and not nome_arquivo.endswith(".csv"):
+        return RedirectResponse("/organiza/campanhas/lista-aluguel?erro=arquivo", status_code=303)
+    try:
+        linhas = _ler_csv_aluguel(arquivo.file.read())
+    except Exception:
+        return RedirectResponse("/organiza/campanhas/lista-aluguel?erro=leitura", status_code=303)
+
+    importados = 0
+    atualizados = 0
+    ignorados = 0
+    vistos = set()
+    for item in linhas:
+        nome = _nome_aluguel_normalizado(item.get("nome") or "")
+        normalizado = _normalizar_telefone_csv_aluguel(item.get("telefone_bruto") or "")
+        if not nome or not normalizado:
+            ignorados += 1
+            continue
+        pais, ddi, telefone, numero_chave = normalizado
+        ultimo_mes = _mes_aluguel_numero(item.get("ultimo_mes"))
+        ultimo_aluguel_em = None
+        bruto_data = (item.get("ultimo_aluguel") or "").strip()
+        if bruto_data:
+            for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+                try:
+                    ultimo_aluguel_em = datetime.strptime(bruto_data[:10], formato).date()
+                    ultimo_mes = ultimo_aluguel_em.month
+                    break
+                except ValueError:
+                    continue
+        if numero_chave in vistos:
+            ignorados += 1
+            continue
+        vistos.add(numero_chave)
+        existente = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.numero_chave == numero_chave).first()
+        if existente:
+            # CONNECT é a fonte atual: uma reimportação da planilha nunca regride seus dados.
+            if (existente.integracao or "PLANILHA").upper() == "CONNECT":
+                ignorados += 1
+                continue
+            mudou = False
+            for campo, valor in (("nome", nome), ("pais", pais), ("ddi", ddi), ("telefone", telefone)):
+                if getattr(existente, campo) != valor:
+                    setattr(existente, campo, valor)
+                    mudou = True
+            if ultimo_mes and existente.ultimo_mes_aluguel != ultimo_mes:
+                existente.ultimo_mes_aluguel = ultimo_mes
+                mudou = True
+            if ultimo_aluguel_em and existente.ultimo_aluguel_em != ultimo_aluguel_em:
+                existente.ultimo_aluguel_em = ultimo_aluguel_em
+                mudou = True
+            existente.origem = "PLANILHA"
+            existente.integracao = "PLANILHA"
+            if mudou:
+                atualizados += 1
+            continue
+        db.add(CampanhaAluguelContato(
+            nome=nome, pais=pais, ddi=ddi, telefone=telefone,
+            numero_chave=numero_chave, campanhas_ativo=1, origem="PLANILHA", integracao="PLANILHA",
+            ultimo_mes_aluguel=ultimo_mes, ultimo_aluguel_em=ultimo_aluguel_em,
+        ))
+        importados += 1
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/campanhas/lista-aluguel?importados={importados}&atualizados={atualizados}&ignorados={ignorados}",
+        status_code=303,
+    )
+
+
+def _validar_chave_connect(request: Request):
+    esperada = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    if not esperada:
+        raise HTTPException(status_code=503, detail="Chave Connect → Organiza não configurada.")
+    recebida = (request.headers.get("X-API-Key") or "").strip()
+    if not recebida or not secrets.compare_digest(recebida, esperada):
+        raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+
+@app.post("/api/integracoes/connect/clientes-aluguel")
+async def integrar_cliente_aluguel_connect(request: Request, db: Session = Depends(get_db)):
+    """Upsert da lista de aluguel. CONNECT sempre prevalece sobre PLANILHA."""
+    _validar_chave_connect(request)
+    try:
+        dados = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON inválido.")
+
+    nome = _nome_aluguel_normalizado(str(dados.get("nome") or ""))
+    normalizado = _normalizar_telefone_csv_aluguel(str(dados.get("telefone") or ""))
+    if not nome or not normalizado:
+        raise HTTPException(status_code=422, detail="Nome e telefone válidos são obrigatórios.")
+    pais, ddi, telefone, numero_chave = normalizado
+
+    connect_cliente_id = None
+    connect_solicitacao_id = None
+    try:
+        if dados.get("connect_cliente_id") not in (None, ""):
+            connect_cliente_id = int(dados.get("connect_cliente_id"))
+        if dados.get("connect_solicitacao_id") not in (None, ""):
+            connect_solicitacao_id = int(dados.get("connect_solicitacao_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="IDs do Connect inválidos.")
+
+    data_evento = None
+    if dados.get("data_evento"):
+        try:
+            data_evento = date.fromisoformat(str(dados.get("data_evento"))[:10])
+        except ValueError:
+            raise HTTPException(status_code=422, detail="data_evento deve usar AAAA-MM-DD.")
+
+    contato = None
+    if connect_cliente_id:
+        contato = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.connect_cliente_id == connect_cliente_id).first()
+    if not contato:
+        contato = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.numero_chave == numero_chave).first()
+
+    criado = contato is None
+    if criado:
+        contato = CampanhaAluguelContato(
+            nome=nome, pais=pais, ddi=ddi, telefone=telefone, numero_chave=numero_chave,
+            campanhas_ativo=1, origem="CONNECT", integracao="CONNECT",
+        )
+        db.add(contato)
+    else:
+        contato.nome = nome
+        contato.pais = pais
+        contato.ddi = ddi
+        contato.telefone = telefone
+        contato.numero_chave = numero_chave
+
+    contato.origem = "CONNECT"
+    contato.integracao = "CONNECT"
+    contato.connect_cliente_id = connect_cliente_id or contato.connect_cliente_id
+    contato.connect_solicitacao_id = connect_solicitacao_id or contato.connect_solicitacao_id
+    contato.ultima_sincronizacao_em = datetime.now()
+    if data_evento:
+        # O Connect envia a visão atual do cliente (seu contrato válido mais recente).
+        # Por isso pode inclusive voltar para um mês anterior após cancelamento/alteração.
+        contato.ultimo_aluguel_em = data_evento
+        contato.ultimo_mes_aluguel = data_evento.month
+
+    db.commit()
+    db.refresh(contato)
+    return {
+        "ok": True, "acao": "criado" if criado else "atualizado", "id": contato.id,
+        "integracao": contato.integracao, "ultimo_mes_aluguel": contato.ultimo_mes_aluguel,
+    }
+
+
+@app.post("/organiza/campanhas/lista-aluguel/{contato_id}/alternar")
+def campanha_lista_aluguel_alternar(contato_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    contato = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.id == contato_id).first()
+    if not contato:
+        raise HTTPException(404)
+    contato.campanhas_ativo = 0 if int(contato.campanhas_ativo or 0) == 1 else 1
+    db.commit()
+    return RedirectResponse("/organiza/campanhas/lista-aluguel", status_code=303)
+
+
 @app.get("/organiza/campanhas/nova", response_class=HTMLResponse)
 def campanha_nova(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    elegiveis = _clientes_lista_atualizacao(db)
+    atualizacao = _clientes_lista_atualizacao(db)
+    aluguel = _clientes_lista_aluguel(db)
     return templates.TemplateResponse("organiza/campanha_form.html", {
         "request": request, "usuario": usuario, "erro": "",
         "pacote_atual": obter_pacote_atual(db),
-        "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "total_atualizacao": sum(1 for item in atualizacao if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "total_aluguel": sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1),
+        "total_aluguel_por_mes": {m: sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1 and contato.ultimo_mes_aluguel == m) for m in MESES_ALUGUEL},
+        "meses_aluguel": MESES_ALUGUEL,
+        "form_lista_tipo": "ATUALIZACAO", "form_aluguel_mes": 0,
         "form_link": "", "campanha": None, "modo_edicao": False,
     })
 
@@ -2526,6 +2946,7 @@ def campanha_criar(
     request: Request,
     nome: str = Form(...),
     lista_tipo: str = Form("ATUALIZACAO"),
+    aluguel_mes: int = Form(0),
     mensagem: str = Form(...),
     link: str = Form(""),
     usuario: Usuario = Depends(usuario_logado),
@@ -2535,30 +2956,38 @@ def campanha_criar(
     mensagem = (mensagem or "").strip()
     link = (link or "").strip()
     lista_tipo = (lista_tipo or "ATUALIZACAO").strip().upper()
+    aluguel_mes = int(aluguel_mes or 0) if str(aluguel_mes or "0").isdigit() else 0
+    aluguel_mes = aluguel_mes if 1 <= aluguel_mes <= 12 else 0
     erro = ""
     if not nome:
         erro = "Informe o nome da campanha."
-    elif lista_tipo != "ATUALIZACAO":
-        erro = "Nesta etapa está disponível somente a lista de Clientes de Atualização."
+    elif lista_tipo not in {"ATUALIZACAO", "ALUGUEL"}:
+        erro = "Selecione uma lista válida."
     elif not mensagem:
         erro = "Informe a mensagem da campanha."
     elif len(link) > 1000:
         erro = "O link deve ter no máximo 1000 caracteres."
 
     if erro:
-        elegiveis = _clientes_lista_atualizacao(db)
+        atualizacao = _clientes_lista_atualizacao(db)
+        aluguel = _clientes_lista_aluguel(db)
         return templates.TemplateResponse("organiza/campanha_form.html", {
             "request": request, "usuario": usuario, "erro": erro,
             "pacote_atual": obter_pacote_atual(db),
-            "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
-            "form_nome": nome, "form_mensagem": mensagem, "form_link": link,
+            "total_atualizacao": sum(1 for item in atualizacao if int(item["cliente"].campanhas_ativo or 0) == 1),
+            "total_aluguel": sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1),
+            "total_aluguel_por_mes": {m: sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1 and contato.ultimo_mes_aluguel == m) for m in MESES_ALUGUEL},
+            "meses_aluguel": MESES_ALUGUEL,
+            "form_nome": nome, "form_lista_tipo": lista_tipo, "form_aluguel_mes": aluguel_mes,
+            "form_mensagem": mensagem, "form_link": link,
             "campanha": None, "modo_edicao": False,
         }, status_code=400)
 
     campanha = Campanha(
-        nome=nome, lista_tipo="ATUALIZACAO", mensagem=mensagem, link=link or None,
-        pacote_alvo=obter_pacote_atual(db), status="RASCUNHO",
-        criado_por_id=usuario.id,
+        nome=nome, lista_tipo=lista_tipo, mensagem=mensagem, link=link or None,
+        pacote_alvo=obter_pacote_atual(db) if lista_tipo == "ATUALIZACAO" else None,
+        aluguel_mes=(aluguel_mes or None) if lista_tipo == "ALUGUEL" else None,
+        status="RASCUNHO", criado_por_id=usuario.id,
     )
     db.add(campanha)
     db.commit()
@@ -2576,12 +3005,17 @@ def campanha_editar(
     campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
     if not campanha:
         raise HTTPException(404)
-    elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+    atualizacao = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+    aluguel = _clientes_lista_aluguel(db)
     return templates.TemplateResponse("organiza/campanha_form.html", {
         "request": request, "usuario": usuario, "erro": "",
         "pacote_atual": campanha.pacote_alvo or obter_pacote_atual(db),
-        "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
-        "form_nome": campanha.nome, "form_mensagem": campanha.mensagem, "form_link": campanha.link or "",
+        "total_atualizacao": sum(1 for item in atualizacao if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "total_aluguel": sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1),
+        "total_aluguel_por_mes": {m: sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1 and contato.ultimo_mes_aluguel == m) for m in MESES_ALUGUEL},
+        "meses_aluguel": MESES_ALUGUEL,
+        "form_nome": campanha.nome, "form_lista_tipo": campanha.lista_tipo, "form_aluguel_mes": campanha.aluguel_mes or 0,
+        "form_mensagem": campanha.mensagem, "form_link": campanha.link or "",
         "campanha": campanha, "modo_edicao": True,
     })
 
@@ -2591,6 +3025,8 @@ def campanha_salvar_edicao(
     campanha_id: int,
     request: Request,
     nome: str = Form(...),
+    lista_tipo: str = Form("ATUALIZACAO"),
+    aluguel_mes: int = Form(0),
     mensagem: str = Form(...),
     link: str = Form(""),
     usuario: Usuario = Depends(usuario_logado),
@@ -2603,25 +3039,42 @@ def campanha_salvar_edicao(
     nome = (nome or "").strip()
     mensagem = (mensagem or "").strip()
     link = (link or "").strip()
+    lista_tipo = (lista_tipo or campanha.lista_tipo or "ATUALIZACAO").strip().upper()
+    aluguel_mes = int(aluguel_mes or 0) if str(aluguel_mes or "0").isdigit() else 0
+    aluguel_mes = aluguel_mes if 1 <= aluguel_mes <= 12 else 0
     erro = ""
     if not nome:
         erro = "Informe o nome da campanha."
+    elif lista_tipo not in {"ATUALIZACAO", "ALUGUEL"}:
+        erro = "Selecione uma lista válida."
+    elif campanha.status != "RASCUNHO" and lista_tipo != (campanha.lista_tipo or "ATUALIZACAO").upper():
+        erro = "A lista não pode ser alterada depois que a campanha foi iniciada."
+    elif campanha.status != "RASCUNHO" and lista_tipo == "ALUGUEL" and aluguel_mes != int(campanha.aluguel_mes or 0):
+        erro = "O mês da lista não pode ser alterado depois que a campanha foi iniciada."
     elif not mensagem:
         erro = "Informe a mensagem da campanha."
     elif len(link) > 1000:
         erro = "O link deve ter no máximo 1000 caracteres."
 
     if erro:
-        elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+        atualizacao = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+        aluguel = _clientes_lista_aluguel(db)
         return templates.TemplateResponse("organiza/campanha_form.html", {
             "request": request, "usuario": usuario, "erro": erro,
             "pacote_atual": campanha.pacote_alvo or obter_pacote_atual(db),
-            "total_elegiveis": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
-            "form_nome": nome, "form_mensagem": mensagem, "form_link": link,
+            "total_atualizacao": sum(1 for item in atualizacao if int(item["cliente"].campanhas_ativo or 0) == 1),
+            "total_aluguel": sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1),
+            "total_aluguel_por_mes": {m: sum(1 for contato in aluguel if int(contato.campanhas_ativo or 0) == 1 and contato.ultimo_mes_aluguel == m) for m in MESES_ALUGUEL},
+            "meses_aluguel": MESES_ALUGUEL,
+            "form_nome": nome, "form_lista_tipo": lista_tipo, "form_aluguel_mes": aluguel_mes,
+            "form_mensagem": mensagem, "form_link": link,
             "campanha": campanha, "modo_edicao": True,
         }, status_code=400)
 
     campanha.nome = nome
+    campanha.lista_tipo = lista_tipo
+    campanha.pacote_alvo = obter_pacote_atual(db) if lista_tipo == "ATUALIZACAO" else None
+    campanha.aluguel_mes = (aluguel_mes or None) if lista_tipo == "ALUGUEL" else None
     campanha.mensagem = mensagem
     campanha.link = link or None
     db.commit()
@@ -2634,15 +3087,24 @@ def campanha_iniciar(campanha_id: int, usuario: Usuario = Depends(usuario_logado
     if not campanha:
         raise HTTPException(404)
     if campanha.status == "RASCUNHO":
-        pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
-        lista = _clientes_lista_atualizacao(db, pacote_alvo)
-        clientes = [item["cliente"] for item in lista if int(item["cliente"].campanhas_ativo or 0) == 1]
-        if not clientes:
-            return RedirectResponse(f"/organiza/campanhas/{campanha.id}?erro=nenhum_cliente", status_code=303)
-        existentes = {cid for (cid,) in db.query(CampanhaDestinatario.cliente_id).filter(CampanhaDestinatario.campanha_id == campanha.id).all()}
-        for cliente in clientes:
-            if cliente.id not in existentes:
-                db.add(CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE"))
+        if (campanha.lista_tipo or "").upper() == "ALUGUEL":
+            contatos = [c for c in _clientes_lista_aluguel(db, mes=campanha.aluguel_mes) if _contato_elegivel_aluguel(c)]
+            if not contatos:
+                return RedirectResponse(f"/organiza/campanhas/{campanha.id}?erro=nenhum_cliente", status_code=303)
+            existentes = {cid for (cid,) in db.query(CampanhaAluguelDestinatario.contato_id).filter(CampanhaAluguelDestinatario.campanha_id == campanha.id).all()}
+            for contato in contatos:
+                if contato.id not in existentes:
+                    db.add(CampanhaAluguelDestinatario(campanha_id=campanha.id, contato_id=contato.id, status="PENDENTE"))
+        else:
+            pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+            lista = _clientes_lista_atualizacao(db, pacote_alvo)
+            clientes = [item["cliente"] for item in lista if int(item["cliente"].campanhas_ativo or 0) == 1]
+            if not clientes:
+                return RedirectResponse(f"/organiza/campanhas/{campanha.id}?erro=nenhum_cliente", status_code=303)
+            existentes = {cid for (cid,) in db.query(CampanhaDestinatario.cliente_id).filter(CampanhaDestinatario.campanha_id == campanha.id).all()}
+            for cliente in clientes:
+                if cliente.id not in existentes:
+                    db.add(CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE"))
         campanha.status = "ATIVA"
         campanha.iniciado_em = datetime.now()
         db.commit()
@@ -2654,11 +3116,18 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
     campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
     if not campanha:
         raise HTTPException(404)
-    elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db)) if campanha.status == "RASCUNHO" else []
+    total_previsto = 0
+    if campanha.status == "RASCUNHO":
+        if (campanha.lista_tipo or "").upper() == "ALUGUEL":
+            total_previsto = sum(1 for contato in _clientes_lista_aluguel(db, mes=campanha.aluguel_mes) if _contato_elegivel_aluguel(contato))
+        else:
+            elegiveis = _clientes_lista_atualizacao(db, campanha.pacote_alvo or obter_pacote_atual(db))
+            total_previsto = sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1)
     return templates.TemplateResponse("organiza/campanha_detalhe.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
+        "rotulo_lista": _rotulo_lista_campanha(campanha),
         "contagens": _contagens_campanha(db, campanha.id),
-        "total_previsto": sum(1 for item in elegiveis if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "total_previsto": total_previsto, "meses_aluguel": MESES_ALUGUEL,
         "erro": request.query_params.get("erro", ""),
     })
 
@@ -2671,6 +3140,9 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
     if campanha.status != "ATIVA":
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
     destinatario = _reservar_proximo_campanha(db, campanha, usuario)
+    pessoa = None
+    if destinatario:
+        pessoa = destinatario.contato if (campanha.lista_tipo or "").upper() == "ALUGUEL" else destinatario.cliente
     contagens = _contagens_campanha(db, campanha.id)
     if not destinatario and contagens["pendentes"] == 0:
         campanha.status = "FINALIZADA"
@@ -2678,17 +3150,18 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
         db.commit()
     return templates.TemplateResponse("organiza/campanha_envio.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
-        "destinatario": destinatario, "contagens": contagens,
-        "whatsapp_url": _whatsapp_campanha_url(campanha, destinatario.cliente) if destinatario else "",
+        "destinatario": destinatario, "pessoa": pessoa, "contagens": contagens,
+        "whatsapp_url": _whatsapp_campanha_url(campanha, pessoa) if pessoa else "",
     })
 
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/enviado")
 def campanha_marcar_enviado(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    destinatario = db.query(CampanhaDestinatario).filter(
-        CampanhaDestinatario.id == destinatario_id,
-        CampanhaDestinatario.campanha_id == campanha_id,
-    ).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    modelo = _modelo_destinatario_campanha(campanha)
+    destinatario = db.query(modelo).filter(modelo.id == destinatario_id, modelo.campanha_id == campanha_id).first()
     if not destinatario:
         raise HTTPException(404)
     if destinatario.status == "EM_ENVIO" and destinatario.reservado_por_id == usuario.id:
@@ -2701,20 +3174,39 @@ def campanha_marcar_enviado(campanha_id: int, destinatario_id: int, usuario: Usu
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/nao-receber")
 def campanha_nao_receber(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    destinatario = db.query(CampanhaDestinatario).options(selectinload(CampanhaDestinatario.cliente)).filter(
-        CampanhaDestinatario.id == destinatario_id,
-        CampanhaDestinatario.campanha_id == campanha_id,
-    ).first()
-    if not destinatario:
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
         raise HTTPException(404)
-    if destinatario.reservado_por_id == usuario.id and destinatario.status == "EM_ENVIO":
-        destinatario.cliente.campanhas_ativo = 0
-        destinatario.status = "IGNORADO"
-        db.query(CampanhaDestinatario).filter(
-            CampanhaDestinatario.cliente_id == destinatario.cliente_id,
-            CampanhaDestinatario.status == "PENDENTE",
-        ).update({CampanhaDestinatario.status: "IGNORADO"}, synchronize_session=False)
-        db.commit()
+    if (campanha.lista_tipo or "").upper() == "ALUGUEL":
+        destinatario = db.query(CampanhaAluguelDestinatario).options(selectinload(CampanhaAluguelDestinatario.contato)).filter(
+            CampanhaAluguelDestinatario.id == destinatario_id,
+            CampanhaAluguelDestinatario.campanha_id == campanha_id,
+        ).first()
+        if not destinatario:
+            raise HTTPException(404)
+        if destinatario.reservado_por_id == usuario.id and destinatario.status == "EM_ENVIO":
+            destinatario.contato.campanhas_ativo = 0
+            destinatario.status = "IGNORADO"
+            db.query(CampanhaAluguelDestinatario).filter(
+                CampanhaAluguelDestinatario.contato_id == destinatario.contato_id,
+                CampanhaAluguelDestinatario.status == "PENDENTE",
+            ).update({CampanhaAluguelDestinatario.status: "IGNORADO"}, synchronize_session=False)
+            db.commit()
+    else:
+        destinatario = db.query(CampanhaDestinatario).options(selectinload(CampanhaDestinatario.cliente)).filter(
+            CampanhaDestinatario.id == destinatario_id,
+            CampanhaDestinatario.campanha_id == campanha_id,
+        ).first()
+        if not destinatario:
+            raise HTTPException(404)
+        if destinatario.reservado_por_id == usuario.id and destinatario.status == "EM_ENVIO":
+            destinatario.cliente.campanhas_ativo = 0
+            destinatario.status = "IGNORADO"
+            db.query(CampanhaDestinatario).filter(
+                CampanhaDestinatario.cliente_id == destinatario.cliente_id,
+                CampanhaDestinatario.status == "PENDENTE",
+            ).update({CampanhaDestinatario.status: "IGNORADO"}, synchronize_session=False)
+            db.commit()
     return RedirectResponse(f"/organiza/campanhas/{campanha_id}/proximo", status_code=303)
 
 
