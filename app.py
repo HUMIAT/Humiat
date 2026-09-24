@@ -2517,7 +2517,7 @@ def _pacote_label_num(valor: int) -> str:
 
 
 def obter_pacote_atual(db: Session) -> str:
-    configuracao = db.query(Configuracao).filter(Configuracao.chave == "pacote_atual").first()
+    configuracao = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == "pacote_atual").first()
     valor = (configuracao.valor if configuracao else PACOTE_ATUAL_PADRAO) or PACOTE_ATUAL_PADRAO
     valor = valor.strip().replace("-", ".")
     return valor if _pacote_release_num(valor) is not None else PACOTE_ATUAL_PADRAO
