@@ -2505,6 +2505,51 @@ def _pacote_url(valor: str) -> str:
 
 ATUALIZACAO_PRECO_PACOTE_CENTAVOS = 25000
 ATUALIZACAO_PROMO_TOTAL_CENTAVOS = 25000
+ATUALIZACAO_PROMO_DESCONTO_UMA_CENTAVOS = 5000
+_ATUALIZACAO_PROMO_CACHE = {"expira_em": None, "dados": None}
+
+
+def _solvoz_atualizacao_promocao_config() -> dict:
+    """Lê a promoção no SolVoz para a mensagem usar exatamente o mesmo preço do popup."""
+    agora = datetime.now()
+    cache_dados = _ATUALIZACAO_PROMO_CACHE.get("dados")
+    expira = _ATUALIZACAO_PROMO_CACHE.get("expira_em")
+    if cache_dados and isinstance(expira, datetime) and agora < expira:
+        return dict(cache_dados)
+    padrao = {
+        "ativo": False, "vigente": False,
+        "valor_total_centavos": ATUALIZACAO_PROMO_TOTAL_CENTAVOS,
+        "desconto_uma_centavos": ATUALIZACAO_PROMO_DESCONTO_UMA_CENTAVOS,
+        "valida_ate": "", "valida_ate_br": "",
+        "preco_pacote_centavos": ATUALIZACAO_PRECO_PACOTE_CENTAVOS,
+    }
+    try:
+        dados = _solvoz_api_request("/api/integracoes/organiza/atualizacao-promocao")
+        if isinstance(dados, dict) and dados.get("ok"):
+            promo = dict(padrao)
+            promo.update(dados)
+            _ATUALIZACAO_PROMO_CACHE["dados"] = promo
+            _ATUALIZACAO_PROMO_CACHE["expira_em"] = agora + timedelta(seconds=60)
+            return promo
+    except Exception as exc:
+        print("WARN promoção atualização SolVoz:", repr(exc))
+        if cache_dados:
+            return dict(cache_dados)
+    return padrao
+
+
+def _valores_atualizacao_cliente(pacotes: list[str]) -> dict:
+    promo = _solvoz_atualizacao_promocao_config()
+    quantidade = max(1, len(pacotes or []))
+    preco_pacote = max(1, int(promo.get("preco_pacote_centavos") or ATUALIZACAO_PRECO_PACOTE_CENTAVOS))
+    normal = quantidade * preco_pacote
+    cobrado = normal
+    if bool(promo.get("vigente")):
+        if quantidade == 1:
+            cobrado = max(1, preco_pacote - max(0, int(promo.get("desconto_uma_centavos") or 0)))
+        else:
+            cobrado = min(normal, max(1, int(promo.get("valor_total_centavos") or normal)))
+    return {"normal_centavos": normal, "cobrado_centavos": cobrado, "promocao": promo, "tem_desconto": bool(cobrado < normal)}
 
 
 def _pacotes_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> list[str]:
@@ -2529,25 +2574,15 @@ def _pacotes_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> list[s
 
 
 def _token_contexto_atualizacao(cliente: Cliente, pacotes: list[str]) -> str:
-    """Contexto assinado enviado ao SolVoz sem expor dados editáveis na URL."""
+    """Token compacto: os dados pessoais ficam no Organiza e não viajam na URL."""
     if not cliente or not pacotes or not SOLVOZ_API_TOKEN:
         return ""
     inicio_url = _pacote_url(pacotes[0])
     fim_url = _pacote_url(pacotes[-1])
-    payload = {
-        "v": 1,
-        "cid": int(cliente.id),
-        "nome": (cliente.nome or "").strip()[:140],
-        "whatsapp": re.sub(r"\D", "", cliente.whatsapp_completo() or "")[:20],
-        "email": (cliente.email or "").strip().lower()[:180],
-        "ini": inicio_url,
-        "fim": fim_url,
-        "pacotes": list(pacotes),
-    }
-    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-    sig = hmac.new(SOLVOZ_API_TOKEN.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
-    return f"{body}.{sig}"
+    cliente_id = int(cliente.id)
+    assinatura_base = f"v2|{cliente_id}|{inicio_url}|{fim_url}"
+    sig = hmac.new(SOLVOZ_API_TOKEN.encode("utf-8"), assinatura_base.encode("utf-8"), hashlib.sha256).hexdigest()[:20]
+    return f"{cliente_id}.{sig}"
 
 
 def _registrar_oferta_atualizacao_cliente(
@@ -2562,11 +2597,12 @@ def _registrar_oferta_atualizacao_cliente(
     cliente.atualizacao_oferta_status = (status or "OFERTA_ENVIADA")[:30]
     cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
     cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+    valores = _valores_atualizacao_cliente(pacotes)
     cliente.atualizacao_oferta_valor_normal_centavos = int(
-        valor_normal_centavos if valor_normal_centavos is not None else len(pacotes) * ATUALIZACAO_PRECO_PACOTE_CENTAVOS
+        valor_normal_centavos if valor_normal_centavos is not None else valores["normal_centavos"]
     )
     cliente.atualizacao_oferta_valor_promocional_centavos = int(
-        valor_promocional_centavos if valor_promocional_centavos is not None else ATUALIZACAO_PROMO_TOTAL_CENTAVOS
+        valor_promocional_centavos if valor_promocional_centavos is not None else valores["cobrado_centavos"]
     )
     if order_nsu:
         cliente.atualizacao_oferta_order_nsu = order_nsu[:120]
@@ -2580,12 +2616,10 @@ def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
         return ""
     inicio_url = _pacote_url(pacotes[0])
     fim_url = _pacote_url(pacotes[-1])
-    base = (
-        "https://www.solvoz.com.br/atualizacoes/karaokerj/"
-        f"{inicio_url}/{fim_url}"
-    )
     contexto = _token_contexto_atualizacao(cliente, pacotes)
-    return f"{base}?{urlencode({'ctx': contexto})}" if contexto else base
+    if contexto:
+        return f"{SOLVOZ_BASE_URL.rstrip('/')}/a/{inicio_url}/{fim_url}/{contexto}"
+    return f"{SOLVOZ_BASE_URL.rstrip('/')}/atualizacoes/karaokerj/{inicio_url}/{fim_url}"
 
 
 def _equipamento_tem_atualizacao(eq: Equipamento, pacote_alvo: str) -> bool:
@@ -2670,15 +2704,23 @@ def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
         link = _link_atualizacao_cliente(campanha, pessoa)
         pacotes = _pacotes_atualizacao_cliente(campanha, pessoa)
         if pacotes:
-            total_centavos = len(pacotes) * ATUALIZACAO_PRECO_PACOTE_CENTAVOS
+            valores = _valores_atualizacao_cliente(pacotes)
             pacotes_txt = " / ".join(pacotes)
-            total_txt = f"R$ {total_centavos / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            bloco = (
-                f"Pacotes a serem atualizados: {pacotes_txt}\n"
-                f"Valor normal: {total_txt}\n\n"
-                "Clique abaixo e tenha uma oferta imperdível:"
-            )
-            mensagem = f"{mensagem}\n\n{bloco}".strip()
+            total_txt = f"R$ {valores['normal_centavos'] / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            linhas = [
+                f"Pacotes a serem atualizados: {pacotes_txt}",
+                f"Valor normal: {total_txt}",
+            ]
+            promo = valores["promocao"]
+            if valores["tem_desconto"] and bool(promo.get("vigente")):
+                promo_txt = f"R$ {valores['cobrado_centavos'] / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                validade = str(promo.get("valida_ate_br") or "").strip()
+                linhas.append(f"Oferta: {promo_txt}" + (f" até {validade}" if validade else ""))
+                linhas.append("Veja as músicas e aproveite:")
+            else:
+                linhas.append("Veja as músicas da atualização:")
+            mensagem = f"{mensagem}\n\n" + "\n".join(linhas)
+            mensagem = mensagem.strip()
     else:
         link = (getattr(campanha, "link", None) or "").strip()
     if link:
@@ -4331,6 +4373,26 @@ def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
     if not recebido or not hmac.compare_digest(recebido, esperado):
         raise HTTPException(401, "Token SolVoz inválido.")
 
+
+
+@app.get("/api/integracoes/solvoz/clientes/{cliente_id}/atualizacao-contexto")
+def api_solvoz_atualizacao_contexto(
+    cliente_id: int,
+    x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
+    db: Session = Depends(get_db),
+):
+    """Dados atuais usados pelo link compacto da campanha, sem expor dados pessoais na URL."""
+    _validar_token_solvoz(x_solvoz_token)
+    cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
+    if not cliente:
+        raise HTTPException(404, "Cliente não encontrado.")
+    return JSONResponse({
+        "ok": True,
+        "cliente_id": int(cliente.id),
+        "nome": (cliente.nome or "").strip(),
+        "email": (cliente.email or "").strip().lower(),
+        "whatsapp": re.sub(r"\D", "", cliente.whatsapp_completo() or ""),
+    })
 
 
 @app.post("/api/integracoes/solvoz/clientes/{cliente_id}/atualizacao-oferta")
