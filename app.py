@@ -1,4 +1,5 @@
 from urllib.parse import quote_plus, urlencode
+import base64
 import hashlib
 import csv
 import html
@@ -539,6 +540,16 @@ class Cliente(Base):
     observacao = Column(Text, nullable=True)
     # Controle exclusivo de campanhas. Não altera o status operacional do cliente.
     campanhas_ativo = Column(Integer, nullable=False, default=1)
+    # Oferta de atualização enviada pelo Organiza e acompanhada pelo SolVoz.
+    # O pagamento não muda automaticamente o pacote instalado; apenas registra
+    # o estágio comercial da oferta no cadastro do cliente.
+    atualizacao_oferta_status = Column(String(30), nullable=True)
+    atualizacao_oferta_periodo = Column(String(120), nullable=True)
+    atualizacao_oferta_pacotes = Column(Text, nullable=True)
+    atualizacao_oferta_valor_normal_centavos = Column(Integer, nullable=True)
+    atualizacao_oferta_valor_promocional_centavos = Column(Integer, nullable=True)
+    atualizacao_oferta_order_nsu = Column(String(120), nullable=True)
+    atualizacao_oferta_atualizado_em = Column(DateTime, nullable=True)
     token_ficha = Column(String(64), nullable=True, unique=True)
     inscricao_estadual = Column(String(30), nullable=True)
     situacao_icms = Column(String(30), nullable=True)
@@ -1476,6 +1487,21 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN campanhas_ativo INTEGER NOT NULL DEFAULT 1"))
             if "humiat_usuario_id" not in existentes_clientes:
                 conn.execute(text("ALTER TABLE clientes ADD COLUMN humiat_usuario_id INTEGER"))
+            tipo_data_oferta = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+            if "atualizacao_oferta_status" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN atualizacao_oferta_status VARCHAR(30)"))
+            if "atualizacao_oferta_periodo" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN atualizacao_oferta_periodo VARCHAR(120)"))
+            if "atualizacao_oferta_pacotes" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN atualizacao_oferta_pacotes TEXT"))
+            if "atualizacao_oferta_valor_normal_centavos" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN atualizacao_oferta_valor_normal_centavos INTEGER"))
+            if "atualizacao_oferta_valor_promocional_centavos" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN atualizacao_oferta_valor_promocional_centavos INTEGER"))
+            if "atualizacao_oferta_order_nsu" not in existentes_clientes:
+                conn.execute(text("ALTER TABLE clientes ADD COLUMN atualizacao_oferta_order_nsu VARCHAR(120)"))
+            if "atualizacao_oferta_atualizado_em" not in existentes_clientes:
+                conn.execute(text(f"ALTER TABLE clientes ADD COLUMN atualizacao_oferta_atualizado_em {tipo_data_oferta}"))
             conn.execute(text("UPDATE clientes SET pais = 'BR' WHERE pais IS NULL OR pais = ''"))
             conn.execute(text("UPDATE clientes SET ddi = '55' WHERE ddi IS NULL OR ddi = ''"))
         try:
@@ -2477,22 +2503,18 @@ def _pacote_url(valor: str) -> str:
     return (valor or "").strip().replace(".", "-")
 
 
-def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
-    """Gera o link público de atualizações conforme a versão real do cliente.
+ATUALIZACAO_PRECO_PACOTE_CENTAVOS = 25000
+ATUALIZACAO_PROMO_TOTAL_CENTAVOS = 25000
 
-    O cliente já possui o pacote gravado no equipamento. A página precisa começar
-    na primeira versão que ele ainda não possui e terminar no pacote alvo da
-    campanha. Ex.: equipamento 2025.2 e alvo 2026.1 -> /2026-1/2026-1.
-    Quando há mais de um equipamento, usa o mais desatualizado para não omitir
-    nenhuma atualização necessária ao cliente.
-    """
+
+def _pacotes_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> list[str]:
+    """Retorna os pacotes pendentes do equipamento mais desatualizado até o alvo."""
     if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO" or not cliente:
-        return ""
+        return []
     pacote_alvo = (campanha.pacote_alvo or PACOTE_ATUAL_PADRAO).strip()
     alvo_indice = _pacote_indice(pacote_alvo)
     if alvo_indice is None:
-        return ""
-
+        return []
     indices_origem = []
     for eq in (cliente.equipamentos or []):
         if not _equipamento_tem_atualizacao(eq, pacote_alvo):
@@ -2501,16 +2523,69 @@ def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
         if indice is not None and indice < alvo_indice:
             indices_origem.append(indice)
     if not indices_origem:
-        return ""
+        return []
+    inicio = min(indices_origem) + 1
+    return [_pacote_por_indice(i) for i in range(inicio, alvo_indice + 1)]
 
-    inicio_indice = min(indices_origem) + 1
-    if inicio_indice > alvo_indice:
+
+def _token_contexto_atualizacao(cliente: Cliente, pacotes: list[str]) -> str:
+    """Contexto assinado enviado ao SolVoz sem expor dados editáveis na URL."""
+    if not cliente or not pacotes or not SOLVOZ_API_TOKEN:
         return ""
-    pacote_inicio = _pacote_por_indice(inicio_indice)
-    return (
-        "https://www.solvoz.com.br/atualizacoes/karaokerj/"
-        f"{_pacote_url(pacote_inicio)}/{_pacote_url(pacote_alvo)}"
+    inicio_url = _pacote_url(pacotes[0])
+    fim_url = _pacote_url(pacotes[-1])
+    payload = {
+        "v": 1,
+        "cid": int(cliente.id),
+        "nome": (cliente.nome or "").strip()[:140],
+        "whatsapp": re.sub(r"\D", "", cliente.whatsapp_completo() or "")[:20],
+        "email": (cliente.email or "").strip().lower()[:180],
+        "ini": inicio_url,
+        "fim": fim_url,
+        "pacotes": list(pacotes),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    sig = hmac.new(SOLVOZ_API_TOKEN.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+
+def _registrar_oferta_atualizacao_cliente(
+    cliente: Cliente, campanha: Campanha, status: str, order_nsu: str = "",
+    valor_normal_centavos: int | None = None, valor_promocional_centavos: int | None = None,
+) -> None:
+    if not cliente or not campanha:
+        return
+    pacotes = _pacotes_atualizacao_cliente(campanha, cliente)
+    if not pacotes:
+        return
+    cliente.atualizacao_oferta_status = (status or "OFERTA_ENVIADA")[:30]
+    cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
+    cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+    cliente.atualizacao_oferta_valor_normal_centavos = int(
+        valor_normal_centavos if valor_normal_centavos is not None else len(pacotes) * ATUALIZACAO_PRECO_PACOTE_CENTAVOS
     )
+    cliente.atualizacao_oferta_valor_promocional_centavos = int(
+        valor_promocional_centavos if valor_promocional_centavos is not None else ATUALIZACAO_PROMO_TOTAL_CENTAVOS
+    )
+    if order_nsu:
+        cliente.atualizacao_oferta_order_nsu = order_nsu[:120]
+    cliente.atualizacao_oferta_atualizado_em = datetime.now()
+
+
+def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
+    """Gera o link público individual com período e contexto assinado do cliente."""
+    pacotes = _pacotes_atualizacao_cliente(campanha, cliente)
+    if not pacotes:
+        return ""
+    inicio_url = _pacote_url(pacotes[0])
+    fim_url = _pacote_url(pacotes[-1])
+    base = (
+        "https://www.solvoz.com.br/atualizacoes/karaokerj/"
+        f"{inicio_url}/{fim_url}"
+    )
+    contexto = _token_contexto_atualizacao(cliente, pacotes)
+    return f"{base}?{urlencode({'ctx': contexto})}" if contexto else base
 
 
 def _equipamento_tem_atualizacao(eq: Equipamento, pacote_alvo: str) -> bool:
@@ -2593,10 +2668,21 @@ def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
     mensagem = (campanha.mensagem or "").strip().replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
     if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
         link = _link_atualizacao_cliente(campanha, pessoa)
+        pacotes = _pacotes_atualizacao_cliente(campanha, pessoa)
+        if pacotes:
+            total_centavos = len(pacotes) * ATUALIZACAO_PRECO_PACOTE_CENTAVOS
+            pacotes_txt = " / ".join(pacotes)
+            total_txt = f"R$ {total_centavos / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            bloco = (
+                f"Pacotes a serem atualizados: {pacotes_txt}\n"
+                f"Valor normal: {total_txt}\n\n"
+                "Clique abaixo e tenha uma oferta imperdível:"
+            )
+            mensagem = f"{mensagem}\n\n{bloco}".strip()
     else:
         link = (getattr(campanha, "link", None) or "").strip()
     if link:
-        mensagem = f"{mensagem}\n\n{link}".strip()
+        mensagem = f"{mensagem}\n{link}".strip()
     return mensagem
 
 
@@ -3326,6 +3412,8 @@ def campanha_marcar_enviado(campanha_id: int, destinatario_id: int, usuario: Usu
         destinatario.status = "ENVIADO"
         destinatario.enviado_por_id = usuario.id
         destinatario.enviado_em = datetime.now()
+        if (campanha.lista_tipo or "").upper() == "ATUALIZACAO" and getattr(destinatario, "cliente", None):
+            _registrar_oferta_atualizacao_cliente(destinatario.cliente, campanha, "OFERTA_ENVIADA")
         db.commit()
     return RedirectResponse(f"/organiza/campanhas/{campanha_id}/proximo", status_code=303)
 
@@ -4243,6 +4331,57 @@ def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
     if not recebido or not hmac.compare_digest(recebido, esperado):
         raise HTTPException(401, "Token SolVoz inválido.")
 
+
+
+@app.post("/api/integracoes/solvoz/clientes/{cliente_id}/atualizacao-oferta")
+async def api_solvoz_atualizacao_oferta(
+    cliente_id: int,
+    request: Request,
+    x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
+    db: Session = Depends(get_db),
+):
+    """Recebe do SolVoz o estágio comercial da oferta de atualização total."""
+    _validar_token_solvoz(x_solvoz_token)
+    try:
+        if "application/json" in (request.headers.get("content-type") or "").lower():
+            data = await request.json()
+        else:
+            data = dict(await request.form())
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
+    if not cliente:
+        raise HTTPException(404, "Cliente não encontrado.")
+    status = str(data.get("status") or "").strip().upper()[:30]
+    permitidos = {"OFERTA_ENVIADA", "PAGINA_ABERTA", "CHECKOUT_INICIADO", "PAGO", "ERRO_CHECKOUT"}
+    if status not in permitidos:
+        raise HTTPException(400, "Status da oferta inválido.")
+    pacotes = data.get("pacotes")
+    if isinstance(pacotes, str):
+        try:
+            pacotes = json.loads(pacotes)
+        except Exception:
+            pacotes = [p.strip() for p in pacotes.split("/") if p.strip()]
+    pacotes = [str(p).strip()[:30] for p in (pacotes or []) if str(p).strip()]
+    cliente.atualizacao_oferta_status = status
+    if pacotes:
+        cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+        cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
+    try:
+        if data.get("valor_normal_centavos") not in (None, ""):
+            cliente.atualizacao_oferta_valor_normal_centavos = int(data.get("valor_normal_centavos"))
+        if data.get("valor_promocional_centavos") not in (None, ""):
+            cliente.atualizacao_oferta_valor_promocional_centavos = int(data.get("valor_promocional_centavos"))
+    except Exception:
+        pass
+    order_nsu = str(data.get("order_nsu") or "").strip()
+    if order_nsu:
+        cliente.atualizacao_oferta_order_nsu = order_nsu[:120]
+    cliente.atualizacao_oferta_atualizado_em = datetime.now()
+    db.commit()
+    return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": status})
 
 
 @app.post("/api/integracoes/solvoz/email/recuperacao")

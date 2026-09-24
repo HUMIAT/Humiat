@@ -33,6 +33,20 @@
   </article>
   <div class="resumo-coluna">
     <article class="cartao resumo-unico"><small>Equipamentos vinculados</small><strong>{{ cliente.equipamentos|length }}</strong></article>
+    <article class="cartao resumo-unico">
+      <small>Oferta de atualização</small>
+      <strong>{{ cliente.atualizacao_oferta_status or 'Sem oferta' }}</strong>
+      {% if cliente.atualizacao_oferta_pacotes %}
+      <span class="texto-suave" style="display:block;margin-top:6px">Pacotes: {{ cliente.atualizacao_oferta_pacotes|replace('[','')|replace(']','')|replace('\"','')|replace(',', ' /') }}</span>
+      {% endif %}
+      {% if cliente.atualizacao_oferta_valor_normal_centavos %}
+      <span class="texto-suave" style="display:block;margin-top:4px">Valor normal: R$ {{ '%.2f'|format(cliente.atualizacao_oferta_valor_normal_centavos / 100)|replace('.', ',') }}</span>
+      {% endif %}
+      {% if cliente.atualizacao_oferta_valor_promocional_centavos %}
+      <span class="texto-suave" style="display:block;margin-top:2px">Oferta total: <strong>R$ {{ '%.2f'|format(cliente.atualizacao_oferta_valor_promocional_centavos / 100)|replace('.', ',') }}</strong></span>
+      {% endif %}
+      {% if cliente.atualizacao_oferta_atualizado_em %}<span class="texto-suave" style="display:block;margin-top:4px">Atualizado em {{ cliente.atualizacao_oferta_atualizado_em.strftime('%d/%m/%Y %H:%M') }}</span>{% endif %}
+    </article>
     <article class="cartao solvoz-acesso-card humiat-acesso-card">
       <div class="solvoz-acesso-topo">
         <div>
