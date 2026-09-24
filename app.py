@@ -2605,8 +2605,10 @@ def _solvoz_atualizacao_promocao_config() -> dict:
     return padrao
 
 
-def _valores_atualizacao_cliente(pacotes: list[str]) -> dict:
-    promo = _solvoz_atualizacao_promocao_config()
+def _valores_atualizacao_cliente(pacotes: list[str], promo_override: dict | None = None) -> dict:
+    # Durante uma campanha preparada usamos o snapshot congelado e não
+    # consultamos o SolVoz novamente a cada cliente.
+    promo = dict(promo_override or _solvoz_atualizacao_promocao_config())
     quantidade = max(1, len(pacotes or []))
     preco_pacote = max(1, int(promo.get("preco_pacote_centavos") or ATUALIZACAO_PRECO_PACOTE_CENTAVOS))
     normal = quantidade * preco_pacote
@@ -2619,8 +2621,14 @@ def _valores_atualizacao_cliente(pacotes: list[str]) -> dict:
     return {"normal_centavos": normal, "cobrado_centavos": cobrado, "promocao": promo, "tem_desconto": bool(cobrado < normal)}
 
 
-def _pacotes_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> list[str]:
-    """Usa a lista real de releases do SolVoz, que é a mesma fonte do popup."""
+def _pacotes_atualizacao_cliente(
+    campanha: Campanha, cliente: Cliente, pacotes_disponiveis: list[str] | None = None
+) -> list[str]:
+    """Usa a lista real de releases do SolVoz.
+
+    Em campanha preparada, ``pacotes_disponiveis`` vem do snapshot obtido uma
+    única vez antes do envio; assim não existe consulta externa por contato.
+    """
     if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO" or not cliente:
         return []
     pacote_alvo = (campanha.pacote_alvo or PACOTE_ATUAL_PADRAO).strip()
@@ -2637,7 +2645,7 @@ def _pacotes_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> list[s
     if not origens:
         return []
     origem = min(origens)
-    disponiveis = _pacotes_disponiveis_solvoz()
+    disponiveis = _pacotes_disponiveis_solvoz() if pacotes_disponiveis is None else list(pacotes_disponiveis)
     pacotes = []
     for label in disponiveis:
         numero = _pacote_release_num(label)
@@ -2675,7 +2683,9 @@ def _registrar_oferta_atualizacao_cliente(
     cliente.atualizacao_oferta_status = (status or "OFERTA_ENVIADA")[:30]
     cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
     cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
-    valores = _valores_atualizacao_cliente(pacotes)
+    valores = None
+    if valor_normal_centavos is None or valor_promocional_centavos is None:
+        valores = _valores_atualizacao_cliente(pacotes)
     cliente.atualizacao_oferta_valor_normal_centavos = int(
         valor_normal_centavos if valor_normal_centavos is not None else valores["normal_centavos"]
     )
@@ -2687,9 +2697,11 @@ def _registrar_oferta_atualizacao_cliente(
     cliente.atualizacao_oferta_atualizado_em = datetime.now()
 
 
-def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
+def _link_atualizacao_cliente(
+    campanha: Campanha, cliente: Cliente, pacotes_override: list[str] | None = None
+) -> str:
     """Gera o link público individual com período e contexto assinado do cliente."""
-    pacotes = _pacotes_atualizacao_cliente(campanha, cliente)
+    pacotes = list(pacotes_override or []) or _pacotes_atualizacao_cliente(campanha, cliente)
     if not pacotes:
         return ""
     inicio_url = _pacote_url(pacotes[0])
@@ -2700,20 +2712,37 @@ def _link_atualizacao_cliente(campanha: Campanha, cliente: Cliente) -> str:
     return f"{SOLVOZ_BASE_URL.rstrip('/')}/atualizacoes/karaokerj/{inicio_url}/{fim_url}"
 
 
-def _equipamento_tem_atualizacao(eq: Equipamento, pacote_alvo: str) -> bool:
+def _equipamento_tem_atualizacao(
+    eq: Equipamento, pacote_alvo: str, pacotes_disponiveis: list[str] | None = None
+) -> bool:
     """Lista de Atualização: equipamento ativo e com atualização disponível."""
     if (eq.status or "").strip().lower() != "ativo":
+        return False
+    if pacotes_disponiveis is not None:
+        origem = _pacote_release_num((eq.pacote or "").strip() or None)
+        alvo = _pacote_release_num(pacote_alvo)
+        if origem is None or alvo is None or origem >= alvo:
+            return False
+        for label in pacotes_disponiveis:
+            numero = _pacote_release_num(label)
+            if numero is not None and origem < numero <= alvo:
+                return True
         return False
     falta = calcular_falta_pacote((eq.pacote or "").strip() or None, pacote_alvo)
     return bool(falta is not None and falta > 0)
 
 
-def _clientes_lista_atualizacao(db: Session, pacote_alvo: str | None = None) -> list[dict]:
+def _clientes_lista_atualizacao(
+    db: Session, pacote_alvo: str | None = None, pacotes_disponiveis: list[str] | None = None
+) -> list[dict]:
     pacote_alvo = pacote_alvo or obter_pacote_atual(db)
     clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome.asc()).all()
     lista = []
     for cliente in clientes:
-        pendentes = [eq for eq in cliente.equipamentos if _equipamento_tem_atualizacao(eq, pacote_alvo)]
+        pendentes = [
+            eq for eq in cliente.equipamentos
+            if _equipamento_tem_atualizacao(eq, pacote_alvo, pacotes_disponiveis)
+        ]
         if not pendentes:
             continue
         lista.append({"cliente": cliente, "equipamentos": ordenar_equipamentos(pendentes)})
@@ -2776,13 +2805,16 @@ def _rotulo_lista_campanha(campanha: Campanha | None) -> str:
     return "Clientes de Aluguel" if campanha and (campanha.lista_tipo or "").upper() == "ALUGUEL" else "Clientes de Atualização"
 
 
-def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
+def _mensagem_campanha(
+    campanha: Campanha, pessoa, pacotes_override: list[str] | None = None,
+    valores_override: dict | None = None, link_override: str | None = None,
+) -> str:
     mensagem = (campanha.mensagem or "").strip().replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
     if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
-        link = _link_atualizacao_cliente(campanha, pessoa)
-        pacotes = _pacotes_atualizacao_cliente(campanha, pessoa)
+        pacotes = list(pacotes_override or []) or _pacotes_atualizacao_cliente(campanha, pessoa)
+        link = link_override if link_override is not None else _link_atualizacao_cliente(campanha, pessoa, pacotes)
         if pacotes:
-            valores = _valores_atualizacao_cliente(pacotes)
+            valores = dict(valores_override or _valores_atualizacao_cliente(pacotes))
             pacotes_txt = " / ".join(pacotes)
             total_txt = f"R$ {valores['normal_centavos'] / 100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             linhas = [
@@ -2800,7 +2832,7 @@ def _mensagem_campanha(campanha: Campanha, pessoa) -> str:
             mensagem = f"{mensagem}\n\n" + "\n".join(linhas)
             mensagem = mensagem.strip()
     else:
-        link = (getattr(campanha, "link", None) or "").strip()
+        link = link_override if link_override is not None else (getattr(campanha, "link", None) or "").strip()
     if link:
         mensagem = f"{mensagem}\n{link}".strip()
     return mensagem
@@ -2815,22 +2847,31 @@ def _whatsapp_campanha_url(campanha: Campanha, pessoa) -> str:
     return _whatsapp_url_pronta(pessoa.whatsapp_completo() or "", _mensagem_campanha(campanha, pessoa))
 
 
-def _preparar_snapshot_destinatario(campanha: Campanha, destinatario, pessoa) -> None:
-    """Congela mensagem/link/preço antes do início do envio rápido."""
+def _preparar_snapshot_destinatario(
+    campanha: Campanha, destinatario, pessoa,
+    promo_snapshot: dict | None = None, pacotes_disponiveis: list[str] | None = None,
+) -> None:
+    """Congela mensagem/link/preço antes do início do envio rápido.
+
+    Quando recebe o snapshot da promoção e a lista de pacotes, esta função é
+    100% local: nenhuma chamada ao SolVoz é feita dentro do loop de clientes.
+    """
     if not campanha or not destinatario or not pessoa:
         return
     telefone = re.sub(r"\D", "", pessoa.whatsapp_completo() or "")
-    mensagem = _mensagem_campanha(campanha, pessoa)
     link = ""
     pacotes: list[str] = []
     valor_normal = None
     valor_promo = None
     if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
-        pacotes = _pacotes_atualizacao_cliente(campanha, pessoa)
-        link = _link_atualizacao_cliente(campanha, pessoa)
-        valores = _valores_atualizacao_cliente(pacotes) if pacotes else {}
+        pacotes = _pacotes_atualizacao_cliente(campanha, pessoa, pacotes_disponiveis)
+        link = _link_atualizacao_cliente(campanha, pessoa, pacotes) if pacotes else ""
+        valores = _valores_atualizacao_cliente(pacotes, promo_snapshot) if pacotes else {}
         valor_normal = int(valores.get("normal_centavos") or 0) if valores else None
         valor_promo = int(valores.get("cobrado_centavos") or 0) if valores else None
+        mensagem = _mensagem_campanha(
+            campanha, pessoa, pacotes_override=pacotes, valores_override=valores, link_override=link
+        )
         if pacotes:
             _registrar_oferta_atualizacao_cliente(
                 pessoa, campanha, "PREPARADA",
@@ -2840,6 +2881,7 @@ def _preparar_snapshot_destinatario(campanha: Campanha, destinatario, pessoa) ->
             )
     else:
         link = (campanha.link or "").strip()
+        mensagem = _mensagem_campanha(campanha, pessoa, link_override=link)
     destinatario.telefone_pronto = telefone[:40] or None
     destinatario.mensagem_pronta = mensagem
     destinatario.link_pronto = link[:1000] or None
@@ -2848,8 +2890,18 @@ def _preparar_snapshot_destinatario(campanha: Campanha, destinatario, pessoa) ->
     destinatario.valor_promocional_centavos = valor_promo
 
 
-def _precalcular_mensagens_campanha(db: Session, campanha: Campanha) -> None:
-    """Calcula toda a fila uma única vez; depois cada clique só salva e avança."""
+def _precalcular_mensagens_campanha(
+    db: Session, campanha: Campanha, promo_snapshot: dict | None = None
+) -> None:
+    """Monta a campanha inteira antes do primeiro envio.
+
+    Para Atualização, o SolVoz é consultado no máximo uma vez aqui. Depois
+    todos os 500+ destinatários são montados somente com dados locais.
+    """
+    pacotes_disponiveis = None
+    if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
+        promo_snapshot = dict(promo_snapshot or _solvoz_atualizacao_promocao_config())
+        pacotes_disponiveis = [str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()]
     if (campanha.lista_tipo or "").upper() == "ALUGUEL":
         destinos = db.query(CampanhaAluguelDestinatario).options(
             selectinload(CampanhaAluguelDestinatario.contato)
@@ -2863,7 +2915,10 @@ def _precalcular_mensagens_campanha(db: Session, campanha: Campanha) -> None:
         ).filter(CampanhaDestinatario.campanha_id == campanha.id).all()
         for dest in destinos:
             if not dest.mensagem_pronta and dest.cliente:
-                _preparar_snapshot_destinatario(campanha, dest, dest.cliente)
+                _preparar_snapshot_destinatario(
+                    campanha, dest, dest.cliente,
+                    promo_snapshot=promo_snapshot, pacotes_disponiveis=pacotes_disponiveis,
+                )
 
 
 def _modelo_destinatario_campanha(campanha: Campanha | None):
@@ -2887,8 +2942,7 @@ def _contagens_campanha(db: Session, campanha_id: int) -> dict:
 
 
 def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaDestinatario | None:
-    # Reserva abandonada volta à fila depois de 30 min. O update condicional
-    # abaixo impede dois atendentes de pegarem o mesmo cliente.
+    """Reserva somente linhas já preparadas; nenhuma consulta externa ocorre aqui."""
     limite = datetime.now() - timedelta(minutes=30)
     db.query(CampanhaDestinatario).filter(
         CampanhaDestinatario.campanha_id == campanha.id,
@@ -2901,23 +2955,22 @@ def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usua
         CampanhaDestinatario.reservado_em: None,
     }, synchronize_session=False)
     db.commit()
+
     atual = db.query(CampanhaDestinatario).options(
-        selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
+        selectinload(CampanhaDestinatario.cliente)
     ).filter(
         CampanhaDestinatario.campanha_id == campanha.id,
         CampanhaDestinatario.status == "EM_ENVIO",
         CampanhaDestinatario.reservado_por_id == usuario.id,
     ).order_by(CampanhaDestinatario.id.asc()).first()
     if atual:
-        if _cliente_elegivel_atualizacao(atual.cliente, campanha.pacote_alvo or obter_pacote_atual(db)):
-            return atual
-        atual.status = "IGNORADO"
-        db.commit()
+        return atual
 
     while True:
         candidato_id = db.query(CampanhaDestinatario.id).filter(
             CampanhaDestinatario.campanha_id == campanha.id,
             CampanhaDestinatario.status == "PENDENTE",
+            CampanhaDestinatario.mensagem_pronta.isnot(None),
         ).order_by(CampanhaDestinatario.id.asc()).limit(1).scalar()
         if not candidato_id:
             return None
@@ -2933,14 +2986,9 @@ def _reservar_proximo_atualizacao(db: Session, campanha: Campanha, usuario: Usua
         db.commit()
         if not alterados:
             continue
-        destinatario = db.query(CampanhaDestinatario).options(
-            selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
+        return db.query(CampanhaDestinatario).options(
+            selectinload(CampanhaDestinatario.cliente)
         ).filter(CampanhaDestinatario.id == candidato_id).first()
-        if destinatario and _cliente_elegivel_atualizacao(destinatario.cliente, campanha.pacote_alvo or obter_pacote_atual(db)):
-            return destinatario
-        if destinatario:
-            destinatario.status = "IGNORADO"
-            db.commit()
 
 
 def _reservar_proximo_aluguel(db: Session, campanha: Campanha, usuario: Usuario) -> CampanhaAluguelDestinatario | None:
@@ -3540,7 +3588,13 @@ def campanha_iniciar(campanha_id: int, usuario: Usuario = Depends(usuario_logado
                     db.add(CampanhaAluguelDestinatario(campanha_id=campanha.id, contato_id=contato.id, status="PENDENTE"))
         else:
             pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
-            lista = _clientes_lista_atualizacao(db, pacote_alvo)
+            # Uma única leitura do SolVoz ANTES do envio. Esta configuração fica
+            # congelada para toda a preparação da campanha.
+            promo_snapshot = _solvoz_atualizacao_promocao_config()
+            pacotes_disponiveis = [
+                str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()
+            ]
+            lista = _clientes_lista_atualizacao(db, pacote_alvo, pacotes_disponiveis)
             clientes = [item["cliente"] for item in lista if int(item["cliente"].campanhas_ativo or 0) == 1]
             if not clientes:
                 return RedirectResponse(f"/organiza/campanhas/{campanha.id}?erro=nenhum_cliente", status_code=303)
@@ -3548,10 +3602,11 @@ def campanha_iniciar(campanha_id: int, usuario: Usuario = Depends(usuario_logado
             for cliente in clientes:
                 if cliente.id not in existentes:
                     db.add(CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE"))
-        # Primeiro persiste todos os destinatários, depois calcula as mensagens
-        # completas de uma vez. O envio vira apenas “salvar e próximo”.
+        # Primeiro persiste todos os destinatários, depois calcula TODAS as
+        # mensagens. Quando o primeiro contato aparecer, nada externo é mais
+        # consultado durante o envio.
         db.flush()
-        _precalcular_mensagens_campanha(db, campanha)
+        _precalcular_mensagens_campanha(db, campanha, locals().get("promo_snapshot"))
         campanha.status = "ATIVA"
         campanha.iniciado_em = datetime.now()
         db.commit()
@@ -3586,13 +3641,39 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
         raise HTTPException(404)
     if campanha.status != "ATIVA":
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
+    # Compatibilidade com campanhas iniciadas antes da 1.1.44: se ainda houver
+    # destinatários sem snapshot, prepara a campanha inteira UMA VEZ aqui,
+    # antes de mostrar qualquer contato. Depois disso o envio é 100% local.
+    modelo = _modelo_destinatario_campanha(campanha)
+    faltando = db.query(modelo.id).filter(
+        modelo.campanha_id == campanha.id,
+        modelo.status.in_(["PENDENTE", "EM_ENVIO"]),
+        modelo.mensagem_pronta.is_(None),
+    ).first()
+    if faltando:
+        _precalcular_mensagens_campanha(db, campanha)
+        db.commit()
+
+    # Se o clique anterior trouxe ?concluir=ID, conclui localmente antes de
+    # reservar o próximo. Não depende do WhatsApp nem de sistema externo.
+    concluir_id = int(request.query_params.get("concluir") or 0)
+    if concluir_id > 0:
+        atual = db.query(modelo).filter(
+            modelo.id == concluir_id,
+            modelo.campanha_id == campanha.id,
+            modelo.status == "EM_ENVIO",
+            modelo.reservado_por_id == usuario.id,
+        ).first()
+        if atual:
+            atual.status = "PROCESSADO"
+            atual.enviado_por_id = usuario.id
+            atual.enviado_em = datetime.now()
+            db.commit()
+
     destinatario = _reservar_proximo_campanha(db, campanha, usuario)
     pessoa = None
     if destinatario:
         pessoa = destinatario.contato if (campanha.lista_tipo or "").upper() == "ALUGUEL" else destinatario.cliente
-        if not destinatario.mensagem_pronta:
-            _preparar_snapshot_destinatario(campanha, destinatario, pessoa)
-            db.commit()
     contagens = _contagens_campanha(db, campanha.id)
     if not destinatario and contagens["pendentes"] == 0:
         campanha.status = "FINALIZADA"
@@ -3607,12 +3688,12 @@ def campanha_proximo(campanha_id: int, request: Request, usuario: Usuario = Depe
     })
 
 
-@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/whatsapp-proximo", response_class=HTMLResponse)
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/whatsapp-proximo")
 def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    """Salva PROCESSADO antes de abrir o WhatsApp e libera o Organiza imediatamente.
+    """Marca como processado com uma gravação local mínima.
 
-    O WhatsApp é apenas o destino externo da mensagem. O Organiza não espera
-    envio, retorno do app ou confirmação do WhatsApp para avançar a fila.
+    Não monta mensagem, não consulta SolVoz, não abre página-ponte e não
+    espera qualquer retorno do WhatsApp.
     """
     campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
     if not campanha:
@@ -3621,62 +3702,31 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
     destinatario = db.query(modelo).filter(
         modelo.id == destinatario_id,
         modelo.campanha_id == campanha_id,
+        modelo.status == "EM_ENVIO",
+        modelo.reservado_por_id == usuario.id,
     ).first()
     if not destinatario:
-        raise HTTPException(404)
-    if destinatario.status != "EM_ENVIO" or destinatario.reservado_por_id != usuario.id:
-        return HTMLResponse(
-            "<h1>Este cliente já foi assumido por outro atendente.</h1>"
-            "<p>Feche esta aba e continue pela tela do Organiza.</p>",
-            status_code=409,
-        )
-
-    mensagem = destinatario.mensagem_pronta or ""
-    telefone = destinatario.telefone_pronto or ""
-
-    # 1) O Organiza conclui sua parte primeiro.
+        return Response(status_code=204)
     destinatario.status = "PROCESSADO"
     destinatario.enviado_por_id = usuario.id
     destinatario.enviado_em = datetime.now()
+    # Atualiza apenas o cadastro LOCAL usando o snapshot já salvo.
     if (campanha.lista_tipo or "").upper() == "ATUALIZACAO" and getattr(destinatario, "cliente", None):
+        cliente = destinatario.cliente
+        cliente.atualizacao_oferta_status = "OFERTA_ENVIADA"
+        cliente.atualizacao_oferta_periodo = None
         try:
             pacotes = json.loads(destinatario.pacotes_prontos or "[]")
         except Exception:
             pacotes = []
-        _registrar_oferta_atualizacao_cliente(
-            destinatario.cliente, campanha, "OFERTA_ENVIADA",
-            valor_normal_centavos=destinatario.valor_normal_centavos,
-            valor_promocional_centavos=destinatario.valor_promocional_centavos,
-            pacotes_override=pacotes,
-        )
+        if pacotes:
+            cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
+            cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+        cliente.atualizacao_oferta_valor_normal_centavos = destinatario.valor_normal_centavos
+        cliente.atualizacao_oferta_valor_promocional_centavos = destinatario.valor_promocional_centavos
+        cliente.atualizacao_oferta_atualizado_em = datetime.now()
     db.commit()
-
-    # 2) Só depois de salvo, esta aba-ponte manda a tela principal para o próximo
-    #    cliente e segue para o WhatsApp. Nenhum retorno do WhatsApp é aguardado.
-    whatsapp_url = _whatsapp_url_pronta(telefone, mensagem)
-    proximo_url = f"/organiza/campanhas/{campanha_id}/proximo"
-    whatsapp_js = json.dumps(whatsapp_url, ensure_ascii=False)
-    proximo_js = json.dumps(proximo_url, ensure_ascii=False)
-    html = f"""<!doctype html>
-<html lang=\"pt-BR\">
-<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Abrindo WhatsApp</title></head>
-<body>
-<p>Abrindo WhatsApp...</p>
-<script>
-(function() {{
-  const proximo = {proximo_js};
-  const whatsapp = {whatsapp_js};
-  try {{
-    if (window.opener && !window.opener.closed) {{
-      window.opener.location.replace(proximo);
-    }}
-  }} catch (e) {{}}
-  window.location.replace(whatsapp);
-}})();
-</script>
-<noscript><a href=\"{whatsapp_url}\">Abrir WhatsApp</a></noscript>
-</body></html>"""
-    return HTMLResponse(html)
+    return Response(status_code=204)
 
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular")

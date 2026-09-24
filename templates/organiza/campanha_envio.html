@@ -23,11 +23,14 @@
       {% endif %}
 
       <div class="campanha-envio-acoes">
-        <form class="js-whatsapp-proximo-form" method="post" target="campanha_whatsapp" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/whatsapp-proximo">
-          <button class="campanha-whatsapp-btn" type="submit">
-            <span aria-hidden="true">●</span> WhatsApp e Próximo
-          </button>
-        </form>
+        <a class="campanha-whatsapp-btn"
+           id="whatsappProximo"
+           href="{{ whatsapp_url }}"
+           target="_blank" rel="noopener"
+           data-processar="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/whatsapp-proximo"
+           data-proximo="/organiza/campanhas/{{ campanha.id }}/proximo?concluir={{ destinatario.id }}">
+          <span aria-hidden="true">●</span> WhatsApp e Próximo
+        </a>
         <form class="js-envio-form" method="post" action="/organiza/campanhas/{{ campanha.id }}/destinatarios/{{ destinatario.id }}/pular">
           <button class="campanha-pular-btn" type="submit">Pular</button>
         </form>
@@ -51,11 +54,24 @@ document.querySelectorAll('.js-envio-form').forEach((form) => {
     if (botao) { botao.disabled = true; botao.textContent = 'Pulando...'; }
   });
 });
-document.querySelectorAll('.js-whatsapp-proximo-form').forEach((form) => {
-  form.addEventListener('submit', () => {
-    const botao = form.querySelector('button[type="submit"]');
-    if (botao) { botao.disabled = true; botao.textContent = 'Salvando...'; }
+const whatsappProximo = document.getElementById('whatsappProximo');
+if (whatsappProximo) {
+  whatsappProximo.addEventListener('click', (event) => {
+    event.preventDefault();
+    // O contato já está RESERVADO no banco antes deste botão aparecer; por isso
+    // dois atendentes nunca recebem o mesmo cliente. PROCESSADO é gravado em
+    // segundo plano, sem segurar a abertura do WhatsApp.
+    const processar = whatsappProximo.dataset.processar;
+    if (navigator.sendBeacon) {
+      try { navigator.sendBeacon(processar, new Blob([], {type: 'application/x-www-form-urlencoded'})); } catch (e) {}
+    } else {
+      try { fetch(processar, {method: 'POST', keepalive: true}).catch(() => {}); } catch (e) {}
+    }
+    // Abertura direta: não existe mais a página intermediária “Abrindo WhatsApp”.
+    window.open(whatsappProximo.href, '_blank', 'noopener');
+    // Em paralelo a tela do Organiza já segue para o próximo snapshot local.
+    window.location.replace(whatsappProximo.dataset.proximo);
   });
-});
+}
 </script>
 {% endblock %}

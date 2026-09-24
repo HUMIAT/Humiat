@@ -33,9 +33,22 @@
   </section>
 
   {% if campanha.status == 'RASCUNHO' %}
-    <form method="post" action="/organiza/campanhas/{{ campanha.id }}/iniciar" class="campanha-iniciar-form campanha-acao-principal-mobile">
-      <button class="botao primario campanha-botao-grande" type="submit">Iniciar campanha</button>
+    <form method="post" action="/organiza/campanhas/{{ campanha.id }}/iniciar" class="campanha-iniciar-form campanha-acao-principal-mobile" id="campanhaPrepararForm">
+      <button class="botao primario campanha-botao-grande" type="submit" id="campanhaPrepararBtn">Preparar e iniciar campanha</button>
+      <small id="campanhaPrepararAviso" hidden style="margin-top:8px;color:#64748b">Preparando todos os clientes, mensagens, valores e links. Isso acontece uma única vez.</small>
     </form>
+    <script>
+    (() => {
+      const form = document.getElementById('campanhaPrepararForm');
+      if (!form) return;
+      form.addEventListener('submit', () => {
+        const btn = document.getElementById('campanhaPrepararBtn');
+        const aviso = document.getElementById('campanhaPrepararAviso');
+        if (btn) { btn.disabled = true; btn.textContent = 'Preparando campanha...'; }
+        if (aviso) aviso.hidden = false;
+      });
+    })();
+    </script>
   {% elif campanha.status == 'ATIVA' %}
     <div class="campanha-acao-principal-mobile"><a class="botao primario campanha-botao-grande" href="/organiza/campanhas/{{ campanha.id }}/proximo">Continuar campanha</a></div>
   {% else %}
