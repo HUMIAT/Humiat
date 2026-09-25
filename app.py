@@ -6860,6 +6860,62 @@ async def atualizacao_compra_manual(cliente_id: int, request: Request, usuario: 
     return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(f"Compra #{compra.id} registrada como {rotulo}. O SolVoz não cobrará novamente esses pacotes."), status_code=303)
 
 
+@app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/editar")
+async def atualizacao_admin_editar_lancamento(cliente_id: int, compra_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    compra = db.query(AtualizacaoCompra).filter(
+        AtualizacaoCompra.id == compra_id,
+        AtualizacaoCompra.cliente_id == cliente_id,
+        func.upper(AtualizacaoCompra.origem) == "MANUAL",
+        AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")),
+    ).first()
+    cliente = db.get(Cliente, cliente_id)
+    if not compra or not cliente:
+        raise HTTPException(404)
+    form = dict(await request.form())
+
+    inicio = (form.get("pacote_inicio") or compra.pacote_inicio or "").strip()
+    fim = (form.get("pacote_fim") or compra.pacote_fim or inicio).strip()
+    pacotes = _atualizacao_pacotes_intervalo(db, inicio, fim)
+    if not pacotes:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Intervalo de pacotes inválido."), status_code=303)
+
+    desejados = set(_atualizacao_pacotes_lista(pacotes))
+    for outra in _atualizacao_compras_cliente(db, cliente_id):
+        if int(outra.id) == int(compra.id):
+            continue
+        if desejados & set(_atualizacao_pacotes_lista(outra.pacotes)):
+            return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("O intervalo informado possui pacote já registrado em outra compra."), status_code=303)
+
+    valor_atualizacao = moeda_num(form.get("valor_a_pagar") or "0")
+    frete = moeda_num(form.get("frete") or "0")
+    valor_pago = moeda_num(form.get("valor_pago") or "0")
+    normal = moeda_num(form.get("valor_normal") or "0")
+    total = valor_atualizacao + frete
+
+    compra.pacote_inicio = pacotes[0]
+    compra.pacote_fim = pacotes[-1]
+    compra.pacotes = json.dumps(pacotes, ensure_ascii=False)
+    compra.valor_a_pagar_centavos = int(round(valor_atualizacao * 100)) or None
+    compra.frete_centavos = int(round(frete * 100)) or None
+    compra.valor_pago_centavos = int(round(valor_pago * 100)) or None
+    compra.valor_normal_centavos = int(round(normal * 100)) or None
+    compra.forma_pagamento = ((form.get("forma_pagamento") or compra.forma_pagamento or "A definir").strip()[:60] or None)
+    compra.status = "PAGO" if total > 0 and valor_pago >= total else "A_PAGAR"
+    compra.pago_em = (compra.pago_em or datetime.now()) if compra.status == "PAGO" else None
+
+    cliente.atualizacao_oferta_status = compra.status
+    cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
+    cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+    cliente.atualizacao_oferta_valor_normal_centavos = int(round(normal * 100)) or None
+    cliente.atualizacao_oferta_valor_promocional_centavos = int(round(valor_atualizacao * 100)) or None
+    cliente.atualizacao_oferta_atualizado_em = datetime.now()
+    db.commit()
+
+    saldo = max(int(round(total * 100)) - int(compra.valor_pago_centavos or 0), 0)
+    msg = f"Lançamento manual atualizado. Status: {'PAGO' if compra.status == 'PAGO' else 'A PAGAR'} · saldo R$ {saldo/100:.2f}".replace('.', ',')
+    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(msg), status_code=303)
+
+
 @app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/enviar-casa")
 def atualizacao_admin_enviar_casa(cliente_id: int, compra_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.get(Cliente, cliente_id)

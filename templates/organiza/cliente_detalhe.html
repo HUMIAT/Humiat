@@ -320,6 +320,18 @@
         <div class="atualizacao-acoes">
           {% if compra.status == 'PAGO' %}<a class="botao pequeno" target="_blank" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Abrir página do cliente</a>{% endif %}
           {% if compra.status == 'PAGO' %}<form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Online: liberar arquivos / enviar e-mail{% endif %}</button></form>{% else %}<span class="texto-suave">Arquivos online são liberados após o pagamento.</span>{% endif %}
+          {% if compra.origem == 'MANUAL' %}<details class="atualizacao-editar-lancamento"><summary class="botao pequeno">Editar lançamento manual</summary>
+            <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/editar" class="atualizacao-editar-form">
+              <label>Do pacote<select name="pacote_inicio" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}" {% if p.pacote == compra.pacote_inicio %}selected{% endif %}>{{ p.pacote }}</option>{% endfor %}</select></label>
+              <label>Até o pacote<select name="pacote_fim" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}" {% if p.pacote == compra.pacote_fim %}selected{% endif %}>{{ p.pacote }}</option>{% endfor %}</select></label>
+              <label>Valor da atualização<input name="valor_a_pagar" inputmode="decimal" value="{{ '%.2f'|format((compra.valor_a_pagar_centavos or 0)/100)|replace('.', ',') }}" required></label>
+              <label>Frete / deslocamento<input name="frete" inputmode="decimal" value="{{ '%.2f'|format((compra.frete_centavos or 0)/100)|replace('.', ',') }}"></label>
+              <label>Valor já pago<input name="valor_pago" inputmode="decimal" value="{{ '%.2f'|format((compra.valor_pago_centavos or 0)/100)|replace('.', ',') }}"></label>
+              <label>Valor normal<input name="valor_normal" inputmode="decimal" value="{{ '%.2f'|format((compra.valor_normal_centavos or 0)/100)|replace('.', ',') }}"></label>
+              <label>Forma de pagamento<select name="forma_pagamento"><option {% if compra.forma_pagamento == 'A definir' %}selected{% endif %}>A definir</option><option {% if compra.forma_pagamento == 'PIX direto' %}selected{% endif %}>PIX direto</option><option {% if compra.forma_pagamento == 'InfinitePay' %}selected{% endif %}>InfinitePay</option><option {% if compra.forma_pagamento == 'Dinheiro' %}selected{% endif %}>Dinheiro</option><option {% if compra.forma_pagamento == 'Cartão' %}selected{% endif %}>Cartão</option><option {% if compra.forma_pagamento == 'Outro' %}selected{% endif %}>Outro</option></select></label>
+              <div class="atualizacao-editar-acoes"><button class="botao primario pequeno" type="submit">Salvar correção</button><small>O status PAGO/A PAGAR é recalculado pelo total da atualização + frete menos o valor já pago.</small></div>
+            </form>
+          </details>{% endif %}
         </div>
         {% if compra.status != 'PAGO' %}
         <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/pagamento" class="atualizacao-pagamento-rapido">
