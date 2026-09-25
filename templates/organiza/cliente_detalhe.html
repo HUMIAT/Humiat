@@ -287,7 +287,7 @@
   <div class="atualizacao-compras-lista">
     {% for compra in atualizacoes_ctx.compras %}
       {% set ag = atualizacoes_ctx.agendamentos.get(compra.id) %}
-      <article class="atualizacao-compra-item">
+      <article class="atualizacao-compra-item" id="compra-{{ compra.id }}">
         {% set valor_atualizacao = compra.valor_a_pagar_centavos or compra.valor_pago_centavos or 0 %}
         {% set valor_frete = compra.frete_centavos or 0 %}
         {% set valor_total = valor_atualizacao + valor_frete %}
@@ -320,7 +320,7 @@
         <div class="atualizacao-acoes">
           {% if compra.status == 'PAGO' %}<a class="botao pequeno" target="_blank" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Abrir página do cliente</a>{% endif %}
           {% if compra.status == 'PAGO' %}<form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Online: liberar arquivos / enviar e-mail{% endif %}</button></form>{% else %}<span class="texto-suave">Arquivos online são liberados após o pagamento.</span>{% endif %}
-          {% if compra.origem == 'MANUAL' %}<details class="atualizacao-editar-lancamento"><summary class="botao pequeno">Editar lançamento manual</summary>
+          {% if compra.origem == 'MANUAL' %}<details class="atualizacao-editar-lancamento" {% if editar_compra_id == compra.id %}open{% endif %}><summary class="botao pequeno">Editar lançamento manual</summary>
             <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/editar" class="atualizacao-editar-form">
               <label>Do pacote<select name="pacote_inicio" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}" {% if p.pacote == compra.pacote_inicio %}selected{% endif %}>{{ p.pacote }}</option>{% endfor %}</select></label>
               <label>Até o pacote<select name="pacote_fim" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}" {% if p.pacote == compra.pacote_fim %}selected{% endif %}>{{ p.pacote }}</option>{% endfor %}</select></label>

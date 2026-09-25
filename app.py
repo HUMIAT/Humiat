@@ -2589,6 +2589,7 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "agenda_sucesso": request.query_params.get("agenda_sucesso", ""),
         "agenda_erro": request.query_params.get("agenda_erro", ""),
         "campanha_cliente_sucesso": request.query_params.get("campanha_cliente_sucesso", ""),
+        "editar_compra_id": int(request.query_params.get("editar_compra") or 0) if str(request.query_params.get("editar_compra") or "").isdigit() else 0,
     })
 
 
@@ -6674,31 +6675,69 @@ def _google_oauth_state_valido(state: str, usuario: Usuario) -> bool:
 def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     links_padrao = _atualizacao_links_padrao_sync(db)
     pacotes = _atualizacao_pacotes_sync_solvoz(db)
+    filtro = (request.query_params.get("filtro") or "").strip().lower()
     compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc()).limit(100).all()
     agendamentos = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all()
     campanha_atual = db.query(Campanha).filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO").order_by(func.coalesce(Campanha.iniciado_em, Campanha.criado_em).desc(), Campanha.id.desc()).first()
     campanha_resultado = None
+    campanha_valores = {}
+    compras_campanha = []
     if campanha_atual:
         destinos = db.query(CampanhaDestinatario).filter(CampanhaDestinatario.campanha_id == campanha_atual.id).all()
+        destinos_por_cliente = {int(d.cliente_id): d for d in destinos}
         total_dest = len(destinos)
         enviados = sum(1 for d in destinos if (d.status or "").upper() in ("ENVIADO", "PROCESSADO"))
-        cliente_ids = [int(d.cliente_id) for d in destinos]
-        q_compras = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.cliente_id.in_(cliente_ids or [-1]), AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")))
+        cliente_ids = list(destinos_por_cliente.keys())
+        q_compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).filter(
+            AtualizacaoCompra.cliente_id.in_(cliente_ids or [-1]),
+            AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")),
+        )
         if campanha_atual.iniciado_em:
             q_compras = q_compras.filter(AtualizacaoCompra.criado_em >= campanha_atual.iniciado_em)
-        compras_campanha = q_compras.all()
-        total_contratado = sum(int(c.valor_a_pagar_centavos or c.valor_pago_centavos or 0) + int(c.frete_centavos or 0) for c in compras_campanha)
-        total_recebido = sum(int(c.valor_pago_centavos or 0) for c in compras_campanha)
+        compras_campanha = q_compras.order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc()).all()
+
+        # Resultado da campanha = valor da atualização vendida, sem frete/deslocamento.
+        # O snapshot da oferta do destinatário funciona como teto para impedir que um
+        # lançamento manual incorreto distorça o painel (ex.: R$ 2.250 em uma oferta de R$ 250).
+        total_contratado = 0
+        total_recebido = 0
+        total_frete = 0
+        for c in compras_campanha:
+            dest = destinos_por_cliente.get(int(c.cliente_id))
+            oferta_centavos = int(getattr(dest, "valor_promocional_centavos", 0) or 0)
+            cadastrado_centavos = int(c.valor_a_pagar_centavos or c.valor_pago_centavos or 0)
+            valor_campanha = min(cadastrado_centavos, oferta_centavos) if oferta_centavos > 0 else cadastrado_centavos
+            recebido_campanha = min(int(c.valor_pago_centavos or 0), valor_campanha)
+            total_contratado += valor_campanha
+            total_recebido += recebido_campanha
+            total_frete += int(c.frete_centavos or 0)
+            campanha_valores[int(c.id)] = {
+                "oferta": oferta_centavos,
+                "cadastrado": cadastrado_centavos,
+                "valor_campanha": valor_campanha,
+                "recebido_campanha": recebido_campanha,
+                "excede_oferta": bool(oferta_centavos > 0 and cadastrado_centavos > oferta_centavos),
+            }
+
         campanha_resultado = {
             "campanha": campanha_atual, "total": total_dest, "enviados": enviados, "pendentes": max(total_dest - enviados, 0),
             "compras": len(compras_campanha), "pagas": sum(1 for c in compras_campanha if c.status == "PAGO"),
             "a_pagar": sum(1 for c in compras_campanha if c.status == "A_PAGAR"), "total_contratado": total_contratado,
-            "recebido": total_recebido, "em_aberto": max(total_contratado - total_recebido, 0),
+            "recebido": total_recebido, "em_aberto": max(total_contratado - total_recebido, 0), "frete": total_frete,
         }
+
+        if filtro in ("compras", "pagas", "a_pagar"):
+            compras = compras_campanha
+            if filtro == "pagas":
+                compras = [c for c in compras if c.status == "PAGO"]
+            elif filtro == "a_pagar":
+                compras = [c for c in compras if c.status == "A_PAGAR"]
+
     google = _google_integracao(db)
     return templates.TemplateResponse("organiza/atualizacoes.html", {
         "request": request, "usuario": usuario, "links_padrao": links_padrao, "pacotes": pacotes, "compras": compras,
-        "agendamentos": agendamentos, "campanha_resultado": campanha_resultado, "google": google, "google_configurado": _google_configurado(),
+        "agendamentos": agendamentos, "campanha_resultado": campanha_resultado, "campanha_valores": campanha_valores,
+        "filtro": filtro, "google": google, "google_configurado": _google_configurado(),
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 

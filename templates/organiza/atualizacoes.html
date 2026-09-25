@@ -17,10 +17,10 @@
     <div class="campanha-resultado-grid">
       <div><small>Enviados</small><strong>{{ campanha_resultado.enviados }}</strong><span>de {{ campanha_resultado.total }}</span></div>
       <div><small>Pendentes</small><strong>{{ campanha_resultado.pendentes }}</strong><span>na campanha</span></div>
-      <div><small>Compras</small><strong>{{ campanha_resultado.compras }}</strong><span>{{ campanha_resultado.pagas }} pagas · {{ campanha_resultado.a_pagar }} a pagar</span></div>
-      <div class="resultado-arrecadado"><small>Total arrecadado</small><strong>R$ {{ '%.2f'|format(campanha_resultado.total_contratado/100)|replace('.', ',') }}</strong><span>valor total gerado pela campanha</span></div>
-      <div class="resultado-recebido"><small>Total recebido</small><strong>R$ {{ '%.2f'|format(campanha_resultado.recebido/100)|replace('.', ',') }}</strong><span>valor efetivamente pago</span></div>
-      <div class="resultado-aberto"><small>Em aberto</small><strong>R$ {{ '%.2f'|format(campanha_resultado.em_aberto/100)|replace('.', ',') }}</strong><span>a receber</span></div>
+      <a class="resultado-card-link {% if filtro == 'compras' %}ativo{% endif %}" href="/organiza/atualizacoes?filtro=compras#compras-campanha"><small>Compras</small><strong>{{ campanha_resultado.compras }}</strong><span>{{ campanha_resultado.pagas }} pagas · {{ campanha_resultado.a_pagar }} a pagar · clique para conferir</span></a>
+      <a class="resultado-card-link resultado-arrecadado" href="/organiza/atualizacoes?filtro=compras#compras-campanha"><small>Total arrecadado</small><strong>R$ {{ '%.2f'|format(campanha_resultado.total_contratado/100)|replace('.', ',') }}</strong><span>somente atualizações da campanha · sem frete</span></a>
+      <a class="resultado-card-link resultado-recebido" href="/organiza/atualizacoes?filtro=pagas#compras-campanha"><small>Total recebido</small><strong>R$ {{ '%.2f'|format(campanha_resultado.recebido/100)|replace('.', ',') }}</strong><span>recebido referente às atualizações</span></a>
+      <a class="resultado-card-link resultado-aberto" href="/organiza/atualizacoes?filtro=a_pagar#compras-campanha"><small>Em aberto</small><strong>R$ {{ '%.2f'|format(campanha_resultado.em_aberto/100)|replace('.', ',') }}</strong><span>a receber das atualizações</span></a>
     </div>
   </section>
   {% endif %}
@@ -87,11 +87,37 @@
     </div>
   </section>
 
-  <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Compras recentes</h2><p class="texto-suave">Pagamentos do SolVoz e registros manuais ficam na mesma base.</p></div></div>
-    <div class="lista-cards-mobile">
+  <section class="cartao tabela-cartao" id="compras-campanha">
+    <div class="titulo-linha compacto">
+      <div>
+        <h2>{% if filtro == 'compras' %}Compras desta campanha{% elif filtro == 'pagas' %}Compras pagas desta campanha{% elif filtro == 'a_pagar' %}Compras a pagar desta campanha{% else %}Compras recentes{% endif %}</h2>
+        <p class="texto-suave">{% if filtro %}Confira os registros usados no resultado acima. Se algum lançamento manual estiver errado, abra e corrija o cadastro.{% else %}Pagamentos do SolVoz e registros manuais ficam na mesma base.{% endif %}</p>
+      </div>
+      {% if filtro %}<a class="botao pequeno" href="/organiza/atualizacoes#compras-campanha">Limpar filtro</a>{% endif %}
+    </div>
+    <div class="compras-campanha-lista">
       {% for c in compras %}
-        <a class="cliente-card-clean" href="/organiza/clientes/{{ c.cliente_id }}#atualizacoes"><div><strong>{{ c.cliente.nome if c.cliente else ('Cliente #' ~ c.cliente_id) }}</strong><small>{{ c.pacote_inicio }}{% if c.pacote_fim != c.pacote_inicio %} → {{ c.pacote_fim }}{% endif %} · {{ c.origem }}{% if c.forma_pagamento %} · {{ c.forma_pagamento }}{% endif %}</small></div><span>{{ 'PAGO' if c.status == 'PAGO' else 'A PAGAR' }}</span></a>
+        {% set cv = campanha_valores.get(c.id, {}) %}
+        {% set valor_atualizacao = c.valor_a_pagar_centavos or c.valor_pago_centavos or 0 %}
+        {% set valor_frete = c.frete_centavos or 0 %}
+        {% set valor_pago = c.valor_pago_centavos or 0 %}
+        <article class="compra-campanha-row {% if cv.get('excede_oferta') %}compra-alerta{% endif %}">
+          <div class="compra-campanha-identidade">
+            <strong>{{ c.cliente.nome if c.cliente else ('Cliente #' ~ c.cliente_id) }}</strong>
+            <small>{{ c.pacote_inicio }}{% if c.pacote_fim != c.pacote_inicio %} → {{ c.pacote_fim }}{% endif %} · {{ c.origem }}{% if c.forma_pagamento %} · {{ c.forma_pagamento }}{% endif %}</small>
+            {% if cv.get('excede_oferta') %}<span class="compra-aviso">Valor cadastrado acima da oferta da campanha. Confira este lançamento.</span>{% endif %}
+          </div>
+          <div class="compra-campanha-valores">
+            <span><small>Atualização</small><strong>R$ {{ '%.2f'|format(valor_atualizacao/100)|replace('.', ',') }}</strong></span>
+            <span><small>Frete</small><strong>R$ {{ '%.2f'|format(valor_frete/100)|replace('.', ',') }}</strong></span>
+            <span><small>Pago</small><strong>R$ {{ '%.2f'|format(valor_pago/100)|replace('.', ',') }}</strong></span>
+            {% if cv.get('oferta') %}<span><small>Oferta da campanha</small><strong>R$ {{ '%.2f'|format(cv.get('oferta',0)/100)|replace('.', ',') }}</strong></span>{% endif %}
+          </div>
+          <div class="compra-campanha-acoes">
+            <span class="pill {% if c.status == 'PAGO' %}atualizacao-ok{% else %}atualizacao-pendente{% endif %}">{{ 'PAGO' if c.status == 'PAGO' else 'A PAGAR' }}</span>
+            {% if c.origem == 'MANUAL' %}<a class="botao pequeno" href="/organiza/clientes/{{ c.cliente_id }}?editar_compra={{ c.id }}#compra-{{ c.id }}">Editar</a>{% else %}<a class="botao pequeno" href="/organiza/clientes/{{ c.cliente_id }}#atualizacoes">Abrir cliente</a>{% endif %}
+          </div>
+        </article>
       {% else %}<p class="texto-suave vazio">Nenhuma compra registrada.</p>{% endfor %}
     </div>
   </section>
@@ -100,5 +126,8 @@
 .atualizacoes-painel{max-width:1180px}.google-atualizacao-card{display:flex;justify-content:space-between;gap:20px;align-items:center}.google-atualizacao-card h2{margin:2px 0 6px}.atualizacao-pacotes-admin,.atualizacao-links-padrao-admin{display:grid;gap:8px}.atualizacao-pacote-linha{display:grid;grid-template-columns:90px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-pacote-linha small{grid-column:2;color:#64748b}.atualizacao-link-padrao-linha{display:grid;grid-template-columns:190px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-link-padrao-linha small{grid-column:2;color:#64748b}.link-padrao-nome[readonly]{font-weight:800;background:#f8fafc}.atualizacao-link-novo{display:grid;grid-template-columns:minmax(180px,1fr) 180px minmax(260px,1.3fr) auto auto;gap:9px;align-items:end;margin-top:14px;padding:12px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}.atualizacao-link-novo>div{display:grid;gap:2px}.atualizacao-link-novo small{color:#64748b}.check-inline{display:flex;align-items:center;gap:5px;white-space:nowrap}@media(max-width:900px){.atualizacao-link-novo{grid-template-columns:1fr 1fr}.atualizacao-link-novo>div{grid-column:1/-1}}@media(max-width:760px){.google-atualizacao-card{align-items:stretch;flex-direction:column}.atualizacao-pacote-linha,.atualizacao-link-padrao-linha,.atualizacao-link-novo{grid-template-columns:1fr}.atualizacao-pacote-linha small,.atualizacao-link-padrao-linha small,.atualizacao-link-novo>div{grid-column:auto}}
 
 .campanha-resultado-card{display:grid;gap:14px}.campanha-resultado-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.campanha-resultado-grid>div{display:grid;gap:3px;padding:12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.campanha-resultado-grid small{font-size:11px;font-weight:800;text-transform:uppercase;color:#64748b}.campanha-resultado-grid strong{font-size:20px;color:#0f172a}.campanha-resultado-grid span{font-size:11px;color:#64748b}.campanha-resultado-grid .resultado-aberto{background:#fff8ee;border-color:#fed7aa}.campanha-resultado-grid .resultado-aberto strong{color:#c2410c}@media(max-width:1000px){.campanha-resultado-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:600px){.campanha-resultado-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Organiza 1.1.59 — resultado auditável da campanha */
+.campanha-resultado-grid .resultado-card-link{display:grid;gap:3px;padding:12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc;text-decoration:none;color:inherit;transition:.16s ease}.campanha-resultado-grid .resultado-card-link:hover,.campanha-resultado-grid .resultado-card-link.ativo{border-color:#2563eb;box-shadow:0 5px 14px rgba(37,99,235,.10);transform:translateY(-1px)}.campanha-resultado-grid .resultado-card-link small{font-size:11px;font-weight:800;text-transform:uppercase;color:#64748b}.campanha-resultado-grid .resultado-card-link strong{font-size:20px;color:#0f172a}.campanha-resultado-grid .resultado-card-link span{font-size:11px;color:#64748b}.compras-campanha-lista{display:grid;gap:9px}.compra-campanha-row{display:grid;grid-template-columns:minmax(220px,1.3fr) minmax(380px,2fr) auto;gap:14px;align-items:center;padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:#fff}.compra-campanha-row.compra-alerta{border-color:#f59e0b;background:#fffbeb}.compra-campanha-identidade{display:grid;gap:4px}.compra-campanha-identidade small{color:#64748b}.compra-aviso{font-size:11px;font-weight:800;color:#b45309}.compra-campanha-valores{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.compra-campanha-valores span{display:grid;gap:2px;padding:8px 9px;border-radius:8px;background:#f8fafc}.compra-campanha-valores small{font-size:10px;color:#64748b}.compra-campanha-valores strong{font-size:13px}.compra-campanha-acoes{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}@media(max-width:1000px){.compra-campanha-row{grid-template-columns:1fr}.compra-campanha-acoes{justify-content:flex-start}}@media(max-width:650px){.compra-campanha-valores{grid-template-columns:1fr 1fr}}
 </style>
 {% endblock %}
