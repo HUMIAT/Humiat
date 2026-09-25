@@ -846,6 +846,19 @@ class AtualizacaoPacote(Base):
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class AtualizacaoLinkPadrao(Base):
+    __tablename__ = "atualizacao_links_padrao"
+    id = Column(Integer, primary_key=True)
+    chave = Column(String(80), nullable=False, unique=True, index=True)
+    nome = Column(String(160), nullable=False)
+    drive_url = Column(String(1000), nullable=True)
+    drive_file_id = Column(String(255), nullable=True)
+    ativo = Column(Integer, nullable=False, default=1)
+    ordem = Column(Integer, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class AtualizacaoCompra(Base):
     __tablename__ = "atualizacao_compras"
     id = Column(Integer, primary_key=True)
@@ -5632,6 +5645,9 @@ def _atualizacao_pacotes_lista(valor) -> list[str]:
     saida = []
     for item in bruto:
         label = str(item or "").strip()
+        # 2021.0 é somente a versão-base; nunca representa uma atualização comprável.
+        if label == "2021.0":
+            continue
         if label and label not in saida:
             saida.append(label[:30])
     return saida
@@ -5707,12 +5723,40 @@ def _atualizacao_drive_file_id(valor: str | None) -> str:
     return ""
 
 
+def _atualizacao_links_padrao_sync(db: Session) -> list[AtualizacaoLinkPadrao]:
+    padroes = [
+        ("banco_dados", "Banco de Dados", 10),
+        ("atualiza_pendrive", "Atualiza pendrive", 20),
+        ("pendrive_cliente", "Pendrive Cliente", 30),
+    ]
+    existentes = {x.chave: x for x in db.query(AtualizacaoLinkPadrao).all()}
+    alterou = False
+    for chave, nome, ordem in padroes:
+        item = existentes.get(chave)
+        if not item:
+            db.add(AtualizacaoLinkPadrao(chave=chave, nome=nome, ativo=1, ordem=ordem))
+            alterou = True
+        else:
+            # Mantém nome/ordem padronizados sem alterar URL nem status escolhido pelo usuário.
+            if item.nome != nome:
+                item.nome = nome
+                alterou = True
+            if int(item.ordem or 0) != ordem:
+                item.ordem = ordem
+                alterou = True
+    if alterou:
+        db.commit()
+    return db.query(AtualizacaoLinkPadrao).order_by(AtualizacaoLinkPadrao.ordem.asc(), AtualizacaoLinkPadrao.id.asc()).all()
+
+
 def _atualizacao_pacotes_sync_solvoz(db: Session) -> list[AtualizacaoPacote]:
     labels = []
     try:
         labels = _pacotes_disponiveis_solvoz()
     except Exception:
         labels = []
+    # 2021.0 é a base do sistema, não um pacote de atualização.
+    labels = [label for label in labels if (_pacote_release_num(label) or 0) > (_pacote_release_num("2021.0") or 0)]
     existentes = {p.pacote: p for p in db.query(AtualizacaoPacote).all()}
     alterou = False
     for label in labels:
@@ -5721,9 +5765,19 @@ def _atualizacao_pacotes_sync_solvoz(db: Session) -> list[AtualizacaoPacote]:
             db.add(pacote)
             existentes[label] = pacote
             alterou = True
+    # Se uma versão antiga 2021.0 já foi criada em produção, ela deixa de ser utilizável.
+    base = existentes.get("2021.0")
+    if base and base.ativo:
+        base.ativo = 0
+        alterou = True
     if alterou:
         db.commit()
-    return db.query(AtualizacaoPacote).order_by(AtualizacaoPacote.pacote.asc()).all()
+    return (
+        db.query(AtualizacaoPacote)
+        .filter(AtualizacaoPacote.pacote != "2021.0")
+        .order_by(AtualizacaoPacote.pacote.asc())
+        .all()
+    )
 
 
 def _atualizacao_pacotes_intervalo(db: Session, inicio: str, fim: str) -> list[str]:
@@ -5744,7 +5798,11 @@ def _atualizacao_pacotes_intervalo(db: Session, inicio: str, fim: str) -> list[s
             lista.append((numero, _pacote_label_num(numero)))
     lista.sort(key=lambda x: x[0])
     if not lista:
-        return [_pacote_label_num(ini)] if ini == end else [_pacote_label_num(ini), _pacote_label_num(end)]
+        # 2021.0 é base e não pode ser registrado como pacote adquirido.
+        base = _pacote_release_num("2021.0") or 0
+        if end <= base:
+            return []
+        return [_pacote_label_num(ini)] if ini == end and ini > base else ([_pacote_label_num(end)] if ini <= base else [_pacote_label_num(ini), _pacote_label_num(end)])
     return [x[1] for x in lista]
 
 
@@ -5839,6 +5897,26 @@ def _google_drive_conceder_acesso(db: Session, file_id: str, email: str) -> None
     )
 
 
+def _atualizacao_links_padrao_ativos(db: Session) -> list[dict]:
+    links = []
+    faltando = []
+    for item in _atualizacao_links_padrao_sync(db):
+        if not item.ativo:
+            continue
+        if not (item.drive_file_id or item.drive_url):
+            faltando.append(item.nome)
+            continue
+        file_id = (item.drive_file_id or _atualizacao_drive_file_id(item.drive_url)).strip()
+        if not file_id:
+            faltando.append(item.nome)
+            continue
+        url = (item.drive_url or f"https://drive.google.com/open?id={file_id}").strip()
+        links.append({"tipo": "padrao", "nome": item.nome, "file_id": file_id, "url": url})
+    if faltando:
+        raise RuntimeError("Cadastre o link do Google Drive dos arquivos padrão ativos: " + ", ".join(faltando))
+    return links
+
+
 def _atualizacao_links_compra(db: Session, compra: AtualizacaoCompra) -> list[dict]:
     links = []
     faltando = []
@@ -5852,7 +5930,7 @@ def _atualizacao_links_compra(db: Session, compra: AtualizacaoCompra) -> list[di
             faltando.append(label)
             continue
         url = (pacote.drive_url or f"https://drive.google.com/open?id={file_id}").strip()
-        links.append({"pacote": label, "file_id": file_id, "url": url})
+        links.append({"tipo": "pacote", "pacote": label, "nome": f"Pacote {label}", "file_id": file_id, "url": url})
     if faltando:
         raise RuntimeError("Cadastre o link do Google Drive dos pacotes: " + ", ".join(faltando))
     return links
@@ -6071,16 +6149,18 @@ def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: Atuali
     gmail = (cliente.email or "").strip().lower()
     if not _gmail_valido(gmail):
         raise RuntimeError("O cliente precisa atualizar o cadastro com um Gmail válido.")
-    links = _atualizacao_links_compra(db, compra)
+    links_padrao = _atualizacao_links_padrao_ativos(db)
+    links_pacotes = _atualizacao_links_compra(db, compra)
+    links = links_padrao + links_pacotes
     for item in links:
         _google_drive_conceder_acesso(db, item["file_id"], gmail)
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
     agenda_url = f"{PUBLIC_BASE_URL.rstrip('/')}/atualizacao/{cliente.token_ficha}/{compra.id}/agenda?tipo=CASA"
     pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
-    lista_texto = "\n".join(f"- Pacote {x['pacote']}: {x['url']}" for x in links)
+    lista_texto = "\n".join(f"- {x['nome']}: {x['url']}" for x in links)
     lista_html = "".join(
-        f'<p style="margin:8px 0"><a href="{html.escape(x["url"])}" style="display:inline-block;padding:11px 16px;background:#e6003c;color:white;text-decoration:none;border-radius:8px;font-weight:700">Abrir pacote {html.escape(x["pacote"])}</a></p>'
+        f'<p style="margin:8px 0"><a href="{html.escape(x["url"])}" style="display:inline-block;padding:11px 16px;background:#e6003c;color:white;text-decoration:none;border-radius:8px;font-weight:700">Abrir {html.escape(x["nome"])}</a></p>'
         for x in links
     )
     texto = (
@@ -6343,15 +6423,63 @@ def _google_oauth_state_valido(state: str, usuario: Usuario) -> bool:
 
 @app.get("/organiza/atualizacoes", response_class=HTMLResponse)
 def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    links_padrao = _atualizacao_links_padrao_sync(db)
     pacotes = _atualizacao_pacotes_sync_solvoz(db)
     compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).order_by(AtualizacaoCompra.pago_em.desc(), AtualizacaoCompra.id.desc()).limit(100).all()
     agendamentos = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all()
     google = _google_integracao(db)
     return templates.TemplateResponse("organiza/atualizacoes.html", {
-        "request": request, "usuario": usuario, "pacotes": pacotes, "compras": compras,
+        "request": request, "usuario": usuario, "links_padrao": links_padrao, "pacotes": pacotes, "compras": compras,
         "agendamentos": agendamentos, "google": google, "google_configurado": _google_configurado(),
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/organiza/atualizacoes/links-padrao/novo")
+async def atualizacao_link_padrao_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    exigir_admin(usuario)
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    drive_url = (form.get("drive_url") or "").strip()
+    if not nome:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus("Informe o nome do link padrão."), status_code=303)
+    file_id = _atualizacao_drive_file_id(drive_url)
+    if drive_url and not file_id:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus(f"Não consegui identificar o arquivo/pasta do Google Drive de {nome}."), status_code=303)
+    chave_base = re.sub(r"[^a-z0-9]+", "_", unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode().lower()).strip("_") or "link"
+    chave = chave_base
+    i = 2
+    while db.query(AtualizacaoLinkPadrao).filter(AtualizacaoLinkPadrao.chave == chave).first():
+        chave = f"{chave_base}_{i}"
+        i += 1
+    maior_ordem = db.query(func.max(AtualizacaoLinkPadrao.ordem)).scalar() or 30
+    item = AtualizacaoLinkPadrao(
+        chave=chave[:80], nome=nome[:160], drive_url=drive_url or None, drive_file_id=file_id or None,
+        ativo=1 if str(form.get("ativo") or "") in ("1", "on", "true") else 0, ordem=int(maior_ordem) + 10,
+    )
+    db.add(item)
+    db.commit()
+    return RedirectResponse("/organiza/atualizacoes?mensagem=" + quote_plus(f"Link padrão {nome} incluído."), status_code=303)
+
+
+@app.post("/organiza/atualizacoes/links-padrao/{link_id}")
+async def atualizacao_link_padrao_salvar(link_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    exigir_admin(usuario)
+    item = db.get(AtualizacaoLinkPadrao, link_id)
+    if not item:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    nome = (form.get("nome") or item.nome or "Link padrão").strip()
+    drive_url = (form.get("drive_url") or "").strip()
+    file_id = _atualizacao_drive_file_id(drive_url)
+    if drive_url and not file_id:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus(f"Não consegui identificar o arquivo/pasta do Google Drive de {nome}."), status_code=303)
+    item.nome = nome[:160]
+    item.drive_url = drive_url or None
+    item.drive_file_id = file_id or None
+    item.ativo = 1 if str(form.get("ativo") or "") in ("1", "on", "true") else 0
+    db.commit()
+    return RedirectResponse("/organiza/atualizacoes?mensagem=" + quote_plus(f"Link padrão {item.nome} atualizado."), status_code=303)
 
 
 @app.post("/organiza/atualizacoes/pacotes/{pacote_id}")

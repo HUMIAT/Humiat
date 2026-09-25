@@ -23,7 +23,31 @@
   </section>
 
   <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Links dos pacotes</h2><p class="texto-suave">Cole o link do arquivo ou pasta correspondente no Google Drive. O acesso continua privado e será concedido ao Gmail do comprador.</p></div></div>
+    <div class="titulo-linha compacto"><div><h2>Links padrão da atualização</h2><p class="texto-suave">Estes arquivos acompanham qualquer atualização. Deixe <strong>Ativo</strong> somente o que deve ser enviado ao cliente. Você pode incluir outro link padrão quando precisar.</p></div></div>
+    <div class="atualizacao-links-padrao-admin">
+      {% for link in links_padrao %}
+      <form method="post" action="/organiza/atualizacoes/links-padrao/{{ link.id }}" class="atualizacao-link-padrao-linha">
+        <input class="link-padrao-nome" type="text" name="nome" value="{{ link.nome }}" {% if link.chave in ['banco_dados','atualiza_pendrive','pendrive_cliente'] %}readonly{% endif %} {% if not usuario.is_admin %}disabled{% endif %}>
+        <input type="url" name="drive_url" placeholder="https://drive.google.com/..." value="{{ link.drive_url or '' }}" {% if not usuario.is_admin %}disabled{% endif %}>
+        <label class="check-inline"><input type="checkbox" name="ativo" value="1" {% if link.ativo %}checked{% endif %} {% if not usuario.is_admin %}disabled{% endif %}> Ativo</label>
+        {% if usuario.is_admin %}<button class="botao pequeno" type="submit">Salvar</button>{% endif %}
+        <small>{% if link.drive_file_id %}Drive configurado{% elif link.ativo %}Ativo, aguardando link{% else %}Inativo{% endif %}</small>
+      </form>
+      {% endfor %}
+    </div>
+    {% if usuario.is_admin %}
+    <form method="post" action="/organiza/atualizacoes/links-padrao/novo" class="atualizacao-link-novo">
+      <div><strong>Incluir outro link padrão</strong><small>Use somente se surgir outro arquivo que precise acompanhar todas as atualizações.</small></div>
+      <input type="text" name="nome" placeholder="Nome do arquivo/link" required>
+      <input type="url" name="drive_url" placeholder="https://drive.google.com/...">
+      <label class="check-inline"><input type="checkbox" name="ativo" value="1" checked> Ativo</label>
+      <button class="botao pequeno" type="submit">Incluir</button>
+    </form>
+    {% endif %}
+  </section>
+
+  <section class="cartao tabela-cartao">
+    <div class="titulo-linha compacto"><div><h2>Links dos pacotes</h2><p class="texto-suave"><strong>2021.0 é somente a versão-base e não precisa de link.</strong> Os links começam em 2021.1. Cole o arquivo ou pasta correspondente no Google Drive.</p></div></div>
     <div class="atualizacao-pacotes-admin">
       {% for p in pacotes %}
       <form method="post" action="/organiza/atualizacoes/pacotes/{{ p.id }}" class="atualizacao-pacote-linha">
@@ -56,6 +80,6 @@
   </section>
 </section>
 <style>
-.atualizacoes-painel{max-width:1180px}.google-atualizacao-card{display:flex;justify-content:space-between;gap:20px;align-items:center}.google-atualizacao-card h2{margin:2px 0 6px}.atualizacao-pacotes-admin{display:grid;gap:8px}.atualizacao-pacote-linha{display:grid;grid-template-columns:90px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-pacote-linha small{grid-column:2;color:#64748b}.check-inline{display:flex;align-items:center;gap:5px;white-space:nowrap}@media(max-width:760px){.google-atualizacao-card{align-items:stretch;flex-direction:column}.atualizacao-pacote-linha{grid-template-columns:1fr}.atualizacao-pacote-linha small{grid-column:auto}}
+.atualizacoes-painel{max-width:1180px}.google-atualizacao-card{display:flex;justify-content:space-between;gap:20px;align-items:center}.google-atualizacao-card h2{margin:2px 0 6px}.atualizacao-pacotes-admin,.atualizacao-links-padrao-admin{display:grid;gap:8px}.atualizacao-pacote-linha{display:grid;grid-template-columns:90px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-pacote-linha small{grid-column:2;color:#64748b}.atualizacao-link-padrao-linha{display:grid;grid-template-columns:190px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-link-padrao-linha small{grid-column:2;color:#64748b}.link-padrao-nome[readonly]{font-weight:800;background:#f8fafc}.atualizacao-link-novo{display:grid;grid-template-columns:minmax(180px,1fr) 180px minmax(260px,1.3fr) auto auto;gap:9px;align-items:end;margin-top:14px;padding:12px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}.atualizacao-link-novo>div{display:grid;gap:2px}.atualizacao-link-novo small{color:#64748b}.check-inline{display:flex;align-items:center;gap:5px;white-space:nowrap}@media(max-width:900px){.atualizacao-link-novo{grid-template-columns:1fr 1fr}.atualizacao-link-novo>div{grid-column:1/-1}}@media(max-width:760px){.google-atualizacao-card{align-items:stretch;flex-direction:column}.atualizacao-pacote-linha,.atualizacao-link-padrao-linha,.atualizacao-link-novo{grid-template-columns:1fr}.atualizacao-pacote-linha small,.atualizacao-link-padrao-linha small,.atualizacao-link-novo>div{grid-column:auto}}
 </style>
 {% endblock %}
