@@ -8,6 +8,23 @@
   {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 
+  {% if campanha_resultado %}
+  <section class="cartao campanha-resultado-card">
+    <div class="titulo-linha compacto">
+      <div><p class="tag">RESULTADO DA CAMPANHA ATÉ O MOMENTO</p><h2>{{ campanha_resultado.campanha.nome }}</h2><p class="texto-suave">Pacote alvo: {{ campanha_resultado.campanha.pacote_alvo or '-' }} · status {{ campanha_resultado.campanha.status }}</p></div>
+      <a class="botao pequeno" href="/organiza/campanhas/{{ campanha_resultado.campanha.id }}">Abrir campanha</a>
+    </div>
+    <div class="campanha-resultado-grid">
+      <div><small>Enviados</small><strong>{{ campanha_resultado.enviados }}</strong><span>de {{ campanha_resultado.total }}</span></div>
+      <div><small>Pendentes</small><strong>{{ campanha_resultado.pendentes }}</strong><span>na campanha</span></div>
+      <div><small>Compras</small><strong>{{ campanha_resultado.compras }}</strong><span>{{ campanha_resultado.pagas }} pagas · {{ campanha_resultado.a_pagar }} a pagar</span></div>
+      <div><small>Contratado</small><strong>R$ {{ '%.2f'|format(campanha_resultado.total_contratado/100)|replace('.', ',') }}</strong><span>atualização + frete</span></div>
+      <div><small>Recebido</small><strong>R$ {{ '%.2f'|format(campanha_resultado.recebido/100)|replace('.', ',') }}</strong><span>até agora</span></div>
+      <div class="resultado-aberto"><small>Em aberto</small><strong>R$ {{ '%.2f'|format(campanha_resultado.em_aberto/100)|replace('.', ',') }}</strong><span>a receber</span></div>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="cartao google-atualizacao-card">
     <div>
       <p class="tag">GOOGLE</p><h2>Drive + Agenda</h2>
@@ -62,10 +79,10 @@
   </section>
 
   <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Casa/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Segunda a sexta, de 1 em 1 hora.</p></div><a class="botao" href="/organiza/agenda">Abrir agenda completa</a></div>
+    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Online/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Casa do cliente: horário combinado conforme disponibilidade do técnico.</p></div><a class="botao" href="/organiza/agenda">Abrir agenda completa</a></div>
     <div class="lista-cards-mobile">
       {% for a in agendamentos %}
-        <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Atualização · Online' if a.tipo == 'CASA' else 'Atualização · Loja' }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
+        <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Atualização · Online' if a.tipo == 'CASA' else ('Atualização · Casa do cliente' if a.tipo == 'CLIENTE' else 'Atualização · Loja') }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
       {% else %}<p class="texto-suave vazio">Nenhuma atualização agendada.</p>{% endfor %}
     </div>
   </section>
@@ -74,12 +91,14 @@
     <div class="titulo-linha compacto"><div><h2>Compras recentes</h2><p class="texto-suave">Pagamentos do SolVoz e registros manuais ficam na mesma base.</p></div></div>
     <div class="lista-cards-mobile">
       {% for c in compras %}
-        <a class="cliente-card-clean" href="/organiza/clientes/{{ c.cliente_id }}#atualizacoes"><div><strong>{{ c.cliente.nome if c.cliente else ('Cliente #' ~ c.cliente_id) }}</strong><small>{{ c.pacote_inicio }}{% if c.pacote_fim != c.pacote_inicio %} → {{ c.pacote_fim }}{% endif %} · {{ c.origem }}{% if c.forma_pagamento %} · {{ c.forma_pagamento }}{% endif %}</small></div><span>PAGO</span></a>
+        <a class="cliente-card-clean" href="/organiza/clientes/{{ c.cliente_id }}#atualizacoes"><div><strong>{{ c.cliente.nome if c.cliente else ('Cliente #' ~ c.cliente_id) }}</strong><small>{{ c.pacote_inicio }}{% if c.pacote_fim != c.pacote_inicio %} → {{ c.pacote_fim }}{% endif %} · {{ c.origem }}{% if c.forma_pagamento %} · {{ c.forma_pagamento }}{% endif %}</small></div><span>{{ 'PAGO' if c.status == 'PAGO' else 'A PAGAR' }}</span></a>
       {% else %}<p class="texto-suave vazio">Nenhuma compra registrada.</p>{% endfor %}
     </div>
   </section>
 </section>
 <style>
 .atualizacoes-painel{max-width:1180px}.google-atualizacao-card{display:flex;justify-content:space-between;gap:20px;align-items:center}.google-atualizacao-card h2{margin:2px 0 6px}.atualizacao-pacotes-admin,.atualizacao-links-padrao-admin{display:grid;gap:8px}.atualizacao-pacote-linha{display:grid;grid-template-columns:90px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-pacote-linha small{grid-column:2;color:#64748b}.atualizacao-link-padrao-linha{display:grid;grid-template-columns:190px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-link-padrao-linha small{grid-column:2;color:#64748b}.link-padrao-nome[readonly]{font-weight:800;background:#f8fafc}.atualizacao-link-novo{display:grid;grid-template-columns:minmax(180px,1fr) 180px minmax(260px,1.3fr) auto auto;gap:9px;align-items:end;margin-top:14px;padding:12px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}.atualizacao-link-novo>div{display:grid;gap:2px}.atualizacao-link-novo small{color:#64748b}.check-inline{display:flex;align-items:center;gap:5px;white-space:nowrap}@media(max-width:900px){.atualizacao-link-novo{grid-template-columns:1fr 1fr}.atualizacao-link-novo>div{grid-column:1/-1}}@media(max-width:760px){.google-atualizacao-card{align-items:stretch;flex-direction:column}.atualizacao-pacote-linha,.atualizacao-link-padrao-linha,.atualizacao-link-novo{grid-template-columns:1fr}.atualizacao-pacote-linha small,.atualizacao-link-padrao-linha small,.atualizacao-link-novo>div{grid-column:auto}}
+
+.campanha-resultado-card{display:grid;gap:14px}.campanha-resultado-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.campanha-resultado-grid>div{display:grid;gap:3px;padding:12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.campanha-resultado-grid small{font-size:11px;font-weight:800;text-transform:uppercase;color:#64748b}.campanha-resultado-grid strong{font-size:20px;color:#0f172a}.campanha-resultado-grid span{font-size:11px;color:#64748b}.campanha-resultado-grid .resultado-aberto{background:#fff8ee;border-color:#fed7aa}.campanha-resultado-grid .resultado-aberto strong{color:#c2410c}@media(max-width:1000px){.campanha-resultado-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:600px){.campanha-resultado-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 {% endblock %}

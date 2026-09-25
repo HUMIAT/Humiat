@@ -198,7 +198,7 @@
     </label>
     <label>Local
       <select name="local_atendimento">
-        <option value="CLIENTE">Cliente</option>
+        <option value="CLIENTE">Casa do cliente</option>
         <option value="LOJA" selected>Loja</option>
         <option value="ONLINE">Online / AnyDesk</option>
       </select>
@@ -254,9 +254,9 @@
   {% if atualizacao_sucesso %}<div class="alerta sucesso">{{ atualizacao_sucesso }}</div>{% endif %}
   {% if atualizacao_erro %}<div class="alerta erro">{{ atualizacao_erro }}</div>{% endif %}
   <div class="atualizacao-etapas-resumo">
-    <div class="etapa-item ok"><span>1</span><div><strong>Compra</strong><small>Registro pago no SolVoz ou manual no Organiza.</small></div></div>
+    <div class="etapa-item ok"><span>1</span><div><strong>Compra</strong><small>Registre a contratação. Pode ficar PAGO ou A PAGAR.</small></div></div>
     <div class="etapa-item {% if atualizacoes_ctx.gmail_ok %}ok{% else %}pendente{% endif %}"><span>2</span><div><strong>Cadastro</strong><small>{{ 'Gmail pronto para envio dos arquivos.' if atualizacoes_ctx.gmail_ok else 'Atualize o cadastro / Gmail do cliente.' }}</small></div></div>
-    <div class="etapa-item"><span>3</span><div><strong>Entrega / atendimento</strong><small>Online: enviar arquivos e depois agendar AnyDesk. Loja: agendar direto, sem liberar arquivos.</small></div></div>
+    <div class="etapa-item"><span>3</span><div><strong>Entrega / atendimento</strong><small>Online: arquivos + AnyDesk. Loja: agendamento direto. Casa do cliente: horário combinado com o técnico.</small></div></div>
   </div>
   <div class="atualizacao-manual-grid">
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/compra" class="cartao atualizacao-form-interno">
@@ -265,11 +265,14 @@
       <div class="form-grid-organizada duas-colunas">
         <label>Do pacote<select name="pacote_inicio" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}">{{ p.pacote }}</option>{% endfor %}</select></label>
         <label>Até o pacote<select name="pacote_fim" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}" {% if loop.last %}selected{% endif %}>{{ p.pacote }}</option>{% endfor %}</select></label>
-        <label>Valor pago<input name="valor_pago" inputmode="decimal" placeholder="250,00"></label>
+        <label>Valor da atualização<input name="valor_a_pagar" inputmode="decimal" placeholder="250,00" required></label>
+        <label>Frete / deslocamento<input name="frete" inputmode="decimal" placeholder="0,00"></label>
+        <label>Valor já pago<input name="valor_pago" inputmode="decimal" placeholder="0,00"></label>
         <label>Valor normal<input name="valor_normal" inputmode="decimal" placeholder="500,00"></label>
-        <label>Forma de pagamento<select name="forma_pagamento"><option>PIX direto</option><option>InfinitePay</option><option>Dinheiro</option><option>Cartão</option><option>Outro</option></select></label>
+        <label>Forma de pagamento<select name="forma_pagamento"><option>A definir</option><option>PIX direto</option><option>InfinitePay</option><option>Dinheiro</option><option>Cartão</option><option>Outro</option></select></label>
       </div>
-      <button class="botao primario" type="submit">Registrar como pago</button>
+      <p class="texto-suave compra-manual-ajuda">Se o cliente ainda não pagou tudo, a compra fica como <strong>A PAGAR</strong> e os pacotes já deixam de ser oferecidos novamente no SolVoz.</p>
+      <button class="botao primario" type="submit">Registrar compra</button>
     </form>
     <div class="cartao atualizacao-gmail-status">
       <h3>Gmail do cliente</h3>
@@ -285,29 +288,48 @@
     {% for compra in atualizacoes_ctx.compras %}
       {% set ag = atualizacoes_ctx.agendamentos.get(compra.id) %}
       <article class="atualizacao-compra-item">
+        {% set valor_atualizacao = compra.valor_a_pagar_centavos or compra.valor_pago_centavos or 0 %}
+        {% set valor_frete = compra.frete_centavos or 0 %}
+        {% set valor_total = valor_atualizacao + valor_frete %}
+        {% set valor_pago = compra.valor_pago_centavos or 0 %}
+        {% set valor_saldo = [valor_total - valor_pago, 0]|max %}
         <div class="atualizacao-compra-head">
-          <div><span class="pill atualizacao-ok">PAGO</span><h3>{{ compra.pacote_inicio }}{% if compra.pacote_fim != compra.pacote_inicio %} → {{ compra.pacote_fim }}{% endif %}</h3><small>{{ compra.origem }}{% if compra.forma_pagamento %} · {{ compra.forma_pagamento }}{% endif %}{% if compra.pago_em %} · {{ compra.pago_em.strftime('%d/%m/%Y %H:%M') }}{% endif %}</small></div>
-          {% if compra.valor_pago_centavos %}<strong>R$ {{ '%.2f'|format(compra.valor_pago_centavos/100)|replace('.', ',') }}</strong>{% endif %}
+          <div><span class="pill {% if compra.status == 'PAGO' %}atualizacao-ok{% else %}atualizacao-pendente{% endif %}">{{ 'PAGO' if compra.status == 'PAGO' else 'A PAGAR' }}</span><h3>{{ compra.pacote_inicio }}{% if compra.pacote_fim != compra.pacote_inicio %} → {{ compra.pacote_fim }}{% endif %}</h3><small>{{ compra.origem }}{% if compra.forma_pagamento %} · {{ compra.forma_pagamento }}{% endif %}{% if compra.pago_em %} · pago em {{ compra.pago_em.strftime('%d/%m/%Y %H:%M') }}{% endif %}</small></div>
+          <strong>R$ {{ '%.2f'|format(valor_total/100)|replace('.', ',') }}</strong>
+        </div>
+        <div class="atualizacao-financeiro-grid">
+          <div><small>Atualização</small><strong>R$ {{ '%.2f'|format(valor_atualizacao/100)|replace('.', ',') }}</strong></div>
+          <div><small>Frete / deslocamento</small><strong>R$ {{ '%.2f'|format(valor_frete/100)|replace('.', ',') }}</strong></div>
+          <div><small>Pago</small><strong>R$ {{ '%.2f'|format(valor_pago/100)|replace('.', ',') }}</strong></div>
+          <div class="{% if valor_saldo > 0 %}saldo-aberto{% endif %}"><small>A pagar</small><strong>R$ {{ '%.2f'|format(valor_saldo/100)|replace('.', ',') }}</strong></div>
         </div>
         <p class="texto-suave">Pacotes: {{ compra.pacotes|replace('[','')|replace(']','')|replace('"','')|replace(',', ' /') }}</p>
         <div class="atualizacao-etapas-visual">
-          <div class="etapa-chip ok">1. Compra concluída</div>
+          <div class="etapa-chip {% if compra.status == 'PAGO' %}ok{% else %}andamento{% endif %}">1. {{ 'Compra paga' if compra.status == 'PAGO' else 'Compra registrada · A PAGAR' }}</div>
           <div class="etapa-chip {% if atualizacoes_ctx.gmail_ok %}ok{% else %}pendente{% endif %}">2. {% if atualizacoes_ctx.gmail_ok %}Cadastro atualizado{% else %}Atualizar cadastro{% endif %}</div>
           {% set loja_agendada = ag and ag.status == 'RESERVADO' and ag.tipo == 'LOJA' %}
-          {% set casa_agendada = ag and ag.status == 'RESERVADO' and ag.tipo == 'CASA' %}
-          <div class="etapa-chip {% if loja_agendada or (casa_agendada and compra.email_arquivos_enviado_em) %}ok{% elif compra.email_arquivos_enviado_em or casa_agendada %}andamento{% else %}pendente{% endif %}">3. {% if loja_agendada %}Loja agendada{% elif casa_agendada and compra.email_arquivos_enviado_em %}Arquivos enviados + AnyDesk agendado{% elif compra.email_arquivos_enviado_em %}Arquivos enviados · falta agendar{% elif casa_agendada %}AnyDesk agendado · confira os arquivos{% else %}Online: arquivos + agenda / Loja: agenda{% endif %}</div>
+          {% set online_agendado = ag and ag.status == 'RESERVADO' and ag.tipo == 'CASA' %}
+          {% set cliente_agendado = ag and ag.status == 'RESERVADO' and ag.tipo == 'CLIENTE' %}
+          <div class="etapa-chip {% if loja_agendada or cliente_agendado or (online_agendado and compra.email_arquivos_enviado_em) %}ok{% elif compra.email_arquivos_enviado_em or online_agendado %}andamento{% else %}pendente{% endif %}">3. {% if loja_agendada %}Loja agendada{% elif cliente_agendado %}Casa do cliente agendada{% elif online_agendado and compra.email_arquivos_enviado_em %}Arquivos enviados + AnyDesk agendado{% elif compra.email_arquivos_enviado_em %}Arquivos enviados · falta agendar{% elif online_agendado %}AnyDesk agendado · confira os arquivos{% else %}Escolher Loja, Casa do cliente ou Online{% endif %}</div>
         </div>
         <div class="atualizacao-status-grid">
           <div><small>Gmail</small><strong>{{ cliente.email or '-' }}</strong></div>
           <div><small>Arquivos</small><strong>{% if compra.email_arquivos_enviado_em %}E-mail enviado{% elif compra.arquivos_liberados_em %}Liberados{% else %}Aguardando{% endif %}</strong></div>
-          <div><small>Atendimento</small><strong>{% if ag and ag.status == 'RESERVADO' %}{{ 'Atualização · Online' if ag.tipo == 'CASA' else 'Atualização · Loja' }} · {{ ag.data_hora.strftime('%d/%m %H:%M') }}{% else %}Não agendado{% endif %}</strong></div>
+          <div><small>Atendimento</small><strong>{% if ag and ag.status == 'RESERVADO' %}{{ 'Atualização · Online' if ag.tipo == 'CASA' else ('Atualização · Casa do cliente' if ag.tipo == 'CLIENTE' else 'Atualização · Loja') }} · {{ ag.data_hora.strftime('%d/%m %H:%M') }}{% else %}Não agendado{% endif %}</strong></div>
         </div>
         <div class="atualizacao-acoes">
-          <a class="botao pequeno" target="_blank" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Abrir página do cliente</a>
-          <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Online: liberar arquivos / enviar e-mail{% endif %}</button></form>
+          {% if compra.status == 'PAGO' %}<a class="botao pequeno" target="_blank" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Abrir página do cliente</a>{% endif %}
+          {% if compra.status == 'PAGO' %}<form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Online: liberar arquivos / enviar e-mail{% endif %}</button></form>{% else %}<span class="texto-suave">Arquivos online são liberados após o pagamento.</span>{% endif %}
         </div>
+        {% if compra.status != 'PAGO' %}
+        <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/pagamento" class="atualizacao-pagamento-rapido">
+          <label>Recebimento<input name="valor_recebido" inputmode="decimal" value="{{ '%.2f'|format(valor_saldo/100)|replace('.', ',') }}" required></label>
+          <label>Forma<select name="forma_pagamento"><option>PIX direto</option><option>Dinheiro</option><option>Cartão</option><option>InfinitePay</option><option>Outro</option></select></label>
+          <button class="botao pequeno" type="submit">Registrar recebimento</button>
+        </form>
+        {% endif %}
         <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/agendar" class="atualizacao-agendar-admin">
-          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Online / AnyDesk · 10:00 às 20:00</option></select></label>
+          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CLIENTE" {% if ag and ag.tipo=='CLIENTE' %}selected{% endif %}>Casa do cliente · horário combinado</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Online / AnyDesk · 10:00 às 20:00</option></select></label>
           <label>Dia e hora<input type="datetime-local" name="data_hora" required value="{{ ag.data_hora.strftime('%Y-%m-%dT%H:%M') if ag and ag.status == 'RESERVADO' else '' }}"></label>
           <button class="botao primario pequeno" type="submit">{% if ag and ag.status == 'RESERVADO' %}Reagendar{% else %}Reservar horário{% endif %}</button>
         </form>

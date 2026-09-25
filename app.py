@@ -873,6 +873,8 @@ class AtualizacaoCompra(Base):
     pacote_fim = Column(String(30), nullable=False)
     pacotes = Column(Text, nullable=False)
     valor_normal_centavos = Column(Integer, nullable=True)
+    valor_a_pagar_centavos = Column(Integer, nullable=True)
+    frete_centavos = Column(Integer, nullable=True)
     valor_pago_centavos = Column(Integer, nullable=True)
     forma_pagamento = Column(String(60), nullable=True)
     status = Column(String(30), nullable=False, default="PAGO", index=True)
@@ -1539,6 +1541,14 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN categoria VARCHAR(30)"))
             if "local_atendimento" not in existentes_agenda_manual:
                 conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN local_atendimento VARCHAR(20)"))
+
+    if "atualizacao_compras" in insp.get_table_names():
+        existentes_atualizacao_compras = {c["name"] for c in insp.get_columns("atualizacao_compras")}
+        with engine.begin() as conn:
+            if "valor_a_pagar_centavos" not in existentes_atualizacao_compras:
+                conn.execute(text("ALTER TABLE atualizacao_compras ADD COLUMN valor_a_pagar_centavos INTEGER"))
+            if "frete_centavos" not in existentes_atualizacao_compras:
+                conn.execute(text("ALTER TABLE atualizacao_compras ADD COLUMN frete_centavos INTEGER"))
 
     if "assistencias" in insp.get_table_names():
         existentes = {c["name"] for c in insp.get_columns("assistencias")}
@@ -5824,8 +5834,8 @@ def _gmail_valido(email: str | None) -> bool:
 def _atualizacao_compras_cliente(db: Session, cliente_id: int) -> list[AtualizacaoCompra]:
     return (
         db.query(AtualizacaoCompra)
-        .filter(AtualizacaoCompra.cliente_id == int(cliente_id), AtualizacaoCompra.status == "PAGO")
-        .order_by(AtualizacaoCompra.pago_em.desc(), AtualizacaoCompra.id.desc())
+        .filter(AtualizacaoCompra.cliente_id == int(cliente_id), AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")))
+        .order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc())
         .all()
     )
 
@@ -6101,7 +6111,13 @@ def _atualizacao_links_compra(db: Session, compra: AtualizacaoCompra) -> list[di
 
 def _atualizacao_horario_valido(tipo: str, momento: datetime | None) -> bool:
     tipo = (tipo or "").strip().upper()
-    if not momento or tipo not in ATUALIZACAO_HORARIOS or momento.weekday() >= 5:
+    if not momento or momento <= datetime.now():
+        return False
+    # Atendimento presencial na casa do cliente depende da disponibilidade do técnico.
+    # Não há grade fixa de horário; apenas evitamos conflitos com a agenda existente.
+    if tipo == "CLIENTE":
+        return True
+    if tipo not in ATUALIZACAO_HORARIOS or momento.weekday() >= 5:
         return False
     return momento.minute == 0 and momento.second == 0 and momento.hour in ATUALIZACAO_HORARIOS[tipo]
 
@@ -6151,7 +6167,7 @@ def _google_calendar_event_payload(cliente: Cliente, compra: AtualizacaoCompra, 
     tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
     inicio = ag.data_hora.replace(tzinfo=tz) if ag.data_hora.tzinfo is None else ag.data_hora.astimezone(tz)
     fim = inicio + timedelta(minutes=int(ag.duracao_minutos or ATUALIZACAO_DURACAO_MINUTOS))
-    tipo_rotulo = "Online" if ag.tipo == "CASA" else "Loja"
+    tipo_rotulo = "Online / AnyDesk" if ag.tipo == "CASA" else ("Casa do cliente" if ag.tipo == "CLIENTE" else "Loja")
     pacotes = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
     descricao = (
         f"Atualização Karaokê RJ\nCliente: {cliente.nome}\n"
@@ -6227,7 +6243,7 @@ AGENDA_CATEGORIAS = {
     "OUTRO": "Outro",
 }
 AGENDA_LOCAIS = {
-    "CLIENTE": "Cliente",
+    "CLIENTE": "Casa do cliente",
     "LOJA": "Loja",
     "ONLINE": "Online",
 }
@@ -6413,10 +6429,15 @@ def _atualizacao_enviar_email_agendamento(db: Session, cliente: Cliente, compra:
     gmail = (cliente.email or "").strip().lower()
     if not _gmail_valido(gmail):
         return
-    tipo_rotulo = "Atualização · Online / AnyDesk" if ag.tipo == "CASA" else "Atualização · Loja"
+    tipo_rotulo = "Atualização · Online / AnyDesk" if ag.tipo == "CASA" else ("Atualização · Casa do cliente" if ag.tipo == "CLIENTE" else "Atualização · Loja")
     data_txt = ag.data_hora.strftime("%d/%m/%Y às %H:%M")
     pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
-    lembrete = "Os arquivos devem estar completamente baixados no PC/notebook antes do horário marcado." if ag.tipo == "CASA" else "Leve o equipamento no horário reservado."
+    if ag.tipo == "CASA":
+        lembrete = "Os arquivos devem estar completamente baixados no PC/notebook antes do horário marcado."
+    elif ag.tipo == "CLIENTE":
+        lembrete = "Atendimento na casa do cliente, em horário combinado conforme disponibilidade do técnico."
+    else:
+        lembrete = "Leve o equipamento no horário reservado."
     texto = (
         f"Olá, {cliente.nome}!\n\nSeu atendimento para atualização foi reservado.\n"
         f"Atendimento: {tipo_rotulo}\nData e hora: {data_txt}\nPacotes: {pacotes_txt}\n\n{lembrete}\n\nKaraokê RJ"
@@ -6436,7 +6457,8 @@ def _atualizacao_enviar_email_agendamento(db: Session, cliente: Cliente, compra:
 
 def _atualizacao_registrar_compra(
     db: Session, cliente: Cliente, pacotes: list[str], *, origem: str, order_nsu: str = "",
-    valor_normal_centavos: int = 0, valor_pago_centavos: int = 0, forma_pagamento: str = "",
+    valor_normal_centavos: int = 0, valor_a_pagar_centavos: int = 0, frete_centavos: int = 0,
+    valor_pago_centavos: int = 0, forma_pagamento: str = "", status: str = "",
 ) -> AtualizacaoCompra:
     pacotes = _atualizacao_pacotes_lista(pacotes)
     if not pacotes:
@@ -6460,17 +6482,25 @@ def _atualizacao_registrar_compra(
     compra.pacote_fim = pacotes[-1]
     compra.pacotes = json.dumps(pacotes, ensure_ascii=False)
     compra.valor_normal_centavos = int(valor_normal_centavos or 0) or None
+    # Valor contratado da atualização, sem deslocamento. Em registros antigos/InfinitePay,
+    # usa o valor pago como referência quando não vier explicitamente.
+    valor_a_pagar_centavos = int(valor_a_pagar_centavos or 0) or int(valor_pago_centavos or 0)
+    compra.valor_a_pagar_centavos = valor_a_pagar_centavos or None
+    compra.frete_centavos = int(frete_centavos or 0) or None
     compra.valor_pago_centavos = int(valor_pago_centavos or 0) or None
     compra.forma_pagamento = (forma_pagamento or "")[:60] or None
-    compra.status = "PAGO"
-    compra.pago_em = compra.pago_em or datetime.now()
-    cliente.atualizacao_oferta_status = "PAGO"
+    total_centavos = int(valor_a_pagar_centavos or 0) + int(frete_centavos or 0)
+    pago_centavos = int(valor_pago_centavos or 0)
+    status_solicitado = (status or "").strip().upper()
+    compra.status = "PAGO" if status_solicitado == "PAGO" or (total_centavos > 0 and pago_centavos >= total_centavos) else "A_PAGAR"
+    compra.pago_em = (compra.pago_em or datetime.now()) if compra.status == "PAGO" else None
+    cliente.atualizacao_oferta_status = compra.status
     cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
     cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
     if valor_normal_centavos:
         cliente.atualizacao_oferta_valor_normal_centavos = int(valor_normal_centavos)
-    if valor_pago_centavos:
-        cliente.atualizacao_oferta_valor_promocional_centavos = int(valor_pago_centavos)
+    if valor_a_pagar_centavos:
+        cliente.atualizacao_oferta_valor_promocional_centavos = int(valor_a_pagar_centavos)
     if order_nsu:
         cliente.atualizacao_oferta_order_nsu = order_nsu[:120]
     cliente.atualizacao_oferta_atualizado_em = datetime.now()
@@ -6588,9 +6618,9 @@ async def api_solvoz_atualizacao_oferta(
         except Exception:
             pacotes = [p.strip() for p in pacotes.split("/") if p.strip()]
     pacotes = [str(p).strip()[:30] for p in (pacotes or []) if str(p).strip()]
-    # Depois que uma atualização foi paga, abrir novamente o mesmo link não
-    # rebaixa o cadastro para PAGINA_ABERTA/CHECKOUT_INICIADO.
-    ja_pago = bool(_atualizacao_compra_cobrindo(db, cliente.id, pacotes)) if pacotes else False
+    # Depois que a compra foi registrada (PAGO ou A_PAGAR), abrir novamente o mesmo
+    # link não rebaixa o cadastro nem oferece os mesmos pacotes de novo.
+    compra_existente = _atualizacao_compra_cobrindo(db, cliente.id, pacotes) if pacotes else None
     if status == "PAGO":
         compra = _atualizacao_registrar_compra(
             db, cliente, pacotes, origem="SOLVOZ", order_nsu=str(data.get("order_nsu") or ""),
@@ -6599,8 +6629,10 @@ async def api_solvoz_atualizacao_oferta(
             forma_pagamento="InfinitePay",
         )
         return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": "PAGO", "compra_id": compra.id})
-    if ja_pago or (cliente.atualizacao_oferta_status or "").upper() == "PAGO":
-        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": "PAGO", "preservado": True})
+    if compra_existente:
+        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": compra_existente.status or "A_PAGAR", "preservado": True, "compra_id": compra_existente.id})
+    if (cliente.atualizacao_oferta_status or "").upper() in ("PAGO", "A_PAGAR"):
+        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": (cliente.atualizacao_oferta_status or "A_PAGAR").upper(), "preservado": True})
     cliente.atualizacao_oferta_status = status
     if pacotes:
         cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
@@ -6642,12 +6674,31 @@ def _google_oauth_state_valido(state: str, usuario: Usuario) -> bool:
 def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     links_padrao = _atualizacao_links_padrao_sync(db)
     pacotes = _atualizacao_pacotes_sync_solvoz(db)
-    compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).order_by(AtualizacaoCompra.pago_em.desc(), AtualizacaoCompra.id.desc()).limit(100).all()
+    compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc()).limit(100).all()
     agendamentos = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all()
+    campanha_atual = db.query(Campanha).filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO").order_by(func.coalesce(Campanha.iniciado_em, Campanha.criado_em).desc(), Campanha.id.desc()).first()
+    campanha_resultado = None
+    if campanha_atual:
+        destinos = db.query(CampanhaDestinatario).filter(CampanhaDestinatario.campanha_id == campanha_atual.id).all()
+        total_dest = len(destinos)
+        enviados = sum(1 for d in destinos if (d.status or "").upper() in ("ENVIADO", "PROCESSADO"))
+        cliente_ids = [int(d.cliente_id) for d in destinos]
+        q_compras = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.cliente_id.in_(cliente_ids or [-1]), AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")))
+        if campanha_atual.iniciado_em:
+            q_compras = q_compras.filter(AtualizacaoCompra.criado_em >= campanha_atual.iniciado_em)
+        compras_campanha = q_compras.all()
+        total_contratado = sum(int(c.valor_a_pagar_centavos or c.valor_pago_centavos or 0) + int(c.frete_centavos or 0) for c in compras_campanha)
+        total_recebido = sum(int(c.valor_pago_centavos or 0) for c in compras_campanha)
+        campanha_resultado = {
+            "campanha": campanha_atual, "total": total_dest, "enviados": enviados, "pendentes": max(total_dest - enviados, 0),
+            "compras": len(compras_campanha), "pagas": sum(1 for c in compras_campanha if c.status == "PAGO"),
+            "a_pagar": sum(1 for c in compras_campanha if c.status == "A_PAGAR"), "total_contratado": total_contratado,
+            "recebido": total_recebido, "em_aberto": max(total_contratado - total_recebido, 0),
+        }
     google = _google_integracao(db)
     return templates.TemplateResponse("organiza/atualizacoes.html", {
         "request": request, "usuario": usuario, "links_padrao": links_padrao, "pacotes": pacotes, "compras": compras,
-        "agendamentos": agendamentos, "google": google, "google_configurado": _google_configurado(),
+        "agendamentos": agendamentos, "campanha_resultado": campanha_resultado, "google": google, "google_configurado": _google_configurado(),
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 
@@ -6794,13 +6845,19 @@ async def atualizacao_compra_manual(cliente_id: int, request: Request, usuario: 
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Intervalo de pacotes inválido."), status_code=303)
     if _atualizacao_compra_cobrindo(db, cliente_id, pacotes):
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Esses pacotes já constam como comprados para este cliente."), status_code=303)
-    valor = moeda_num(form.get("valor_pago") or "0")
+    valor_a_pagar = moeda_num(form.get("valor_a_pagar") or "0")
+    frete = moeda_num(form.get("frete") or "0")
+    valor_pago = moeda_num(form.get("valor_pago") or "0")
     normal = moeda_num(form.get("valor_normal") or "0")
+    total = valor_a_pagar + frete
+    status = "PAGO" if total > 0 and valor_pago >= total else "A_PAGAR"
     compra = _atualizacao_registrar_compra(
         db, cliente, pacotes, origem="MANUAL", valor_normal_centavos=int(round(normal * 100)),
-        valor_pago_centavos=int(round(valor * 100)), forma_pagamento=(form.get("forma_pagamento") or "PIX direto").strip(),
+        valor_a_pagar_centavos=int(round(valor_a_pagar * 100)), frete_centavos=int(round(frete * 100)),
+        valor_pago_centavos=int(round(valor_pago * 100)), forma_pagamento=(form.get("forma_pagamento") or "A definir").strip(), status=status,
     )
-    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(f"Compra #{compra.id} registrada. O SolVoz não cobrará novamente esses pacotes."), status_code=303)
+    rotulo = "PAGO" if compra.status == "PAGO" else "A PAGAR"
+    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(f"Compra #{compra.id} registrada como {rotulo}. O SolVoz não cobrará novamente esses pacotes."), status_code=303)
 
 
 @app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/enviar-casa")
@@ -6818,19 +6875,55 @@ def atualizacao_admin_enviar_casa(cliente_id: int, compra_id: int, usuario: Usua
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus(str(exc)), status_code=303)
 
 
+@app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/pagamento")
+async def atualizacao_admin_registrar_pagamento(cliente_id: int, compra_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.cliente_id == cliente_id, AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR"))).first()
+    if not compra:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    recebido = moeda_num(form.get("valor_recebido") or "0")
+    if recebido <= 0:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Informe um valor recebido maior que zero."), status_code=303)
+    atual = int(compra.valor_pago_centavos or 0)
+    compra.valor_pago_centavos = atual + int(round(recebido * 100))
+    forma = (form.get("forma_pagamento") or "").strip()
+    if forma:
+        compra.forma_pagamento = forma[:60]
+    total = int(compra.valor_a_pagar_centavos or 0) + int(compra.frete_centavos or 0)
+    if total > 0 and int(compra.valor_pago_centavos or 0) >= total:
+        compra.status = "PAGO"
+        compra.pago_em = compra.pago_em or datetime.now()
+        cliente = db.get(Cliente, cliente_id)
+        if cliente:
+            cliente.atualizacao_oferta_status = "PAGO"
+            cliente.atualizacao_oferta_atualizado_em = datetime.now()
+    else:
+        compra.status = "A_PAGAR"
+    db.commit()
+    saldo = max(total - int(compra.valor_pago_centavos or 0), 0)
+    msg = "Pagamento concluído." if compra.status == "PAGO" else f"Recebimento registrado. Saldo a pagar: R$ {saldo/100:.2f}".replace('.', ',')
+    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(msg), status_code=303)
+
+
 @app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/agendar")
 async def atualizacao_admin_agendar(cliente_id: int, compra_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.get(Cliente, cliente_id)
-    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.cliente_id == cliente_id, AtualizacaoCompra.status == "PAGO").first()
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.cliente_id == cliente_id, AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR"))).first()
     if not cliente or not compra:
         raise HTTPException(404)
     form = dict(await request.form())
     tipo = (form.get("tipo") or "LOJA").strip().upper()
+    if tipo not in ("LOJA", "CASA", "CLIENTE"):
+        tipo = "LOJA"
     momento = datetime_form(form.get("data_hora") or "")
     ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
     if not _atualizacao_horario_valido(tipo, momento):
-        horario = "10:00 às 20:00" if tipo == "CASA" else "14:00 às 18:00"
-        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus(f"Horário inválido. {tipo.title()}: segunda a sexta, {horario}, de 1 em 1 hora."), status_code=303)
+        if tipo == "CLIENTE":
+            mensagem_horario = "Escolha um horário futuro para a visita do técnico."
+        else:
+            horario = "10:00 às 20:00" if tipo == "CASA" else "14:00 às 18:00"
+            mensagem_horario = f"Horário inválido. Segunda a sexta, {horario}, de 1 em 1 hora."
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus(mensagem_horario), status_code=303)
     if _atualizacao_horario_ocupado(db, momento, ag.id if ag else 0):
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Esse horário conflita com outro compromisso do Organiza."), status_code=303)
     if not ag:

@@ -1,0 +1,511 @@
+/* =========================================================
+   ORGANIZA 1.1.56 — DESIGN SYSTEM GLOBAL
+   Camada final de padronização visual. Carregada depois das
+   folhas históricas e dos estilos locais dos templates.
+   ========================================================= */
+
+:root{
+  --ui-primary:#2563eb;
+  --ui-primary-hover:#1d4ed8;
+  --ui-primary-soft:#eff6ff;
+  --ui-text:#0f172a;
+  --ui-text-2:#334155;
+  --ui-muted:#64748b;
+  --ui-line:#dbe3ee;
+  --ui-line-soft:#e8edf4;
+  --ui-bg:#f4f7fb;
+  --ui-card:#ffffff;
+  --ui-success:#16a34a;
+  --ui-success-hover:#15803d;
+  --ui-warning:#d97706;
+  --ui-danger:#dc2626;
+  --ui-danger-hover:#b91c1c;
+  --ui-radius:12px;
+  --ui-radius-sm:9px;
+  --ui-shadow:0 8px 24px rgba(15,23,42,.06);
+}
+
+/* Base e tipografia */
+body.organiza-corpo{
+  background:var(--ui-bg);
+  color:var(--ui-text);
+  font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;
+  font-size:14px;
+  line-height:1.45;
+}
+body.organiza-corpo .app-main{color:var(--ui-text)}
+body.organiza-corpo .pagina-clean{display:grid;gap:14px;max-width:1400px;margin:0 auto}
+body.organiza-corpo h1,
+body.organiza-corpo h2,
+body.organiza-corpo h3{color:var(--ui-text);font-weight:800;letter-spacing:-.02em}
+body.organiza-corpo h1{font-size:1.75rem;line-height:1.1;margin:.1rem 0 .35rem}
+body.organiza-corpo h2{font-size:1.25rem;line-height:1.2;margin:.15rem 0 .35rem}
+body.organiza-corpo h3{font-size:1rem;line-height:1.25;margin:.1rem 0 .3rem}
+body.organiza-corpo p{line-height:1.5}
+body.organiza-corpo .texto-suave{color:var(--ui-muted)!important}
+body.organiza-corpo .tag{
+  display:block;
+  margin:0 0 5px;
+  color:var(--ui-primary)!important;
+  font-size:.7rem;
+  font-weight:900;
+  line-height:1.2;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+}
+body.organiza-corpo .titulo-linha,
+body.organiza-corpo .cabecalho-pagina{
+  align-items:flex-end;
+  gap:14px;
+  margin-bottom:0;
+}
+body.organiza-corpo .titulo-linha>div>p,
+body.organiza-corpo .cabecalho-pagina>div>p{margin:.2rem 0 0}
+
+/* Cartões: um único padrão */
+body.organiza-corpo .cartao,
+body.organiza-corpo .panel-card,
+body.organiza-corpo .form-card,
+body.organiza-corpo .equip-card,
+body.organiza-corpo .atualizacao-compra-item,
+body.organiza-corpo .cliente-campanha-linha,
+body.organiza-corpo .cliente-agenda-item,
+body.organiza-corpo .card-os{
+  background:var(--ui-card)!important;
+  border:1px solid var(--ui-line)!important;
+  border-radius:var(--ui-radius)!important;
+  box-shadow:var(--ui-shadow)!important;
+}
+body.organiza-corpo .cartao,
+body.organiza-corpo .panel-card,
+body.organiza-corpo .form-card{padding:16px}
+body.organiza-corpo .tabela-cartao{overflow:visible}
+
+/* Botões: azul = ação, branco = secundário, verde = sucesso/WhatsApp, vermelho = perigo */
+body.organiza-corpo .botao,
+body.organiza-corpo .btn,
+body.organiza-corpo .btn-new,
+body.organiza-corpo .btn-primary,
+body.organiza-corpo .btn-small,
+body.organiza-corpo .item-botao,
+body.organiza-corpo a.botao,
+body.organiza-corpo button.botao{
+  appearance:none;
+  min-height:38px;
+  height:auto;
+  padding:8px 13px;
+  border:1px solid var(--ui-primary)!important;
+  border-radius:var(--ui-radius-sm)!important;
+  background:var(--ui-primary)!important;
+  background-image:none!important;
+  color:#fff!important;
+  box-shadow:none!important;
+  font:inherit;
+  font-size:.82rem;
+  font-weight:800;
+  line-height:1.15;
+  letter-spacing:0;
+  text-transform:none;
+  text-decoration:none;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:background .15s ease,border-color .15s ease,transform .15s ease;
+}
+body.organiza-corpo .botao:hover,
+body.organiza-corpo .btn:hover,
+body.organiza-corpo .btn-new:hover,
+body.organiza-corpo .btn-primary:hover,
+body.organiza-corpo .btn-small:hover{
+  background:var(--ui-primary-hover)!important;
+  border-color:var(--ui-primary-hover)!important;
+  color:#fff!important;
+  transform:none!important;
+}
+body.organiza-corpo .botao.primario,
+body.organiza-corpo .btn.primario{
+  background:var(--ui-primary)!important;
+  border-color:var(--ui-primary)!important;
+  color:#fff!important;
+}
+body.organiza-corpo .botao.fantasma,
+body.organiza-corpo .btn-secondary{
+  background:#fff!important;
+  border-color:var(--ui-line)!important;
+  color:var(--ui-text-2)!important;
+}
+body.organiza-corpo .botao.fantasma:hover,
+body.organiza-corpo .btn-secondary:hover{
+  background:#f8fafc!important;
+  border-color:#b9c6d8!important;
+  color:var(--ui-text)!important;
+}
+body.organiza-corpo .botao.whatsapp,
+body.organiza-corpo .botao.sucesso,
+body.organiza-corpo .btn-whatsapp,
+body.organiza-corpo .btn-ok,
+body.organiza-corpo .campanha-whatsapp-btn{
+  background:var(--ui-success)!important;
+  border-color:var(--ui-success)!important;
+  color:#fff!important;
+}
+body.organiza-corpo .botao.whatsapp:hover,
+body.organiza-corpo .botao.sucesso:hover,
+body.organiza-corpo .btn-whatsapp:hover,
+body.organiza-corpo .btn-ok:hover,
+body.organiza-corpo .campanha-whatsapp-btn:hover{
+  background:var(--ui-success-hover)!important;
+  border-color:var(--ui-success-hover)!important;
+}
+body.organiza-corpo .botao.perigo,
+body.organiza-corpo .btn-danger{
+  background:var(--ui-danger)!important;
+  border-color:var(--ui-danger)!important;
+  color:#fff!important;
+}
+body.organiza-corpo .botao.perigo:hover,
+body.organiza-corpo .btn-danger:hover{
+  background:var(--ui-danger-hover)!important;
+  border-color:var(--ui-danger-hover)!important;
+}
+body.organiza-corpo .botao.pequeno,
+body.organiza-corpo .botao-compacto,
+body.organiza-corpo .btn-small{min-height:34px;padding:7px 10px;font-size:.76rem}
+body.organiza-corpo button:disabled,
+body.organiza-corpo .botao:disabled,
+body.organiza-corpo .btn:disabled{opacity:.48;cursor:not-allowed;filter:none!important}
+
+/* Campos e formulários */
+body.organiza-corpo .app-main input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]),
+body.organiza-corpo .app-main select,
+body.organiza-corpo .app-main textarea{
+  width:100%;
+  min-height:42px;
+  padding:9px 11px;
+  border:1px solid #cbd5e1!important;
+  border-radius:9px!important;
+  background:#fff!important;
+  color:var(--ui-text)!important;
+  box-shadow:none!important;
+  font:inherit;
+  font-size:.86rem;
+  line-height:1.35;
+}
+body.organiza-corpo .app-main textarea{min-height:96px;resize:vertical}
+body.organiza-corpo .app-main input:focus,
+body.organiza-corpo .app-main select:focus,
+body.organiza-corpo .app-main textarea:focus{
+  outline:0;
+  border-color:#7aa7ff!important;
+  box-shadow:0 0 0 3px rgba(37,99,235,.09)!important;
+}
+body.organiza-corpo .app-main label{color:var(--ui-text-2);font-size:.8rem;font-weight:800}
+body.organiza-corpo .app-main label small{color:var(--ui-muted);font-weight:500}
+
+/* Pills, chips e estados */
+body.organiza-corpo .pill,
+body.organiza-corpo .status-pill,
+body.organiza-corpo .agenda-chip,
+body.organiza-corpo .tag-pill,
+body.organiza-corpo .etapa-chip{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:24px;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:.7rem;
+  font-weight:800;
+  line-height:1.15;
+}
+
+/* Menu lateral: compacto, agrupado e sempre rolável */
+body.organiza-corpo .app-shell{
+  grid-template-columns:240px minmax(0,1fr);
+  background:linear-gradient(90deg,#071326 0 240px,var(--ui-bg) 240px);
+}
+body.organiza-corpo .app-sidebar{
+  width:240px;
+  padding:14px 11px 16px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:#334155 transparent;
+}
+body.organiza-corpo .side-logo{margin:0 6px 14px;gap:10px;font-size:1.02rem}
+body.organiza-corpo .side-logo small{font-size:9.5px;color:#8ea3c1}
+body.organiza-corpo .organiza-brand-icon{width:32px;height:32px;border-radius:8px}
+body.organiza-corpo .side-nav,
+body.organiza-corpo .side-bottom{gap:3px}
+body.organiza-corpo .side-nav-simples .menu-grupo{gap:2px;margin:3px 0 6px}
+body.organiza-corpo .side-nav-simples .menu-grupo>strong,
+body.organiza-corpo .side-admin-label{
+  padding:7px 9px 2px;
+  color:#8397b5!important;
+  font-size:9px!important;
+  font-weight:900;
+  letter-spacing:.1em;
+  line-height:1.2;
+  text-transform:uppercase;
+}
+body.organiza-corpo .side-nav a,
+body.organiza-corpo .side-bottom a{
+  min-height:37px;
+  height:auto;
+  padding:7px 9px;
+  gap:9px;
+  border-radius:9px;
+  color:#d7e1ef;
+  font-size:.72rem;
+  font-weight:800;
+  line-height:1.15;
+  letter-spacing:.015em;
+  text-transform:uppercase;
+}
+body.organiza-corpo .side-nav a.ativo,
+body.organiza-corpo .side-nav a:hover,
+body.organiza-corpo .side-bottom a:hover{
+  background:var(--ui-primary)!important;
+  color:#fff!important;
+  box-shadow:none!important;
+}
+body.organiza-corpo .side-bottom{margin-top:8px;padding-top:8px;border-top:1px solid rgba(148,163,184,.16)}
+body.organiza-corpo .side-user{margin-top:7px;padding:8px 6px 0}
+body.organiza-corpo .avatar{width:32px;height:32px;font-size:.8rem}
+body.organiza-corpo .side-user strong{font-size:.78rem}
+body.organiza-corpo .side-user small{font-size:.68rem}
+
+/* Cliente: informação rápida e ações no mesmo padrão */
+body.organiza-corpo .cliente-card-clean{
+  padding:12px 13px!important;
+  background:#fff!important;
+  border-color:var(--ui-line)!important;
+  color:var(--ui-text)!important;
+  box-shadow:none!important;
+}
+body.organiza-corpo .cliente-card-clean:hover{border-color:#9bb7e8!important;transform:none!important}
+body.organiza-corpo .cliente-card-clean strong{color:var(--ui-text)!important;font-size:.92rem}
+body.organiza-corpo .cliente-card-clean small{color:var(--ui-muted)!important}
+body.organiza-corpo .cliente-card-clean>span,
+body.organiza-corpo .cliente-main>span{color:var(--ui-primary)!important;font-size:.8rem;font-weight:800}
+body.organiza-corpo .cliente-card-clean .cliente-mini-tags{
+  display:flex!important;
+  flex-wrap:wrap!important;
+  gap:5px!important;
+  margin-top:6px!important;
+}
+body.organiza-corpo .cliente-card-clean .cliente-mini-tags span{
+  display:inline-flex!important;
+  width:auto!important;
+  min-height:23px;
+  padding:4px 7px!important;
+  border:1px solid #e2e8f0;
+  border-radius:999px!important;
+  background:#f8fafc!important;
+  color:#526078!important;
+  font-size:.69rem!important;
+  font-weight:700;
+}
+body.organiza-corpo .cliente-card-clean .cliente-card-botoes{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:flex-end!important;
+  gap:6px!important;
+  flex-wrap:wrap!important;
+}
+body.organiza-corpo .cliente-hero{
+  padding:4px 0 8px;
+  margin-bottom:0;
+  border-bottom:1px solid var(--ui-line-soft);
+}
+body.organiza-corpo .cliente-hero h1{font-size:1.7rem}
+body.organiza-corpo .cliente-topo-tags span{
+  background:#f8fafc!important;
+  border-color:#e2e8f0!important;
+  color:#526078!important;
+  font-size:.71rem!important;
+}
+body.organiza-corpo .cliente-secao-nav{
+  margin:0 0 2px;
+  padding:5px;
+  border-color:var(--ui-line)!important;
+  border-radius:10px!important;
+  box-shadow:none!important;
+}
+body.organiza-corpo .cliente-secao-nav a{padding:7px 10px;border-radius:7px;font-size:.74rem;color:#526078}
+body.organiza-corpo .cliente-secao-nav a:hover{background:var(--ui-primary-soft);color:var(--ui-primary)}
+body.organiza-corpo .cliente-acoes-popover{border-color:var(--ui-line)!important;border-radius:10px!important;box-shadow:0 12px 30px rgba(15,23,42,.12)!important}
+
+/* Fluxo de atualização: texto não encosta no título */
+body.organiza-corpo .atualizacao-etapas-resumo{
+  gap:10px!important;
+  margin:12px 0 14px!important;
+}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item{
+  display:grid!important;
+  grid-template-columns:28px minmax(0,1fr)!important;
+  gap:10px!important;
+  align-items:start!important;
+  padding:11px 12px!important;
+  border-radius:10px!important;
+  background:#f8fafc!important;
+  border:1px solid var(--ui-line)!important;
+}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item.ok{background:#f0fdf4!important;border-color:#bbf7d0!important}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item.pendente{background:#fffbeb!important;border-color:#fde68a!important}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item>div{display:grid!important;gap:3px!important;min-width:0}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item strong{display:block!important;font-size:.88rem;line-height:1.2}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item small{display:block!important;color:var(--ui-muted)!important;font-size:.73rem;line-height:1.35}
+body.organiza-corpo .atualizacao-etapas-resumo .etapa-item>span{width:26px!important;height:26px!important;font-size:.75rem!important}
+body.organiza-corpo .atualizacao-manual-grid{gap:12px!important;margin:12px 0!important}
+body.organiza-corpo .atualizacao-form-interno,
+body.organiza-corpo .atualizacao-gmail-status{padding:14px!important;box-shadow:none!important}
+body.organiza-corpo .atualizacao-status-grid>div{background:#f8fafc!important;border:1px solid #eef2f7}
+
+/* Agenda e compromissos */
+body.organiza-corpo .agenda-lista-simples{display:grid;gap:8px}
+body.organiza-corpo .agenda-dia{margin:10px 0 2px;font-size:1rem;color:var(--ui-text-2)}
+body.organiza-corpo .agenda-linha{
+  background:#fff!important;
+  border-top:1px solid var(--ui-line)!important;
+  border-right:1px solid var(--ui-line)!important;
+  border-bottom:1px solid var(--ui-line)!important;
+  border-radius:10px!important;
+  padding:10px 12px!important;
+  box-shadow:none!important;
+}
+body.organiza-corpo .agenda-linha time{font-weight:900;color:var(--ui-text)}
+body.organiza-corpo .agenda-linha small{color:var(--ui-muted)}
+body.organiza-corpo .agenda-legenda{gap:6px}
+
+/* Tabelas e resumos financeiros */
+body.organiza-corpo table{color:var(--ui-text)}
+body.organiza-corpo .tabela-clean th,
+body.organiza-corpo .data-table th{color:var(--ui-muted);font-size:.72rem}
+body.organiza-corpo .resumo-valores>div,
+body.organiza-corpo .venda-resumo-card,
+body.organiza-corpo .venda-resumo-datas>div{background:#f8fafc!important;border:1px solid var(--ui-line-soft)!important;border-radius:10px!important}
+
+/* Alertas */
+body.organiza-corpo .alerta{border-radius:10px!important;padding:10px 12px!important;font-size:.82rem;line-height:1.4}
+body.organiza-corpo .alerta.sucesso{background:#f0fdf4!important;color:#166534!important;border:1px solid #bbf7d0!important}
+body.organiza-corpo .alerta.erro{background:#fff1f2!important;color:#be123c!important;border:1px solid #fecdd3!important}
+body.organiza-corpo .alerta.info,
+body.organiza-corpo .alerta.informacao{background:#eff6ff!important;color:#1d4ed8!important;border:1px solid #bfdbfe!important}
+
+/* Desktop principal */
+@media(min-width:1101px){
+  body.organiza-corpo .app-main{padding:18px 24px 48px}
+  body.organiza-corpo .grade-ficha.clean-ficha{gap:12px}
+  body.organiza-corpo .clean-metricas{gap:10px}
+  body.organiza-corpo .cliente-card-acoes{grid-template-columns:minmax(0,1fr) auto!important;align-items:center}
+  body.organiza-corpo .atualizacao-etapas-resumo{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+}
+
+/* Tablet */
+@media(max-width:1100px){
+  body.organiza-corpo .app-shell{display:block;background:var(--ui-bg)}
+  body.organiza-corpo .app-sidebar{width:min(88vw,320px)}
+  body.organiza-corpo .app-main{padding:18px 16px 92px}
+}
+
+/* Mobile: toque confortável e sem textos quebrados/espremidos */
+@media(max-width:760px){
+  body.organiza-corpo{font-size:14px}
+  body.organiza-corpo .app-main{padding:12px 10px 92px!important}
+  body.organiza-corpo .pagina-clean{gap:10px}
+  body.organiza-corpo h1{font-size:1.48rem}
+  body.organiza-corpo h2{font-size:1.12rem}
+  body.organiza-corpo h3{font-size:.98rem}
+  body.organiza-corpo .titulo-linha,
+  body.organiza-corpo .cabecalho-pagina{align-items:stretch!important;flex-direction:column!important;gap:9px!important}
+  body.organiza-corpo .titulo-linha .acoes-titulo,
+  body.organiza-corpo .cabecalho-pagina .acoes-titulo{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  body.organiza-corpo .titulo-linha .acoes-titulo>.botao,
+  body.organiza-corpo .cabecalho-pagina .acoes-titulo>.botao{width:100%;min-width:0;white-space:normal;text-align:center}
+  body.organiza-corpo .cartao,
+  body.organiza-corpo .panel-card,
+  body.organiza-corpo .form-card{padding:12px!important;border-radius:11px!important}
+  body.organiza-corpo .botao,
+  body.organiza-corpo .btn,
+  body.organiza-corpo .btn-new,
+  body.organiza-corpo .btn-primary,
+  body.organiza-corpo .btn-secondary,
+  body.organiza-corpo .btn-whatsapp{min-height:42px;padding:9px 11px;font-size:.8rem}
+  body.organiza-corpo .botao.pequeno,
+  body.organiza-corpo .botao-compacto,
+  body.organiza-corpo .btn-small{min-height:38px;font-size:.75rem}
+  body.organiza-corpo .app-main input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]),
+  body.organiza-corpo .app-main select,
+  body.organiza-corpo .app-main textarea{font-size:16px!important}
+  body.organiza-corpo .cliente-hero{gap:8px;padding-bottom:9px}
+  body.organiza-corpo .cliente-hero h1{font-size:1.45rem}
+  body.organiza-corpo .cliente-contato-linha{display:grid!important;gap:2px!important;font-size:.82rem}
+  body.organiza-corpo .cliente-hero-acoes{display:grid!important;grid-template-columns:1fr 1fr;width:100%;gap:7px!important}
+  body.organiza-corpo .cliente-hero-acoes>.botao,
+  body.organiza-corpo .cliente-hero-acoes>.cliente-acoes-menu{width:100%;min-width:0}
+  body.organiza-corpo .cliente-acoes-menu>summary{width:100%;white-space:normal;text-align:center}
+  body.organiza-corpo .cliente-topo-tags{gap:4px!important}
+  body.organiza-corpo .cliente-card-acoes{grid-template-columns:1fr!important}
+  body.organiza-corpo .cliente-card-clean .cliente-card-botoes{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;width:100%;gap:6px!important}
+  body.organiza-corpo .cliente-card-clean .cliente-card-botoes .botao{width:100%;min-width:0;white-space:normal;padding:7px 5px!important}
+  body.organiza-corpo .atualizacao-etapas-resumo{grid-template-columns:1fr!important}
+  body.organiza-corpo .atualizacao-manual-grid,
+  body.organiza-corpo .atualizacao-status-grid,
+  body.organiza-corpo .atualizacao-agendar-admin{grid-template-columns:1fr!important}
+  body.organiza-corpo .agenda-linha{grid-template-columns:1fr!important;gap:6px!important;align-items:start!important}
+  body.organiza-corpo .agenda-linha>div:last-child{justify-content:flex-start!important;width:100%}
+  body.organiza-corpo .agenda-linha>div:last-child .botao,
+  body.organiza-corpo .agenda-linha>div:last-child form{flex:1}
+  body.organiza-corpo .agenda-linha>div:last-child form .botao{width:100%}
+}
+
+@media(max-width:430px){
+  body.organiza-corpo .cliente-card-clean .cliente-card-botoes{grid-template-columns:1fr 1fr!important}
+  body.organiza-corpo .cliente-card-clean .cliente-card-botoes .botao:last-child{grid-column:1/-1}
+  body.organiza-corpo .titulo-linha .acoes-titulo,
+  body.organiza-corpo .cabecalho-pagina .acoes-titulo{grid-template-columns:1fr}
+}
+
+/* Compatibilidade com botões legados que ainda existem em telas antigas */
+body.organiza-corpo .btn-alerta,
+body.organiza-corpo .btn-info,
+body.organiza-corpo .btn-recibo,
+body.organiza-corpo .btn-retirada{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  min-height:38px!important;
+  height:auto!important;
+  padding:8px 13px!important;
+  border:1px solid var(--ui-primary)!important;
+  border-radius:var(--ui-radius-sm)!important;
+  background:var(--ui-primary)!important;
+  color:#fff!important;
+  box-shadow:none!important;
+  font:inherit!important;
+  font-size:.82rem!important;
+  font-weight:800!important;
+  line-height:1.15!important;
+  text-decoration:none!important;
+}
+body.organiza-corpo .btn-alerta:hover,
+body.organiza-corpo .btn-info:hover,
+body.organiza-corpo .btn-recibo:hover,
+body.organiza-corpo .btn-retirada:hover{background:var(--ui-primary-hover)!important;border-color:var(--ui-primary-hover)!important}
+body.organiza-corpo .campanha-pular-btn{
+  min-height:38px!important;
+  padding:8px 13px!important;
+  border:1px solid var(--ui-line)!important;
+  border-radius:var(--ui-radius-sm)!important;
+  background:#fff!important;
+  color:var(--ui-text-2)!important;
+  box-shadow:none!important;
+  font-weight:800!important;
+}
+body.organiza-corpo .campanha-pular-btn:hover{background:#f8fafc!important;border-color:#b9c6d8!important}
+
+/* Remove cores herdadas da folha institucional antiga dentro do produto */
+body.organiza-corpo .botao.primario,
+body.organiza-corpo .btn.primario,
+body.organiza-corpo .btn-primary{background-image:none!important;text-shadow:none!important}
+body.organiza-corpo a{text-decoration-thickness:1px;text-underline-offset:2px}

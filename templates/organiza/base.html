@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-title" content="Organiza">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="theme-color" content="#15803d">
+  <meta name="theme-color" content="#2563eb">
   <link rel="stylesheet" href="/static/css/estilo.css">
   <link rel="stylesheet" href="/static/css/organiza.css?v={{ ORGANIZA_VERSION }}">
 </head>
@@ -73,6 +73,7 @@
     <div class="mobile-user-mini" aria-label="Usuário {{ usuario.nome }}">{{ usuario.nome[:1] }}</div>
   </header>
   <main class="app-main">{% block conteudo %}{% endblock %}</main>
+  <link rel="stylesheet" href="/static/css/organiza-theme.css?v={{ ORGANIZA_VERSION }}">
   <nav class="mobile-nav clean-mobile" aria-label="Navegação principal no celular">
     <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza">
       <span>⌂</span><small>Dashboard</small>
@@ -91,6 +92,7 @@
 </div>
 {% else %}
 <main class="organiza-container publica">{% block conteudo_publico %}{% endblock %}</main>
+<link rel="stylesheet" href="/static/css/organiza-theme.css?v={{ ORGANIZA_VERSION }}">
 {% endif %}
 <script>
 document.addEventListener("DOMContentLoaded", () => {
