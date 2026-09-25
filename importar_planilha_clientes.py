@@ -27,7 +27,7 @@ import re
 from openpyxl import load_workbook
 
 from database import SessionLocal, engine, Base
-from app import Cliente, Equipamento, limpar_telefone
+from app import Cliente, Equipamento, limpar_telefone, _corrigir_consistencia_pacotes
 from sqlalchemy import inspect, text as sql_text
 
 
@@ -322,6 +322,10 @@ def importar(caminho=ARQUIVO_PADRAO):
             db.add(equipamento)
             equipamentos_criados += 1
 
+        db.flush()
+        # A implantação também respeita a regra atual: nenhuma máquina fica sem pacote
+        # e o pacote da máquina de referência é espelhado no cadastro do cliente.
+        _corrigir_consistencia_pacotes(db)
         db.commit()
 
         registrar_importacao_concluida(

@@ -17,7 +17,7 @@
     <label class="filtro-busca">Buscar
       <input name="q" value="{{ q }}" placeholder="Cliente, equipamento ou código">
     </label>
-    <label>Pagamento
+    <label class="filtro-campo">Pagamento
       <select name="pagamento">
         <option value="todos" {% if pagamento_filtro == 'todos' %}selected{% endif %}>Todos</option>
         <option value="pendente" {% if pagamento_filtro == 'pendente' %}selected{% endif %}>Falta pagamento</option>
@@ -26,13 +26,13 @@
         <option value="excesso" {% if pagamento_filtro == 'excesso' %}selected{% endif %}>Pagamento acima do total</option>
       </select>
     </label>
-    <label>Valor
+    <label class="filtro-campo">Valor
       <select name="valor">
         <option value="todos" {% if valor_filtro == 'todos' %}selected{% endif %}>Todos os valores</option>
         <option value="acima_5000" {% if valor_filtro == 'acima_5000' %}selected{% endif %}>Acima de R$ 5.000,00</option>
       </select>
     </label>
-    <label>Campanha de atualização
+    <label class="filtro-campo filtro-campanha">Campanha de atualização
       <select name="campanha_id" {% if not campanhas_atualizacao %}disabled{% endif %}>
         {% if not campanhas_atualizacao %}<option value="">Nenhuma campanha</option>{% endif %}
         {% for c in campanhas_atualizacao %}
@@ -40,7 +40,7 @@
         {% endfor %}
       </select>
     </label>
-    <label>Envio da campanha
+    <label class="filtro-campo filtro-campanha-envio">Envio da campanha
       <select name="campanha_envio" {% if not campanha_selecionada %}disabled{% endif %}>
         <option value="todos" {% if campanha_envio_filtro == 'todos' %}selected{% endif %}>Todos</option>
         <option value="nao_enviado" {% if campanha_envio_filtro == 'nao_enviado' %}selected{% endif %}>Não enviado pelo Organiza</option>
@@ -76,7 +76,7 @@
         </div>
       </details>
     </div>
-    <label>Ordenar
+    <label class="filtro-campo">Ordenar
       <select name="ordem">
         <option value="recentes" {% if ordem == 'recentes' %}selected{% endif %}>Mais novos primeiro</option>
         <option value="antigos" {% if ordem == 'antigos' %}selected{% endif %}>Mais antigos primeiro</option>
@@ -173,7 +173,15 @@
 
 </section>
 <style>
-.titulo-acoes-vendas{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filtros-vendas{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(6,minmax(145px,1fr)) auto;gap:12px;align-items:end;margin:16px 0;padding:14px}.filtros-vendas label{display:grid;gap:6px;font-size:13px;font-weight:700}.filtros-vendas input,.filtros-vendas select{min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 10px;background:#fff}.filtro-status{display:grid;gap:6px;min-width:0}.filtro-rotulo{font-size:13px;font-weight:700}.status-multi{position:relative;min-width:0}.status-multi summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 34px 8px 10px;background:#fff;cursor:pointer;font-size:14px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}.status-multi summary::-webkit-details-marker{display:none}.status-multi summary:after{content:"⌄";position:absolute;right:11px;top:50%;transform:translateY(-55%);font-size:16px}.status-multi[open] summary{border-color:#7aa7ff;box-shadow:0 0 0 2px rgba(37,99,235,.08)}.status-multi-menu{position:absolute;z-index:30;top:calc(100% + 6px);left:0;min-width:240px;width:max-content;max-width:320px;padding:10px;border:1px solid #d0d9e6;border-radius:10px;background:#fff;box-shadow:0 12px 28px rgba(15,23,42,.14)}.status-multi-topo{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:2px 4px 8px;font-size:12px}.status-limpar{border:0;background:transparent;color:#2563eb;font-weight:700;cursor:pointer;padding:4px}.status-opcao{display:flex!important;grid-template-columns:none!important;align-items:center;gap:8px!important;padding:8px 6px;border-radius:7px;font-size:13px!important;font-weight:500!important;cursor:pointer}.status-opcao:hover{background:#f5f8fc}.status-opcao input{min-height:0!important;width:16px;height:16px;margin:0;padding:0}.filtros-acoes{display:flex;gap:8px}.campanha-vendas-resumo{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 12px;padding:12px 14px}.campanha-vendas-resumo>div{display:grid;gap:3px}.campanha-vendas-resumo small{font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#64748b}.campanha-vendas-resumo span{font-size:12px;color:#64748b}.campanha-venda-status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 0;padding:10px 12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.campanha-venda-status>div{display:grid;gap:2px}.campanha-venda-status small{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b}.campanha-venda-status span{font-size:12px;color:#64748b}.campanha-venda-status.enviado{border-color:#b7e4c7;background:#f1fbf4}.campanha-venda-status.nao-enviado{border-color:#f4c7a1;background:#fff8f1}.campanha-venda-status.fora{border-color:#dbe3ee;background:#f8fafc}.resultado-vendas{margin:0 0 12px}.alerta-venda{margin:10px 0 0;padding:8px 10px;font-size:13px}.venda-card-acoes{display:flex;gap:6px;flex-wrap:nowrap;align-items:center;flex:0 0 auto}.venda-card-acoes .botao{white-space:nowrap;padding:7px 10px;font-size:.75rem}.venda-card-opcionais{margin-top:0}@media(max-width:1100px){.filtros-vendas{grid-template-columns:repeat(2,minmax(0,1fr))}.filtro-busca{grid-column:1/-1}.filtros-acoes{grid-column:1/-1}.status-multi-menu{width:100%;min-width:100%}}@media(max-width:640px){.filtros-vendas{grid-template-columns:1fr}.filtro-busca,.filtros-acoes{grid-column:auto}.filtros-acoes .botao{flex:1}.campanha-vendas-resumo,.campanha-venda-status{align-items:stretch;flex-direction:column}.campanha-venda-status .botao{width:100%;text-align:center}}
+.titulo-acoes-vendas{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filtros-vendas{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px;align-items:end;margin:16px 0;padding:14px;overflow:visible}
+.filtros-vendas>label,.filtros-vendas>.filtro-status,.filtros-vendas>.filtros-acoes{min-width:0}
+.filtros-vendas label{display:grid;gap:6px;font-size:13px;font-weight:700}
+.filtros-vendas input,.filtros-vendas select{box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 10px;background:#fff}
+.filtro-busca{grid-column:span 2}.filtro-campanha{grid-column:span 2}
+.filtro-status{display:grid;gap:6px;min-width:0}.filtro-rotulo{font-size:13px;font-weight:700}.status-multi{position:relative;min-width:0}.status-multi summary{box-sizing:border-box;width:100%;max-width:100%;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;border:1px solid #d0d9e6;border-radius:9px;padding:8px 34px 8px 10px;background:#fff;cursor:pointer;font-size:14px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}.status-multi summary::-webkit-details-marker{display:none}.status-multi summary:after{content:"⌄";position:absolute;right:11px;top:50%;transform:translateY(-55%);font-size:16px}.status-multi[open] summary{border-color:#7aa7ff;box-shadow:0 0 0 2px rgba(37,99,235,.08)}.status-multi-menu{position:absolute;z-index:30;top:calc(100% + 6px);left:0;min-width:240px;width:max-content;max-width:min(320px,calc(100vw - 40px));padding:10px;border:1px solid #d0d9e6;border-radius:10px;background:#fff;box-shadow:0 12px 28px rgba(15,23,42,.14)}.status-multi-topo{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:2px 4px 8px;font-size:12px}.status-limpar{border:0;background:transparent;color:#2563eb;font-weight:700;cursor:pointer;padding:4px}.status-opcao{display:flex!important;grid-template-columns:none!important;align-items:center;gap:8px!important;padding:8px 6px;border-radius:7px;font-size:13px!important;font-weight:500!important;cursor:pointer}.status-opcao:hover{background:#f5f8fc}.status-opcao input{min-height:0!important;width:16px;height:16px;margin:0;padding:0}.filtros-acoes{display:flex;gap:8px;flex-wrap:wrap}.campanha-vendas-resumo{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 12px;padding:12px 14px}.campanha-vendas-resumo>div{display:grid;gap:3px}.campanha-vendas-resumo small{font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#64748b}.campanha-vendas-resumo span{font-size:12px;color:#64748b}.campanha-venda-status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 0;padding:10px 12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.campanha-venda-status>div{display:grid;gap:2px}.campanha-venda-status small{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b}.campanha-venda-status span{font-size:12px;color:#64748b}.campanha-venda-status.enviado{border-color:#b7e4c7;background:#f1fbf4}.campanha-venda-status.nao-enviado{border-color:#f4c7a1;background:#fff8f1}.campanha-venda-status.fora{border-color:#dbe3ee;background:#f8fafc}.resultado-vendas{margin:0 0 12px}.alerta-venda{margin:10px 0 0;padding:8px 10px;font-size:13px}.venda-card-acoes{display:flex;gap:6px;flex-wrap:nowrap;align-items:center;flex:0 0 auto}.venda-card-acoes .botao{white-space:nowrap;padding:7px 10px;font-size:.75rem}.venda-card-opcionais{margin-top:0}
+@media(max-width:900px){.filtro-busca,.filtro-campanha{grid-column:1/-1}.filtros-vendas{grid-template-columns:repeat(2,minmax(0,1fr))}.filtros-acoes{grid-column:1/-1}}
+@media(max-width:640px){.filtros-vendas{grid-template-columns:1fr}.filtro-busca,.filtro-campanha,.filtros-acoes{grid-column:auto}.filtros-acoes .botao{flex:1}.campanha-vendas-resumo,.campanha-venda-status{align-items:stretch;flex-direction:column}.campanha-venda-status .botao{width:100%;text-align:center}}
 </style>
 <script>
 (function () {

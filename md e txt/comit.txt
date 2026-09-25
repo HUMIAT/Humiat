@@ -1,3 +1,3 @@
 git add .
-git commit -m "Organiza 1.1.48 - confere e reenvia campanha de atualizacao em Vendas"
+git commit -m "Organiza 1.1.51 - corrige pacotes e cria lote de nao enviados"
 git push origin main

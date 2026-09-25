@@ -16,6 +16,8 @@
   {% if erro == 'nenhum_cliente' %}<div class="alerta erro">Não há clientes ativos para esta campanha.</div>{% endif %}
   {% if erro == 'lote_ocupado' %}<div class="alerta erro">Esse lote acabou de ser escolhido por outro atendente ou você já possui outro lote em andamento. Escolha um lote livre.</div>{% endif %}
   {% if erro == 'selecione_lote' %}<div class="alerta info">Escolha um lote antes de iniciar o envio.</div>{% endif %}
+  {% if recuperacao == 'nenhum' %}<div class="alerta info">Todos os clientes elegíveis desta campanha já foram enviados/processados. Nenhum lote complementar foi criado.</div>{% endif %}
+  {% if recuperacao and recuperacao not in ['nenhum','indisponivel'] %}<div class="alerta sucesso">Lote complementar criado com {{ recuperacao }} cliente(s) não enviado(s){% if lotes_recuperacao %} · lote(s) {{ lotes_recuperacao }}{% endif %}.</div>{% endif %}
 
   <section class="cartao campanha-resumo-card">
     <div class="campanha-resumo-topo">
@@ -33,6 +35,21 @@
       <div class="campanha-link-preview"><small>Link da campanha</small><a href="{{ campanha.link }}" target="_blank" rel="noopener">{{ campanha.link }}</a></div>
     {% endif %}
   </section>
+
+  {% if campanha.lista_tipo == 'ATUALIZACAO' and campanha.status != 'RASCUNHO' %}
+  <section class="cartao campanha-resumo-card">
+    <div class="campanha-resumo-topo">
+      <div>
+        <small>Conferência de envio</small>
+        <strong>Lote de não enviados</strong>
+      </div>
+      <form method="post" action="/organiza/campanhas/{{ campanha.id }}/lote-nao-enviados" onsubmit="return confirm('Criar um lote complementar apenas com clientes elegíveis que ainda não foram enviados/processados?')">
+        <button class="botao primario" type="submit">Criar lote de não enviados</button>
+      </form>
+    </div>
+    <p class="texto-suave">Reaproveita a rotina de lotes da campanha. Inclui clientes que ficaram fora da campanha por inconsistência de pacote e também pendentes não processados, sem duplicar quem já consta como enviado/processado.</p>
+  </section>
+  {% endif %}
 
   {% if campanha.status in ['RASCUNHO', 'ATIVA'] and lotes %}
     <form method="post" action="/organiza/campanhas/{{ campanha.id }}/iniciar" class="cartao campanha-lotes-selecao" id="campanhaLoteForm">

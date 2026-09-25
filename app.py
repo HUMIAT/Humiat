@@ -1671,6 +1671,10 @@ def iniciar_banco():
                 cliente_existente.pais, cliente_existente.ddi, cliente_existente.telefone
             )
 
+        eq_corrigidos, clientes_corrigidos, primeiro_pacote = _corrigir_consistencia_pacotes(db)
+        if eq_corrigidos or clientes_corrigidos:
+            print(f"[PACOTES] 1.1.51: equipamentos ajustados={eq_corrigidos}; clientes sincronizados={clientes_corrigidos}; primeiro pacote={primeiro_pacote}.")
+
         vinculados_piloto = _vincular_equipe_interna_ao_cadastro_clientes(db)
         if vinculados_piloto:
             print(f"[HUMIAT ID] 1.1.33: {vinculados_piloto} ficha(s) da equipe interna vinculada(s) ao cadastro de Clientes.")
@@ -2613,19 +2617,69 @@ def _pacotes_disponiveis_solvoz() -> list[str]:
     return [label for _, label in saida]
 
 
+def _primeiro_pacote_disponivel(db: Session) -> str:
+    """Retorna o primeiro pacote cronológico conhecido.
+
+    O SolVoz é a fonte preferencial. Se a integração estiver indisponível, usa
+    os pacotes já existentes no Organiza para nunca deixar uma máquina sem pacote.
+    """
+    candidatos: list[tuple[int, str]] = []
+    try:
+        for label in _pacotes_disponiveis_solvoz():
+            numero = _pacote_release_num(label)
+            if numero is not None:
+                candidatos.append((numero, _pacote_label_num(numero)))
+    except Exception:
+        pass
+    if candidatos:
+        return min(candidatos, key=lambda item: item[0])[1]
+
+    valores = []
+    try:
+        valores.extend(x[0] for x in db.query(Equipamento.pacote).filter(Equipamento.pacote.isnot(None)).distinct().all())
+        valores.extend(x[0] for x in db.query(Cliente.pacote).filter(Cliente.pacote.isnot(None)).distinct().all())
+    except Exception:
+        valores = []
+    for valor in valores:
+        numero = _pacote_release_num(valor)
+        if numero is not None:
+            candidatos.append((numero, _pacote_label_num(numero)))
+    if candidatos:
+        return min(candidatos, key=lambda item: item[0])[1]
+    return obter_pacote_atual(db)
+
+
+def _normalizar_pacote_cadastrado(valor: str | None) -> str | None:
+    texto = (valor or "").strip().replace("-", ".").replace(",", ".")
+    if not texto:
+        return None
+    numero = _pacote_release_num(texto)
+    if numero is not None:
+        return _pacote_label_num(numero)
+    especial = texto.upper()
+    return especial if especial in {"NA", "NE"} else texto
+
+
 def calcular_falta_pacote(pacote: str | None, pacote_atual: str = PACOTE_ATUAL_PADRAO) -> int | None:
-    """Conta pacotes reais do SolVoz, aceitando versões como 2023.3."""
+    """Conta pacotes reais do SolVoz, aceitando versões como 2023.3.
+
+    Equipamento ativo sem pacote cadastrado é tratado como origem desconhecida:
+    ele precisa receber desde o primeiro pacote disponível até o pacote-alvo.
+    """
     origem = _pacote_release_num(pacote)
     alvo = _pacote_release_num(pacote_atual)
-    if origem is None or alvo is None:
+    if alvo is None:
         return None
-    if origem >= alvo:
+    if origem is not None and origem >= alvo:
         return 0
     disponiveis = _pacotes_disponiveis_solvoz()
     if disponiveis:
         nums = [_pacote_release_num(x) for x in disponiveis]
+        if origem is None:
+            return sum(1 for n in nums if n is not None and n <= alvo)
         return sum(1 for n in nums if n is not None and origem < n <= alvo)
-    # Fallback apenas para indisponibilidade temporária da integração.
+    # Fallback para indisponibilidade temporária da integração. Sem pacote
+    # cadastrado, mantém o equipamento elegível para não perder a campanha.
     return 1
 
 
@@ -2673,6 +2727,9 @@ def _solvoz_atualizacao_promocao_config() -> dict:
         print("WARN promoção atualização SolVoz:", repr(exc))
         if cache_dados:
             return dict(cache_dados)
+        # Evita repetir a mesma falha centenas de vezes durante migrações/lotes.
+        _ATUALIZACAO_PROMO_CACHE["dados"] = dict(padrao)
+        _ATUALIZACAO_PROMO_CACHE["expira_em"] = agora + timedelta(seconds=60)
     return padrao
 
 
@@ -2692,13 +2749,79 @@ def _valores_atualizacao_cliente(pacotes: list[str], promo_override: dict | None
     return {"normal_centavos": normal, "cobrado_centavos": cobrado, "promocao": promo, "tem_desconto": bool(cobrado < normal)}
 
 
+def _chave_equipamento_mais_antigo(eq: Equipamento):
+    data_ref = eq.data_compra or eq.previsao_entrega
+    return (
+        0 if data_ref else 1,
+        data_ref or date.max,
+        eq.criado_em or datetime.max,
+        eq.id or 0,
+    )
+
+
+def _equipamento_ativo_mais_antigo(cliente: Cliente | None) -> Equipamento | None:
+    """Retorna a máquina ativa mais antiga do cliente para campanhas de atualização."""
+    if not cliente:
+        return None
+    ativos = [eq for eq in (cliente.equipamentos or []) if (eq.status or "").strip().lower() == "ativo"]
+    return min(ativos, key=_chave_equipamento_mais_antigo) if ativos else None
+
+
+def _sincronizar_pacote_cliente(db: Session, cliente_id: int, primeiro_pacote: str | None = None) -> tuple[int, int]:
+    """Garante pacote em todas as máquinas e espelha no cadastro do cliente."""
+    cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
+    if not cliente:
+        return 0, 0
+    equipamentos = db.query(Equipamento).filter(Equipamento.cliente_id == int(cliente_id)).all()
+    if not equipamentos:
+        return 0, 0
+    primeiro = _normalizar_pacote_cadastrado(primeiro_pacote) or _primeiro_pacote_disponivel(db)
+    pacote_atual = obter_pacote_atual(db)
+    eq_alterados = 0
+    for eq in equipamentos:
+        pacote = _normalizar_pacote_cadastrado(eq.pacote) or primeiro
+        if (eq.pacote or "").strip() != pacote:
+            eq.pacote = pacote
+            eq_alterados += 1
+        falta = calcular_falta_pacote(eq.pacote, pacote_atual)
+        if eq.falta_pacote != falta:
+            eq.falta_pacote = falta
+            eq_alterados += 1
+    ativos = [eq for eq in equipamentos if (eq.status or "").strip().lower() == "ativo"]
+    referencia = min(ativos or equipamentos, key=_chave_equipamento_mais_antigo)
+    pacote_cliente = _normalizar_pacote_cadastrado(referencia.pacote) or primeiro
+    cliente_alterado = 0
+    if (cliente.pacote or "").strip() != pacote_cliente:
+        cliente.pacote = pacote_cliente
+        cliente_alterado = 1
+    falta_cliente = calcular_falta_pacote(cliente.pacote, pacote_atual)
+    if cliente.falta_pacote != falta_cliente:
+        cliente.falta_pacote = falta_cliente
+        cliente_alterado = 1
+    return eq_alterados, cliente_alterado
+
+
+def _corrigir_consistencia_pacotes(db: Session) -> tuple[int, int, str]:
+    """Backfill idempotente usado na implantação e nos próximos deploys."""
+    primeiro = _primeiro_pacote_disponivel(db)
+    total_eq = 0
+    total_clientes = 0
+    for (cliente_id,) in db.query(Cliente.id).all():
+        eq_alt, cli_alt = _sincronizar_pacote_cliente(db, int(cliente_id), primeiro)
+        total_eq += eq_alt
+        total_clientes += cli_alt
+    if total_eq or total_clientes:
+        db.commit()
+    return total_eq, total_clientes, primeiro
+
+
 def _pacotes_atualizacao_cliente(
     campanha: Campanha, cliente: Cliente, pacotes_disponiveis: list[str] | None = None
 ) -> list[str]:
-    """Usa a lista real de releases do SolVoz.
+    """Calcula a atualização pela máquina ativa mais antiga do cliente.
 
-    Em campanha preparada, ``pacotes_disponiveis`` vem do snapshot obtido uma
-    única vez antes do envio; assim não existe consulta externa por contato.
+    Se a máquina mais antiga não tiver pacote cadastrado, a atualização começa
+    no primeiro pacote disponível e segue até o pacote-alvo da campanha.
     """
     if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO" or not cliente:
         return []
@@ -2706,26 +2829,22 @@ def _pacotes_atualizacao_cliente(
     alvo = _pacote_release_num(pacote_alvo)
     if alvo is None:
         return []
-    origens = []
-    for eq in (cliente.equipamentos or []):
-        if (eq.status or "").strip().lower() != "ativo":
-            continue
-        origem = _pacote_release_num((eq.pacote or "").strip())
-        if origem is not None and origem < alvo:
-            origens.append(origem)
-    if not origens:
+
+    eq_referencia = _equipamento_ativo_mais_antigo(cliente)
+    if not eq_referencia:
         return []
-    origem = min(origens)
+    origem = _pacote_release_num((eq_referencia.pacote or "").strip() or None)
+    if origem is not None and origem >= alvo:
+        return []
+
     disponiveis = _pacotes_disponiveis_solvoz() if pacotes_disponiveis is None else list(pacotes_disponiveis)
     pacotes = []
     for label in disponiveis:
         numero = _pacote_release_num(label)
-        if numero is not None and origem < numero <= alvo:
+        if numero is not None and numero <= alvo and (origem is None or origem < numero):
             pacotes.append(_pacote_label_num(numero))
     if pacotes:
         return pacotes
-    # Fallback conservador: mantém ao menos o alvo; em operação normal a lista
-    # vem do SolVoz e este caminho não é usado.
     return [_pacote_label_num(alvo)]
 
 
@@ -2792,11 +2911,11 @@ def _equipamento_tem_atualizacao(
     if pacotes_disponiveis is not None:
         origem = _pacote_release_num((eq.pacote or "").strip() or None)
         alvo = _pacote_release_num(pacote_alvo)
-        if origem is None or alvo is None or origem >= alvo:
+        if alvo is None or (origem is not None and origem >= alvo):
             return False
         for label in pacotes_disponiveis:
             numero = _pacote_release_num(label)
-            if numero is not None and origem < numero <= alvo:
+            if numero is not None and numero <= alvo and (origem is None or origem < numero):
                 return True
         return False
     falta = calcular_falta_pacote((eq.pacote or "").strip() or None, pacote_alvo)
@@ -2810,13 +2929,12 @@ def _clientes_lista_atualizacao(
     clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome.asc()).all()
     lista = []
     for cliente in clientes:
-        pendentes = [
-            eq for eq in cliente.equipamentos
-            if _equipamento_tem_atualizacao(eq, pacote_alvo, pacotes_disponiveis)
-        ]
-        if not pendentes:
+        eq_referencia = _equipamento_ativo_mais_antigo(cliente)
+        if not eq_referencia or not _equipamento_tem_atualizacao(eq_referencia, pacote_alvo, pacotes_disponiveis):
             continue
-        lista.append({"cliente": cliente, "equipamentos": ordenar_equipamentos(pendentes)})
+        # Um cliente com várias máquinas entra uma única vez e sempre pela
+        # máquina ativa mais antiga, que define o pacote inicial da campanha.
+        lista.append({"cliente": cliente, "equipamentos": [eq_referencia]})
     return lista
 
 
@@ -2865,7 +2983,8 @@ def _clientes_lista_aluguel(db: Session, mes: int | None = None, integracao: str
 def _cliente_elegivel_atualizacao(cliente: Cliente, pacote_alvo: str) -> bool:
     if not int(getattr(cliente, "campanhas_ativo", 1) or 0):
         return False
-    return any(_equipamento_tem_atualizacao(eq, pacote_alvo) for eq in (cliente.equipamentos or []))
+    eq_referencia = _equipamento_ativo_mais_antigo(cliente)
+    return bool(eq_referencia and _equipamento_tem_atualizacao(eq_referencia, pacote_alvo))
 
 
 def _contato_elegivel_aluguel(contato: CampanhaAluguelContato) -> bool:
@@ -3013,38 +3132,45 @@ def _contagens_campanha(db: Session, campanha_id: int) -> dict:
 
 
 def _garantir_lotes_campanha(db: Session, campanha: Campanha) -> list[CampanhaLote]:
-    """Divide qualquer campanha em lotes fixos de até 100 contatos.
+    """Garante lotes sem renumerar destinatários já atribuídos.
 
-    A divisão é feita uma única vez, por ordem dos destinatários. Assim duas
-    pessoas nunca trabalham no mesmo bloco: cada usuário reserva um lote inteiro.
+    Isso preserva lotes complementares criados depois da campanha original.
     """
     modelo = _modelo_destinatario_campanha(campanha)
     linhas = db.query(modelo).filter(modelo.campanha_id == campanha.id).order_by(modelo.id.asc()).all()
     if not linhas:
         return []
     alterou = False
-    for idx, dest in enumerate(linhas):
-        numero = (idx // CAMPANHA_LOTE_TAMANHO) + 1
-        if int(getattr(dest, "lote_numero", 0) or 0) != numero:
-            dest.lote_numero = numero
+    atribuidos = [int(getattr(dest, "lote_numero", 0) or 0) for dest in linhas if int(getattr(dest, "lote_numero", 0) or 0) > 0]
+    proximo_numero = max(atribuidos, default=0) + 1
+    sem_lote = [dest for dest in linhas if int(getattr(dest, "lote_numero", 0) or 0) <= 0]
+    if sem_lote:
+        if not atribuidos:
+            proximo_numero = 1
+        for idx, dest in enumerate(sem_lote):
+            dest.lote_numero = proximo_numero + (idx // CAMPANHA_LOTE_TAMANHO)
             alterou = True
-    totais = {}
+    totais: dict[int, int] = {}
     for dest in linhas:
-        num = int(dest.lote_numero or 1)
-        totais[num] = totais.get(num, 0) + 1
+        numero = int(dest.lote_numero or 0)
+        if numero > 0:
+            totais[numero] = totais.get(numero, 0) + 1
     existentes = {int(l.numero): l for l in db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id).all()}
     for numero, total in sorted(totais.items()):
         lote = existentes.get(numero)
         if not lote:
-            lote = CampanhaLote(campanha_id=campanha.id, numero=numero, total=total)
-            db.add(lote)
+            db.add(CampanhaLote(campanha_id=campanha.id, numero=numero, total=total))
             alterou = True
         elif int(lote.total or 0) != total:
             lote.total = total
             alterou = True
+    for numero, lote in existentes.items():
+        if numero not in totais and int(lote.total or 0) != 0:
+            lote.total = 0
+            alterou = True
     if alterou:
         db.commit()
-    return db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id).order_by(CampanhaLote.numero.asc()).all()
+    return db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id, CampanhaLote.total > 0).order_by(CampanhaLote.numero.asc()).all()
 
 
 def _lote_pendentes(db: Session, campanha: Campanha, lote_numero: int) -> int:
@@ -3224,6 +3350,77 @@ def _preparar_campanha_com_lotes(db: Session, campanha: Campanha) -> int:
         _garantir_lotes_campanha(db, campanha)
     db.commit()
     return total
+
+
+def _criar_lote_nao_enviados_atualizacao(db: Session, campanha: Campanha) -> tuple[int, list[int]]:
+    """Cria lote(s) complementar(es) de atualização com quem ainda não foi enviado."""
+    if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO":
+        return 0, []
+    _corrigir_consistencia_pacotes(db)
+    pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+    promo_snapshot = _solvoz_atualizacao_promocao_config()
+    pacotes_disponiveis = [str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()]
+    elegiveis = [item["cliente"] for item in _clientes_lista_atualizacao(db, pacote_alvo, pacotes_disponiveis) if int(item["cliente"].campanhas_ativo or 0) == 1]
+    destinos = db.query(CampanhaDestinatario).filter(CampanhaDestinatario.campanha_id == campanha.id).all()
+    por_cliente = {int(dest.cliente_id): dest for dest in destinos}
+    candidatos: list[CampanhaDestinatario] = []
+    for cliente in elegiveis:
+        dest = por_cliente.get(int(cliente.id))
+        status_atual = (dest.status or "").upper() if dest else ""
+        if dest and status_atual in CAMPANHA_ENVIO_CONFIRMADO:
+            continue
+        if dest and status_atual == "EM_ENVIO":
+            continue
+        if not dest:
+            dest = CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE")
+            db.add(dest)
+            db.flush()
+            por_cliente[int(cliente.id)] = dest
+        else:
+            dest.status = "PENDENTE"
+            dest.reservado_por_id = None
+            dest.reservado_em = None
+            dest.enviado_por_id = None
+            dest.enviado_em = None
+        _preparar_snapshot_destinatario(campanha, dest, cliente, promo_snapshot=promo_snapshot, pacotes_disponiveis=pacotes_disponiveis)
+        candidatos.append(dest)
+    if not candidatos:
+        db.commit()
+        return 0, []
+    max_lote = int(db.query(func.max(CampanhaLote.numero)).filter(CampanhaLote.campanha_id == campanha.id).scalar() or 0)
+    numeros: list[int] = []
+    for idx, dest in enumerate(candidatos):
+        numero = max_lote + 1 + (idx // CAMPANHA_LOTE_TAMANHO)
+        dest.lote_numero = numero
+        if numero not in numeros:
+            numeros.append(numero)
+    db.flush()
+    _garantir_lotes_campanha(db, campanha)
+    for numero in numeros:
+        lote = db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == numero).first()
+        if lote:
+            lote.reservado_por_id = None
+            lote.reservado_em = None
+            lote.concluido_em = None
+    campanha.status = "ATIVA"
+    campanha.iniciado_em = campanha.iniciado_em or datetime.now()
+    campanha.finalizado_em = None
+    db.commit()
+    return len(candidatos), numeros
+
+
+@app.post("/organiza/campanhas/{campanha_id}/lote-nao-enviados")
+def campanha_criar_lote_nao_enviados(campanha_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    if (campanha.lista_tipo or "").upper() != "ATUALIZACAO":
+        return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao=indisponivel", status_code=303)
+    total, numeros = _criar_lote_nao_enviados_atualizacao(db, campanha)
+    if not total:
+        return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao=nenhum", status_code=303)
+    lotes_txt = ",".join(str(n) for n in numeros)
+    return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao={total}&lotes_recuperacao={lotes_txt}", status_code=303)
 
 
 def _reservar_lote_escolhido(db: Session, campanha: Campanha, usuario: Usuario, lote_numero: int) -> CampanhaLote | None:
@@ -3979,6 +4176,8 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
         "lotes": lotes,
         "tamanho_lote": CAMPANHA_LOTE_TAMANHO,
         "erro": request.query_params.get("erro", ""),
+        "recuperacao": request.query_params.get("recuperacao", ""),
+        "lotes_recuperacao": request.query_params.get("lotes_recuperacao", ""),
     })
 
 
@@ -4595,11 +4794,10 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     codigo_padrao_nfae, descricao_padrao_nfae = nfae_padrao_produto(eq.tipo)
     eq.nota_codigo = re.sub(r"[^A-Za-z0-9._-]", "", (form.get("nota_codigo") or "").strip()) or codigo_padrao_nfae
     eq.nota_descricao = (form.get("nota_descricao") or "").strip() or descricao_padrao_nfae
-    pacote_informado = (form.get("pacote") or "").strip()
-    if pacote_informado:
-        eq.pacote = pacote_informado
-    elif not eq.pacote:
-        eq.pacote = None
+    pacote_informado = _normalizar_pacote_cadastrado(form.get("pacote"))
+    pacote_existente = _normalizar_pacote_cadastrado(eq.pacote)
+    eq.pacote = pacote_informado or pacote_existente or _primeiro_pacote_disponivel(db)
+    # Nenhuma máquina fica sem pacote. O valor ausente recebe o primeiro pacote disponível.
     # Este valor é derivado do pacote instalado e nunca é informado manualmente.
     eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
     eq.plano = (form.get("plano") or "").strip() or None
@@ -4759,24 +4957,23 @@ def opcoes_equipamentos(db: Session):
     tipos_bd = [x[0] for x in db.query(Equipamento.tipo).filter(Equipamento.tipo.isnot(None), Equipamento.tipo != "").distinct().order_by(Equipamento.tipo).all()]
     pacotes_bd = [x[0] for x in db.query(Equipamento.pacote).filter(Equipamento.pacote.isnot(None), Equipamento.pacote != "").distinct().all()]
     tipos = list(dict.fromkeys(["JUKEBOX", "MALETA", "IPHONE", "FLIPERAMA"] + tipos_bd))
-
-    pacote_atual = obter_pacote_atual(db)
-    atual = tuple(map(int, pacote_atual.split(".")))
-    pacotes_validos = []
-    especiais = []
-    for pacote in pacotes_bd:
-        valor = (pacote or "").strip()
-        correspondencia = re.fullmatch(r"(\d{4})\.([12])", valor)
-        if correspondencia:
-            chave = tuple(map(int, correspondencia.groups()))
-            if chave <= atual:
-                pacotes_validos.append(valor)
-        elif valor.upper() in {"NE", "NA"}:
-            especiais.append(valor.upper())
-
-    pacotes_validos = sorted(set(pacotes_validos + [pacote_atual]), key=lambda valor: tuple(map(int, valor.split("."))), reverse=True)
-    pacotes = pacotes_validos + sorted(set(especiais))
-    return tipos, pacotes
+    candidatos = list(pacotes_bd)
+    try:
+        candidatos.extend(_pacotes_disponiveis_solvoz())
+    except Exception:
+        pass
+    candidatos.append(obter_pacote_atual(db))
+    numericos: dict[int, str] = {}
+    especiais = set()
+    for pacote in candidatos:
+        valor = _normalizar_pacote_cadastrado(pacote)
+        numero = _pacote_release_num(valor)
+        if numero is not None:
+            numericos[numero] = _pacote_label_num(numero)
+        elif valor in {"NE", "NA"}:
+            especiais.add(valor)
+    pacotes_validos = [numericos[n] for n in sorted(numericos, reverse=True)]
+    return tipos, pacotes_validos + sorted(especiais)
 
 
 @app.get("/organiza/clientes/{cliente_id}/equipamentos/novo", response_class=HTMLResponse)
@@ -4786,7 +4983,7 @@ def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depen
     tipos, pacotes = opcoes_equipamentos(db)
     return templates.TemplateResponse("organiza/equipamento_form.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "equipamento": None,
-        "erro": "", "tipos": tipos, "pacotes": pacotes,
+        "erro": "", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db),
         "proxima_maquina": proximo_codigo_maquina(db),
         "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
         "pacote_atual": obter_pacote_atual(db),
@@ -4804,7 +5001,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
         tipos, pacotes = opcoes_equipamentos(db)
         return templates.TemplateResponse("organiza/equipamento_form.html", {
             "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
-            "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes,
+            "erro": "Informe o tipo do equipamento.", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db),
             "proxima_maquina": proximo_codigo_maquina(db),
             "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
             "solvoz_empresas": empresas_solvoz_ativas(db),
@@ -4823,13 +5020,15 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
         tipos, pacotes = opcoes_equipamentos(db)
         return templates.TemplateResponse("organiza/equipamento_form.html", {
             "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
-            "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
+            "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db),
             "proxima_maquina": eq.maquina,
             "proximo_numero_cliente": eq.numero_maquina_cliente,
             "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
             "solvoz_empresas": empresas_solvoz_ativas(db),
         }, status_code=400)
     db.add(eq)
+    db.flush()
+    _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
@@ -4842,7 +5041,7 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     tipos, pacotes = opcoes_equipamentos(db)
     clientes_transferencia = db.query(Cliente).filter(Cliente.id != cliente_id).order_by(Cliente.nome.asc()).all()
     transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db)})
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db), "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db)})
 
 
 
@@ -4897,11 +5096,13 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
         transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
         return templates.TemplateResponse("organiza/equipamento_form.html", {
             "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
-            "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes,
+            "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db),
             "clientes_transferencia": clientes_transferencia, "transferencias": transferencias,
             "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
             "solvoz_empresas": empresas_solvoz_ativas(db)
         }, status_code=400)
+    db.flush()
+    _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
 
@@ -5562,6 +5763,8 @@ async def equipamento_gerar_qr(cliente_id: int, equipamento_id: int, request: Re
     form = dict(await request.form())
     preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
+    db.flush()
+    _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
 
     zip_path = gerar_pacote_qr(eq, db)
@@ -5587,6 +5790,8 @@ async def equipamento_gerar_licenca(cliente_id: int, equipamento_id: int, reques
     form = dict(await request.form())
     preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
+    db.flush()
+    _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
     _, zip_path = gerar_pasta_licenca(eq, db)
     return FileResponse(
@@ -5622,6 +5827,8 @@ async def equipamento_transferir(cliente_id: int, equipamento_id: int, request: 
     db.flush()
     reordenar_series_cliente(db, cliente_id)
     reordenar_series_cliente(db, destino_id)
+    _sincronizar_pacote_cliente(db, cliente_id)
+    _sincronizar_pacote_cliente(db, destino_id)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{destino_id}/equipamentos/{equipamento_id}/editar?transferido=1", status_code=303)
 
@@ -6205,6 +6412,7 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     db.add(eq)
     db.flush()
     reordenar_series_cliente(db, cliente.id)
+    _sincronizar_pacote_cliente(db, cliente.id)
     db.commit()
     db.refresh(eq)
     return RedirectResponse(f"/organiza/vendas/{eq.id}/cadastro", status_code=303)
