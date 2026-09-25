@@ -823,8 +823,12 @@ class Item(Base):
 class AgendaManual(Base):
     __tablename__ = "agenda_manual"
     id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=True, index=True)
     titulo = Column(String(180), nullable=False)
+    # tipo é mantido para compatibilidade visual com compromissos antigos.
     tipo = Column(String(40), nullable=False, default="visita")
+    categoria = Column(String(30), nullable=True, index=True)
+    local_atendimento = Column(String(20), nullable=True, index=True)
     data_hora = Column(DateTime, nullable=False)
     contato = Column(String(120), nullable=True)
     observacao = Column(Text, nullable=True)
@@ -1529,6 +1533,12 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN google_sync_erro TEXT"))
             if "google_sync_em" not in existentes_agenda_manual:
                 conn.execute(text(f"ALTER TABLE agenda_manual ADD COLUMN google_sync_em {tipo_dt_agenda}"))
+            if "cliente_id" not in existentes_agenda_manual:
+                conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN cliente_id INTEGER"))
+            if "categoria" not in existentes_agenda_manual:
+                conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN categoria VARCHAR(30)"))
+            if "local_atendimento" not in existentes_agenda_manual:
+                conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN local_atendimento VARCHAR(20)"))
 
     if "assistencias" in insp.get_table_names():
         existentes = {c["name"] for c in insp.get_columns("assistencias")}
@@ -2125,17 +2135,67 @@ def api_lokafest_cliente(
 
 
 
+
+
+def _cliente_resumo_visual(cliente: Cliente | None) -> dict:
+    equipamento = _equipamento_ativo_mais_antigo(cliente)
+    pacote = ((equipamento.pacote or '').strip() if equipamento else '') or '-'
+    identificacao = rotulo_maquina(equipamento) if equipamento else '-'
+    email = (getattr(cliente, 'email', '') or '').strip() or None
+    return {
+        'equipamento_base': equipamento,
+        'pacote_base': pacote,
+        'identificacao_base': identificacao,
+        'email': email,
+        'email_ok': _gmail_valido(email),
+        'municipio': (getattr(cliente, 'municipio', None) or getattr(cliente, 'cidade', None) or '').strip() or None,
+        'empresa': (getattr(cliente, 'empresa', None) or '').strip() or None,
+    }
+
+
+def _ultima_campanha_atualizacao_cliente(db: Session, cliente: Cliente | None) -> dict | None:
+    if not cliente:
+        return None
+    dest = (
+        db.query(CampanhaDestinatario)
+        .join(Campanha, Campanha.id == CampanhaDestinatario.campanha_id)
+        .filter(
+            CampanhaDestinatario.cliente_id == int(cliente.id),
+            func.upper(Campanha.lista_tipo) == 'ATUALIZACAO',
+        )
+        .order_by(CampanhaDestinatario.id.desc())
+        .first()
+    )
+    if not dest:
+        return None
+    campanha = db.query(Campanha).filter(Campanha.id == dest.campanha_id).first()
+    telefone = (dest.telefone_pronto or cliente.whatsapp_completo() or '').strip()
+    mensagem = (dest.mensagem_pronta or '').strip()
+    return {
+        'campanha_id': int(dest.campanha_id),
+        'destinatario_id': int(dest.id),
+        'nome': (campanha.nome if campanha else 'Campanha de atualização'),
+        'status': dest.status or 'PENDENTE',
+        'link_pronto': (dest.link_pronto or '').strip(),
+        'mensagem_pronta': mensagem,
+        'whatsapp_url': _whatsapp_url_pronta(telefone, mensagem) if telefone and mensagem else '',
+        'consulta_url': f'/organiza/clientes/{cliente.id}?consulta=1&campanha_id={dest.campanha_id}',
+        'enviado_em': dest.enviado_em,
+    }
+
 @app.get("/organiza/clientes", response_class=HTMLResponse)
 def clientes(request: Request, busca: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     query = db.query(Cliente).options(selectinload(Cliente.equipamentos))
     termo = busca.strip()
     if termo:
         like = f"%{termo}%"
-        query = query.filter(or_(Cliente.nome.ilike(like), Cliente.telefone.ilike(like), Cliente.empresa.ilike(like), Cliente.municipio.ilike(like), Cliente.cidade.ilike(like)))
+        query = query.filter(or_(Cliente.nome.ilike(like), Cliente.telefone.ilike(like), Cliente.empresa.ilike(like), Cliente.municipio.ilike(like), Cliente.cidade.ilike(like), Cliente.email.ilike(like)))
     lista = query.order_by(Cliente.nome.asc()).all()
+    resumos_clientes = {int(cliente.id): _cliente_resumo_visual(cliente) for cliente in lista}
     return templates.TemplateResponse("organiza/clientes.html", {
         "request": request, "usuario": usuario, "clientes": lista, "busca": busca,
         "total_clientes": db.query(Cliente).count(), "total_equipamentos": db.query(Equipamento).count(),
+        "resumos_clientes": resumos_clientes,
     })
 
 
@@ -2459,6 +2519,36 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     if not retorno_consulta.startswith("/organiza/vendas"):
         retorno_consulta = "/organiza/vendas"
     atualizacoes_ctx = _atualizacao_contexto_admin_cliente(db, cliente) if not somente_consulta else {"compras": [], "agendamentos": {}, "pacotes": [], "gmail_ok": _gmail_valido(cliente.email)}
+    resumo_visual = _cliente_resumo_visual(cliente)
+    campanha_recente = None if somente_consulta else _ultima_campanha_atualizacao_cliente(db, cliente)
+    campanhas_cliente = []
+    agendamentos_cliente = []
+    if not somente_consulta:
+        destinos = (
+            db.query(CampanhaDestinatario)
+            .options(selectinload(CampanhaDestinatario.campanha))
+            .filter(CampanhaDestinatario.cliente_id == cliente.id)
+            .order_by(CampanhaDestinatario.id.desc())
+            .limit(12)
+            .all()
+        )
+        for dest in destinos:
+            campanha = dest.campanha
+            if not campanha:
+                continue
+            campanhas_cliente.append({
+                "campanha": campanha,
+                "destinatario": dest,
+                "status_rotulo": _rotulo_status_envio_campanha(dest.status, True),
+                "whatsapp_url": _whatsapp_url_pronta(dest.telefone_pronto or cliente.whatsapp_completo() or "", dest.mensagem_pronta or ""),
+            })
+        agendamentos_cliente = (
+            db.query(AgendaManual)
+            .filter(AgendaManual.cliente_id == cliente.id)
+            .order_by(AgendaManual.data_hora.desc())
+            .limit(8)
+            .all()
+        )
 
     return templates.TemplateResponse("organiza/cliente_detalhe.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
@@ -2482,7 +2572,80 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "atualizacoes_ctx": atualizacoes_ctx,
         "atualizacao_sucesso": request.query_params.get("atualizacao_sucesso", ""),
         "atualizacao_erro": request.query_params.get("atualizacao_erro", ""),
+        "resumo_visual": resumo_visual,
+        "campanha_recente": campanha_recente,
+        "campanhas_cliente": campanhas_cliente,
+        "agendamentos_cliente": agendamentos_cliente,
+        "agenda_sucesso": request.query_params.get("agenda_sucesso", ""),
+        "agenda_erro": request.query_params.get("agenda_erro", ""),
+        "campanha_cliente_sucesso": request.query_params.get("campanha_cliente_sucesso", ""),
     })
+
+
+@app.post("/organiza/clientes/{cliente_id}/agendar-atendimento")
+async def cliente_agendar_atendimento_rapido(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    form = await request.form()
+    categoria = _agenda_categoria(form.get("categoria"))
+    local = _agenda_local(form.get("local_atendimento"))
+    data_hora = datetime_form(form.get("data_hora") or "")
+    descricao = (form.get("descricao") or "").strip()
+    if not data_hora or data_hora <= datetime.now():
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente.id}?agenda_erro={quote_plus('Escolha uma data e horário futuros.')}#agenda-cliente",
+            status_code=303,
+        )
+    evento = AgendaManual(
+        cliente_id=cliente.id,
+        titulo=_agenda_titulo(categoria, local, cliente.nome),
+        tipo=_agenda_tipo_visual(categoria, local),
+        categoria=categoria,
+        local_atendimento=local,
+        data_hora=data_hora,
+        contato=f"{cliente.nome} · +{cliente.ddi} {cliente.telefone_formatado()}",
+        observacao=descricao or "Atendimento agendado pela ficha do cliente.",
+    )
+    db.add(evento)
+    db.flush()
+    _google_calendar_manual_sincronizar(db, evento)
+    db.commit()
+    msg = "Atendimento reservado no Organiza e enviado ao Google Agenda." if evento.google_sync_status == "SINCRONIZADO" else "Atendimento reservado no Organiza; a sincronização com o Google Agenda ficou pendente."
+    return RedirectResponse(
+        f"/organiza/clientes/{cliente.id}?agenda_sucesso={quote_plus(msg)}#agenda-cliente",
+        status_code=303,
+    )
+
+
+@app.post("/organiza/clientes/{cliente_id}/campanhas/{destinatario_id}/confirmar-reenvio")
+def cliente_campanha_confirmar_reenvio(
+    cliente_id: int,
+    destinatario_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    dest = db.query(CampanhaDestinatario).filter(
+        CampanhaDestinatario.id == destinatario_id,
+        CampanhaDestinatario.cliente_id == cliente_id,
+    ).first()
+    if not dest:
+        raise HTTPException(404)
+    dest.status = "ENVIADO"
+    dest.enviado_por_id = usuario.id
+    dest.enviado_em = datetime.now()
+    dest.reservado_por_id = None
+    dest.reservado_em = None
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/clientes/{cliente_id}?campanha_cliente_sucesso=1#campanhas-cliente",
+        status_code=303,
+    )
 
 
 @app.post("/organiza/clientes/{cliente_id}/humiat-acesso")
@@ -5988,16 +6151,16 @@ def _google_calendar_event_payload(cliente: Cliente, compra: AtualizacaoCompra, 
     tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
     inicio = ag.data_hora.replace(tzinfo=tz) if ag.data_hora.tzinfo is None else ag.data_hora.astimezone(tz)
     fim = inicio + timedelta(minutes=int(ag.duracao_minutos or ATUALIZACAO_DURACAO_MINUTOS))
-    tipo_rotulo = "Em casa / AnyDesk" if ag.tipo == "CASA" else "Na loja"
+    tipo_rotulo = "Online" if ag.tipo == "CASA" else "Loja"
     pacotes = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
     descricao = (
         f"Atualização Karaokê RJ\nCliente: {cliente.nome}\n"
         f"WhatsApp: +{cliente.ddi or ''}{cliente.telefone or ''}\n"
         f"Gmail: {cliente.email or '-'}\nPacotes: {pacotes}\n"
-        f"Atendimento: {tipo_rotulo}\nCompra Organiza #{compra.id}"
+        f"Categoria: Atualização\nLocal: {tipo_rotulo}\nCompra Organiza #{compra.id}"
     )
     return {
-        "summary": f"Atualização Karaokê RJ - {tipo_rotulo} - {cliente.nome}"[:180],
+        "summary": f"Atualização | {tipo_rotulo} | {cliente.nome}"[:180],
         "description": descricao,
         "start": {"dateTime": inicio.isoformat(), "timeZone": ORGANIZA_GOOGLE_TZ},
         "end": {"dateTime": fim.isoformat(), "timeZone": ORGANIZA_GOOGLE_TZ},
@@ -6056,20 +6219,74 @@ def _google_calendar_excluir(db: Session, ag: AtualizacaoAgendamento) -> None:
         ag.google_sync_erro = str(exc)[:1200]
 
 
+AGENDA_CATEGORIAS = {
+    "ATUALIZACAO": "Atualização",
+    "MANUTENCAO": "Manutenção",
+    "VENDA": "Venda",
+    "VISITA": "Visita / Atendimento",
+    "OUTRO": "Outro",
+}
+AGENDA_LOCAIS = {
+    "CLIENTE": "Cliente",
+    "LOJA": "Loja",
+    "ONLINE": "Online",
+}
+
+def _agenda_categoria(valor: str | None) -> str:
+    v = (valor or "").strip().upper()
+    return v if v in AGENDA_CATEGORIAS else "VISITA"
+
+def _agenda_local(valor: str | None) -> str:
+    v = (valor or "").strip().upper()
+    return v if v in AGENDA_LOCAIS else "LOJA"
+
+def _agenda_categoria_evento(evento: AgendaManual) -> str:
+    if (evento.categoria or "").strip():
+        return _agenda_categoria(evento.categoria)
+    legado = (evento.tipo or "").strip().lower()
+    if legado in {"online", "loja", "entrada", "retirada", "visita"}:
+        return "VISITA"
+    return "OUTRO"
+
+def _agenda_local_evento(evento: AgendaManual) -> str:
+    if (evento.local_atendimento or "").strip():
+        return _agenda_local(evento.local_atendimento)
+    legado = (evento.tipo or "").strip().lower()
+    if legado == "online":
+        return "ONLINE"
+    if legado in {"entrada", "retirada", "loja", "visita"}:
+        return "LOJA"
+    return "LOJA"
+
+def _agenda_tipo_visual(categoria: str, local: str) -> str:
+    categoria = _agenda_categoria(categoria)
+    local = _agenda_local(local)
+    local_classe = local.lower()
+    if categoria == "ATUALIZACAO":
+        base = "atualizacao-casa" if local == "ONLINE" else ("atualizacao-loja" if local == "LOJA" else "atualizacao-cliente")
+        return f"{base} {local_classe}"
+    categoria_classe = {
+        "MANUTENCAO": "manutencao", "VENDA": "venda", "VISITA": "visita", "OUTRO": "outro"
+    }.get(categoria, "visita")
+    return f"{categoria_classe} {local_classe}"
+
+def _agenda_titulo(categoria: str, local: str, nome: str = "") -> str:
+    cat = AGENDA_CATEGORIAS[_agenda_categoria(categoria)]
+    loc = AGENDA_LOCAIS[_agenda_local(local)]
+    base = f"{cat} | {loc}"
+    return f"{base} | {nome}"[:180] if nome else base[:180]
+
 def _google_calendar_manual_event_payload(evento: AgendaManual) -> dict:
     tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
     inicio = evento.data_hora.replace(tzinfo=tz) if evento.data_hora.tzinfo is None else evento.data_hora.astimezone(tz)
     fim = inicio + timedelta(minutes=60)
-    tipo_rotulos = {
-        "visita": "Visita",
-        "entrada": "Cliente vai trazer",
-        "online": "Atendimento online",
-        "retirada": "Cliente vem buscar",
-        "fornecedor": "Fornecedor",
-        "outro": "Outro",
-    }
-    tipo_rotulo = tipo_rotulos.get((evento.tipo or "").strip().lower(), (evento.tipo or "Compromisso").strip().title())
-    descricao = [f"Compromisso criado no Organiza", f"Tipo: {tipo_rotulo}"]
+    categoria = _agenda_categoria_evento(evento)
+    local = _agenda_local_evento(evento)
+    descricao = [
+        "Compromisso criado no Organiza",
+        f"Categoria: {AGENDA_CATEGORIAS[categoria]}",
+        f"Local: {AGENDA_LOCAIS[local]}",
+    ]
     if evento.contato:
         descricao.append(f"Contato: {evento.contato}")
     if evento.observacao:
@@ -6169,7 +6386,7 @@ def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: Atuali
         "IMPORTANTE: abra este e-mail no PC ou notebook que será utilizado pelo técnico via AnyDesk. Não faça o download pelo celular.\n\n"
         "Como baixar:\n1. Entre no Google com o mesmo Gmail acima.\n2. Abra cada link abaixo.\n3. Clique em Baixar e aguarde o download terminar completamente.\n4. Não altere nem mova os arquivos antes do atendimento.\n"
         f"\n{lista_texto}\n\nDepois que TODOS os arquivos estiverem baixados no computador, agende o atendimento pelo AnyDesk:\n{agenda_url}\n\n"
-        "Atendimentos em casa: segunda a sexta, das 10:00 às 20:00, com horários de 1 em 1 hora.\n\nKaraokê RJ"
+        "Atendimentos online / AnyDesk: segunda a sexta, das 10:00 às 20:00, com horários de 1 em 1 hora.\n\nKaraokê RJ"
     )
     corpo = f"""
     <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#20242a">
@@ -6196,7 +6413,7 @@ def _atualizacao_enviar_email_agendamento(db: Session, cliente: Cliente, compra:
     gmail = (cliente.email or "").strip().lower()
     if not _gmail_valido(gmail):
         return
-    tipo_rotulo = "em casa / AnyDesk" if ag.tipo == "CASA" else "na loja"
+    tipo_rotulo = "Atualização · Online / AnyDesk" if ag.tipo == "CASA" else "Atualização · Loja"
     data_txt = ag.data_hora.strftime("%d/%m/%Y às %H:%M")
     pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
     lembrete = "Os arquivos devem estar completamente baixados no PC/notebook antes do horário marcado." if ag.tipo == "CASA" else "Leve o equipamento no horário reservado."
@@ -7318,6 +7535,11 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         if valor and valor.strip()
     ]
     status_filtros = [valor for valor in status_filtros if valor in status_opcoes]
+    visao_vendas = (request.query_params.get("visao") or "operacional").strip().lower()
+    if visao_vendas not in {"operacional", "todos"}:
+        visao_vendas = "operacional"
+    if not request.query_params.getlist("status") and visao_vendas == "operacional":
+        status_filtros = [s for s in ("Solicitar gabinete", "Montagem", "Pronto para entrega") if s in status_opcoes]
     ordem = (request.query_params.get("ordem") or "recentes").strip()
 
     if q:
@@ -7400,6 +7622,7 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         *[("status", item) for item in status_filtros],
         ("campanha_id", str(campanha_id or "")),
         ("campanha_envio", campanha_envio),
+        ("visao", visao_vendas),
         ("ordem", ordem),
     ]
 
@@ -7415,6 +7638,7 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         "campanha_selecionada": campanha_selecionada,
         "campanha_id": campanha_id,
         "campanha_envio_filtro": campanha_envio,
+        "visao_vendas": visao_vendas,
         "filtro_query": urlencode(parametros_filtro),
     }
 
@@ -7662,6 +7886,7 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         "campanha_selecionada": dados["campanha_selecionada"],
         "campanha_id": dados["campanha_id"],
         "campanha_envio_filtro": dados["campanha_envio_filtro"],
+        "visao_vendas": dados["visao_vendas"],
         "total_vendas": total_vendas,
         "pagina": pagina,
         "total_paginas": total_paginas,
@@ -11251,13 +11476,17 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             })
 
     for e in db.query(AgendaManual).order_by(AgendaManual.data_hora.asc()).all():
+        cliente_manual = db.get(Cliente, e.cliente_id) if e.cliente_id else None
+        categoria_manual = _agenda_categoria_evento(e)
+        local_manual = _agenda_local_evento(e)
         eventos.append({
-            "tipo": e.tipo,
-            "titulo": e.titulo,
+            "tipo": _agenda_tipo_visual(categoria_manual, local_manual),
+            "titulo": f"{AGENDA_CATEGORIAS[categoria_manual]} · {AGENDA_LOCAIS[local_manual]}",
             "data_hora": e.data_hora,
-            "cliente": e.contato or "Compromisso manual",
+            "cliente": cliente_manual.nome if cliente_manual else (e.contato or "Compromisso manual"),
             "equipamento": " · ".join(filter(None, [e.observacao or "", f"Google {e.google_sync_status or 'aguardando'}"])),
-            "link": f"/organiza/agenda/manual/{e.id}/editar",
+            "link": f"/organiza/clientes/{cliente_manual.id}#agenda-cliente" if cliente_manual else f"/organiza/agenda/manual/{e.id}/editar",
+            "editar_link": f"/organiza/agenda/manual/{e.id}/editar",
             "manual": True,
             "evento_id": e.id,
             "google_sync_status": e.google_sync_status,
@@ -11271,7 +11500,7 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             continue
         eventos.append({
             "tipo": "atualizacao-casa" if a.tipo == "CASA" else "atualizacao-loja",
-            "titulo": "Atualização AnyDesk" if a.tipo == "CASA" else "Atualização na loja",
+            "titulo": "Atualização · Online" if a.tipo == "CASA" else "Atualização · Loja",
             "data_hora": a.data_hora,
             "cliente": cliente_at.nome,
             "equipamento": f"Pacotes {compra.pacote_inicio} a {compra.pacote_fim} · Google {a.google_sync_status or 'aguardando'}",
@@ -11474,9 +11703,11 @@ def agenda_google_sincronizar(usuario: Usuario = Depends(usuario_logado), db: Se
 
 
 @app.get("/organiza/agenda/manual/novo", response_class=HTMLResponse)
-def agenda_manual_novo(request: Request, usuario: Usuario = Depends(usuario_logado)):
+def agenda_manual_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    clientes_agenda = db.query(Cliente).order_by(Cliente.nome.asc()).all()
     return templates.TemplateResponse("organiza/agenda_manual_form.html", {
-        "request": request, "usuario": usuario, "evento": None, "erro": "",
+        "request": request, "usuario": usuario, "evento": None, "erro": "", "clientes_agenda": clientes_agenda,
+        "agenda_categorias": AGENDA_CATEGORIAS, "agenda_locais": AGENDA_LOCAIS,
     })
 
 
@@ -11484,15 +11715,30 @@ def agenda_manual_novo(request: Request, usuario: Usuario = Depends(usuario_loga
 async def agenda_manual_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = await request.form()
     data_hora = datetime_form(form.get("data_hora"))
-    titulo = (form.get("titulo") or "").strip()
-    if not titulo or not data_hora:
+    categoria = _agenda_categoria(form.get("categoria"))
+    local = _agenda_local(form.get("local_atendimento"))
+    try:
+        cliente_id = int(form.get("cliente_id") or 0)
+    except (TypeError, ValueError):
+        cliente_id = 0
+    cliente = db.get(Cliente, cliente_id) if cliente_id else None
+    nome_visitante = (form.get("nome_visitante") or form.get("contato") or "").strip()
+    telefone_visitante = (form.get("telefone_visitante") or "").strip()
+    contato_livre = " · ".join(x for x in (nome_visitante, telefone_visitante) if x)
+    nome = cliente.nome if cliente else nome_visitante
+    if not nome or not data_hora:
+        clientes_agenda = db.query(Cliente).order_by(Cliente.nome.asc()).all()
         return templates.TemplateResponse("organiza/agenda_manual_form.html", {
             "request": request, "usuario": usuario, "evento": None,
-            "erro": "Informe o título e a data com horário.",
+            "erro": "Informe um cliente ou nome/contato e a data com horário.",
+            "clientes_agenda": clientes_agenda, "agenda_categorias": AGENDA_CATEGORIAS, "agenda_locais": AGENDA_LOCAIS,
         }, status_code=400)
+    contato = (f"{cliente.nome} · +{cliente.ddi} {cliente.telefone_formatado()}" if cliente else contato_livre)
     evento = AgendaManual(
-        titulo=titulo, tipo=(form.get("tipo") or "visita").strip(),
-        data_hora=data_hora, contato=(form.get("contato") or "").strip() or None,
+        cliente_id=cliente.id if cliente else None,
+        titulo=_agenda_titulo(categoria, local, nome),
+        tipo=_agenda_tipo_visual(categoria, local), categoria=categoria, local_atendimento=local,
+        data_hora=data_hora, contato=contato or None,
         observacao=(form.get("observacao") or "").strip() or None,
     )
     db.add(evento)
@@ -11508,8 +11754,10 @@ def agenda_manual_editar(evento_id: int, request: Request, usuario: Usuario = De
     evento = db.get(AgendaManual, evento_id)
     if not evento:
         raise HTTPException(404)
+    clientes_agenda = db.query(Cliente).order_by(Cliente.nome.asc()).all()
     return templates.TemplateResponse("organiza/agenda_manual_form.html", {
-        "request": request, "usuario": usuario, "evento": evento, "erro": "",
+        "request": request, "usuario": usuario, "evento": evento, "erro": "", "clientes_agenda": clientes_agenda,
+        "agenda_categorias": AGENDA_CATEGORIAS, "agenda_locais": AGENDA_LOCAIS,
     })
 
 
@@ -11520,16 +11768,31 @@ async def agenda_manual_salvar(evento_id: int, request: Request, usuario: Usuari
         raise HTTPException(404)
     form = await request.form()
     data_hora = datetime_form(form.get("data_hora"))
-    titulo = (form.get("titulo") or "").strip()
-    if not titulo or not data_hora:
+    categoria = _agenda_categoria(form.get("categoria"))
+    local = _agenda_local(form.get("local_atendimento"))
+    try:
+        cliente_id = int(form.get("cliente_id") or 0)
+    except (TypeError, ValueError):
+        cliente_id = 0
+    cliente = db.get(Cliente, cliente_id) if cliente_id else None
+    nome_visitante = (form.get("nome_visitante") or form.get("contato") or "").strip()
+    telefone_visitante = (form.get("telefone_visitante") or "").strip()
+    contato_livre = " · ".join(x for x in (nome_visitante, telefone_visitante) if x)
+    nome = cliente.nome if cliente else nome_visitante
+    if not nome or not data_hora:
+        clientes_agenda = db.query(Cliente).order_by(Cliente.nome.asc()).all()
         return templates.TemplateResponse("organiza/agenda_manual_form.html", {
             "request": request, "usuario": usuario, "evento": evento,
-            "erro": "Informe o título e a data com horário.",
+            "erro": "Informe um cliente ou nome/contato e a data com horário.",
+            "clientes_agenda": clientes_agenda, "agenda_categorias": AGENDA_CATEGORIAS, "agenda_locais": AGENDA_LOCAIS,
         }, status_code=400)
-    evento.titulo = titulo
-    evento.tipo = (form.get("tipo") or "visita").strip()
+    evento.cliente_id = cliente.id if cliente else None
+    evento.categoria = categoria
+    evento.local_atendimento = local
+    evento.tipo = _agenda_tipo_visual(categoria, local)
+    evento.titulo = _agenda_titulo(categoria, local, nome)
     evento.data_hora = data_hora
-    evento.contato = (form.get("contato") or "").strip() or None
+    evento.contato = (f"{cliente.nome} · +{cliente.ddi} {cliente.telefone_formatado()}" if cliente else contato_livre) or None
     evento.observacao = (form.get("observacao") or "").strip() or None
     _google_calendar_manual_sincronizar(db, evento)
     db.commit()

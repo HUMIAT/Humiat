@@ -4,15 +4,35 @@
   <div class="titulo-linha"><div><p class="tag">Cadastro</p><h1>Clientes</h1><p class="texto-suave">Cada cliente pode ter um ou vários equipamentos.</p></div><a class="botao primario" href="/organiza/clientes/novo">+ Novo cliente</a></div>
   <div class="grade-metricas clean-metricas duas"><article class="cartao metrica"><span>👥</span><div><small>Clientes</small><strong>{{ total_clientes }}</strong></div></article><article class="cartao metrica"><span>🎛️</span><div><small>Equipamentos</small><strong>{{ total_equipamentos }}</strong></div></article></div>
   <section class="cartao tabela-cartao">
-    <form method="get" class="busca-clean"><input name="busca" value="{{ busca }}" placeholder="Buscar por nome, telefone, empresa ou município"><button class="botao" type="submit">Buscar</button>{% if busca %}<a class="botao fantasma" href="/organiza/clientes">Limpar</a>{% endif %}</form>
+    <form method="get" class="busca-clean"><input name="busca" value="{{ busca }}" placeholder="Buscar por nome, telefone, e-mail, empresa ou município"><button class="botao" type="submit">Buscar</button>{% if busca %}<a class="botao fantasma" href="/organiza/clientes">Limpar</a>{% endif %}</form>
     <div class="lista-cards-mobile">
     {% for cliente in clientes %}
-      <article class="cliente-card-clean cliente-card-acoes">
-        <a class="cliente-main" href="/organiza/clientes/{{ cliente.id }}"><div><strong>{{ cliente.nome }}</strong><small>+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</small></div><span>{{ cliente.equipamentos|length }} equip.</span></a>
-        <a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a>
+      {% set resumo = resumos_clientes.get(cliente.id, {}) %}
+      <article class="cliente-card-clean cliente-card-acoes cliente-card-rich">
+        <a class="cliente-main" href="/organiza/clientes/{{ cliente.id }}">
+          <div>
+            <strong>{{ cliente.nome }}</strong>
+            <small>+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if resumo.empresa %} · {{ resumo.empresa }}{% endif %}</small>
+            <div class="cliente-mini-tags">
+              <span>{{ resumo.email or 'Sem e-mail' }}</span>
+              <span>Pacote: {{ resumo.pacote_base }}</span>
+              <span>{{ resumo.identificacao_base }}</span>
+              {% if resumo.municipio %}<span>{{ resumo.municipio }}</span>{% endif %}
+            </div>
+          </div>
+          <span>{{ cliente.equipamentos|length }} equip.</span>
+        </a>
+        <div class="cliente-card-botoes">
+          <a class="botao pequeno primario" href="/organiza/clientes/{{ cliente.id }}">Abrir</a>
+          <a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}#agenda-cliente">Agendar</a>
+          <a class="botao pequeno whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}">WhatsApp</a>
+        </div>
       </article>
     {% else %}<p class="texto-suave vazio">Nenhum cliente encontrado.</p>{% endfor %}
     </div>
   </section>
 </section>
+<style>
+.cliente-card-rich{gap:12px}.cliente-card-botoes{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.cliente-mini-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}.cliente-mini-tags span{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:rgba(148,163,184,.12);color:#cbd5e1;font-size:.76rem;line-height:1.1}@media(max-width:760px){.cliente-card-acoes{grid-template-columns:1fr}.cliente-card-botoes{justify-content:flex-start}}
+</style>
 {% endblock %}

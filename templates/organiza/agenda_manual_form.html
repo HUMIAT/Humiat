@@ -1,11 +1,11 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean agenda-formulario">
+<section class="pagina-clean agenda-formulario agenda-formulario-padronizado">
   <div class="titulo-linha">
     <div>
       <p class="tag">AGENDA</p>
       <h1>{% if evento %}Editar compromisso{% else %}Novo compromisso{% endif %}</h1>
-      <p class="texto-suave">Use para visitas, fornecedores ou pessoas que ainda não são clientes.</p>
+      <p class="texto-suave">Use o mesmo padrão para clientes e visitantes, sem precisar abrir manutenção ou orçamento.</p>
     </div>
     <a class="btn secundario" href="/organiza/agenda">Voltar</a>
   </div>
@@ -17,32 +17,47 @@
     </div>
   {% endif %}
 
-  <form method="post" class="form-card">
-    <label>Tipo
-      <select name="tipo" required>
-        {% set tipo_atual = evento.tipo if evento else 'visita' %}
-        <option value="visita" {% if tipo_atual == 'visita' %}selected{% endif %}>Visita</option>
-        <option value="entrada" {% if tipo_atual == 'entrada' %}selected{% endif %}>Cliente vai trazer</option>
-        <option value="online" {% if tipo_atual == 'online' %}selected{% endif %}>Atendimento online</option>
-        <option value="retirada" {% if tipo_atual == 'retirada' %}selected{% endif %}>Cliente vem buscar</option>
-        <option value="fornecedor" {% if tipo_atual == 'fornecedor' %}selected{% endif %}>Fornecedor</option>
-        <option value="outro" {% if tipo_atual == 'outro' %}selected{% endif %}>Outro</option>
+  {% set categoria_atual = evento.categoria if evento and evento.categoria else 'VISITA' %}
+  {% set local_atual = evento.local_atendimento if evento and evento.local_atendimento else ('ONLINE' if evento and evento.tipo == 'online' else 'LOJA') %}
+  <form method="post" class="form-card agenda-padrao-form">
+    <div class="agenda-padrao-grid">
+      <label>Categoria
+        <select name="categoria" required>
+          {% for chave, rotulo in agenda_categorias.items() %}<option value="{{ chave }}" {% if categoria_atual == chave %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Local
+        <select name="local_atendimento" required>
+          {% for chave, rotulo in agenda_locais.items() %}<option value="{{ chave }}" {% if local_atual == chave %}selected{% endif %}>{{ rotulo }}{% if chave == 'ONLINE' %} / AnyDesk{% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Data e hora
+        <input type="datetime-local" name="data_hora" required value="{{ evento.data_hora.strftime('%Y-%m-%dT%H:%M') if evento else '' }}">
+      </label>
+    </div>
+
+    <label>Cliente cadastrado <small class="texto-suave">Opcional. Deixe em branco para visitante/não cliente.</small>
+      <select name="cliente_id" id="agenda-cliente-select">
+        <option value="">Visitante / não cliente</option>
+        {% for c in clientes_agenda %}<option value="{{ c.id }}" {% if evento and evento.cliente_id == c.id %}selected{% endif %}>{{ c.nome }} · +{{ c.ddi }} {{ c.telefone_formatado() }}</option>{% endfor %}
       </select>
     </label>
-    <label>Título
-      <input name="titulo" required maxlength="180" value="{{ evento.titulo if evento else '' }}" placeholder="Ex.: Visita para conhecer a loja">
-    </label>
-    <label>Data e hora
-      <input type="datetime-local" name="data_hora" required value="{{ evento.data_hora.strftime('%Y-%m-%dT%H:%M') if evento else '' }}">
-    </label>
-    <label>Nome ou contato
-      <input name="contato" maxlength="120" value="{{ evento.contato if evento and evento.contato else '' }}" placeholder="Ex.: João / Fornecedor">
-    </label>
-    <label>Observação
-      <textarea name="observacao" rows="4" placeholder="Informações importantes">{{ evento.observacao if evento and evento.observacao else '' }}</textarea>
+
+    <div class="agenda-visitante-grid">
+      <label>Nome do visitante
+        <input name="nome_visitante" maxlength="90" value="{{ evento.contato if evento and evento.contato and not evento.cliente_id else '' }}" placeholder="Ex.: João">
+        <small class="texto-suave">Necessário apenas quando não houver cliente selecionado.</small>
+      </label>
+      <label>Telefone do visitante
+        <input name="telefone_visitante" maxlength="30" inputmode="tel" placeholder="Opcional">
+      </label>
+    </div>
+
+    <label>Descrição curta
+      <textarea name="observacao" rows="4" maxlength="500" placeholder="Ex.: Quer conhecer os modelos de karaokê; orientar configuração do microfone; demonstração para venda...">{{ evento.observacao if evento and evento.observacao else '' }}</textarea>
     </label>
     <button class="btn primario" type="submit">Salvar compromisso</button>
-    <small class="texto-suave">Ao salvar, o Organiza cria ou atualiza o mesmo compromisso no Google Agenda conectado.</small>
+    <small class="texto-suave">O título será criado automaticamente no padrão “Categoria | Local | Nome” e sincronizado com o Google Agenda.</small>
   </form>
 
   {% if evento %}

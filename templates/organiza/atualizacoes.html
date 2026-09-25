@@ -65,7 +65,7 @@
     <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Casa/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Segunda a sexta, de 1 em 1 hora.</p></div><a class="botao" href="/organiza/agenda">Abrir agenda completa</a></div>
     <div class="lista-cards-mobile">
       {% for a in agendamentos %}
-        <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Casa / AnyDesk' if a.tipo == 'CASA' else 'Loja' }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
+        <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Atualização · Online' if a.tipo == 'CASA' else 'Atualização · Loja' }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
       {% else %}<p class="texto-suave vazio">Nenhuma atualização agendada.</p>{% endfor %}
     </div>
   </section>

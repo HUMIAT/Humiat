@@ -17,19 +17,19 @@
     <div class="fluxo-acao-principal"><h2>Passo 2 — confirme seu Gmail</h2><p>O Google Drive liberará somente os pacotes comprados para este endereço.</p><a class="botao primario botao-cheio" href="{{ cadastro_url }}">Atualizar cadastro e Gmail</a></div>
   {% else %}
     {% if agendamento %}
-      <div class="alerta sucesso"><strong>Atendimento reservado.</strong><br>{{ 'Em casa / AnyDesk' if agendamento.tipo == 'CASA' else 'Na loja' }} · {{ agendamento.data_hora.strftime('%d/%m/%Y às %H:%M') }}</div>
+      <div class="alerta sucesso"><strong>Atendimento reservado.</strong><br>{{ 'Online / AnyDesk' if agendamento.tipo == 'CASA' else 'Atualização · Loja' }} · {{ agendamento.data_hora.strftime('%d/%m/%Y às %H:%M') }}</div>
     {% endif %}
     <h2>Passo 3 — como você fará a atualização?</h2>
     <div class="modo-atualizacao-grid">
       <article>
-        <h3>Em casa / AnyDesk</h3>
+        <h3>Online / AnyDesk</h3>
         <p>Primeiro liberamos e enviamos os arquivos ao seu Gmail. Abra o e-mail no <strong>PC/notebook que o técnico utilizará</strong>, baixe todos os arquivos e só depois marque o horário.</p>
         <p class="texto-suave">Atendimento: segunda a sexta, 10:00 às 20:00.</p>
         <form method="post" action="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/modo"><input type="hidden" name="modo" value="CASA"><button class="botao primario botao-cheio" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos e link da agenda{% else %}Receber arquivos por e-mail{% endif %}</button></form>
         {% if compra.email_arquivos_enviado_em %}<a class="botao botao-cheio" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/agenda?tipo=CASA">Já baixei os arquivos · Agendar AnyDesk</a>{% endif %}
       </article>
       <article>
-        <h3>Na loja</h3>
+        <h3>Atualização · Loja</h3>
         <p>Não precisa baixar os arquivos. Escolha o dia e horário para levar o equipamento. A confirmação será enviada para <strong>{{ cliente.email }}</strong>.</p>
         <p class="texto-suave">Atendimento: segunda a sexta, 14:00 às 18:00.</p>
         <form method="post" action="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/modo"><input type="hidden" name="modo" value="LOJA"><button class="botao primario botao-cheio" type="submit">Agendar atualização na loja</button></form>

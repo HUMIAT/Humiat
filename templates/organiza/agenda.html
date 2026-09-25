@@ -5,7 +5,7 @@
     <div>
       <p class="tag">AGENDA</p>
       <h1>Compromissos</h1>
-      <p class="texto-suave">Entradas, atendimentos online, retiradas e atualizações de catálogo.</p>
+      <p class="texto-suave">Compromissos organizados por categoria e local, para clientes cadastrados ou visitantes.</p>
     </div>
     <a class="btn primario" href="/organiza/agenda/manual/novo">+ Adicionar compromisso</a>
   </div>
@@ -33,13 +33,14 @@
     </div>
   </div>
 
-  <div class="agenda-legenda">
-    <span class="agenda-chip entrada">Cliente vai trazer</span>
-    <span class="agenda-chip online">Atendimento online</span>
-    <span class="agenda-chip retirada">Cliente vem buscar</span>
-    <span class="agenda-chip visita">Manual</span>
-    <span class="agenda-chip atualizacao-casa">Atualização AnyDesk</span>
-    <span class="agenda-chip atualizacao-loja">Atualização loja</span>
+  <div class="agenda-legenda agenda-legenda-padrao">
+    <span class="agenda-chip atualizacao-loja">Atualização</span>
+    <span class="agenda-chip manutencao">Manutenção</span>
+    <span class="agenda-chip venda">Venda</span>
+    <span class="agenda-chip loja">Visita / Atendimento</span>
+    <span class="agenda-chip cliente">Local: Cliente</span>
+    <span class="agenda-chip online">Local: Online</span>
+    <span class="agenda-chip loja">Local: Loja</span>
   </div>
 
   {% if eventos %}
@@ -62,7 +63,7 @@
           </a>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
             {% if e.manual %}
-              <a class="botao pequeno" href="{{ e.link }}">Editar</a>
+              <a class="botao pequeno" href="{{ e.editar_link or e.link }}">Editar</a>
             {% else %}
               <details style="position:relative">
                 <summary class="botao pequeno" style="cursor:pointer;list-style:none">Reagendar</summary>

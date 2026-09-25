@@ -1,6 +1,52 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente{% if somente_consulta %} · somente consulta{% endif %}</p><h1>{{ cliente.nome }}</h1><p class="texto-suave">+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p></div><div class="acoes-titulo">{% if somente_consulta %}<span class="pill consulta-somente">Somente consulta</span><a class="botao" href="{{ retorno_consulta }}">Voltar para vendas</a>{% else %}<a class="botao" href="/organiza/clientes">Voltar</a><a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a><a class="botao" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Manutenção</a><a class="botao" href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">+ Venda</a><a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nEsse procedimento é importante para emissão de documentos, garantia e futuros atendimentos.\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a>{% endif %}</div></div>
+<section class="pagina-clean cliente-detalhe-page">
+  <div class="cliente-hero">
+    <div class="cliente-hero-main">
+      <p class="tag">Cliente{% if somente_consulta %} · somente consulta{% endif %}</p>
+      <h1>{{ cliente.nome }}</h1>
+      <div class="cliente-contato-linha">
+        <span>+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}</span>
+        <span>{{ cliente.email or 'Sem e-mail' }}</span>
+        {% if cliente.empresa %}<span>{{ cliente.empresa }}</span>{% endif %}
+      </div>
+      <div class="cliente-topo-tags">
+        <span>Pacote: {{ resumo_visual.pacote_base }}</span>
+        <span>{{ resumo_visual.identificacao_base }}</span>
+        <span>{{ cliente.equipamentos|length }} equipamento(s)</span>
+        <span>{{ cliente.atualizacao_oferta_status or 'Sem oferta de atualização' }}</span>
+      </div>
+    </div>
+    <div class="cliente-hero-acoes">
+      {% if somente_consulta %}
+        <span class="pill consulta-somente">Somente consulta</span>
+        <a class="botao" href="{{ retorno_consulta }}">Voltar para vendas</a>
+      {% else %}
+        <a class="botao" href="/organiza/clientes">Voltar</a>
+        <a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar cliente</a>
+        <details class="cliente-acoes-menu">
+          <summary class="botao primario">Ações rápidas ▾</summary>
+          <div class="cliente-acoes-popover">
+            <a href="#agenda-cliente">Agendar atendimento</a>
+            <a href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">Nova manutenção</a>
+            <a href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">Nova venda</a>
+            <a href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">Novo equipamento</a>
+            <a target="_blank" href="{{ whatsapp_url(cliente) }}">Abrir WhatsApp</a>
+            <a target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nKaraokê RJ')|urlencode }}">Pedir atualização de cadastro</a>
+          </div>
+        </details>
+      {% endif %}
+    </div>
+  </div>
+  {% if not somente_consulta %}
+  <nav class="cliente-secao-nav" aria-label="Seções do cliente">
+    <a href="#cadastro-cliente">Cadastro</a>
+    <a href="#agenda-cliente">Agenda</a>
+    <a href="#atualizacoes">Atualizações</a>
+    <a href="#campanhas-cliente">Campanhas</a>
+    <a href="#equipamentos-cliente">Equipamentos</a>
+  </nav>
+  {% endif %}
 {% if humiat_sucesso %}<div class="alerta sucesso">{{ humiat_sucesso }}</div>{% endif %}
 {% if humiat_erro %}<div class="alerta erro">{{ humiat_erro }}</div>{% endif %}
 {% if solvoz_sucesso %}<div class="alerta sucesso">{{ solvoz_sucesso }}</div>{% endif %}
@@ -37,7 +83,7 @@
   {% endif %}
 </article>
 {% endif %}
-<div class="grade-ficha clean-ficha">
+<div class="grade-ficha clean-ficha" id="cadastro-cliente">
   <article class="cartao">
     <p class="tag">Dados do cliente</p>
     <dl class="lista-dados">
@@ -133,13 +179,85 @@
   </div>
 </div>
 {% if not somente_consulta %}
+<section class="cartao cliente-agenda-rapida" id="agenda-cliente">
+  <div class="titulo-linha compacto">
+    <div><p class="tag">AGENDA</p><h2>Agendar atendimento</h2><p class="texto-suave">Para conversas, orientações e atendimentos que não precisam virar manutenção ou orçamento.</p></div>
+    <a class="botao pequeno" href="/organiza/agenda">Abrir agenda completa</a>
+  </div>
+  {% if agenda_sucesso %}<div class="alerta sucesso">{{ agenda_sucesso }}</div>{% endif %}
+  {% if agenda_erro %}<div class="alerta erro">{{ agenda_erro }}</div>{% endif %}
+  <form method="post" action="/organiza/clientes/{{ cliente.id }}/agendar-atendimento" class="cliente-agenda-form cliente-agenda-form-padronizado">
+    <label>Categoria
+      <select name="categoria">
+        <option value="ATUALIZACAO">Atualização</option>
+        <option value="MANUTENCAO">Manutenção</option>
+        <option value="VENDA">Venda</option>
+        <option value="VISITA" selected>Visita / Atendimento</option>
+        <option value="OUTRO">Outro</option>
+      </select>
+    </label>
+    <label>Local
+      <select name="local_atendimento">
+        <option value="CLIENTE">Cliente</option>
+        <option value="LOJA" selected>Loja</option>
+        <option value="ONLINE">Online / AnyDesk</option>
+      </select>
+    </label>
+    <label>Dia e hora<input type="datetime-local" name="data_hora" required></label>
+    <label class="agenda-descricao">Descrição curta<input type="text" name="descricao" maxlength="220" placeholder="Ex.: Conhecer equipamentos, tirar dúvida, orientar configuração..."></label>
+    <button class="botao primario" type="submit">Reservar na agenda</button>
+  </form>
+  {% if agendamentos_cliente %}
+  <div class="cliente-agenda-recentes">
+    {% for evento in agendamentos_cliente[:4] %}
+      <a href="/organiza/agenda/manual/{{ evento.id }}/editar" class="cliente-agenda-item">
+        <div><strong>{{ evento.data_hora.strftime('%d/%m/%Y %H:%M') }}</strong><small>{{ evento.titulo }} · {{ evento.observacao or 'Sem descrição' }}</small></div>
+        <span>{{ evento.google_sync_status or 'Aguardando Google' }}</span>
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="cartao cliente-campanhas" id="campanhas-cliente">
+  <div class="titulo-linha compacto">
+    <div><p class="tag">CAMPANHAS</p><h2>Campanhas deste cliente</h2><p class="texto-suave">Reenvie a mensagem ou o link individual sem precisar procurar o cliente dentro da campanha.</p></div>
+    <a class="botao pequeno" href="/organiza/campanhas">Ver todas as campanhas</a>
+  </div>
+  {% if campanha_cliente_sucesso %}<div class="alerta sucesso">Reenvio registrado no Organiza.</div>{% endif %}
+  <div class="cliente-campanhas-lista">
+  {% for item in campanhas_cliente %}
+    {% set campanha = item.campanha %}{% set dest = item.destinatario %}
+    <article class="cliente-campanha-linha">
+      <div class="cliente-campanha-info">
+        <strong>{{ campanha.nome }}</strong>
+        <small>{{ item.status_rotulo }}{% if dest.enviado_em %} · {{ dest.enviado_em.strftime('%d/%m/%Y %H:%M') }}{% endif %}</small>
+        {% if dest.link_pronto %}<span class="cliente-link-curto">{{ dest.link_pronto }}</span>{% endif %}
+      </div>
+      <div class="cliente-campanha-acoes">
+        {% if item.whatsapp_url %}<a class="botao pequeno whatsapp" href="{{ item.whatsapp_url }}" target="_blank" rel="noopener">Reenviar WhatsApp</a>{% endif %}
+        {% if dest.link_pronto %}<button class="botao pequeno" type="button" data-copy="{{ dest.link_pronto }}">Copiar link</button>{% endif %}
+        <details class="cliente-campanha-mensagem"><summary class="botao pequeno">Ver mensagem</summary><div><pre>{{ dest.mensagem_pronta or campanha.mensagem }}</pre></div></details>
+        <form method="post" action="/organiza/clientes/{{ cliente.id }}/campanhas/{{ dest.id }}/confirmar-reenvio"><button class="botao pequeno" type="submit">Confirmar reenvio</button></form>
+      </div>
+    </article>
+  {% else %}
+    <p class="texto-suave vazio">Este cliente ainda não possui campanha de atualização registrada.</p>
+  {% endfor %}
+  </div>
+</section>
+
 <section class="cartao tabela-cartao atualizacao-admin-card" id="atualizacoes">
   <div class="titulo-linha compacto">
     <div><p class="tag">ATUALIZAÇÕES</p><h2>Compras e agendamentos</h2><p class="texto-suave">O Organiza é a fonte oficial dos pacotes comprados, Gmail e reservas.</p></div>
-    <a class="botao" href="/organiza/atualizacoes">Configurar pacotes / Google</a>
   </div>
   {% if atualizacao_sucesso %}<div class="alerta sucesso">{{ atualizacao_sucesso }}</div>{% endif %}
   {% if atualizacao_erro %}<div class="alerta erro">{{ atualizacao_erro }}</div>{% endif %}
+  <div class="atualizacao-etapas-resumo">
+    <div class="etapa-item ok"><span>1</span><div><strong>Compra</strong><small>Registro pago no SolVoz ou manual no Organiza.</small></div></div>
+    <div class="etapa-item {% if atualizacoes_ctx.gmail_ok %}ok{% else %}pendente{% endif %}"><span>2</span><div><strong>Cadastro</strong><small>{{ 'Gmail pronto para envio dos arquivos.' if atualizacoes_ctx.gmail_ok else 'Atualize o cadastro / Gmail do cliente.' }}</small></div></div>
+    <div class="etapa-item"><span>3</span><div><strong>Entrega / atendimento</strong><small>Online: enviar arquivos e depois agendar AnyDesk. Loja: agendar direto, sem liberar arquivos.</small></div></div>
+  </div>
   <div class="atualizacao-manual-grid">
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/compra" class="cartao atualizacao-form-interno">
       <h3>Registrar compra manual</h3>
@@ -172,17 +290,24 @@
           {% if compra.valor_pago_centavos %}<strong>R$ {{ '%.2f'|format(compra.valor_pago_centavos/100)|replace('.', ',') }}</strong>{% endif %}
         </div>
         <p class="texto-suave">Pacotes: {{ compra.pacotes|replace('[','')|replace(']','')|replace('"','')|replace(',', ' /') }}</p>
+        <div class="atualizacao-etapas-visual">
+          <div class="etapa-chip ok">1. Compra concluída</div>
+          <div class="etapa-chip {% if atualizacoes_ctx.gmail_ok %}ok{% else %}pendente{% endif %}">2. {% if atualizacoes_ctx.gmail_ok %}Cadastro atualizado{% else %}Atualizar cadastro{% endif %}</div>
+          {% set loja_agendada = ag and ag.status == 'RESERVADO' and ag.tipo == 'LOJA' %}
+          {% set casa_agendada = ag and ag.status == 'RESERVADO' and ag.tipo == 'CASA' %}
+          <div class="etapa-chip {% if loja_agendada or (casa_agendada and compra.email_arquivos_enviado_em) %}ok{% elif compra.email_arquivos_enviado_em or casa_agendada %}andamento{% else %}pendente{% endif %}">3. {% if loja_agendada %}Loja agendada{% elif casa_agendada and compra.email_arquivos_enviado_em %}Arquivos enviados + AnyDesk agendado{% elif compra.email_arquivos_enviado_em %}Arquivos enviados · falta agendar{% elif casa_agendada %}AnyDesk agendado · confira os arquivos{% else %}Online: arquivos + agenda / Loja: agenda{% endif %}</div>
+        </div>
         <div class="atualizacao-status-grid">
           <div><small>Gmail</small><strong>{{ cliente.email or '-' }}</strong></div>
           <div><small>Arquivos</small><strong>{% if compra.email_arquivos_enviado_em %}E-mail enviado{% elif compra.arquivos_liberados_em %}Liberados{% else %}Aguardando{% endif %}</strong></div>
-          <div><small>Atendimento</small><strong>{% if ag and ag.status == 'RESERVADO' %}{{ 'Casa / AnyDesk' if ag.tipo == 'CASA' else 'Loja' }} · {{ ag.data_hora.strftime('%d/%m %H:%M') }}{% else %}Não agendado{% endif %}</strong></div>
+          <div><small>Atendimento</small><strong>{% if ag and ag.status == 'RESERVADO' %}{{ 'Atualização · Online' if ag.tipo == 'CASA' else 'Atualização · Loja' }} · {{ ag.data_hora.strftime('%d/%m %H:%M') }}{% else %}Não agendado{% endif %}</strong></div>
         </div>
         <div class="atualizacao-acoes">
           <a class="botao pequeno" target="_blank" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Abrir página do cliente</a>
-          <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Liberar arquivos / enviar e-mail{% endif %}</button></form>
+          <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Online: liberar arquivos / enviar e-mail{% endif %}</button></form>
         </div>
         <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/agendar" class="atualizacao-agendar-admin">
-          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Em casa / AnyDesk · 10:00 às 20:00</option></select></label>
+          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Online / AnyDesk · 10:00 às 20:00</option></select></label>
           <label>Dia e hora<input type="datetime-local" name="data_hora" required value="{{ ag.data_hora.strftime('%Y-%m-%dT%H:%M') if ag and ag.status == 'RESERVADO' else '' }}"></label>
           <button class="botao primario pequeno" type="submit">{% if ag and ag.status == 'RESERVADO' %}Reagendar{% else %}Reservar horário{% endif %}</button>
         </form>
@@ -196,7 +321,7 @@
   {% else %}<p class="texto-suave vazio">Nenhuma atualização comprada ainda.</p>{% endif %}
 </section>
 {% endif %}
-<section class="cartao tabela-cartao">
+<section class="cartao tabela-cartao" id="equipamentos-cliente">
   <div class="titulo-linha compacto">
     <div><h2>Equipamentos</h2><p class="texto-suave">Organizados por tipo e identificação do cliente.</p></div>
     <div class="acoes-titulo">
@@ -323,4 +448,7 @@ async function copiarChaveNfeCard(btn){
   setTimeout(function(){ btn.textContent = original; btn.classList.remove('copiado'); }, 1600);
 }
 </script>
+<style>
+.cliente-topo-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.cliente-topo-tags span{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(148,163,184,.12);color:#475569;font-size:.8rem;font-weight:700}.cliente-campanha-rapida{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.cliente-campanha-rapida h2{margin:4px 0 8px}.atualizacao-etapas-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}.etapa-item{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid #dbe3ef;border-radius:14px;background:#f8fafc}.etapa-item span{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e2e8f0;color:#0f172a;font-weight:800;flex:0 0 auto}.etapa-item.ok{border-color:#bbf7d0;background:#f0fdf4}.etapa-item.ok span{background:#22c55e;color:#fff}.etapa-item.pendente{border-color:#fde68a;background:#fffbeb}.etapa-item.pendente span{background:#f59e0b;color:#fff}.atualizacao-etapas-visual{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.etapa-chip{display:inline-flex;align-items:center;padding:7px 10px;border-radius:999px;background:#e2e8f0;color:#0f172a;font-size:.78rem;font-weight:800}.etapa-chip.ok{background:#dcfce7;color:#166534}.etapa-chip.pendente{background:#fef3c7;color:#92400e}@media(max-width:900px){.cliente-campanha-rapida,.atualizacao-etapas-resumo{grid-template-columns:1fr;display:grid}.cliente-campanha-rapida .acoes-titulo{justify-content:flex-start}}@media(max-width:760px){.cliente-topo-tags span{font-size:.74rem}.cliente-campanha-rapida{gap:12px}}
+</style>
 {% endblock %}

@@ -1,3 +1,10 @@
+HUMIAT Organiza 1.1.55
+
+- Reorganiza menu lateral por grupos.
+- Melhora a ficha do cliente com resumo rápido no topo.
+- Adiciona bloco de reenvio da campanha mais recente do cliente.
+- Reorganiza atualizações em 3 etapas visuais e melhora leitura no celular/desktop.
+
 # HUMIAT Organiza 1.1.54
 
 ## Atualizações — links padrão e base 2021.0
