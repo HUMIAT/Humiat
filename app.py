@@ -1673,7 +1673,7 @@ def iniciar_banco():
 
         eq_corrigidos, clientes_corrigidos, primeiro_pacote = _corrigir_consistencia_pacotes(db)
         if eq_corrigidos or clientes_corrigidos:
-            print(f"[PACOTES] 1.1.51: equipamentos ajustados={eq_corrigidos}; clientes sincronizados={clientes_corrigidos}; primeiro pacote={primeiro_pacote}.")
+            print(f"[PACOTES] 1.1.52: equipamentos ajustados={eq_corrigidos}; clientes sincronizados={clientes_corrigidos}; primeiro pacote={primeiro_pacote}.")
 
         vinculados_piloto = _vincular_equipe_interna_ao_cadastro_clientes(db)
         if vinculados_piloto:
@@ -2802,14 +2802,43 @@ def _sincronizar_pacote_cliente(db: Session, cliente_id: int, primeiro_pacote: s
 
 
 def _corrigir_consistencia_pacotes(db: Session) -> tuple[int, int, str]:
-    """Backfill idempotente usado na implantação e nos próximos deploys."""
+    """Backfill idempotente em lote, sem N+1 de consultas por cliente.
+
+    A rotina continua sendo executada na implantação, mas carrega clientes e
+    equipamentos com selectinload. Assim uma base grande não faz duas ou três
+    consultas adicionais para cada cliente.
+    """
     primeiro = _primeiro_pacote_disponivel(db)
+    pacote_atual = obter_pacote_atual(db)
     total_eq = 0
     total_clientes = 0
-    for (cliente_id,) in db.query(Cliente.id).all():
-        eq_alt, cli_alt = _sincronizar_pacote_cliente(db, int(cliente_id), primeiro)
-        total_eq += eq_alt
-        total_clientes += cli_alt
+    clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).all()
+    for cliente in clientes:
+        equipamentos = list(cliente.equipamentos or [])
+        if not equipamentos:
+            continue
+        for eq in equipamentos:
+            pacote = _normalizar_pacote_cadastrado(eq.pacote) or primeiro
+            if (eq.pacote or "").strip() != pacote:
+                eq.pacote = pacote
+                total_eq += 1
+            falta = calcular_falta_pacote(eq.pacote, pacote_atual)
+            if eq.falta_pacote != falta:
+                eq.falta_pacote = falta
+                total_eq += 1
+        ativos = [eq for eq in equipamentos if (eq.status or "").strip().lower() == "ativo"]
+        referencia = min(ativos or equipamentos, key=_chave_equipamento_mais_antigo)
+        pacote_cliente = _normalizar_pacote_cadastrado(referencia.pacote) or primeiro
+        alterou_cliente = False
+        if (cliente.pacote or "").strip() != pacote_cliente:
+            cliente.pacote = pacote_cliente
+            alterou_cliente = True
+        falta_cliente = calcular_falta_pacote(cliente.pacote, pacote_atual)
+        if cliente.falta_pacote != falta_cliente:
+            cliente.falta_pacote = falta_cliente
+            alterou_cliente = True
+        if alterou_cliente:
+            total_clientes += 1
     if total_eq or total_clientes:
         db.commit()
     return total_eq, total_clientes, primeiro
@@ -2978,6 +3007,49 @@ def _clientes_lista_aluguel(db: Session, mes: int | None = None, integracao: str
     if integracao in {"PLANILHA", "CONNECT"}:
         consulta = consulta.filter(func.upper(CampanhaAluguelContato.integracao) == integracao)
     return consulta.order_by(CampanhaAluguelContato.nome.asc(), CampanhaAluguelContato.id.asc()).all()
+
+
+def _filtrar_lista_atualizacao(lista: list[dict], busca: str = "", status: str = "") -> list[dict]:
+    busca_norm = re.sub(r"\D", "", busca or "")
+    busca_txt = (busca or "").strip().casefold()
+    status = (status or "").strip().upper()
+    saida = []
+    for item in lista:
+        cliente = item.get("cliente")
+        if not cliente:
+            continue
+        ativo = int(getattr(cliente, "campanhas_ativo", 1) or 0) == 1
+        if status == "ATIVO" and not ativo:
+            continue
+        if status == "INATIVO" and ativo:
+            continue
+        if busca_txt:
+            nome = (cliente.nome or "").casefold()
+            telefone = re.sub(r"\D", "", f"{cliente.ddi or ''}{cliente.telefone or ''}")
+            if busca_txt not in nome and (not busca_norm or busca_norm not in telefone):
+                continue
+        saida.append(item)
+    return saida
+
+
+def _filtrar_lista_aluguel(lista: list[CampanhaAluguelContato], busca: str = "", status: str = "") -> list[CampanhaAluguelContato]:
+    busca_norm = re.sub(r"\D", "", busca or "")
+    busca_txt = (busca or "").strip().casefold()
+    status = (status or "").strip().upper()
+    saida = []
+    for contato in lista:
+        ativo = int(getattr(contato, "campanhas_ativo", 1) or 0) == 1
+        if status == "ATIVO" and not ativo:
+            continue
+        if status == "INATIVO" and ativo:
+            continue
+        if busca_txt:
+            nome = (contato.nome or "").casefold()
+            telefone = re.sub(r"\D", "", f"{contato.ddi or ''}{contato.telefone or ''}")
+            if busca_txt not in nome and (not busca_norm or busca_norm not in telefone):
+                continue
+        saida.append(contato)
+    return saida
 
 
 def _cliente_elegivel_atualizacao(cliente: Cliente, pacote_alvo: str) -> bool:
@@ -3352,43 +3424,121 @@ def _preparar_campanha_com_lotes(db: Session, campanha: Campanha) -> int:
     return total
 
 
-def _criar_lote_nao_enviados_atualizacao(db: Session, campanha: Campanha) -> tuple[int, list[int]]:
-    """Cria lote(s) complementar(es) de atualização com quem ainda não foi enviado."""
-    if not campanha or (campanha.lista_tipo or "").upper() != "ATUALIZACAO":
+def _quantidade_nao_enviados_campanha(db: Session, campanha: Campanha) -> int:
+    """Conta, apenas com dados locais, quem ainda pode formar lote complementar."""
+    if not campanha:
+        return 0
+    lista_tipo = (campanha.lista_tipo or "ATUALIZACAO").upper()
+    if lista_tipo == "ALUGUEL":
+        pessoas = [c for c in _clientes_lista_aluguel(db, mes=campanha.aluguel_mes) if _contato_elegivel_aluguel(c)]
+        modelo = CampanhaAluguelDestinatario
+        pessoa_id_attr = "contato_id"
+    else:
+        pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+        pessoas = [
+            item["cliente"] for item in _clientes_lista_atualizacao(db, pacote_alvo)
+            if int(item["cliente"].campanhas_ativo or 0) == 1
+        ]
+        modelo = CampanhaDestinatario
+        pessoa_id_attr = "cliente_id"
+    destinos = db.query(modelo).filter(modelo.campanha_id == campanha.id).all()
+    por_pessoa = {int(getattr(dest, pessoa_id_attr)): dest for dest in destinos}
+    lotes_abertos = {
+        int(l.numero) for l in db.query(CampanhaLote).filter(
+            CampanhaLote.campanha_id == campanha.id,
+            CampanhaLote.concluido_em.is_(None),
+        ).all()
+    }
+    total = 0
+    for pessoa in pessoas:
+        dest = por_pessoa.get(int(pessoa.id))
+        if not dest:
+            total += 1
+            continue
+        status = (dest.status or "").upper()
+        if status in CAMPANHA_ENVIO_CONFIRMADO or status in {"EM_ENVIO", "IGNORADO"}:
+            continue
+        # Se já está PENDENTE em um lote aberto, ele já possui caminho de envio
+        # e não deve ser movido repetidamente para novos lotes complementares.
+        if status == "PENDENTE" and int(dest.lote_numero or 0) in lotes_abertos:
+            continue
+        total += 1
+    return total
+
+
+def _criar_lote_nao_enviados(db: Session, campanha: Campanha) -> tuple[int, list[int]]:
+    """Cria lote(s) complementar(es) com elegíveis ainda não enviados.
+
+    É uma regra geral de campanhas. Atualização e Aluguel reaproveitam a mesma
+    estrutura de destinatários/lotes; somente a origem da lista muda.
+    """
+    if not campanha:
         return 0, []
-    _corrigir_consistencia_pacotes(db)
-    pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
-    promo_snapshot = _solvoz_atualizacao_promocao_config()
-    pacotes_disponiveis = [str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()]
-    elegiveis = [item["cliente"] for item in _clientes_lista_atualizacao(db, pacote_alvo, pacotes_disponiveis) if int(item["cliente"].campanhas_ativo or 0) == 1]
-    destinos = db.query(CampanhaDestinatario).filter(CampanhaDestinatario.campanha_id == campanha.id).all()
-    por_cliente = {int(dest.cliente_id): dest for dest in destinos}
-    candidatos: list[CampanhaDestinatario] = []
-    for cliente in elegiveis:
-        dest = por_cliente.get(int(cliente.id))
+
+    lista_tipo = (campanha.lista_tipo or "ATUALIZACAO").upper()
+    promo_snapshot = None
+    pacotes_disponiveis = None
+    if lista_tipo == "ALUGUEL":
+        pessoas = [
+            c for c in _clientes_lista_aluguel(db, mes=campanha.aluguel_mes)
+            if _contato_elegivel_aluguel(c)
+        ]
+        modelo = CampanhaAluguelDestinatario
+        pessoa_id_attr = "contato_id"
+    else:
+        pacote_alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+        promo_snapshot = _solvoz_atualizacao_promocao_config()
+        pacotes_disponiveis = [
+            str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()
+        ]
+        pessoas = [
+            item["cliente"] for item in _clientes_lista_atualizacao(db, pacote_alvo, pacotes_disponiveis)
+            if int(item["cliente"].campanhas_ativo or 0) == 1
+        ]
+        modelo = CampanhaDestinatario
+        pessoa_id_attr = "cliente_id"
+
+    destinos = db.query(modelo).filter(modelo.campanha_id == campanha.id).all()
+    por_pessoa = {int(getattr(dest, pessoa_id_attr)): dest for dest in destinos}
+    lotes_abertos = {
+        int(l.numero) for l in db.query(CampanhaLote).filter(
+            CampanhaLote.campanha_id == campanha.id,
+            CampanhaLote.concluido_em.is_(None),
+        ).all()
+    }
+    candidatos = []
+    for pessoa in pessoas:
+        dest = por_pessoa.get(int(pessoa.id))
         status_atual = (dest.status or "").upper() if dest else ""
         if dest and status_atual in CAMPANHA_ENVIO_CONFIRMADO:
             continue
-        if dest and status_atual == "EM_ENVIO":
+        if dest and status_atual in {"EM_ENVIO", "IGNORADO"}:
+            continue
+        if dest and status_atual == "PENDENTE" and int(dest.lote_numero or 0) in lotes_abertos:
             continue
         if not dest:
-            dest = CampanhaDestinatario(campanha_id=campanha.id, cliente_id=cliente.id, status="PENDENTE")
+            kwargs = {"campanha_id": campanha.id, pessoa_id_attr: pessoa.id, "status": "PENDENTE"}
+            dest = modelo(**kwargs)
             db.add(dest)
-            db.flush()
-            por_cliente[int(cliente.id)] = dest
+            por_pessoa[int(pessoa.id)] = dest
         else:
             dest.status = "PENDENTE"
             dest.reservado_por_id = None
             dest.reservado_em = None
             dest.enviado_por_id = None
             dest.enviado_em = None
-        _preparar_snapshot_destinatario(campanha, dest, cliente, promo_snapshot=promo_snapshot, pacotes_disponiveis=pacotes_disponiveis)
+        _preparar_snapshot_destinatario(
+            campanha, dest, pessoa,
+            promo_snapshot=promo_snapshot, pacotes_disponiveis=pacotes_disponiveis,
+        )
         candidatos.append(dest)
+
     if not candidatos:
         db.commit()
         return 0, []
+
     max_lote = int(db.query(func.max(CampanhaLote.numero)).filter(CampanhaLote.campanha_id == campanha.id).scalar() or 0)
-    numeros: list[int] = []
+    numeros = []
     for idx, dest in enumerate(candidatos):
         numero = max_lote + 1 + (idx // CAMPANHA_LOTE_TAMANHO)
         dest.lote_numero = numero
@@ -3397,7 +3547,9 @@ def _criar_lote_nao_enviados_atualizacao(db: Session, campanha: Campanha) -> tup
     db.flush()
     _garantir_lotes_campanha(db, campanha)
     for numero in numeros:
-        lote = db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == numero).first()
+        lote = db.query(CampanhaLote).filter(
+            CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == numero
+        ).first()
         if lote:
             lote.reservado_por_id = None
             lote.reservado_em = None
@@ -3414,9 +3566,7 @@ def campanha_criar_lote_nao_enviados(campanha_id: int, usuario: Usuario = Depend
     campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
     if not campanha:
         raise HTTPException(404)
-    if (campanha.lista_tipo or "").upper() != "ATUALIZACAO":
-        return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao=indisponivel", status_code=303)
-    total, numeros = _criar_lote_nao_enviados_atualizacao(db, campanha)
+    total, numeros = _criar_lote_nao_enviados(db, campanha)
     if not total:
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao=nenhum", status_code=303)
     lotes_txt = ",".join(str(n) for n in numeros)
@@ -3651,33 +3801,58 @@ def campanhas_lista(request: Request, usuario: Usuario = Depends(usuario_logado)
 
 
 @app.get("/organiza/campanhas/lista-atualizacao", response_class=HTMLResponse)
-def campanha_lista_atualizacao(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def campanha_lista_atualizacao(
+    request: Request, q: str = "", status: str = "",
+    usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db),
+):
     pacote_atual = obter_pacote_atual(db)
-    lista = _clientes_lista_atualizacao(db, pacote_atual)
+    lista_total = _clientes_lista_atualizacao(db, pacote_atual)
+    status = (status or "").strip().upper()
+    if status not in {"ATIVO", "INATIVO"}:
+        status = ""
+    lista = _filtrar_lista_atualizacao(lista_total, q, status)
     return templates.TemplateResponse("organiza/lista_atualizacao.html", {
         "request": request, "usuario": usuario, "lista": lista,
         "pacote_atual": pacote_atual,
         "ativos": sum(1 for item in lista if int(item["cliente"].campanhas_ativo or 0) == 1),
+        "total_geral": len(lista_total), "q_filtro": (q or "").strip(), "status_filtro": status,
     })
 
 
 @app.post("/organiza/campanhas/lista-atualizacao/{cliente_id}/alternar")
-def campanha_lista_atualizacao_alternar(cliente_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def campanha_lista_atualizacao_alternar(
+    cliente_id: int, q: str = Form(""), status: str = Form(""),
+    usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db),
+):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(404)
     cliente.campanhas_ativo = 0 if int(cliente.campanhas_ativo or 0) == 1 else 1
     db.commit()
-    return RedirectResponse("/organiza/campanhas/lista-atualizacao", status_code=303)
+    params = []
+    if (q or "").strip():
+        params.append("q=" + quote_plus((q or "").strip()))
+    status = (status or "").strip().upper()
+    if status in {"ATIVO", "INATIVO"}:
+        params.append("status=" + status)
+    sufixo = ("?" + "&".join(params)) if params else ""
+    return RedirectResponse("/organiza/campanhas/lista-atualizacao" + sufixo, status_code=303)
 
 
 @app.get("/organiza/campanhas/lista-aluguel", response_class=HTMLResponse)
-def campanha_lista_aluguel(request: Request, mes: int = 0, integracao: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def campanha_lista_aluguel(
+    request: Request, mes: int = 0, integracao: str = "", q: str = "", status: str = "",
+    usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db),
+):
     mes = mes if 1 <= int(mes or 0) <= 12 else 0
     integracao = (integracao or "").strip().upper()
     if integracao not in {"PLANILHA", "CONNECT"}:
         integracao = ""
-    lista = _clientes_lista_aluguel(db, mes=mes or None, integracao=integracao)
+    status = (status or "").strip().upper()
+    if status not in {"ATIVO", "INATIVO"}:
+        status = ""
+    lista_total = _clientes_lista_aluguel(db, mes=mes or None, integracao=integracao)
+    lista = _filtrar_lista_aluguel(lista_total, q, status)
     return templates.TemplateResponse("organiza/lista_aluguel.html", {
         "request": request, "usuario": usuario, "lista": lista,
         "ativos": sum(1 for contato in lista if int(contato.campanhas_ativo or 0) == 1),
@@ -3690,6 +3865,7 @@ def campanha_lista_aluguel(request: Request, mes: int = 0, integracao: str = "",
         "connect_ignorados": request.query_params.get("connect_ignorados", ""),
         "connect_erro": request.query_params.get("connect_erro", ""),
         "mes_filtro": mes, "integracao_filtro": integracao, "meses_aluguel": MESES_ALUGUEL,
+        "q_filtro": (q or "").strip(), "status_filtro": status, "total_geral": len(lista_total),
     })
 
 
@@ -3943,13 +4119,29 @@ def campanha_lista_aluguel_atualizar_connect(
 
 
 @app.post("/organiza/campanhas/lista-aluguel/{contato_id}/alternar")
-def campanha_lista_aluguel_alternar(contato_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def campanha_lista_aluguel_alternar(
+    contato_id: int, mes: int = Form(0), integracao: str = Form(""), q: str = Form(""), status: str = Form(""),
+    usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db),
+):
     contato = db.query(CampanhaAluguelContato).filter(CampanhaAluguelContato.id == contato_id).first()
     if not contato:
         raise HTTPException(404)
     contato.campanhas_ativo = 0 if int(contato.campanhas_ativo or 0) == 1 else 1
     db.commit()
-    return RedirectResponse("/organiza/campanhas/lista-aluguel", status_code=303)
+    params = []
+    mes = int(mes or 0) if str(mes or "0").isdigit() else 0
+    if 1 <= mes <= 12:
+        params.append(f"mes={mes}")
+    integracao = (integracao or "").strip().upper()
+    if integracao in {"PLANILHA", "CONNECT"}:
+        params.append("integracao=" + integracao)
+    if (q or "").strip():
+        params.append("q=" + quote_plus((q or "").strip()))
+    status = (status or "").strip().upper()
+    if status in {"ATIVO", "INATIVO"}:
+        params.append("status=" + status)
+    sufixo = ("?" + "&".join(params)) if params else ""
+    return RedirectResponse("/organiza/campanhas/lista-aluguel" + sufixo, status_code=303)
 
 
 @app.get("/organiza/campanhas/nova", response_class=HTMLResponse)
@@ -4168,6 +4360,7 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
     contagens = _contagens_campanha(db, campanha.id)
     total_previsto = contagens["total"]
     lotes = _resumo_lotes_campanha(db, campanha) if total_previsto else []
+    nao_enviados_disponiveis = _quantidade_nao_enviados_campanha(db, campanha) if campanha.status != "RASCUNHO" else 0
     return templates.TemplateResponse("organiza/campanha_detalhe.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
         "rotulo_lista": _rotulo_lista_campanha(campanha),
@@ -4175,6 +4368,7 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
         "total_previsto": total_previsto, "meses_aluguel": MESES_ALUGUEL,
         "lotes": lotes,
         "tamanho_lote": CAMPANHA_LOTE_TAMANHO,
+        "nao_enviados_disponiveis": nao_enviados_disponiveis,
         "erro": request.query_params.get("erro", ""),
         "recuperacao": request.query_params.get("recuperacao", ""),
         "lotes_recuperacao": request.query_params.get("lotes_recuperacao", ""),

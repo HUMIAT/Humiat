@@ -36,18 +36,18 @@
     {% endif %}
   </section>
 
-  {% if campanha.lista_tipo == 'ATUALIZACAO' and campanha.status != 'RASCUNHO' %}
+  {% if campanha.status != 'RASCUNHO' and nao_enviados_disponiveis %}
   <section class="cartao campanha-resumo-card">
     <div class="campanha-resumo-topo">
       <div>
         <small>Conferência de envio</small>
-        <strong>Lote de não enviados</strong>
+        <strong>{{ nao_enviados_disponiveis }} não enviado(s)</strong>
       </div>
-      <form method="post" action="/organiza/campanhas/{{ campanha.id }}/lote-nao-enviados" onsubmit="return confirm('Criar um lote complementar apenas com clientes elegíveis que ainda não foram enviados/processados?')">
+      <form method="post" action="/organiza/campanhas/{{ campanha.id }}/lote-nao-enviados" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='Criando lote...'; return true;">
         <button class="botao primario" type="submit">Criar lote de não enviados</button>
       </form>
     </div>
-    <p class="texto-suave">Reaproveita a rotina de lotes da campanha. Inclui clientes que ficaram fora da campanha por inconsistência de pacote e também pendentes não processados, sem duplicar quem já consta como enviado/processado.</p>
+    <p class="texto-suave">Disponível em qualquer campanha. Reconfere a lista desta campanha e cria apenas lote(s) complementar(es) com contatos ainda não enviados/processados, sem duplicar quem já foi confirmado.</p>
   </section>
   {% endif %}
 

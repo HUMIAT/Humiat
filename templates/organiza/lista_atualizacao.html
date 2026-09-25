@@ -12,8 +12,24 @@
 
   <div class="grade-metricas clean-metricas duas">
     <article class="cartao metrica"><span>✓</span><div><small>Ativos para campanhas</small><strong>{{ ativos }}</strong></div></article>
-    <article class="cartao metrica"><span>↻</span><div><small>Na lista de atualização</small><strong>{{ lista|length }}</strong></div></article>
+    <article class="cartao metrica"><span>↻</span><div><small>Exibidos no filtro</small><strong>{{ lista|length }} / {{ total_geral }}</strong></div></article>
   </div>
+
+
+  <form method="get" action="/organiza/campanhas/lista-atualizacao" class="cartao campanha-importacao-form campanha-filtros-clientes">
+    <div>
+      <strong>Filtrar clientes</strong>
+      <p class="texto-suave">Busque por nome ou telefone e mostre somente ativos ou inativos.</p>
+    </div>
+    <input type="search" name="q" value="{{ q_filtro }}" placeholder="Nome ou telefone">
+    <select name="status">
+      <option value="">Todos os status</option>
+      <option value="ATIVO" {% if status_filtro == 'ATIVO' %}selected{% endif %}>Ativos</option>
+      <option value="INATIVO" {% if status_filtro == 'INATIVO' %}selected{% endif %}>Inativos</option>
+    </select>
+    <button class="botao" type="submit">Filtrar</button>
+    {% if q_filtro or status_filtro %}<a class="botao fantasma" href="/organiza/campanhas/lista-atualizacao">Limpar</a>{% endif %}
+  </form>
 
   <section class="cartao tabela-cartao campanha-clientes">
     {% for item in lista %}
@@ -29,6 +45,8 @@
           </small>
         </div>
         <form method="post" action="/organiza/campanhas/lista-atualizacao/{{ cliente.id }}/alternar">
+          <input type="hidden" name="q" value="{{ q_filtro }}">
+          <input type="hidden" name="status" value="{{ status_filtro }}">
           {% if cliente.campanhas_ativo %}
             <button class="botao pequeno fantasma" type="submit">Inativar campanha</button>
           {% else %}
