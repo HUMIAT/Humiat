@@ -1,12 +1,42 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ cliente.nome }}</h1><p class="texto-suave">+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p></div><div class="acoes-titulo"><a class="botao" href="/organiza/clientes">Voltar</a><a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a><a class="botao" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Manutenção</a><a class="botao" href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">+ Venda</a><a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nEsse procedimento é importante para emissão de documentos, garantia e futuros atendimentos.\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a></div></div>
+<section class="pagina-clean"><div class="titulo-linha"><div><p class="tag">Cliente{% if somente_consulta %} · somente consulta{% endif %}</p><h1>{{ cliente.nome }}</h1><p class="texto-suave">+{{ cliente.ddi }} {{ cliente.telefone_formatado() }}{% if cliente.empresa %} · {{ cliente.empresa }}{% endif %}</p></div><div class="acoes-titulo">{% if somente_consulta %}<span class="pill consulta-somente">Somente consulta</span><a class="botao" href="{{ retorno_consulta }}">Voltar para vendas</a>{% else %}<a class="botao" href="/organiza/clientes">Voltar</a><a class="botao" href="/organiza/clientes/{{ cliente.id }}/editar">Editar</a><a class="botao" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Manutenção</a><a class="botao" href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">+ Venda</a><a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\n📋 *Atualização de cadastro*\n\nPara prosseguirmos com o seu atendimento e mantermos seu cadastro atualizado, pedimos que revise e confirme seus dados no link abaixo:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nEsse procedimento é importante para emissão de documentos, garantia e futuros atendimentos.\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a><a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Equipamento</a>{% endif %}</div></div>
 {% if humiat_sucesso %}<div class="alerta sucesso">{{ humiat_sucesso }}</div>{% endif %}
 {% if humiat_erro %}<div class="alerta erro">{{ humiat_erro }}</div>{% endif %}
 {% if solvoz_sucesso %}<div class="alerta sucesso">{{ solvoz_sucesso }}</div>{% endif %}
 {% if solvoz_erro %}<div class="alerta erro">{{ solvoz_erro }}</div>{% endif %}
 {% if cnpj_sucesso %}<div class="alerta sucesso">{{ cnpj_sucesso }}</div>{% endif %}
 {% if cnpj_erro %}<div class="alerta erro">{{ cnpj_erro }}</div>{% endif %}
+{% if somente_consulta and manual_sucesso %}<div class="alerta sucesso">Envio manual registrado. Este cliente agora consta como enviado nesta campanha.</div>{% endif %}
+{% if somente_consulta and campanha_manual %}
+<article class="cartao consulta-campanha-card">
+  <div class="consulta-campanha-topo">
+    <div><p class="tag">Campanha de atualização</p><h2>{{ campanha_manual.nome }}</h2><p class="texto-suave">Pacote alvo: {{ campanha_manual.pacote_alvo or '-' }}</p></div>
+    <span class="pill {% if destinatario_manual and destinatario_manual.status in ['PROCESSADO','ENVIADO'] %}consulta-envio-ok{% else %}consulta-envio-pendente{% endif %}">{{ campanha_status_rotulo }}</span>
+  </div>
+  {% if destinatario_manual %}
+    <div class="consulta-campanha-grid">
+      <div><small>Mensagem preparada</small><pre>{{ destinatario_manual.mensagem_pronta or campanha_manual.mensagem }}</pre></div>
+      <div>
+        <small>Link deste cliente</small>
+        {% if destinatario_manual.link_pronto %}<a href="{{ destinatario_manual.link_pronto }}" target="_blank" rel="noopener">{{ destinatario_manual.link_pronto }}</a>{% else %}<span class="texto-suave">Sem link preparado.</span>{% endif %}
+        {% if destinatario_manual.enviado_em %}<p class="texto-suave">Último registro de envio: {{ destinatario_manual.enviado_em.strftime('%d/%m/%Y %H:%M') }}</p>{% endif %}
+      </div>
+    </div>
+    <div class="consulta-campanha-acoes">
+      <a class="botao whatsapp primario" href="{{ whatsapp_campanha_manual }}" target="_blank" rel="noopener">{% if destinatario_manual.status in ['PROCESSADO','ENVIADO'] %}Reabrir WhatsApp para reenviar{% else %}Abrir WhatsApp para enviar{% endif %}</a>
+      <form method="post" action="/organiza/campanhas/{{ campanha_manual.id }}/destinatarios/{{ destinatario_manual.id }}/manual-enviado">
+        <input type="hidden" name="venda_id" value="{{ venda_consulta.id if venda_consulta else 0 }}">
+        <input type="hidden" name="retorno" value="{{ retorno_consulta }}">
+        <button class="botao" type="submit">{% if destinatario_manual.status in ['PROCESSADO','ENVIADO'] %}Confirmar reenvio manual{% else %}Confirmar que enviei{% endif %}</button>
+      </form>
+    </div>
+    <p class="texto-suave consulta-campanha-nota">Abrir o WhatsApp não altera o status automaticamente. Depois de realmente enviar a mensagem, confirme o envio manual acima.</p>
+  {% else %}
+    <div class="alerta info">Este cliente não fazia parte desta campanha. O Organiza não possui mensagem congelada para envio manual nesta campanha.</div>
+  {% endif %}
+</article>
+{% endif %}
 <div class="grade-ficha clean-ficha">
   <article class="cartao">
     <p class="tag">Dados do cliente</p>
@@ -23,7 +53,7 @@
       <dt>Bairro</dt><dd>{{ cliente.bairro or '-' }}</dd>
       <dt>Endereço de entrega</dt><dd>{% if cliente.entrega_igual_cliente != 0 %}Igual ao endereço do cliente{% else %}{{ cliente.entrega_endereco or '-' }}{% if cliente.entrega_numero %}, {{ cliente.entrega_numero }}{% endif %}{% if cliente.entrega_complemento %} - {{ cliente.entrega_complemento }}{% endif %} · {{ cliente.entrega_municipio or '-' }}/{{ cliente.entrega_estado or '-' }}{% endif %}</dd>
     </dl>
-    {% if cliente.documento and cliente.documento|replace('.','')|replace('/','')|replace('-','')|length >= 14 %}
+    {% if not somente_consulta and cliente.documento and cliente.documento|replace('.','')|replace('/','')|replace('-','')|length >= 14 %}
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizar-cnpj" style="margin-top:14px">
       <button class="botao pequeno" type="submit">Atualizar cadastro pelo CNPJ</button>
       <small class="texto-suave" style="display:block;margin-top:6px">Consulta Razão Social, endereço, IE e situação cadastral disponível.</small>
@@ -47,7 +77,7 @@
       {% endif %}
       {% if cliente.atualizacao_oferta_atualizado_em %}<span class="texto-suave" style="display:block;margin-top:4px">Atualizado em {{ cliente.atualizacao_oferta_atualizado_em.strftime('%d/%m/%Y %H:%M') }}</span>{% endif %}
     </article>
-    <article class="cartao solvoz-acesso-card humiat-acesso-card">
+    {% if not somente_consulta %}<article class="cartao solvoz-acesso-card humiat-acesso-card">
       <div class="solvoz-acesso-topo">
         <div>
           <p class="tag">Humiat ID</p>
@@ -99,13 +129,16 @@
       </form>
       {% endif %}
       {% endif %}
-    </article>
+    </article>{% endif %}
   </div>
 </div>
 <section class="cartao tabela-cartao">
   <div class="titulo-linha compacto">
     <div><h2>Equipamentos</h2><p class="texto-suave">Organizados por tipo e identificação do cliente.</p></div>
     <div class="acoes-titulo">
+      {% if somente_consulta %}
+        <span class="texto-suave">Visualização sem edição</span>
+      {% else %}
       <form method="get" class="filtros-equipamentos">
         <select name="status_equipamento" onchange="this.form.submit()">
           <option value="Ativo" {% if status_filtro=='Ativo' %}selected{% endif %}>Ativos</option>
@@ -118,11 +151,12 @@
         </select>
       </form>
       <a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Adicionar</a>
+      {% endif %}
     </div>
   </div>
   <div class="equip-grid">
     {% for eq in equipamentos %}
-    <article class="equip-card">
+    <article class="equip-card {% if venda_consulta and venda_consulta.id == eq.id %}equip-card-consulta-destaque{% endif %}">
       <div class="equip-head">
         <div>
           <span class="pill">{{ eq.status }}</span>
@@ -130,7 +164,7 @@
           <p>{{ eq.tipo or 'Equipamento' }}{% if eq.modelo %} · {{ eq.modelo }}{% endif %}</p>
           <small>Código técnico: <strong>{{ eq|codigo_tecnico }}</strong></small>
         </div>
-        <a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a>
+        {% if not somente_consulta %}<a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a>{% endif %}
       </div>
       <dl>
         <dt>Identificação</dt><dd><strong>{{ eq|rotulo_maquina }}</strong></dd>
@@ -171,7 +205,7 @@
       <div class="acoes-documentos">
         <a class="botao pequeno" target="_blank" href="/organiza/equipamentos/{{ eq.id }}/garantia.pdf">Contrato de garantia</a>
         <a class="botao pequeno" target="_blank" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/recibo">Recibo</a>
-        <a class="botao pequeno" href="/organiza/equipamentos/{{ eq.id }}/nfae">Emitir NFA-e</a>
+        {% if not somente_consulta %}<a class="botao pequeno" href="/organiza/equipamentos/{{ eq.id }}/nfae">Emitir NFA-e</a>{% endif %}
         <a class="botao pequeno" target="_blank" rel="noopener" href="{{ NFE_CONSULTA_URL }}">Consultar NF-e</a>
         <button class="botao pequeno copiar-chave-nfe" type="button" data-chave="{{ eq.chave_acesso_nfe or '' }}" onclick="copiarChaveNfeCard(this)" {% if not eq.chave_acesso_nfe %}disabled title="Cadastre a chave de acesso na tela da NFA-e"{% endif %}>Copiar chave</button>
       </div>
@@ -181,7 +215,10 @@
     <p class="texto-suave vazio">Nenhum equipamento cadastrado.</p>
     {% endfor %}
   </div>
-</section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div><a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a></div><div class="lista-cards-mobile">{% for m in manutencoes %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
+</section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div>{% if not somente_consulta %}<a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a>{% endif %}</div><div class="lista-cards-mobile">{% for m in manutencoes %}{% if somente_consulta %}<div class="cliente-card-clean"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></div>{% else %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% endif %}{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
+<style>
+.consulta-somente{background:#eef2ff;color:#3730a3}.consulta-campanha-card{margin:14px 0;padding:16px}.consulta-campanha-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.consulta-campanha-topo h2{margin:2px 0 4px}.consulta-envio-ok{background:#e8f7ee;color:#166534}.consulta-envio-pendente{background:#fff2df;color:#9a4d00}.consulta-campanha-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.8fr);gap:16px;margin-top:14px}.consulta-campanha-grid>div{display:grid;align-content:start;gap:7px}.consulta-campanha-grid small{font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.consulta-campanha-grid pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.45;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px}.consulta-campanha-grid a{word-break:break-word}.consulta-campanha-acoes{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}.consulta-campanha-acoes form{margin:0}.consulta-campanha-nota{margin:10px 0 0}.equip-card-consulta-destaque{outline:2px solid #2563eb;outline-offset:2px}@media(max-width:760px){.consulta-campanha-topo,.consulta-campanha-acoes{align-items:stretch;flex-direction:column}.consulta-campanha-grid{grid-template-columns:1fr}.consulta-campanha-acoes .botao,.consulta-campanha-acoes form,.consulta-campanha-acoes form .botao{width:100%;text-align:center}}
+</style>
 <script>
 async function copiarChaveNfeCard(btn){
   const chave = ((btn && btn.dataset && btn.dataset.chave) || '').replace(/\D/g, '');

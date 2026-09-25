@@ -2286,7 +2286,12 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
         db.commit()
+    somente_consulta = (request.query_params.get("consulta") or "").strip() == "1"
     status_filtro = (request.query_params.get("status_equipamento") or "Ativo").strip()
+    if somente_consulta and (request.query_params.get("venda_id") or "").strip():
+        # Ao consultar a partir de Vendas, a venda selecionada precisa aparecer
+        # mesmo que o status dela seja Montagem, Entregue etc.
+        status_filtro = "Todos"
     tipo_filtro = tipo_equipamento_padrao(request.query_params.get("tipo_equipamento") or "")
     equipamentos = list(cliente.equipamentos)
     if status_filtro != "Todos":
@@ -2295,6 +2300,44 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         equipamentos = [eq for eq in equipamentos if tipo_equipamento_padrao(eq.tipo or "") == tipo_filtro]
     equipamentos = ordenar_equipamentos(equipamentos)
     manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).all()
+
+    venda_consulta = None
+    campanha_manual = None
+    destinatario_manual = None
+    whatsapp_campanha_manual = ""
+    campanha_status_rotulo = ""
+    try:
+        venda_id_consulta = int(request.query_params.get("venda_id") or 0)
+    except (TypeError, ValueError):
+        venda_id_consulta = 0
+    if venda_id_consulta:
+        venda_consulta = next((eq for eq in cliente.equipamentos if int(eq.id) == venda_id_consulta), None)
+    try:
+        campanha_id_manual = int(request.query_params.get("campanha_id") or 0)
+    except (TypeError, ValueError):
+        campanha_id_manual = 0
+    if somente_consulta and campanha_id_manual:
+        campanha_manual = db.query(Campanha).filter(
+            Campanha.id == campanha_id_manual,
+            func.upper(Campanha.lista_tipo) == "ATUALIZACAO",
+        ).first()
+        if campanha_manual:
+            destinatario_manual = db.query(CampanhaDestinatario).filter(
+                CampanhaDestinatario.campanha_id == campanha_manual.id,
+                CampanhaDestinatario.cliente_id == cliente.id,
+            ).first()
+            if destinatario_manual:
+                whatsapp_campanha_manual = _whatsapp_url_pronta(
+                    destinatario_manual.telefone_pronto or cliente.whatsapp_completo() or "",
+                    destinatario_manual.mensagem_pronta or "",
+                )
+                campanha_status_rotulo = _rotulo_status_envio_campanha(destinatario_manual.status, True)
+            else:
+                campanha_status_rotulo = _rotulo_status_envio_campanha(None, False)
+    retorno_consulta = (request.query_params.get("retorno") or "/organiza/vendas").strip()
+    if not retorno_consulta.startswith("/organiza/vendas"):
+        retorno_consulta = "/organiza/vendas"
+
     return templates.TemplateResponse("organiza/cliente_detalhe.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
         "equipamentos": equipamentos, "status_filtro": status_filtro, "tipo_filtro": tipo_filtro,
@@ -2306,6 +2349,14 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "humiat_erro": request.query_params.get("humiat_erro", ""),
         "cnpj_sucesso": request.query_params.get("cnpj_sucesso", ""),
         "cnpj_erro": request.query_params.get("cnpj_erro", ""),
+        "somente_consulta": somente_consulta,
+        "venda_consulta": venda_consulta,
+        "campanha_manual": campanha_manual,
+        "destinatario_manual": destinatario_manual,
+        "whatsapp_campanha_manual": whatsapp_campanha_manual,
+        "campanha_status_rotulo": campanha_status_rotulo,
+        "retorno_consulta": retorno_consulta,
+        "manual_sucesso": request.query_params.get("manual_sucesso", ""),
     })
 
 
@@ -4039,6 +4090,66 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
     return Response(status_code=204)
 
 
+@app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/manual-enviado")
+async def campanha_manual_marcar_enviado(
+    campanha_id: int,
+    destinatario_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Confirma um envio/reenvio feito manualmente a partir da consulta em Vendas."""
+    campanha = db.query(Campanha).filter(
+        Campanha.id == campanha_id,
+        func.upper(Campanha.lista_tipo) == "ATUALIZACAO",
+    ).first()
+    if not campanha:
+        raise HTTPException(404)
+    destinatario = db.query(CampanhaDestinatario).options(
+        selectinload(CampanhaDestinatario.cliente)
+    ).filter(
+        CampanhaDestinatario.id == destinatario_id,
+        CampanhaDestinatario.campanha_id == campanha_id,
+    ).first()
+    if not destinatario or not destinatario.cliente:
+        raise HTTPException(404)
+
+    destinatario.status = "ENVIADO"
+    destinatario.enviado_por_id = usuario.id
+    destinatario.enviado_em = datetime.now()
+    destinatario.reservado_por_id = None
+    destinatario.reservado_em = None
+
+    cliente = destinatario.cliente
+    cliente.atualizacao_oferta_status = "OFERTA_ENVIADA"
+    cliente.atualizacao_oferta_periodo = None
+    try:
+        pacotes = json.loads(destinatario.pacotes_prontos or "[]")
+    except Exception:
+        pacotes = []
+    if pacotes:
+        cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
+        cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+    cliente.atualizacao_oferta_valor_normal_centavos = destinatario.valor_normal_centavos
+    cliente.atualizacao_oferta_valor_promocional_centavos = destinatario.valor_promocional_centavos
+    cliente.atualizacao_oferta_atualizado_em = datetime.now()
+
+    lote_numero = int(destinatario.lote_numero or 0)
+    db.commit()
+    _fechar_lote_se_concluido(db, campanha, lote_numero)
+
+    form = dict(await request.form())
+    venda_id = int(form.get("venda_id") or 0)
+    retorno = (form.get("retorno") or "/organiza/vendas").strip()
+    if not retorno.startswith("/organiza/vendas"):
+        retorno = "/organiza/vendas"
+    consulta_url = (
+        f"/organiza/clientes/{cliente.id}?consulta=1&venda_id={venda_id}"
+        f"&campanha_id={campanha.id}&manual_sucesso=1&retorno={quote_plus(retorno)}"
+    )
+    return RedirectResponse(consulta_url, status_code=303)
+
+
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular-rapido")
 def campanha_pular_rapido(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
@@ -5566,6 +5677,32 @@ def _migrar_pagamentos_legados_vendas(db: Session, equipamentos: list[Equipament
 
 
 
+CAMPANHA_ENVIO_CONFIRMADO = {"PROCESSADO", "ENVIADO"}
+
+
+def _campanhas_atualizacao_para_vendas(db: Session) -> list[Campanha]:
+    """Campanhas de atualização disponíveis para conferência na tela de Vendas."""
+    return (
+        db.query(Campanha)
+        .filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO")
+        .order_by(Campanha.criado_em.desc(), Campanha.id.desc())
+        .all()
+    )
+
+
+def _rotulo_status_envio_campanha(status: str | None, tem_destinatario: bool = True) -> str:
+    if not tem_destinatario:
+        return "Fora da campanha"
+    status = (status or "PENDENTE").upper()
+    if status in CAMPANHA_ENVIO_CONFIRMADO:
+        return "Enviado pelo fluxo"
+    if status == "IGNORADO":
+        return "Pulado / não enviado"
+    if status == "EM_ENVIO":
+        return "Em envio / não confirmado"
+    return "Pendente / não enviado"
+
+
 def _vendas_filtradas(request: Request, db: Session) -> dict:
     """Carrega as vendas e aplica exatamente os mesmos cálculos e filtros da tela e do relatório."""
     equipamentos = (
@@ -5582,6 +5719,19 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
     )
     equipamentos = [eq for eq in equipamentos if equipamento_eh_venda(eq)]
     status_opcoes = sorted({eq.status for eq in equipamentos if eq.status})
+    campanhas_atualizacao = _campanhas_atualizacao_para_vendas(db)
+    campanha_id = 0
+    try:
+        campanha_id = int(request.query_params.get("campanha_id") or 0)
+    except (TypeError, ValueError):
+        campanha_id = 0
+    campanha_selecionada = next((c for c in campanhas_atualizacao if int(c.id) == campanha_id), None)
+    if not campanha_selecionada and campanhas_atualizacao:
+        campanha_selecionada = campanhas_atualizacao[0]
+        campanha_id = int(campanha_selecionada.id)
+    campanha_envio = (request.query_params.get("campanha_envio") or "todos").strip().lower()
+    if campanha_envio not in {"todos", "nao_enviado", "enviado", "fora"}:
+        campanha_envio = "todos"
 
     # Sincroniza automaticamente vendas antigas ou recém-cadastradas em que o
     # valor recebido ainda existe apenas no campo legado `pago`.
@@ -5641,6 +5791,34 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         status_selecionados = set(status_filtros)
         equipamentos = [eq for eq in equipamentos if (eq.status or "") in status_selecionados]
 
+    # Situação real registrada pela campanha escolhida. PROCESSADO/ENVIADO
+    # significam que o fluxo do Organiza foi acionado; o WhatsApp não fornece
+    # confirmação de entrega ao Organiza.
+    destinatarios_por_cliente = {}
+    if campanha_selecionada and equipamentos:
+        cliente_ids = sorted({int(eq.cliente_id) for eq in equipamentos if eq.cliente_id})
+        if cliente_ids:
+            destinos = db.query(CampanhaDestinatario).filter(
+                CampanhaDestinatario.campanha_id == campanha_selecionada.id,
+                CampanhaDestinatario.cliente_id.in_(cliente_ids),
+            ).all()
+            destinatarios_por_cliente = {int(d.cliente_id): d for d in destinos}
+
+    for eq in equipamentos:
+        dest = destinatarios_por_cliente.get(int(eq.cliente_id or 0))
+        eq.campanha_destinatario_id = int(dest.id) if dest else 0
+        eq.campanha_status = (dest.status or "PENDENTE") if dest else "FORA"
+        eq.campanha_status_rotulo = _rotulo_status_envio_campanha(dest.status if dest else None, bool(dest))
+        eq.campanha_enviado_em = dest.enviado_em if dest else None
+        eq.campanha_foi_enviado = bool(dest and (dest.status or "").upper() in CAMPANHA_ENVIO_CONFIRMADO)
+
+    if campanha_selecionada and campanha_envio == "nao_enviado":
+        equipamentos = [eq for eq in equipamentos if eq.campanha_destinatario_id and not eq.campanha_foi_enviado]
+    elif campanha_selecionada and campanha_envio == "enviado":
+        equipamentos = [eq for eq in equipamentos if eq.campanha_destinatario_id and eq.campanha_foi_enviado]
+    elif campanha_selecionada and campanha_envio == "fora":
+        equipamentos = [eq for eq in equipamentos if not eq.campanha_destinatario_id]
+
     if ordem == "antigos":
         equipamentos.sort(key=lambda eq: (eq.data_compra or date.min, eq.criado_em or datetime.min, eq.id))
     elif ordem == "maior_valor":
@@ -5664,6 +5842,8 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         ("pagamento", pagamento),
         ("valor", valor_filtro),
         *[("status", item) for item in status_filtros],
+        ("campanha_id", str(campanha_id or "")),
+        ("campanha_envio", campanha_envio),
         ("ordem", ordem),
     ]
 
@@ -5675,6 +5855,10 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         "status_filtros": status_filtros,
         "ordem": ordem,
         "status_opcoes": status_opcoes,
+        "campanhas_atualizacao": campanhas_atualizacao,
+        "campanha_selecionada": campanha_selecionada,
+        "campanha_id": campanha_id,
+        "campanha_envio_filtro": campanha_envio,
         "filtro_query": urlencode(parametros_filtro),
     }
 
@@ -5918,6 +6102,10 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         "status_filtros": dados["status_filtros"],
         "ordem": dados["ordem"],
         "status_opcoes": dados["status_opcoes"],
+        "campanhas_atualizacao": dados["campanhas_atualizacao"],
+        "campanha_selecionada": dados["campanha_selecionada"],
+        "campanha_id": dados["campanha_id"],
+        "campanha_envio_filtro": dados["campanha_envio_filtro"],
         "total_vendas": total_vendas,
         "pagina": pagina,
         "total_paginas": total_paginas,
