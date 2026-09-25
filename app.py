@@ -1,4 +1,4 @@
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus, urlencode, urlparse, parse_qs
 import base64
 import hashlib
 import csv
@@ -15,6 +15,7 @@ import unicodedata
 import urllib.request
 import urllib.error
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 from urllib.parse import quote
 
@@ -39,7 +40,7 @@ from humiat_id import (
     garantir_empresa_solvoz_humiat,
     permissoes_usuario_humiat, salvar_permissoes_usuario_humiat,
     usuario_humiat_interno, usuario_humiat_equipe_prioritaria, enviar_link_acesso_humiat,
-    enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao,
+    enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao, _enviar_resend_humiat,
 )
 
 from services.comunicacao import (
@@ -54,6 +55,27 @@ ORGANIZA_VERSION = ORGANIZA_VERSAO
 templates.env.globals["ORGANIZA_VERSION"] = ORGANIZA_VERSION
 NFE_CONSULTA_URL = "https://consultadfe.fazenda.rj.gov.br/consultaDFe/paginas/consultaChaveAcesso.faces"
 templates.env.globals["NFE_CONSULTA_URL"] = NFE_CONSULTA_URL
+
+# Integração Google exclusiva do Organiza para atualizações de catálogo.
+# Pode reaproveitar o mesmo OAuth Client do Google Cloud usado em outro sistema,
+# desde que o callback do Organiza também esteja cadastrado no projeto Google.
+ORGANIZA_GOOGLE_CLIENT_ID = (os.getenv("ORGANIZA_GOOGLE_CLIENT_ID") or os.getenv("GOOGLE_CALENDAR_CLIENT_ID") or "").strip()
+ORGANIZA_GOOGLE_CLIENT_SECRET = (os.getenv("ORGANIZA_GOOGLE_CLIENT_SECRET") or os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET") or "").strip()
+ORGANIZA_GOOGLE_REDIRECT_URI = (os.getenv("ORGANIZA_GOOGLE_REDIRECT_URI") or f"{PUBLIC_BASE_URL.rstrip('/')}/organiza/google/callback").strip()
+ORGANIZA_GOOGLE_CALENDAR_ID = (os.getenv("ORGANIZA_GOOGLE_CALENDAR_ID") or "primary").strip() or "primary"
+ORGANIZA_GOOGLE_TZ = (os.getenv("ORGANIZA_GOOGLE_TIMEZONE") or "America/Sao_Paulo").strip() or "America/Sao_Paulo"
+GOOGLE_OAUTH_SCOPES = [
+    "openid",
+    "email",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/drive",
+]
+
+ATUALIZACAO_HORARIOS = {
+    "CASA": list(range(10, 21)),  # 10:00 até 20:00, inclusive
+    "LOJA": list(range(14, 19)),  # 14:00 até 18:00, inclusive
+}
+ATUALIZACAO_DURACAO_MINUTOS = 60
 
 NFSE_PORTAL_URL = "https://www.nfse.gov.br/EmissorNacional/DPS/Pessoas"
 NFSE_TIPO_MANUTENCAO = "manutencao"
@@ -806,7 +828,76 @@ class AgendaManual(Base):
     data_hora = Column(DateTime, nullable=False)
     contato = Column(String(120), nullable=True)
     observacao = Column(Text, nullable=True)
+    google_event_id = Column(String(255), nullable=True)
+    google_sync_status = Column(String(30), nullable=True)
+    google_sync_erro = Column(Text, nullable=True)
+    google_sync_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
+
+
+class AtualizacaoPacote(Base):
+    __tablename__ = "atualizacao_pacotes"
+    id = Column(Integer, primary_key=True)
+    pacote = Column(String(30), nullable=False, unique=True, index=True)
+    drive_url = Column(String(1000), nullable=True)
+    drive_file_id = Column(String(255), nullable=True)
+    ativo = Column(Integer, nullable=False, default=1)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class AtualizacaoCompra(Base):
+    __tablename__ = "atualizacao_compras"
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
+    origem = Column(String(30), nullable=False, default="MANUAL")
+    order_nsu = Column(String(120), nullable=True, unique=True, index=True)
+    pacote_inicio = Column(String(30), nullable=False)
+    pacote_fim = Column(String(30), nullable=False)
+    pacotes = Column(Text, nullable=False)
+    valor_normal_centavos = Column(Integer, nullable=True)
+    valor_pago_centavos = Column(Integer, nullable=True)
+    forma_pagamento = Column(String(60), nullable=True)
+    status = Column(String(30), nullable=False, default="PAGO", index=True)
+    pago_em = Column(DateTime, nullable=True)
+    arquivos_liberados_em = Column(DateTime, nullable=True)
+    email_arquivos_enviado_em = Column(DateTime, nullable=True)
+    email_erro = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    cliente = relationship("Cliente")
+
+
+class AtualizacaoAgendamento(Base):
+    __tablename__ = "atualizacao_agendamentos"
+    id = Column(Integer, primary_key=True)
+    compra_id = Column(Integer, ForeignKey("atualizacao_compras.id"), nullable=False, unique=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
+    tipo = Column(String(20), nullable=False)
+    data_hora = Column(DateTime, nullable=False, index=True)
+    duracao_minutos = Column(Integer, nullable=False, default=60)
+    status = Column(String(30), nullable=False, default="RESERVADO", index=True)
+    google_event_id = Column(String(255), nullable=True)
+    google_sync_status = Column(String(30), nullable=True)
+    google_sync_erro = Column(Text, nullable=True)
+    email_confirmacao_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    compra = relationship("AtualizacaoCompra")
+    cliente = relationship("Cliente")
+
+
+class OrganizaGoogleIntegracao(Base):
+    __tablename__ = "organiza_google_integracao"
+    id = Column(Integer, primary_key=True)
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    account_email = Column(String(180), nullable=True)
+    calendar_id = Column(String(255), nullable=False, default="primary")
+    scopes = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class Manutencao(Base):
@@ -1413,6 +1504,19 @@ def iniciar_banco():
     seed_humiat_id()
     # Migração leve para bancos já existentes (SQLite e PostgreSQL)
     insp = inspect(engine)
+    if "agenda_manual" in insp.get_table_names():
+        existentes_agenda_manual = {c["name"] for c in insp.get_columns("agenda_manual")}
+        tipo_dt_agenda = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+        with engine.begin() as conn:
+            if "google_event_id" not in existentes_agenda_manual:
+                conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN google_event_id VARCHAR(255)"))
+            if "google_sync_status" not in existentes_agenda_manual:
+                conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN google_sync_status VARCHAR(30)"))
+            if "google_sync_erro" not in existentes_agenda_manual:
+                conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN google_sync_erro TEXT"))
+            if "google_sync_em" not in existentes_agenda_manual:
+                conn.execute(text(f"ALTER TABLE agenda_manual ADD COLUMN google_sync_em {tipo_dt_agenda}"))
+
     if "assistencias" in insp.get_table_names():
         existentes = {c["name"] for c in insp.get_columns("assistencias")}
         tipo_dt = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
@@ -2341,6 +2445,7 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     retorno_consulta = (request.query_params.get("retorno") or "/organiza/vendas").strip()
     if not retorno_consulta.startswith("/organiza/vendas"):
         retorno_consulta = "/organiza/vendas"
+    atualizacoes_ctx = _atualizacao_contexto_admin_cliente(db, cliente) if not somente_consulta else {"compras": [], "agendamentos": {}, "pacotes": [], "gmail_ok": _gmail_valido(cliente.email)}
 
     return templates.TemplateResponse("organiza/cliente_detalhe.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
@@ -2361,6 +2466,9 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "campanha_status_rotulo": campanha_status_rotulo,
         "retorno_consulta": retorno_consulta,
         "manual_sucesso": request.query_params.get("manual_sucesso", ""),
+        "atualizacoes_ctx": atualizacoes_ctx,
+        "atualizacao_sucesso": request.query_params.get("atualizacao_sucesso", ""),
+        "atualizacao_erro": request.query_params.get("atualizacao_erro", ""),
     })
 
 
@@ -5507,6 +5615,589 @@ async def solvoz_empresa_status(
     return RedirectResponse("/organiza/configuracoes/solvoz-empresas", status_code=303)
 
 
+
+# -----------------------------------------------------------------------------
+# Atualizações de catálogo: compras, Google Drive, e-mail e agenda
+# -----------------------------------------------------------------------------
+def _atualizacao_pacotes_lista(valor) -> list[str]:
+    if isinstance(valor, list):
+        bruto = valor
+    else:
+        try:
+            bruto = json.loads(str(valor or "[]"))
+        except Exception:
+            bruto = [x.strip() for x in str(valor or "").replace(" a ", "/").split("/") if x.strip()]
+    if not isinstance(bruto, list):
+        return []
+    saida = []
+    for item in bruto:
+        label = str(item or "").strip()
+        if label and label not in saida:
+            saida.append(label[:30])
+    return saida
+
+
+def _gmail_valido(email: str | None) -> bool:
+    valor = (email or "").strip().lower()
+    return bool(re.fullmatch(r"[^\s@]+@(gmail\.com|googlemail\.com)", valor))
+
+
+def _atualizacao_compras_cliente(db: Session, cliente_id: int) -> list[AtualizacaoCompra]:
+    return (
+        db.query(AtualizacaoCompra)
+        .filter(AtualizacaoCompra.cliente_id == int(cliente_id), AtualizacaoCompra.status == "PAGO")
+        .order_by(AtualizacaoCompra.pago_em.desc(), AtualizacaoCompra.id.desc())
+        .all()
+    )
+
+
+def _atualizacao_pacotes_comprados(db: Session, cliente_id: int) -> list[str]:
+    saida = []
+    for compra in reversed(_atualizacao_compras_cliente(db, cliente_id)):
+        for pacote in _atualizacao_pacotes_lista(compra.pacotes):
+            if pacote not in saida:
+                saida.append(pacote)
+    return saida
+
+
+def _atualizacao_compra_cobrindo(db: Session, cliente_id: int, pacotes: list[str]) -> AtualizacaoCompra | None:
+    desejados = set(_atualizacao_pacotes_lista(pacotes))
+    if not desejados:
+        return None
+    compras = _atualizacao_compras_cliente(db, cliente_id)
+    for compra in compras:
+        if desejados.issubset(set(_atualizacao_pacotes_lista(compra.pacotes))):
+            return compra
+    # Compatibilidade para compras antigas separadas em mais de um registro.
+    uniao = set()
+    for compra in compras:
+        uniao.update(_atualizacao_pacotes_lista(compra.pacotes))
+    return compras[0] if desejados.issubset(uniao) and compras else None
+
+
+def _atualizacao_fluxo_url(cliente: Cliente, compra: AtualizacaoCompra) -> str:
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+    return f"{PUBLIC_BASE_URL.rstrip('/')}/atualizacao/{cliente.token_ficha}/{compra.id}"
+
+
+def _atualizacao_cadastro_url(cliente: Cliente, compra: AtualizacaoCompra) -> str:
+    fluxo = _atualizacao_fluxo_url(cliente, compra)
+    return f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{cliente.token_ficha}?{urlencode({'next': fluxo})}"
+
+
+def _atualizacao_drive_file_id(valor: str | None) -> str:
+    texto = (valor or "").strip()
+    if not texto:
+        return ""
+    if re.fullmatch(r"[A-Za-z0-9_-]{15,}", texto):
+        return texto
+    try:
+        parsed = urlparse(texto)
+        path = parsed.path or ""
+        for padrao in (r"/file/d/([A-Za-z0-9_-]+)", r"/folders/([A-Za-z0-9_-]+)", r"/d/([A-Za-z0-9_-]+)"):
+            m = re.search(padrao, path)
+            if m:
+                return m.group(1)
+        query = parse_qs(parsed.query)
+        if query.get("id"):
+            return str(query["id"][0])
+    except Exception:
+        pass
+    return ""
+
+
+def _atualizacao_pacotes_sync_solvoz(db: Session) -> list[AtualizacaoPacote]:
+    labels = []
+    try:
+        labels = _pacotes_disponiveis_solvoz()
+    except Exception:
+        labels = []
+    existentes = {p.pacote: p for p in db.query(AtualizacaoPacote).all()}
+    alterou = False
+    for label in labels:
+        if label not in existentes:
+            pacote = AtualizacaoPacote(pacote=label, ativo=1)
+            db.add(pacote)
+            existentes[label] = pacote
+            alterou = True
+    if alterou:
+        db.commit()
+    return db.query(AtualizacaoPacote).order_by(AtualizacaoPacote.pacote.asc()).all()
+
+
+def _atualizacao_pacotes_intervalo(db: Session, inicio: str, fim: str) -> list[str]:
+    candidatos = [p.pacote for p in _atualizacao_pacotes_sync_solvoz(db) if p.ativo]
+    if not candidatos:
+        try:
+            candidatos = _pacotes_disponiveis_solvoz()
+        except Exception:
+            candidatos = []
+    ini = _pacote_release_num(inicio)
+    end = _pacote_release_num(fim)
+    if ini is None or end is None or ini > end:
+        return []
+    lista = []
+    for label in candidatos:
+        numero = _pacote_release_num(label)
+        if numero is not None and ini <= numero <= end:
+            lista.append((numero, _pacote_label_num(numero)))
+    lista.sort(key=lambda x: x[0])
+    if not lista:
+        return [_pacote_label_num(ini)] if ini == end else [_pacote_label_num(ini), _pacote_label_num(end)]
+    return [x[1] for x in lista]
+
+
+def _google_integracao(db: Session, criar: bool = False) -> OrganizaGoogleIntegracao | None:
+    item = db.query(OrganizaGoogleIntegracao).order_by(OrganizaGoogleIntegracao.id.asc()).first()
+    if not item and criar:
+        item = OrganizaGoogleIntegracao(calendar_id=ORGANIZA_GOOGLE_CALENDAR_ID)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+    return item
+
+
+def _google_configurado() -> bool:
+    return bool(ORGANIZA_GOOGLE_CLIENT_ID and ORGANIZA_GOOGLE_CLIENT_SECRET and ORGANIZA_GOOGLE_REDIRECT_URI)
+
+
+def _google_http_json(url: str, *, method: str = "GET", token: str = "", payload=None, form=None, timeout: int = 20) -> dict:
+    data = None
+    headers = {"Accept": "application/json", "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSION}"}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    elif form is not None:
+        data = urlencode(form).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return json.loads(body or "{}") if body else {}
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Google HTTP {exc.code}: {detalhe[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Falha de rede Google: {exc.reason}") from exc
+
+
+def _google_access_token(db: Session) -> str:
+    integ = _google_integracao(db)
+    if not integ or not integ.refresh_token and not integ.access_token:
+        raise RuntimeError("Google ainda não conectado no Organiza.")
+    agora = datetime.now()
+    if integ.access_token and (not integ.expires_at or integ.expires_at > agora + timedelta(minutes=2)):
+        return integ.access_token
+    if not integ.refresh_token:
+        raise RuntimeError("Conexão Google expirada. Reconecte a conta no Organiza.")
+    if not _google_configurado():
+        raise RuntimeError("Credenciais Google do Organiza não configuradas.")
+    data = _google_http_json(
+        "https://oauth2.googleapis.com/token", method="POST",
+        form={
+            "client_id": ORGANIZA_GOOGLE_CLIENT_ID,
+            "client_secret": ORGANIZA_GOOGLE_CLIENT_SECRET,
+            "refresh_token": integ.refresh_token,
+            "grant_type": "refresh_token",
+        },
+    )
+    token = str(data.get("access_token") or "").strip()
+    if not token:
+        raise RuntimeError("Google não retornou novo access token.")
+    integ.access_token = token
+    integ.expires_at = agora + timedelta(seconds=max(int(data.get("expires_in") or 3600) - 30, 60))
+    db.commit()
+    return token
+
+
+def _google_drive_conceder_acesso(db: Session, file_id: str, email: str) -> None:
+    if not file_id:
+        raise RuntimeError("Arquivo/pasta do Google Drive sem ID.")
+    if not _gmail_valido(email):
+        raise RuntimeError("Cadastre um endereço Gmail válido antes de liberar os arquivos.")
+    token = _google_access_token(db)
+    encoded = urllib.parse.quote(file_id, safe="")
+    try:
+        dados = _google_http_json(
+            f"https://www.googleapis.com/drive/v3/files/{encoded}/permissions?fields=permissions(id,emailAddress,type,role)&supportsAllDrives=true",
+            token=token,
+        )
+        for permissao in dados.get("permissions") or []:
+            if str(permissao.get("emailAddress") or "").strip().lower() == email.strip().lower():
+                return
+    except Exception:
+        # A criação abaixo continua sendo a validação definitiva da permissão.
+        pass
+    _google_http_json(
+        f"https://www.googleapis.com/drive/v3/files/{encoded}/permissions?sendNotificationEmail=false&supportsAllDrives=true",
+        method="POST", token=token,
+        payload={"type": "user", "role": "reader", "emailAddress": email.strip().lower()},
+    )
+
+
+def _atualizacao_links_compra(db: Session, compra: AtualizacaoCompra) -> list[dict]:
+    links = []
+    faltando = []
+    for label in _atualizacao_pacotes_lista(compra.pacotes):
+        pacote = db.query(AtualizacaoPacote).filter(AtualizacaoPacote.pacote == label, AtualizacaoPacote.ativo == 1).first()
+        if not pacote or not (pacote.drive_file_id or pacote.drive_url):
+            faltando.append(label)
+            continue
+        file_id = (pacote.drive_file_id or _atualizacao_drive_file_id(pacote.drive_url)).strip()
+        if not file_id:
+            faltando.append(label)
+            continue
+        url = (pacote.drive_url or f"https://drive.google.com/open?id={file_id}").strip()
+        links.append({"pacote": label, "file_id": file_id, "url": url})
+    if faltando:
+        raise RuntimeError("Cadastre o link do Google Drive dos pacotes: " + ", ".join(faltando))
+    return links
+
+
+def _atualizacao_horario_valido(tipo: str, momento: datetime | None) -> bool:
+    tipo = (tipo or "").strip().upper()
+    if not momento or tipo not in ATUALIZACAO_HORARIOS or momento.weekday() >= 5:
+        return False
+    return momento.minute == 0 and momento.second == 0 and momento.hour in ATUALIZACAO_HORARIOS[tipo]
+
+
+def _atualizacao_horario_ocupado(db: Session, momento: datetime, ignorar_agendamento_id: int = 0) -> bool:
+    inicio = momento - timedelta(minutes=59)
+    fim = momento + timedelta(minutes=59)
+    q = db.query(AtualizacaoAgendamento).filter(
+        AtualizacaoAgendamento.status == "RESERVADO",
+        AtualizacaoAgendamento.data_hora >= inicio,
+        AtualizacaoAgendamento.data_hora <= fim,
+    )
+    if ignorar_agendamento_id:
+        q = q.filter(AtualizacaoAgendamento.id != ignorar_agendamento_id)
+    if q.first():
+        return True
+    # A agenda de atualização respeita também os compromissos já existentes do Organiza.
+    if db.query(AgendaManual).filter(AgendaManual.data_hora >= inicio, AgendaManual.data_hora <= fim).first():
+        return True
+    if db.query(Manutencao).filter(
+        ~Manutencao.status.in_(("Encerrada", "Cancelada")),
+        or_(
+            Manutencao.entrega_prevista_em.between(inicio, fim),
+            Manutencao.retirada_em.between(inicio, fim),
+        ),
+    ).first():
+        return True
+    return False
+
+
+def _atualizacao_horarios_disponiveis(db: Session, tipo: str, dia: date) -> list[str]:
+    tipo = (tipo or "").strip().upper()
+    if tipo not in ATUALIZACAO_HORARIOS or dia.weekday() >= 5:
+        return []
+    saida = []
+    agora = datetime.now()
+    for hora in ATUALIZACAO_HORARIOS[tipo]:
+        momento = datetime.combine(dia, time(hour=hora, minute=0))
+        if momento <= agora:
+            continue
+        if not _atualizacao_horario_ocupado(db, momento):
+            saida.append(momento.strftime("%H:%M"))
+    return saida
+
+
+def _google_calendar_event_payload(cliente: Cliente, compra: AtualizacaoCompra, ag: AtualizacaoAgendamento) -> dict:
+    tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
+    inicio = ag.data_hora.replace(tzinfo=tz) if ag.data_hora.tzinfo is None else ag.data_hora.astimezone(tz)
+    fim = inicio + timedelta(minutes=int(ag.duracao_minutos or ATUALIZACAO_DURACAO_MINUTOS))
+    tipo_rotulo = "Em casa / AnyDesk" if ag.tipo == "CASA" else "Na loja"
+    pacotes = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
+    descricao = (
+        f"Atualização Karaokê RJ\nCliente: {cliente.nome}\n"
+        f"WhatsApp: +{cliente.ddi or ''}{cliente.telefone or ''}\n"
+        f"Gmail: {cliente.email or '-'}\nPacotes: {pacotes}\n"
+        f"Atendimento: {tipo_rotulo}\nCompra Organiza #{compra.id}"
+    )
+    return {
+        "summary": f"Atualização Karaokê RJ - {tipo_rotulo} - {cliente.nome}"[:180],
+        "description": descricao,
+        "start": {"dateTime": inicio.isoformat(), "timeZone": ORGANIZA_GOOGLE_TZ},
+        "end": {"dateTime": fim.isoformat(), "timeZone": ORGANIZA_GOOGLE_TZ},
+        "reminders": {"useDefault": True},
+    }
+
+
+def _google_calendar_sincronizar(db: Session, ag: AtualizacaoAgendamento, cliente: Cliente, compra: AtualizacaoCompra) -> None:
+    try:
+        token = _google_access_token(db)
+        integ = _google_integracao(db, criar=True)
+        calendar_id = urllib.parse.quote((integ.calendar_id or ORGANIZA_GOOGLE_CALENDAR_ID), safe="")
+        payload = _google_calendar_event_payload(cliente, compra, ag)
+        if ag.google_event_id:
+            event_id = urllib.parse.quote(ag.google_event_id, safe="")
+            dados = _google_http_json(
+                f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}",
+                method="PUT", token=token, payload=payload,
+            )
+        else:
+            dados = _google_http_json(
+                f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events",
+                method="POST", token=token, payload=payload,
+            )
+            ag.google_event_id = str(dados.get("id") or "").strip() or None
+        ag.google_sync_status = "SINCRONIZADO"
+        ag.google_sync_erro = None
+    except Exception as exc:
+        ag.google_sync_status = "ERRO"
+        ag.google_sync_erro = str(exc)[:1200]
+
+
+def _google_calendar_excluir(db: Session, ag: AtualizacaoAgendamento) -> None:
+    if not ag.google_event_id:
+        return
+    try:
+        token = _google_access_token(db)
+        integ = _google_integracao(db, criar=True)
+        calendar_id = urllib.parse.quote((integ.calendar_id or ORGANIZA_GOOGLE_CALENDAR_ID), safe="")
+        event_id = urllib.parse.quote(ag.google_event_id, safe="")
+        req = urllib.request.Request(
+            f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}",
+            method="DELETE",
+            headers={"Authorization": f"Bearer {token}", "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSION}"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (404, 410):
+                raise
+        ag.google_event_id = None
+        ag.google_sync_status = "REMOVIDO"
+        ag.google_sync_erro = None
+    except Exception as exc:
+        ag.google_sync_status = "ERRO"
+        ag.google_sync_erro = str(exc)[:1200]
+
+
+def _google_calendar_manual_event_payload(evento: AgendaManual) -> dict:
+    tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
+    inicio = evento.data_hora.replace(tzinfo=tz) if evento.data_hora.tzinfo is None else evento.data_hora.astimezone(tz)
+    fim = inicio + timedelta(minutes=60)
+    tipo_rotulos = {
+        "visita": "Visita",
+        "entrada": "Cliente vai trazer",
+        "online": "Atendimento online",
+        "retirada": "Cliente vem buscar",
+        "fornecedor": "Fornecedor",
+        "outro": "Outro",
+    }
+    tipo_rotulo = tipo_rotulos.get((evento.tipo or "").strip().lower(), (evento.tipo or "Compromisso").strip().title())
+    descricao = [f"Compromisso criado no Organiza", f"Tipo: {tipo_rotulo}"]
+    if evento.contato:
+        descricao.append(f"Contato: {evento.contato}")
+    if evento.observacao:
+        descricao.append(f"Observação: {evento.observacao}")
+    if evento.id:
+        descricao.append(f"Agenda Organiza #{evento.id}")
+    return {
+        "summary": str(evento.titulo or "Compromisso Organiza")[:180],
+        "description": "\n".join(descricao),
+        "start": {"dateTime": inicio.isoformat(), "timeZone": ORGANIZA_GOOGLE_TZ},
+        "end": {"dateTime": fim.isoformat(), "timeZone": ORGANIZA_GOOGLE_TZ},
+        "reminders": {"useDefault": True},
+    }
+
+
+def _google_calendar_manual_sincronizar(db: Session, evento: AgendaManual) -> None:
+    """Cria ou atualiza no Google Agenda o mesmo compromisso manual do Organiza.
+
+    A falha do Google nunca impede salvar a agenda local; o status fica registrado
+    no próprio compromisso para permitir correção/reconexão depois.
+    """
+    try:
+        token = _google_access_token(db)
+        integ = _google_integracao(db, criar=True)
+        calendar_id = urllib.parse.quote((integ.calendar_id or ORGANIZA_GOOGLE_CALENDAR_ID), safe="")
+        payload = _google_calendar_manual_event_payload(evento)
+        if evento.google_event_id:
+            event_id = urllib.parse.quote(evento.google_event_id, safe="")
+            dados = _google_http_json(
+                f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}",
+                method="PUT", token=token, payload=payload,
+            )
+        else:
+            dados = _google_http_json(
+                f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events",
+                method="POST", token=token, payload=payload,
+            )
+            evento.google_event_id = str(dados.get("id") or "").strip() or None
+        evento.google_sync_status = "SINCRONIZADO"
+        evento.google_sync_erro = None
+        evento.google_sync_em = datetime.now()
+    except Exception as exc:
+        evento.google_sync_status = "ERRO"
+        evento.google_sync_erro = str(exc)[:1200]
+        evento.google_sync_em = datetime.now()
+
+
+def _google_calendar_manual_excluir(db: Session, evento: AgendaManual) -> None:
+    if not evento.google_event_id:
+        return
+    try:
+        token = _google_access_token(db)
+        integ = _google_integracao(db, criar=True)
+        calendar_id = urllib.parse.quote((integ.calendar_id or ORGANIZA_GOOGLE_CALENDAR_ID), safe="")
+        event_id = urllib.parse.quote(evento.google_event_id, safe="")
+        req = urllib.request.Request(
+            f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}",
+            method="DELETE",
+            headers={"Authorization": f"Bearer {token}", "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSION}"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (404, 410):
+                raise
+        evento.google_event_id = None
+        evento.google_sync_status = "REMOVIDO"
+        evento.google_sync_erro = None
+        evento.google_sync_em = datetime.now()
+    except Exception as exc:
+        evento.google_sync_status = "ERRO"
+        evento.google_sync_erro = str(exc)[:1200]
+        evento.google_sync_em = datetime.now()
+
+
+def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: AtualizacaoCompra) -> None:
+    gmail = (cliente.email or "").strip().lower()
+    if not _gmail_valido(gmail):
+        raise RuntimeError("O cliente precisa atualizar o cadastro com um Gmail válido.")
+    links = _atualizacao_links_compra(db, compra)
+    for item in links:
+        _google_drive_conceder_acesso(db, item["file_id"], gmail)
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+    agenda_url = f"{PUBLIC_BASE_URL.rstrip('/')}/atualizacao/{cliente.token_ficha}/{compra.id}/agenda?tipo=CASA"
+    pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
+    lista_texto = "\n".join(f"- Pacote {x['pacote']}: {x['url']}" for x in links)
+    lista_html = "".join(
+        f'<p style="margin:8px 0"><a href="{html.escape(x["url"])}" style="display:inline-block;padding:11px 16px;background:#e6003c;color:white;text-decoration:none;border-radius:8px;font-weight:700">Abrir pacote {html.escape(x["pacote"])}</a></p>'
+        for x in links
+    )
+    texto = (
+        f"Olá, {cliente.nome}!\n\nSua atualização Karaokê RJ está pronta.\n"
+        f"Pacotes: {pacotes_txt}\nGmail liberado: {gmail}\n\n"
+        "IMPORTANTE: abra este e-mail no PC ou notebook que será utilizado pelo técnico via AnyDesk. Não faça o download pelo celular.\n\n"
+        "Como baixar:\n1. Entre no Google com o mesmo Gmail acima.\n2. Abra cada link abaixo.\n3. Clique em Baixar e aguarde o download terminar completamente.\n4. Não altere nem mova os arquivos antes do atendimento.\n"
+        f"\n{lista_texto}\n\nDepois que TODOS os arquivos estiverem baixados no computador, agende o atendimento pelo AnyDesk:\n{agenda_url}\n\n"
+        "Atendimentos em casa: segunda a sexta, das 10:00 às 20:00, com horários de 1 em 1 hora.\n\nKaraokê RJ"
+    )
+    corpo = f"""
+    <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#20242a">
+      <h2 style="color:#e6003c">Sua atualização Karaokê RJ está pronta</h2>
+      <p>Pacotes adquiridos: <strong>{html.escape(pacotes_txt)}</strong></p>
+      <p>Acesso liberado para: <strong>{html.escape(gmail)}</strong></p>
+      <div style="padding:14px;border-radius:10px;background:#fff3f6;border:1px solid #ffd0dc"><strong>Abra este e-mail no PC ou notebook que será utilizado pelo técnico via AnyDesk.</strong><br>Não faça o download pelo celular.</div>
+      <h3>Como baixar</h3>
+      <ol><li>Entre no Google com o mesmo Gmail acima.</li><li>Abra cada pacote.</li><li>Clique em <strong>Baixar</strong> e aguarde terminar completamente.</li><li>Não altere nem mova os arquivos antes do atendimento.</li></ol>
+      {lista_html}
+      <h3>Depois de baixar todos os arquivos</h3>
+      <p>Somente depois que os arquivos estiverem no computador, marque o atendimento do técnico.</p>
+      <p><a href="{html.escape(agenda_url)}" style="display:inline-block;padding:12px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Agendar atendimento pelo AnyDesk</a></p>
+      <p style="color:#687180;font-size:13px">Segunda a sexta, das 10:00 às 20:00. Os horários são reservados de 1 em 1 hora.</p>
+    </div>"""
+    _enviar_resend_humiat(gmail, "Sua atualização Karaokê RJ está pronta", texto, corpo, user_agent=f"Organiza/{ORGANIZA_VERSION}")
+    compra.arquivos_liberados_em = compra.arquivos_liberados_em or datetime.now()
+    compra.email_arquivos_enviado_em = datetime.now()
+    compra.email_erro = None
+    db.commit()
+
+
+def _atualizacao_enviar_email_agendamento(db: Session, cliente: Cliente, compra: AtualizacaoCompra, ag: AtualizacaoAgendamento) -> None:
+    gmail = (cliente.email or "").strip().lower()
+    if not _gmail_valido(gmail):
+        return
+    tipo_rotulo = "em casa / AnyDesk" if ag.tipo == "CASA" else "na loja"
+    data_txt = ag.data_hora.strftime("%d/%m/%Y às %H:%M")
+    pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
+    lembrete = "Os arquivos devem estar completamente baixados no PC/notebook antes do horário marcado." if ag.tipo == "CASA" else "Leve o equipamento no horário reservado."
+    texto = (
+        f"Olá, {cliente.nome}!\n\nSeu atendimento para atualização foi reservado.\n"
+        f"Atendimento: {tipo_rotulo}\nData e hora: {data_txt}\nPacotes: {pacotes_txt}\n\n{lembrete}\n\nKaraokê RJ"
+    )
+    corpo = f"""
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#20242a">
+      <h2 style="color:#e6003c">Atualização agendada</h2>
+      <p><strong>{html.escape(tipo_rotulo.title())}</strong></p>
+      <p>Data e hora: <strong>{html.escape(data_txt)}</strong></p>
+      <p>Pacotes: {html.escape(pacotes_txt)}</p>
+      <div style="padding:12px;border-radius:10px;background:#f5f7fa">{html.escape(lembrete)}</div>
+    </div>"""
+    _enviar_resend_humiat(gmail, "Atualização Karaokê RJ agendada", texto, corpo, user_agent=f"Organiza/{ORGANIZA_VERSION}")
+    ag.email_confirmacao_em = datetime.now()
+    db.commit()
+
+
+def _atualizacao_registrar_compra(
+    db: Session, cliente: Cliente, pacotes: list[str], *, origem: str, order_nsu: str = "",
+    valor_normal_centavos: int = 0, valor_pago_centavos: int = 0, forma_pagamento: str = "",
+) -> AtualizacaoCompra:
+    pacotes = _atualizacao_pacotes_lista(pacotes)
+    if not pacotes:
+        raise ValueError("Informe os pacotes adquiridos.")
+    existente = None
+    if order_nsu:
+        existente = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.order_nsu == order_nsu).first()
+    if not existente:
+        desejados = set(pacotes)
+        for item in _atualizacao_compras_cliente(db, cliente.id):
+            if desejados == set(_atualizacao_pacotes_lista(item.pacotes)):
+                existente = item
+                break
+    compra = existente or AtualizacaoCompra(cliente_id=cliente.id)
+    if not existente:
+        db.add(compra)
+    compra.origem = (origem or "MANUAL")[:30]
+    if order_nsu:
+        compra.order_nsu = order_nsu[:120]
+    compra.pacote_inicio = pacotes[0]
+    compra.pacote_fim = pacotes[-1]
+    compra.pacotes = json.dumps(pacotes, ensure_ascii=False)
+    compra.valor_normal_centavos = int(valor_normal_centavos or 0) or None
+    compra.valor_pago_centavos = int(valor_pago_centavos or 0) or None
+    compra.forma_pagamento = (forma_pagamento or "")[:60] or None
+    compra.status = "PAGO"
+    compra.pago_em = compra.pago_em or datetime.now()
+    cliente.atualizacao_oferta_status = "PAGO"
+    cliente.atualizacao_oferta_periodo = pacotes[0] if len(pacotes) == 1 else f"{pacotes[0]} a {pacotes[-1]}"
+    cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
+    if valor_normal_centavos:
+        cliente.atualizacao_oferta_valor_normal_centavos = int(valor_normal_centavos)
+    if valor_pago_centavos:
+        cliente.atualizacao_oferta_valor_promocional_centavos = int(valor_pago_centavos)
+    if order_nsu:
+        cliente.atualizacao_oferta_order_nsu = order_nsu[:120]
+    cliente.atualizacao_oferta_atualizado_em = datetime.now()
+    db.commit()
+    db.refresh(compra)
+    return compra
+
+
+def _atualizacao_contexto_admin_cliente(db: Session, cliente: Cliente) -> dict:
+    compras = _atualizacao_compras_cliente(db, cliente.id)
+    ag_por_compra = {
+        a.compra_id: a for a in db.query(AtualizacaoAgendamento).filter(
+            AtualizacaoAgendamento.compra_id.in_([c.id for c in compras] or [-1])
+        ).all()
+    }
+    pacotes = _atualizacao_pacotes_sync_solvoz(db)
+    return {
+        "compras": compras,
+        "agendamentos": ag_por_compra,
+        "pacotes": pacotes,
+        "gmail_ok": _gmail_valido(cliente.email),
+    }
+
+
 def _validar_token_solvoz(x_solvoz_token: Optional[str]) -> None:
     esperado = SOLVOZ_API_TOKEN
     if not esperado:
@@ -5523,26 +6214,48 @@ def api_solvoz_atualizacao_contexto(
     x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
     db: Session = Depends(get_db),
 ):
-    """Dados atuais usados pelo link compacto da campanha, sem expor dados pessoais na URL."""
+    """Dados atuais do cliente + histórico pago para o link compacto da campanha."""
     _validar_token_solvoz(x_solvoz_token)
     cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
     if not cliente:
         raise HTTPException(404, "Cliente não encontrado.")
-    pacotes = []
-    if cliente.atualizacao_oferta_pacotes:
-        try:
-            bruto = json.loads(cliente.atualizacao_oferta_pacotes)
-            if isinstance(bruto, list):
-                pacotes = [str(x).strip() for x in bruto if str(x).strip()]
-        except Exception:
-            pacotes = []
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
+    pacotes_oferta = _atualizacao_pacotes_lista(cliente.atualizacao_oferta_pacotes)
+    compras = []
+    for compra in _atualizacao_compras_cliente(db, cliente.id):
+        ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+        compras.append({
+            "id": int(compra.id),
+            "pacotes": _atualizacao_pacotes_lista(compra.pacotes),
+            "pacote_inicio": compra.pacote_inicio,
+            "pacote_fim": compra.pacote_fim,
+            "status": compra.status,
+            "pago_em": compra.pago_em.isoformat() if compra.pago_em else None,
+            "origem": compra.origem,
+            "order_nsu": compra.order_nsu,
+            "fluxo_url": _atualizacao_fluxo_url(cliente, compra),
+            "cadastro_url": _atualizacao_cadastro_url(cliente, compra),
+            "arquivos_liberados": bool(compra.arquivos_liberados_em),
+            "email_arquivos_enviado": bool(compra.email_arquivos_enviado_em),
+            "agendamento": ({
+                "tipo": ag.tipo,
+                "data_hora": ag.data_hora.isoformat() if ag.data_hora else None,
+                "status": ag.status,
+                "google_sync_status": ag.google_sync_status,
+            } if ag else None),
+        })
     return JSONResponse({
         "ok": True,
         "cliente_id": int(cliente.id),
         "nome": (cliente.nome or "").strip(),
         "email": (cliente.email or "").strip().lower(),
+        "gmail_ok": _gmail_valido(cliente.email),
         "whatsapp": re.sub(r"\D", "", cliente.whatsapp_completo() or ""),
-        "pacotes": pacotes,
+        "pacotes": pacotes_oferta,
+        "pacotes_comprados": _atualizacao_pacotes_comprados(db, cliente.id),
+        "compras": compras,
     })
 
 
@@ -5578,6 +6291,19 @@ async def api_solvoz_atualizacao_oferta(
         except Exception:
             pacotes = [p.strip() for p in pacotes.split("/") if p.strip()]
     pacotes = [str(p).strip()[:30] for p in (pacotes or []) if str(p).strip()]
+    # Depois que uma atualização foi paga, abrir novamente o mesmo link não
+    # rebaixa o cadastro para PAGINA_ABERTA/CHECKOUT_INICIADO.
+    ja_pago = bool(_atualizacao_compra_cobrindo(db, cliente.id, pacotes)) if pacotes else False
+    if status == "PAGO":
+        compra = _atualizacao_registrar_compra(
+            db, cliente, pacotes, origem="SOLVOZ", order_nsu=str(data.get("order_nsu") or ""),
+            valor_normal_centavos=int(data.get("valor_normal_centavos") or 0),
+            valor_pago_centavos=int(data.get("valor_promocional_centavos") or 0),
+            forma_pagamento="InfinitePay",
+        )
+        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": "PAGO", "compra_id": compra.id})
+    if ja_pago or (cliente.atualizacao_oferta_status or "").upper() == "PAGO":
+        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": "PAGO", "preservado": True})
     cliente.atualizacao_oferta_status = status
     if pacotes:
         cliente.atualizacao_oferta_pacotes = json.dumps(pacotes, ensure_ascii=False)
@@ -5595,6 +6321,307 @@ async def api_solvoz_atualizacao_oferta(
     cliente.atualizacao_oferta_atualizado_em = datetime.now()
     db.commit()
     return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": status})
+
+
+
+def _google_oauth_state(usuario: Usuario) -> str:
+    bruto = f"{int(usuario.id)}|{int(datetime.now().timestamp())}"
+    sig = hmac.new(CHAVE_SESSAO.encode(), bruto.encode(), hashlib.sha256).hexdigest()[:24]
+    return base64.urlsafe_b64encode(f"{bruto}|{sig}".encode()).decode().rstrip("=")
+
+
+def _google_oauth_state_valido(state: str, usuario: Usuario) -> bool:
+    try:
+        raw = base64.urlsafe_b64decode(state + "=" * (-len(state) % 4)).decode()
+        uid, ts, sig = raw.split("|", 2)
+        bruto = f"{uid}|{ts}"
+        esperado = hmac.new(CHAVE_SESSAO.encode(), bruto.encode(), hashlib.sha256).hexdigest()[:24]
+        return int(uid) == int(usuario.id) and abs(datetime.now().timestamp() - int(ts)) <= 900 and hmac.compare_digest(sig, esperado)
+    except Exception:
+        return False
+
+
+@app.get("/organiza/atualizacoes", response_class=HTMLResponse)
+def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    pacotes = _atualizacao_pacotes_sync_solvoz(db)
+    compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).order_by(AtualizacaoCompra.pago_em.desc(), AtualizacaoCompra.id.desc()).limit(100).all()
+    agendamentos = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all()
+    google = _google_integracao(db)
+    return templates.TemplateResponse("organiza/atualizacoes.html", {
+        "request": request, "usuario": usuario, "pacotes": pacotes, "compras": compras,
+        "agendamentos": agendamentos, "google": google, "google_configurado": _google_configurado(),
+        "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/organiza/atualizacoes/pacotes/{pacote_id}")
+async def atualizacao_pacote_salvar(pacote_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    exigir_admin(usuario)
+    pacote = db.get(AtualizacaoPacote, pacote_id)
+    if not pacote:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    drive_url = (form.get("drive_url") or "").strip()
+    file_id = _atualizacao_drive_file_id(drive_url)
+    if drive_url and not file_id:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus(f"Não consegui identificar o arquivo/pasta do Google Drive do pacote {pacote.pacote}."), status_code=303)
+    pacote.drive_url = drive_url or None
+    pacote.drive_file_id = file_id or None
+    pacote.ativo = 1 if str(form.get("ativo") or "") in ("1", "on", "true") else 0
+    db.commit()
+    return RedirectResponse("/organiza/atualizacoes?mensagem=" + quote_plus(f"Pacote {pacote.pacote} atualizado."), status_code=303)
+
+
+@app.get("/organiza/google/conectar")
+def organiza_google_conectar(usuario: Usuario = Depends(usuario_logado)):
+    exigir_admin(usuario)
+    if not _google_configurado():
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus("Configure ORGANIZA_GOOGLE_CLIENT_ID e ORGANIZA_GOOGLE_CLIENT_SECRET no servidor."), status_code=303)
+    params = {
+        "client_id": ORGANIZA_GOOGLE_CLIENT_ID,
+        "redirect_uri": ORGANIZA_GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(GOOGLE_OAUTH_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": _google_oauth_state(usuario),
+    }
+    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params), status_code=302)
+
+
+@app.get("/organiza/google/callback")
+def organiza_google_callback(code: str = "", state: str = "", error: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    exigir_admin(usuario)
+    if error:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus(f"Google não autorizou a conexão: {error}"), status_code=303)
+    if not code or not _google_oauth_state_valido(state, usuario):
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus("Retorno do Google inválido ou expirado."), status_code=303)
+    try:
+        data = _google_http_json("https://oauth2.googleapis.com/token", method="POST", form={
+            "client_id": ORGANIZA_GOOGLE_CLIENT_ID,
+            "client_secret": ORGANIZA_GOOGLE_CLIENT_SECRET,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": ORGANIZA_GOOGLE_REDIRECT_URI,
+        })
+        token = str(data.get("access_token") or "").strip()
+        if not token:
+            raise RuntimeError("Google não retornou access token.")
+        perfil = _google_http_json("https://openidconnect.googleapis.com/v1/userinfo", token=token)
+        integ = _google_integracao(db, criar=True)
+        integ.access_token = token
+        if data.get("refresh_token"):
+            integ.refresh_token = str(data.get("refresh_token"))
+        integ.expires_at = datetime.now() + timedelta(seconds=max(int(data.get("expires_in") or 3600) - 30, 60))
+        integ.account_email = str(perfil.get("email") or "").strip().lower() or None
+        integ.calendar_id = integ.calendar_id or ORGANIZA_GOOGLE_CALENDAR_ID
+        integ.scopes = str(data.get("scope") or " ".join(GOOGLE_OAUTH_SCOPES))
+        db.commit()
+        return RedirectResponse("/organiza/atualizacoes?mensagem=" + quote_plus("Google Drive e Google Agenda conectados ao Organiza."), status_code=303)
+    except Exception as exc:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus(str(exc)), status_code=303)
+
+
+@app.post("/organiza/google/desconectar")
+def organiza_google_desconectar(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    exigir_admin(usuario)
+    integ = _google_integracao(db)
+    if integ:
+        integ.access_token = None
+        integ.refresh_token = None
+        integ.expires_at = None
+        integ.account_email = None
+        db.commit()
+    return RedirectResponse("/organiza/atualizacoes?mensagem=" + quote_plus("Conta Google desconectada."), status_code=303)
+
+
+@app.post("/organiza/clientes/{cliente_id}/atualizacoes/compra")
+async def atualizacao_compra_manual(cliente_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.get(Cliente, cliente_id)
+    if not cliente:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    inicio = (form.get("pacote_inicio") or "").strip()
+    fim = (form.get("pacote_fim") or inicio).strip()
+    pacotes = _atualizacao_pacotes_intervalo(db, inicio, fim)
+    if not pacotes:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Intervalo de pacotes inválido."), status_code=303)
+    if _atualizacao_compra_cobrindo(db, cliente_id, pacotes):
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Esses pacotes já constam como comprados para este cliente."), status_code=303)
+    valor = moeda_num(form.get("valor_pago") or "0")
+    normal = moeda_num(form.get("valor_normal") or "0")
+    compra = _atualizacao_registrar_compra(
+        db, cliente, pacotes, origem="MANUAL", valor_normal_centavos=int(round(normal * 100)),
+        valor_pago_centavos=int(round(valor * 100)), forma_pagamento=(form.get("forma_pagamento") or "PIX direto").strip(),
+    )
+    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(f"Compra #{compra.id} registrada. O SolVoz não cobrará novamente esses pacotes."), status_code=303)
+
+
+@app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/enviar-casa")
+def atualizacao_admin_enviar_casa(cliente_id: int, compra_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.get(Cliente, cliente_id)
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.cliente_id == cliente_id, AtualizacaoCompra.status == "PAGO").first()
+    if not cliente or not compra:
+        raise HTTPException(404)
+    try:
+        _atualizacao_enviar_email_casa(db, cliente, compra)
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus("Arquivos liberados no Gmail e e-mail enviado."), status_code=303)
+    except Exception as exc:
+        compra.email_erro = str(exc)[:1200]
+        db.commit()
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus(str(exc)), status_code=303)
+
+
+@app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/agendar")
+async def atualizacao_admin_agendar(cliente_id: int, compra_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cliente = db.get(Cliente, cliente_id)
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.cliente_id == cliente_id, AtualizacaoCompra.status == "PAGO").first()
+    if not cliente or not compra:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    tipo = (form.get("tipo") or "LOJA").strip().upper()
+    momento = datetime_form(form.get("data_hora") or "")
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+    if not _atualizacao_horario_valido(tipo, momento):
+        horario = "10:00 às 20:00" if tipo == "CASA" else "14:00 às 18:00"
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus(f"Horário inválido. {tipo.title()}: segunda a sexta, {horario}, de 1 em 1 hora."), status_code=303)
+    if _atualizacao_horario_ocupado(db, momento, ag.id if ag else 0):
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_erro=" + quote_plus("Esse horário conflita com outro compromisso do Organiza."), status_code=303)
+    if not ag:
+        ag = AtualizacaoAgendamento(compra_id=compra.id, cliente_id=cliente.id)
+        db.add(ag)
+    ag.tipo = tipo
+    ag.data_hora = momento
+    ag.duracao_minutos = ATUALIZACAO_DURACAO_MINUTOS
+    ag.status = "RESERVADO"
+    _google_calendar_sincronizar(db, ag, cliente, compra)
+    db.commit()
+    try:
+        _atualizacao_enviar_email_agendamento(db, cliente, compra, ag)
+    except Exception as exc:
+        ag.google_sync_erro = ((ag.google_sync_erro or "") + f" | E-mail: {exc}")[:1200]
+        db.commit()
+    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus("Atendimento reservado na Agenda do Organiza."), status_code=303)
+
+
+@app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/cancelar-agendamento")
+def atualizacao_admin_cancelar_agendamento(cliente_id: int, compra_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra_id, AtualizacaoAgendamento.cliente_id == cliente_id).first()
+    if not ag:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
+    _google_calendar_excluir(db, ag)
+    ag.status = "CANCELADO"
+    db.commit()
+    return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus("Agendamento cancelado."), status_code=303)
+
+
+@app.get("/atualizacao/{token}/{compra_id}", response_class=HTMLResponse)
+def atualizacao_publica_fluxo(token: str, compra_id: int, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.status == "PAGO").first()
+    if not cliente or not compra or compra.cliente_id != cliente.id:
+        raise HTTPException(404)
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id, AtualizacaoAgendamento.status == "RESERVADO").first()
+    return templates.TemplateResponse("organiza/atualizacao_publica.html", {
+        "request": request, "cliente": cliente, "compra": compra, "pacotes": _atualizacao_pacotes_lista(compra.pacotes),
+        "gmail_ok": _gmail_valido(cliente.email), "cadastro_url": _atualizacao_cadastro_url(cliente, compra), "agendamento": ag,
+        "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
+    }, headers={"Cache-Control": "private, no-store"})
+
+
+@app.post("/atualizacao/{token}/{compra_id}/modo")
+async def atualizacao_publica_modo(token: str, compra_id: int, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.status == "PAGO").first()
+    if not cliente or not compra or compra.cliente_id != cliente.id:
+        raise HTTPException(404)
+    if not _gmail_valido(cliente.email):
+        return RedirectResponse(_atualizacao_cadastro_url(cliente, compra), status_code=303)
+    form = dict(await request.form())
+    modo = (form.get("modo") or "").strip().upper()
+    if modo == "LOJA":
+        return RedirectResponse(f"/atualizacao/{token}/{compra.id}/agenda?tipo=LOJA", status_code=303)
+    if modo != "CASA":
+        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?erro=" + quote_plus("Escolha como deseja realizar a atualização."), status_code=303)
+    try:
+        _atualizacao_enviar_email_casa(db, cliente, compra)
+        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?mensagem=" + quote_plus("Arquivos liberados. Abra o e-mail no PC, baixe tudo e depois use o link de agendamento."), status_code=303)
+    except Exception as exc:
+        compra.email_erro = str(exc)[:1200]
+        db.commit()
+        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?erro=" + quote_plus(str(exc)), status_code=303)
+
+
+@app.get("/atualizacao/{token}/{compra_id}/agenda", response_class=HTMLResponse)
+def atualizacao_publica_agenda(token: str, compra_id: int, request: Request, tipo: str = "LOJA", db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.status == "PAGO").first()
+    tipo = (tipo or "LOJA").strip().upper()
+    if not cliente or not compra or compra.cliente_id != cliente.id or tipo not in ATUALIZACAO_HORARIOS:
+        raise HTTPException(404)
+    if tipo == "CASA" and not compra.email_arquivos_enviado_em:
+        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?erro=" + quote_plus("Primeiro receba e baixe os arquivos no computador. Depois faça o agendamento."), status_code=303)
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id, AtualizacaoAgendamento.status == "RESERVADO").first()
+    return templates.TemplateResponse("organiza/atualizacao_agenda_publica.html", {
+        "request": request, "cliente": cliente, "compra": compra, "tipo": tipo, "agendamento": ag,
+        "hoje": date.today().isoformat(), "erro": request.query_params.get("erro", ""), "mensagem": request.query_params.get("mensagem", ""),
+    }, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/atualizacao/{token}/{compra_id}/horarios")
+def atualizacao_publica_horarios(token: str, compra_id: int, tipo: str, data: str, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.status == "PAGO").first()
+    if not cliente or not compra or compra.cliente_id != cliente.id:
+        raise HTTPException(404)
+    tipo = (tipo or "").strip().upper()
+    try:
+        dia = datetime.strptime(data, "%Y-%m-%d").date()
+    except Exception:
+        return JSONResponse({"horarios": []})
+    if dia < date.today() or tipo not in ATUALIZACAO_HORARIOS:
+        return JSONResponse({"horarios": []})
+    return JSONResponse({"horarios": _atualizacao_horarios_disponiveis(db, tipo, dia)})
+
+
+@app.post("/atualizacao/{token}/{compra_id}/agenda")
+async def atualizacao_publica_agenda_salvar(token: str, compra_id: int, request: Request, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.token_ficha == token).first()
+    compra = db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id == compra_id, AtualizacaoCompra.status == "PAGO").first()
+    if not cliente or not compra or compra.cliente_id != cliente.id:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    tipo = (form.get("tipo") or "LOJA").strip().upper()
+    if tipo == "CASA" and not compra.email_arquivos_enviado_em:
+        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?erro=" + quote_plus("Baixe os arquivos antes de marcar o AnyDesk."), status_code=303)
+    try:
+        momento = datetime.strptime(f"{form.get('data') or ''} {form.get('hora') or ''}", "%Y-%m-%d %H:%M")
+    except Exception:
+        momento = None
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+    if not _atualizacao_horario_valido(tipo, momento):
+        return RedirectResponse(f"/atualizacao/{token}/{compra.id}/agenda?tipo={tipo}&erro=" + quote_plus("Escolha um dia útil e um horário disponível."), status_code=303)
+    if _atualizacao_horario_ocupado(db, momento, ag.id if ag else 0):
+        return RedirectResponse(f"/atualizacao/{token}/{compra.id}/agenda?tipo={tipo}&erro=" + quote_plus("Esse horário acabou de ser reservado. Escolha outro."), status_code=303)
+    if not ag:
+        ag = AtualizacaoAgendamento(compra_id=compra.id, cliente_id=cliente.id)
+        db.add(ag)
+    ag.tipo = tipo
+    ag.data_hora = momento
+    ag.duracao_minutos = ATUALIZACAO_DURACAO_MINUTOS
+    ag.status = "RESERVADO"
+    _google_calendar_sincronizar(db, ag, cliente, compra)
+    db.commit()
+    email_erro = ""
+    try:
+        _atualizacao_enviar_email_agendamento(db, cliente, compra, ag)
+    except Exception as exc:
+        email_erro = str(exc)
+    msg = "Horário reservado com sucesso."
+    if email_erro:
+        msg += " A reserva foi salva, mas a confirmação por e-mail não pôde ser enviada."
+    return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?mensagem=" + quote_plus(msg), status_code=303)
 
 
 @app.post("/api/integracoes/solvoz/email/recuperacao")
@@ -6739,6 +7766,12 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
     )
     cliente.documento = (form.get("documento") or "").strip() or None
     cliente.email = (form.get("email") or "").strip() or None
+    proximo_fluxo = (request.query_params.get("next") or "").strip()
+
+    if proximo_fluxo and "/atualizacao/" in proximo_fluxo and not _gmail_valido(cliente.email):
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente, "erro": "Para receber a atualização, informe um endereço Gmail válido.", "salvo": False, "aviso": ""
+        }, status_code=400)
 
     if not cliente.nome or not telefone_valido(cliente.telefone):
         cliente.telefone = telefone_original
@@ -6850,6 +7883,11 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
         cliente.entrega_estado = ent["uf"]
 
     db.commit()
+    proximo_fluxo = (request.query_params.get("next") or "").strip()
+    base_publica = PUBLIC_BASE_URL.rstrip("/")
+    if proximo_fluxo.startswith(base_publica + "/atualizacao/") or proximo_fluxo.startswith("/atualizacao/"):
+        separador = "&" if "?" in proximo_fluxo else "?"
+        return RedirectResponse(proximo_fluxo + separador + "cadastro=ok", status_code=303)
     destino = f"/cadastro/{token}?salvo=1"
     if aviso:
         destino += "&aviso=" + quote_plus(aviso)
@@ -10090,15 +11128,37 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             "titulo": e.titulo,
             "data_hora": e.data_hora,
             "cliente": e.contato or "Compromisso manual",
-            "equipamento": e.observacao or "",
+            "equipamento": " · ".join(filter(None, [e.observacao or "", f"Google {e.google_sync_status or 'aguardando'}"])),
             "link": f"/organiza/agenda/manual/{e.id}/editar",
             "manual": True,
             "evento_id": e.id,
+            "google_sync_status": e.google_sync_status,
+            "google_sync_erro": e.google_sync_erro,
+        })
+
+    for a in db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all():
+        compra = db.get(AtualizacaoCompra, a.compra_id)
+        cliente_at = db.get(Cliente, a.cliente_id)
+        if not compra or not cliente_at:
+            continue
+        eventos.append({
+            "tipo": "atualizacao-casa" if a.tipo == "CASA" else "atualizacao-loja",
+            "titulo": "Atualização AnyDesk" if a.tipo == "CASA" else "Atualização na loja",
+            "data_hora": a.data_hora,
+            "cliente": cliente_at.nome,
+            "equipamento": f"Pacotes {compra.pacote_inicio} a {compra.pacote_fim} · Google {a.google_sync_status or 'aguardando'}",
+            "link": f"/organiza/clientes/{cliente_at.id}#atualizacoes",
+            "manual": True,
+            "evento_id": a.id,
+            "atualizacao": True,
         })
 
     eventos.sort(key=lambda e: (e["data_hora"], e["titulo"]))
+    google = _google_integracao(db)
     return templates.TemplateResponse("organiza/agenda.html", {
         "request": request, "usuario": usuario, "eventos": eventos,
+        "google": google, "google_configurado": _google_configurado(),
+        "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 
 
@@ -10239,6 +11299,52 @@ def agenda_manutencao_excluir(manutencao_id: int, usuario: Usuario = Depends(usu
     return RedirectResponse("/organiza/agenda", status_code=303)
 
 
+@app.post("/organiza/agenda/google/sincronizar")
+def agenda_google_sincronizar(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    exigir_admin(usuario)
+    integ = _google_integracao(db)
+    if not integ or not integ.refresh_token:
+        return RedirectResponse("/organiza/agenda?erro=" + quote_plus("Conecte a conta Google antes de sincronizar a agenda."), status_code=303)
+    sincronizados = 0
+    erros = 0
+    agora = datetime.now() - timedelta(hours=1)
+    manuais = (
+        db.query(AgendaManual)
+        .filter(AgendaManual.data_hora >= agora)
+        .order_by(AgendaManual.data_hora.asc())
+        .limit(150)
+        .all()
+    )
+    for evento in manuais:
+        _google_calendar_manual_sincronizar(db, evento)
+        if evento.google_sync_status == "SINCRONIZADO":
+            sincronizados += 1
+        else:
+            erros += 1
+    atualizacoes = (
+        db.query(AtualizacaoAgendamento)
+        .filter(AtualizacaoAgendamento.status == "RESERVADO", AtualizacaoAgendamento.data_hora >= agora)
+        .order_by(AtualizacaoAgendamento.data_hora.asc())
+        .limit(150)
+        .all()
+    )
+    for ag in atualizacoes:
+        compra = db.get(AtualizacaoCompra, ag.compra_id)
+        cliente = db.get(Cliente, ag.cliente_id)
+        if not compra or not cliente:
+            continue
+        _google_calendar_sincronizar(db, ag, cliente, compra)
+        if ag.google_sync_status == "SINCRONIZADO":
+            sincronizados += 1
+        else:
+            erros += 1
+    db.commit()
+    mensagem = f"Google Agenda atualizado: {sincronizados} compromisso(s) sincronizado(s)."
+    if erros:
+        mensagem += f" {erros} ficaram com erro; abra o compromisso para consultar o status."
+    return RedirectResponse("/organiza/agenda?mensagem=" + quote_plus(mensagem), status_code=303)
+
+
 @app.get("/organiza/agenda/manual/novo", response_class=HTMLResponse)
 def agenda_manual_novo(request: Request, usuario: Usuario = Depends(usuario_logado)):
     return templates.TemplateResponse("organiza/agenda_manual_form.html", {
@@ -10256,13 +11362,17 @@ async def agenda_manual_criar(request: Request, usuario: Usuario = Depends(usuar
             "request": request, "usuario": usuario, "evento": None,
             "erro": "Informe o título e a data com horário.",
         }, status_code=400)
-    db.add(AgendaManual(
+    evento = AgendaManual(
         titulo=titulo, tipo=(form.get("tipo") or "visita").strip(),
         data_hora=data_hora, contato=(form.get("contato") or "").strip() or None,
         observacao=(form.get("observacao") or "").strip() or None,
-    ))
+    )
+    db.add(evento)
+    db.flush()
+    _google_calendar_manual_sincronizar(db, evento)
     db.commit()
-    return RedirectResponse("/organiza/agenda", status_code=303)
+    mensagem = "Compromisso salvo e enviado ao Google Agenda." if evento.google_sync_status == "SINCRONIZADO" else "Compromisso salvo no Organiza. A sincronização com o Google Agenda ficou pendente."
+    return RedirectResponse("/organiza/agenda?mensagem=" + quote_plus(mensagem), status_code=303)
 
 
 @app.get("/organiza/agenda/manual/{evento_id}/editar", response_class=HTMLResponse)
@@ -10293,17 +11403,24 @@ async def agenda_manual_salvar(evento_id: int, request: Request, usuario: Usuari
     evento.data_hora = data_hora
     evento.contato = (form.get("contato") or "").strip() or None
     evento.observacao = (form.get("observacao") or "").strip() or None
+    _google_calendar_manual_sincronizar(db, evento)
     db.commit()
-    return RedirectResponse("/organiza/agenda", status_code=303)
+    mensagem = "Compromisso atualizado no Organiza e no Google Agenda." if evento.google_sync_status == "SINCRONIZADO" else "Compromisso atualizado no Organiza. A sincronização com o Google Agenda ficou pendente."
+    return RedirectResponse("/organiza/agenda?mensagem=" + quote_plus(mensagem), status_code=303)
 
 
 @app.post("/organiza/agenda/manual/{evento_id}/excluir")
 def agenda_manual_excluir(evento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     evento = db.get(AgendaManual, evento_id)
     if evento:
+        _google_calendar_manual_excluir(db, evento)
+        if evento.google_sync_status == "ERRO":
+            erro = evento.google_sync_erro or "Não foi possível remover o evento do Google Agenda."
+            db.commit()
+            return RedirectResponse("/organiza/agenda?erro=" + quote_plus(erro), status_code=303)
         db.delete(evento)
         db.commit()
-    return RedirectResponse("/organiza/agenda", status_code=303)
+    return RedirectResponse("/organiza/agenda?mensagem=" + quote_plus("Compromisso removido da Agenda do Organiza e do Google Agenda."), status_code=303)
 
 
 def manutencoes_prontas_cliente(db: Session, cliente_id: int):

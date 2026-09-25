@@ -11,6 +11,11 @@
   </div>
 
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if evento and evento.google_sync_status %}
+    <div class="alerta {% if evento.google_sync_status == 'SINCRONIZADO' %}sucesso{% else %}informacao{% endif %}">
+      Google Agenda: <strong>{{ evento.google_sync_status }}</strong>{% if evento.google_sync_erro %} — {{ evento.google_sync_erro }}{% endif %}
+    </div>
+  {% endif %}
 
   <form method="post" class="form-card">
     <label>Tipo
@@ -37,6 +42,7 @@
       <textarea name="observacao" rows="4" placeholder="Informações importantes">{{ evento.observacao if evento and evento.observacao else '' }}</textarea>
     </label>
     <button class="btn primario" type="submit">Salvar compromisso</button>
+    <small class="texto-suave">Ao salvar, o Organiza cria ou atualiza o mesmo compromisso no Google Agenda conectado.</small>
   </form>
 
   {% if evento %}

@@ -1,9 +1,9 @@
 {% extends "organiza/base.html" %}
 {% block conteudo_publico %}
 <section class="orcamento-publico"><div class="publico-card cadastro-publico-card">
-<p class="tag">KARAOKÊ RJ · CADASTRO DA COMPRA</p>
-<h1>Complete seus dados</h1>
-<p class="texto-suave">Preencha os dados abaixo. Se for CNPJ, você pode usar <b>Validar CNPJ</b> para trazer os dados empresariais disponíveis.</p>
+<p class="tag">KARAOKÊ RJ · {% if request.query_params.get('next') %}ATUALIZAÇÃO DE CADASTRO{% else %}CADASTRO DA COMPRA{% endif %}</p>
+<h1>{% if request.query_params.get('next') %}Confirme seu Gmail{% else %}Complete seus dados{% endif %}</h1>
+<p class="texto-suave">{% if request.query_params.get('next') %}Confirme seus dados e informe o <b>Gmail que receberá o acesso aos arquivos da atualização</b>.{% else %}Preencha os dados abaixo. Se for CNPJ, você pode usar <b>Validar CNPJ</b> para trazer os dados empresariais disponíveis.{% endif %}</p>
 {% if salvo %}<div class="alerta sucesso">Dados atualizados com sucesso.</div>{% endif %}
 {% if aviso %}<div class="alerta informacao">{{ aviso }}</div>{% endif %}
 {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
@@ -20,7 +20,7 @@
   </div>
   <small class="texto-suave" id="cnpj-msg"></small>
 </label>
-<label>E-mail *<input type="email" name="email" required value="{{ cliente.email or '' }}"></label>
+<label>{% if request.query_params.get('next') %}E-mail Google (Gmail) *{% else %}E-mail *{% endif %}<input type="email" name="email" required value="{{ cliente.email or '' }}" {% if request.query_params.get('next') %}placeholder="seunome@gmail.com"{% endif %}></label>
 </div>
 
 <div id="dados-cnpj" class="cartao" {% if not cliente.razao_social and not cliente.documento %}style="display:none;margin-top:16px"{% else %}style="margin-top:16px"{% endif %}>

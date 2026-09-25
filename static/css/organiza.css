@@ -3869,3 +3869,5 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .campanha-filtros-clientes select{
   height:44px;padding:0 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#101828;font:inherit;
 }
+/* Organiza 1.1.53 — atualizações, Drive e agenda */
+.agenda-chip.atualizacao-casa{background:#eef2ff;color:#3730a3}.agenda-chip.atualizacao-loja{background:#fff1f2;color:#be123c}.agenda-linha.atualizacao-casa{border-left:5px solid #4f46e5}.agenda-linha.atualizacao-loja{border-left:5px solid #e11d48}

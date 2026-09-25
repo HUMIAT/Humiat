@@ -5,9 +5,32 @@
     <div>
       <p class="tag">AGENDA</p>
       <h1>Compromissos</h1>
-      <p class="texto-suave">Somente entradas na loja, atendimentos online e retiradas.</p>
+      <p class="texto-suave">Entradas, atendimentos online, retiradas e atualizações de catálogo.</p>
     </div>
     <a class="btn primario" href="/organiza/agenda/manual/novo">+ Adicionar compromisso</a>
+  </div>
+
+  {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+  <div class="cartao" style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+    <div>
+      <strong>Google Agenda</strong>
+      {% if google and google.account_email %}
+        <div class="texto-suave">Conectado como {{ google.account_email }}. Novos compromissos manuais e atualizações são sincronizados automaticamente.</div>
+      {% else %}
+        <div class="texto-suave">A Agenda do Organiza continua funcionando, mas a sincronização com o Google está desconectada.</div>
+      {% endif %}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      {% if google and google.refresh_token %}
+        <span class="agenda-chip entrada">Conectado</span>
+        {% if usuario.is_admin %}<form method="post" action="/organiza/agenda/google/sincronizar"><button class="botao pequeno" type="submit">Sincronizar pendentes</button></form>{% endif %}
+      {% elif usuario.is_admin %}
+        <a class="botao pequeno" href="/organiza/google/conectar">Conectar Google</a>
+      {% endif %}
+      {% if usuario.is_admin %}<a class="botao pequeno" href="/organiza/atualizacoes">Configurar integração</a>{% endif %}
+    </div>
   </div>
 
   <div class="agenda-legenda">
@@ -15,6 +38,8 @@
     <span class="agenda-chip online">Atendimento online</span>
     <span class="agenda-chip retirada">Cliente vem buscar</span>
     <span class="agenda-chip visita">Manual</span>
+    <span class="agenda-chip atualizacao-casa">Atualização AnyDesk</span>
+    <span class="agenda-chip atualizacao-loja">Atualização loja</span>
   </div>
 
   {% if eventos %}

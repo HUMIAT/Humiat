@@ -1,0 +1,43 @@
+{% extends "organiza/base.html" %}
+{% block conteudo_publico %}
+<section class="orcamento-publico"><div class="publico-card atualizacao-fluxo-card">
+  <p class="tag">KARAOKÊ RJ · ATUALIZAÇÃO</p>
+  <h1>Sua atualização</h1>
+  <p class="texto-suave">Pacotes adquiridos: <strong>{{ pacotes|join(' / ') }}</strong></p>
+  {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+  <div class="fluxo-3-passos">
+    <article class="passo concluido"><b>1</b><div><strong>Comprar</strong><span>Pagamento confirmado.</span></div></article>
+    <article class="passo {% if gmail_ok %}concluido{% else %}atual{% endif %}"><b>2</b><div><strong>Atualizar cadastro</strong><span>{% if gmail_ok %}Gmail confirmado: {{ cliente.email }}{% else %}Informe o Gmail que receberá sua atualização.{% endif %}</span></div></article>
+    <article class="passo {% if gmail_ok %}atual{% else %}bloqueado{% endif %}"><b>3</b><div><strong>Receber / agendar</strong><span>Escolha atualização em casa ou na loja.</span></div></article>
+  </div>
+
+  {% if not gmail_ok %}
+    <div class="fluxo-acao-principal"><h2>Passo 2 — confirme seu Gmail</h2><p>O Google Drive liberará somente os pacotes comprados para este endereço.</p><a class="botao primario botao-cheio" href="{{ cadastro_url }}">Atualizar cadastro e Gmail</a></div>
+  {% else %}
+    {% if agendamento %}
+      <div class="alerta sucesso"><strong>Atendimento reservado.</strong><br>{{ 'Em casa / AnyDesk' if agendamento.tipo == 'CASA' else 'Na loja' }} · {{ agendamento.data_hora.strftime('%d/%m/%Y às %H:%M') }}</div>
+    {% endif %}
+    <h2>Passo 3 — como você fará a atualização?</h2>
+    <div class="modo-atualizacao-grid">
+      <article>
+        <h3>Em casa / AnyDesk</h3>
+        <p>Primeiro liberamos e enviamos os arquivos ao seu Gmail. Abra o e-mail no <strong>PC/notebook que o técnico utilizará</strong>, baixe todos os arquivos e só depois marque o horário.</p>
+        <p class="texto-suave">Atendimento: segunda a sexta, 10:00 às 20:00.</p>
+        <form method="post" action="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/modo"><input type="hidden" name="modo" value="CASA"><button class="botao primario botao-cheio" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos e link da agenda{% else %}Receber arquivos por e-mail{% endif %}</button></form>
+        {% if compra.email_arquivos_enviado_em %}<a class="botao botao-cheio" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/agenda?tipo=CASA">Já baixei os arquivos · Agendar AnyDesk</a>{% endif %}
+      </article>
+      <article>
+        <h3>Na loja</h3>
+        <p>Não precisa baixar os arquivos. Escolha o dia e horário para levar o equipamento. A confirmação será enviada para <strong>{{ cliente.email }}</strong>.</p>
+        <p class="texto-suave">Atendimento: segunda a sexta, 14:00 às 18:00.</p>
+        <form method="post" action="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/modo"><input type="hidden" name="modo" value="LOJA"><button class="botao primario botao-cheio" type="submit">Agendar atualização na loja</button></form>
+      </article>
+    </div>
+  {% endif %}
+</div></section>
+<style>
+.atualizacao-fluxo-card{max-width:760px}.fluxo-3-passos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0}.passo{display:flex;gap:8px;align-items:flex-start;padding:12px;border:1px solid #dbe3ec;border-radius:12px}.passo>b{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:#94a3b8;color:#fff}.passo>div{display:grid;gap:3px}.passo span{font-size:12px;color:#64748b}.passo.concluido{background:#f0fdf4;border-color:#bbf7d0}.passo.concluido>b{background:#16a34a}.passo.atual{background:#fff7ed;border-color:#fed7aa}.passo.atual>b{background:#e6003c}.passo.bloqueado{opacity:.55}.fluxo-acao-principal{padding:16px;border:1px solid #e2e8f0;border-radius:12px}.modo-atualizacao-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.modo-atualizacao-grid article{padding:16px;border:1px solid #dbe3ec;border-radius:14px;background:#fff}.modo-atualizacao-grid h3{margin-top:0}.modo-atualizacao-grid .botao{margin-top:8px}@media(max-width:650px){.fluxo-3-passos,.modo-atualizacao-grid{grid-template-columns:1fr}}
+</style>
+{% endblock %}

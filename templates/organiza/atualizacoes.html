@@ -1,0 +1,61 @@
+{% extends "organiza/base.html" %}
+{% block titulo %}Atualizações{% endblock %}
+{% block conteudo %}
+<section class="pagina-clean atualizacoes-painel">
+  <div class="titulo-linha">
+    <div><p class="tag">KARAOKÊ RJ</p><h1>Atualizações</h1><p class="texto-suave">Pacotes do Google Drive, compras e agenda de atualização.</p></div>
+  </div>
+  {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+  <section class="cartao google-atualizacao-card">
+    <div>
+      <p class="tag">GOOGLE</p><h2>Drive + Agenda</h2>
+      {% if google and google.account_email %}<p>Conectado como <strong>{{ google.account_email }}</strong></p>{% else %}<p class="texto-suave">Conecte uma conta Google para liberar arquivos no Drive e criar compromissos no Google Agenda.</p>{% endif %}
+      {% if not google_configurado %}<div class="alerta informacao">Configure as credenciais OAuth do Organiza no Render antes de conectar.</div>{% endif %}
+    </div>
+    <div class="acoes-titulo">
+      {% if usuario.is_admin %}
+        {% if google and google.refresh_token %}<a class="botao primario" href="/organiza/google/conectar">Reconectar Google</a><form method="post" action="/organiza/google/desconectar"><button class="botao" type="submit">Desconectar</button></form>
+        {% else %}<a class="botao primario" href="/organiza/google/conectar">Conectar Google</a>{% endif %}
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="cartao tabela-cartao">
+    <div class="titulo-linha compacto"><div><h2>Links dos pacotes</h2><p class="texto-suave">Cole o link do arquivo ou pasta correspondente no Google Drive. O acesso continua privado e será concedido ao Gmail do comprador.</p></div></div>
+    <div class="atualizacao-pacotes-admin">
+      {% for p in pacotes %}
+      <form method="post" action="/organiza/atualizacoes/pacotes/{{ p.id }}" class="atualizacao-pacote-linha">
+        <strong>{{ p.pacote }}</strong>
+        <input type="url" name="drive_url" placeholder="https://drive.google.com/..." value="{{ p.drive_url or '' }}" {% if not usuario.is_admin %}disabled{% endif %}>
+        <label class="check-inline"><input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %} {% if not usuario.is_admin %}disabled{% endif %}> Ativo</label>
+        {% if usuario.is_admin %}<button class="botao pequeno" type="submit">Salvar</button>{% endif %}
+        <small>{% if p.drive_file_id %}Drive configurado{% else %}Sem arquivo/pasta{% endif %}</small>
+      </form>
+      {% else %}<p class="texto-suave">Nenhum pacote localizado no SolVoz.</p>{% endfor %}
+    </div>
+  </section>
+
+  <section class="cartao tabela-cartao">
+    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Casa/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Segunda a sexta, de 1 em 1 hora.</p></div><a class="botao" href="/organiza/agenda">Abrir agenda completa</a></div>
+    <div class="lista-cards-mobile">
+      {% for a in agendamentos %}
+        <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Casa / AnyDesk' if a.tipo == 'CASA' else 'Loja' }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
+      {% else %}<p class="texto-suave vazio">Nenhuma atualização agendada.</p>{% endfor %}
+    </div>
+  </section>
+
+  <section class="cartao tabela-cartao">
+    <div class="titulo-linha compacto"><div><h2>Compras recentes</h2><p class="texto-suave">Pagamentos do SolVoz e registros manuais ficam na mesma base.</p></div></div>
+    <div class="lista-cards-mobile">
+      {% for c in compras %}
+        <a class="cliente-card-clean" href="/organiza/clientes/{{ c.cliente_id }}#atualizacoes"><div><strong>{{ c.cliente.nome if c.cliente else ('Cliente #' ~ c.cliente_id) }}</strong><small>{{ c.pacote_inicio }}{% if c.pacote_fim != c.pacote_inicio %} → {{ c.pacote_fim }}{% endif %} · {{ c.origem }}{% if c.forma_pagamento %} · {{ c.forma_pagamento }}{% endif %}</small></div><span>PAGO</span></a>
+      {% else %}<p class="texto-suave vazio">Nenhuma compra registrada.</p>{% endfor %}
+    </div>
+  </section>
+</section>
+<style>
+.atualizacoes-painel{max-width:1180px}.google-atualizacao-card{display:flex;justify-content:space-between;gap:20px;align-items:center}.google-atualizacao-card h2{margin:2px 0 6px}.atualizacao-pacotes-admin{display:grid;gap:8px}.atualizacao-pacote-linha{display:grid;grid-template-columns:90px minmax(280px,1fr) auto auto;gap:9px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:10px}.atualizacao-pacote-linha small{grid-column:2;color:#64748b}.check-inline{display:flex;align-items:center;gap:5px;white-space:nowrap}@media(max-width:760px){.google-atualizacao-card{align-items:stretch;flex-direction:column}.atualizacao-pacote-linha{grid-template-columns:1fr}.atualizacao-pacote-linha small{grid-column:auto}}
+</style>
+{% endblock %}

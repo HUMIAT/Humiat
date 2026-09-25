@@ -132,6 +132,70 @@
     </article>{% endif %}
   </div>
 </div>
+{% if not somente_consulta %}
+<section class="cartao tabela-cartao atualizacao-admin-card" id="atualizacoes">
+  <div class="titulo-linha compacto">
+    <div><p class="tag">ATUALIZAÇÕES</p><h2>Compras e agendamentos</h2><p class="texto-suave">O Organiza é a fonte oficial dos pacotes comprados, Gmail e reservas.</p></div>
+    <a class="botao" href="/organiza/atualizacoes">Configurar pacotes / Google</a>
+  </div>
+  {% if atualizacao_sucesso %}<div class="alerta sucesso">{{ atualizacao_sucesso }}</div>{% endif %}
+  {% if atualizacao_erro %}<div class="alerta erro">{{ atualizacao_erro }}</div>{% endif %}
+  <div class="atualizacao-manual-grid">
+    <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/compra" class="cartao atualizacao-form-interno">
+      <h3>Registrar compra manual</h3>
+      <p class="texto-suave">Use para PIX direto, dinheiro ou qualquer pagamento feito fora do SolVoz. Ao salvar, estes pacotes deixam de ser cobrados no link do cliente.</p>
+      <div class="form-grid-organizada duas-colunas">
+        <label>Do pacote<select name="pacote_inicio" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}">{{ p.pacote }}</option>{% endfor %}</select></label>
+        <label>Até o pacote<select name="pacote_fim" required>{% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}" {% if loop.last %}selected{% endif %}>{{ p.pacote }}</option>{% endfor %}</select></label>
+        <label>Valor pago<input name="valor_pago" inputmode="decimal" placeholder="250,00"></label>
+        <label>Valor normal<input name="valor_normal" inputmode="decimal" placeholder="500,00"></label>
+        <label>Forma de pagamento<select name="forma_pagamento"><option>PIX direto</option><option>InfinitePay</option><option>Dinheiro</option><option>Cartão</option><option>Outro</option></select></label>
+      </div>
+      <button class="botao primario" type="submit">Registrar como pago</button>
+    </form>
+    <div class="cartao atualizacao-gmail-status">
+      <h3>Gmail do cliente</h3>
+      <strong>{{ cliente.email or 'Não informado' }}</strong>
+      {% if atualizacoes_ctx.gmail_ok %}<span class="pill atualizacao-ok">Gmail válido</span>{% else %}<span class="pill atualizacao-pendente">Precisa atualizar</span>{% endif %}
+      <p class="texto-suave">O acesso aos arquivos do Google Drive é concedido a este Gmail.</p>
+      <a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\nPara receber os arquivos da sua atualização, confirme seu Gmail e seus dados neste link:\n\nhttps://humiat.com.br/cadastro/'~cliente.token_ficha~'\n\nKaraokê RJ')|urlencode }}">Pedir atualização de cadastro</a>
+    </div>
+  </div>
+
+  {% if atualizacoes_ctx.compras %}
+  <div class="atualizacao-compras-lista">
+    {% for compra in atualizacoes_ctx.compras %}
+      {% set ag = atualizacoes_ctx.agendamentos.get(compra.id) %}
+      <article class="atualizacao-compra-item">
+        <div class="atualizacao-compra-head">
+          <div><span class="pill atualizacao-ok">PAGO</span><h3>{{ compra.pacote_inicio }}{% if compra.pacote_fim != compra.pacote_inicio %} → {{ compra.pacote_fim }}{% endif %}</h3><small>{{ compra.origem }}{% if compra.forma_pagamento %} · {{ compra.forma_pagamento }}{% endif %}{% if compra.pago_em %} · {{ compra.pago_em.strftime('%d/%m/%Y %H:%M') }}{% endif %}</small></div>
+          {% if compra.valor_pago_centavos %}<strong>R$ {{ '%.2f'|format(compra.valor_pago_centavos/100)|replace('.', ',') }}</strong>{% endif %}
+        </div>
+        <p class="texto-suave">Pacotes: {{ compra.pacotes|replace('[','')|replace(']','')|replace('"','')|replace(',', ' /') }}</p>
+        <div class="atualizacao-status-grid">
+          <div><small>Gmail</small><strong>{{ cliente.email or '-' }}</strong></div>
+          <div><small>Arquivos</small><strong>{% if compra.email_arquivos_enviado_em %}E-mail enviado{% elif compra.arquivos_liberados_em %}Liberados{% else %}Aguardando{% endif %}</strong></div>
+          <div><small>Atendimento</small><strong>{% if ag and ag.status == 'RESERVADO' %}{{ 'Casa / AnyDesk' if ag.tipo == 'CASA' else 'Loja' }} · {{ ag.data_hora.strftime('%d/%m %H:%M') }}{% else %}Não agendado{% endif %}</strong></div>
+        </div>
+        <div class="atualizacao-acoes">
+          <a class="botao pequeno" target="_blank" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Abrir página do cliente</a>
+          <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/enviar-casa"><button class="botao pequeno" type="submit">{% if compra.email_arquivos_enviado_em %}Reenviar arquivos por e-mail{% else %}Liberar arquivos / enviar e-mail{% endif %}</button></form>
+        </div>
+        <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/agendar" class="atualizacao-agendar-admin">
+          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Em casa / AnyDesk · 10:00 às 20:00</option></select></label>
+          <label>Dia e hora<input type="datetime-local" name="data_hora" required value="{{ ag.data_hora.strftime('%Y-%m-%dT%H:%M') if ag and ag.status == 'RESERVADO' else '' }}"></label>
+          <button class="botao primario pequeno" type="submit">{% if ag and ag.status == 'RESERVADO' %}Reagendar{% else %}Reservar horário{% endif %}</button>
+        </form>
+        {% if ag and ag.status == 'RESERVADO' %}
+        <div class="atualizacao-agenda-info"><small>Google Agenda: {{ ag.google_sync_status or 'Aguardando' }}{% if ag.google_sync_erro %} · {{ ag.google_sync_erro }}{% endif %}</small><form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/cancelar-agendamento" onsubmit="return confirm('Cancelar este agendamento?')"><button class="botao pequeno" type="submit">Cancelar agendamento</button></form></div>
+        {% endif %}
+        {% if compra.email_erro %}<div class="alerta erro">Último envio: {{ compra.email_erro }}</div>{% endif %}
+      </article>
+    {% endfor %}
+  </div>
+  {% else %}<p class="texto-suave vazio">Nenhuma atualização comprada ainda.</p>{% endif %}
+</section>
+{% endif %}
 <section class="cartao tabela-cartao">
   <div class="titulo-linha compacto">
     <div><h2>Equipamentos</h2><p class="texto-suave">Organizados por tipo e identificação do cliente.</p></div>
@@ -218,6 +282,8 @@
 </section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div>{% if not somente_consulta %}<a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a>{% endif %}</div><div class="lista-cards-mobile">{% for m in manutencoes %}{% if somente_consulta %}<div class="cliente-card-clean"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></div>{% else %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% endif %}{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
 <style>
 .consulta-somente{background:#eef2ff;color:#3730a3}.consulta-campanha-card{margin:14px 0;padding:16px}.consulta-campanha-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.consulta-campanha-topo h2{margin:2px 0 4px}.consulta-envio-ok{background:#e8f7ee;color:#166534}.consulta-envio-pendente{background:#fff2df;color:#9a4d00}.consulta-campanha-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.8fr);gap:16px;margin-top:14px}.consulta-campanha-grid>div{display:grid;align-content:start;gap:7px}.consulta-campanha-grid small{font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.consulta-campanha-grid pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.45;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px}.consulta-campanha-grid a{word-break:break-word}.consulta-campanha-acoes{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}.consulta-campanha-acoes form{margin:0}.consulta-campanha-nota{margin:10px 0 0}.equip-card-consulta-destaque{outline:2px solid #2563eb;outline-offset:2px}@media(max-width:760px){.consulta-campanha-topo,.consulta-campanha-acoes{align-items:stretch;flex-direction:column}.consulta-campanha-grid{grid-template-columns:1fr}.consulta-campanha-acoes .botao,.consulta-campanha-acoes form,.consulta-campanha-acoes form .botao{width:100%;text-align:center}}
+
+.atualizacao-manual-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.7fr);gap:14px;margin:14px 0}.atualizacao-form-interno,.atualizacao-gmail-status{padding:14px;box-shadow:none}.atualizacao-gmail-status{display:grid;align-content:start;gap:9px}.atualizacao-ok{background:#e8f7ee;color:#166534}.atualizacao-pendente{background:#fff2df;color:#9a4d00}.atualizacao-compras-lista{display:grid;gap:12px}.atualizacao-compra-item{padding:15px;border:1px solid #dbe3ec;border-radius:14px;background:#fff}.atualizacao-compra-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.atualizacao-compra-head h3{margin:5px 0 3px}.atualizacao-status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.atualizacao-status-grid>div{padding:10px;border-radius:10px;background:#f8fafc;display:grid;gap:3px}.atualizacao-status-grid small{color:#64748b}.atualizacao-acoes,.atualizacao-agenda-info{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.atualizacao-acoes form,.atualizacao-agenda-info form{margin:0}.atualizacao-agendar-admin{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:10px}.atualizacao-agendar-admin label{display:grid;gap:5px}.atualizacao-agenda-info{margin-top:10px;justify-content:space-between}@media(max-width:760px){.atualizacao-manual-grid,.atualizacao-status-grid,.atualizacao-agendar-admin{grid-template-columns:1fr}.atualizacao-compra-head{flex-direction:column}.atualizacao-acoes,.atualizacao-agenda-info{align-items:stretch;flex-direction:column}.atualizacao-acoes .botao,.atualizacao-acoes form,.atualizacao-acoes form .botao{width:100%;text-align:center}}
 </style>
 <script>
 async function copiarChaveNfeCard(btn){

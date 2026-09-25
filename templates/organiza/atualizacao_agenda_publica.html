@@ -1,0 +1,35 @@
+{% extends "organiza/base.html" %}
+{% block conteudo_publico %}
+<section class="orcamento-publico"><div class="publico-card atualizacao-agenda-publica">
+  <p class="tag">KARAOKÊ RJ · AGENDAMENTO</p>
+  <h1>{{ 'Atendimento em casa / AnyDesk' if tipo == 'CASA' else 'Atualização na loja' }}</h1>
+  <p class="texto-suave">{% if tipo == 'CASA' %}Agende somente depois de baixar todos os arquivos no PC/notebook.{% else %}Escolha quando você levará o equipamento até a loja.{% endif %}</p>
+  <div class="alerta informacao">Segunda a sexta · {{ '10:00 às 20:00' if tipo == 'CASA' else '14:00 às 18:00' }} · horários de 1 em 1 hora.</div>
+  {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if agendamento %}<div class="alerta sucesso">Reserva atual: <strong>{{ agendamento.data_hora.strftime('%d/%m/%Y às %H:%M') }}</strong>. Você pode escolher outro horário abaixo para reagendar.</div>{% endif %}
+  <form method="post" class="formulario" id="agenda-atualizacao-form">
+    <input type="hidden" name="tipo" value="{{ tipo }}">
+    <label>Dia<input type="date" id="agenda-data" name="data" min="{{ hoje }}" required></label>
+    <label>Horário<select id="agenda-hora" name="hora" required disabled><option value="">Escolha primeiro o dia</option></select></label>
+    <button class="botao primario botao-cheio" type="submit">{{ 'Reservar atendimento pelo AnyDesk' if tipo == 'CASA' else 'Reservar horário na loja' }}</button>
+  </form>
+  <a class="botao botao-cheio" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Voltar</a>
+</div></section>
+<script>
+(() => {
+  const data=document.getElementById('agenda-data'), hora=document.getElementById('agenda-hora');
+  async function carregar(){
+    hora.disabled=true; hora.innerHTML='<option>Carregando...</option>';
+    if(!data.value){hora.innerHTML='<option value="">Escolha primeiro o dia</option>'; return;}
+    try{
+      const r=await fetch(`/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}/horarios?tipo={{ tipo }}&data=${encodeURIComponent(data.value)}`);
+      const d=await r.json(); const lista=d.horarios||[];
+      hora.innerHTML=lista.length?lista.map(x=>`<option value="${x}">${x}</option>`).join(''):'<option value="">Nenhum horário disponível neste dia</option>';
+      hora.disabled=!lista.length;
+    }catch(e){hora.innerHTML='<option value="">Não foi possível consultar os horários</option>';}
+  }
+  data.addEventListener('change',carregar);
+})();
+</script>
+{% endblock %}
