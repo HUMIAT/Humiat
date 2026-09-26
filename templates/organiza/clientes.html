@@ -25,9 +25,7 @@
         <div class="cliente-card-botoes">
           <a class="botao pequeno primario" href="/organiza/clientes/{{ cliente.id }}">Abrir</a>
           <a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}#agenda-cliente">Agendar</a>
-          {% if not resumo.cadastro_ok %}
-          <a class="botao pequeno whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ ('Olá, '~cliente.nome~'!\n\nPrecisamos confirmar/atualizar seu cadastro para prosseguir com o atendimento. Acesse o link abaixo e revise seus dados:\n\n'~resumo.cadastro_url~'\n\nKaraokê RJ')|urlencode }}">Atualizar cadastro</a>
-          {% endif %}
+          <a class="botao pequeno whatsapp" target="_blank" rel="noopener" href="/organiza/clientes/{{ cliente.id }}/cadastro-whatsapp">Atualizar cadastro</a>
           <a class="botao pequeno" target="_blank" href="{{ whatsapp_url(cliente) }}">WhatsApp</a>
         </div>
       </article>

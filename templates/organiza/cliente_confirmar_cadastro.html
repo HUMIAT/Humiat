@@ -1,0 +1,13 @@
+{% extends "organiza/base.html" %}
+{% block titulo %}Confirmar envio de cadastro{% endblock %}
+{% block conteudo %}
+<section class="pagina-clean" style="max-width:720px">
+  <article class="cartao" style="display:grid;gap:16px">
+    <div><p class="tag">ATUALIZAÇÃO DE CADASTRO</p><h1 style="margin:4px 0 8px">{{ cliente.nome }}</h1><p class="texto-suave">Este cadastro parece atualizado. Deseja enviar o link de atualização mesmo assim?</p></div>
+    <div class="acoes-titulo" style="justify-content:flex-start">
+      <a class="botao" href="/organiza/clientes">Cancelar</a>
+      <a class="botao primario whatsapp" target="_blank" rel="noopener" href="/organiza/clientes/{{ cliente.id }}/cadastro-whatsapp?forcar=1">Enviar mesmo assim</a>
+    </div>
+  </article>
+</section>
+{% endblock %}

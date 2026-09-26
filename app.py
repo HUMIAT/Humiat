@@ -882,6 +882,7 @@ class AtualizacaoCompra(Base):
     arquivos_liberados_em = Column(DateTime, nullable=True)
     email_arquivos_enviado_em = Column(DateTime, nullable=True)
     email_erro = Column(Text, nullable=True)
+    concluido_em = Column(DateTime, nullable=True, index=True)
     criado_em = Column(DateTime, server_default=func.now())
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
     cliente = relationship("Cliente")
@@ -1563,6 +1564,9 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE atualizacao_compras ADD COLUMN valor_a_pagar_centavos INTEGER"))
             if "frete_centavos" not in existentes_atualizacao_compras:
                 conn.execute(text("ALTER TABLE atualizacao_compras ADD COLUMN frete_centavos INTEGER"))
+            if "concluido_em" not in existentes_atualizacao_compras:
+                tipo_dt_atualizacao = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+                conn.execute(text(f"ALTER TABLE atualizacao_compras ADD COLUMN concluido_em {tipo_dt_atualizacao}"))
 
     if "assistencias" in insp.get_table_names():
         existentes = {c["name"] for c in insp.get_columns("assistencias")}
@@ -2162,28 +2166,36 @@ def api_lokafest_cliente(
 
 
 def _cliente_resumo_visual(cliente: Cliente | None) -> dict:
+    # Lista de clientes precisa ser leve: nenhuma validação de cadastro é feita aqui.
+    # A checagem completa acontece somente ao clicar em “Atualizar cadastro”.
     equipamento = _equipamento_ativo_mais_antigo(cliente)
     pacote = ((equipamento.pacote or '').strip() if equipamento else '') or '-'
     identificacao = rotulo_maquina(equipamento) if equipamento else '-'
     email = (getattr(cliente, 'email', '') or '').strip() or None
-    telefone_ok = bool(cliente and telefone_valido(getattr(cliente, 'telefone', None)))
-    documento = limpar_documento(getattr(cliente, 'documento', '') or '')
-    cadastro_ok = bool(
-        cliente and (getattr(cliente, 'nome', '') or '').strip() and telefone_ok and _gmail_valido(email)
-        and len(documento) in (11, 14) and (getattr(cliente, 'cep', '') or '').strip()
-        and (getattr(cliente, 'endereco_numero', '') or '').strip()
-    )
     return {
         'equipamento_base': equipamento,
         'pacote_base': pacote,
         'identificacao_base': identificacao,
         'email': email,
-        'email_ok': _gmail_valido(email),
-        'cadastro_ok': cadastro_ok,
-        'cadastro_url': f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{cliente.token_ficha}" if cliente and cliente.token_ficha else '',
         'municipio': (getattr(cliente, 'municipio', None) or getattr(cliente, 'cidade', None) or '').strip() or None,
         'empresa': (getattr(cliente, 'empresa', None) or '').strip() or None,
     }
+
+
+def _cliente_cadastro_parece_atualizado(cliente: Cliente | None) -> bool:
+    if not cliente:
+        return False
+    email = (cliente.email or '').strip()
+    documento = limpar_documento(cliente.documento or '')
+    return bool(
+        (cliente.nome or '').strip()
+        and telefone_valido(cliente.telefone, cliente.pais, cliente.ddi)
+        and _gmail_valido(email)
+        and len(documento) in (11, 14)
+        and (cliente.cep or '').strip()
+        and (cliente.endereco or '').strip()
+        and (cliente.endereco_numero or '').strip()
+    )
 
 
 def _ultima_campanha_atualizacao_cliente(db: Session, cliente: Cliente | None) -> dict | None:
@@ -2224,13 +2236,6 @@ def clientes(request: Request, busca: str = "", usuario: Usuario = Depends(usuar
         like = f"%{termo}%"
         query = query.filter(or_(Cliente.nome.ilike(like), Cliente.telefone.ilike(like), Cliente.empresa.ilike(like), Cliente.municipio.ilike(like), Cliente.cidade.ilike(like), Cliente.email.ilike(like)))
     lista = query.order_by(Cliente.nome.asc()).all()
-    alterou_token = False
-    for cliente in lista:
-        if not cliente.token_ficha:
-            cliente.token_ficha = secrets.token_urlsafe(24)
-            alterou_token = True
-    if alterou_token:
-        db.commit()
     resumos_clientes = {int(cliente.id): _cliente_resumo_visual(cliente) for cliente in lista}
     return templates.TemplateResponse("organiza/clientes.html", {
         "request": request, "usuario": usuario, "clientes": lista, "busca": busca,
@@ -2238,6 +2243,34 @@ def clientes(request: Request, busca: str = "", usuario: Usuario = Depends(usuar
         "resumos_clientes": resumos_clientes,
     })
 
+
+
+@app.get("/organiza/clientes/{cliente_id}/cadastro-whatsapp", response_class=HTMLResponse)
+def cliente_cadastro_whatsapp(
+    cliente_id: int, request: Request, forcar: int = 0,
+    usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db),
+):
+    cliente = db.get(Cliente, cliente_id)
+    if not cliente:
+        raise HTTPException(404)
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
+    cadastro_url = f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{cliente.token_ficha}"
+    mensagem = (
+        f"Olá, {cliente.nome}!\n\n"
+        "Precisamos confirmar/atualizar seu cadastro para prosseguir com o atendimento. "
+        "Acesse o link abaixo e revise seus dados:\n\n"
+        f"{cadastro_url}\n\nKaraokê RJ"
+    )
+    whatsapp = _whatsapp_url_pronta(cliente.whatsapp_completo() or '', mensagem)
+    if not whatsapp:
+        return RedirectResponse(f"/organiza/clientes/{cliente_id}?humiat_erro=" + quote_plus("Cliente sem WhatsApp válido."), status_code=303)
+    if not forcar and _cliente_cadastro_parece_atualizado(cliente):
+        return templates.TemplateResponse("organiza/cliente_confirmar_cadastro.html", {
+            "request": request, "usuario": usuario, "cliente": cliente, "whatsapp_url": whatsapp,
+        })
+    return RedirectResponse(whatsapp, status_code=303)
 
 def limpar_nome_cliente(nome: str) -> str:
     nome = (nome or "").strip()
@@ -4409,6 +4442,51 @@ async def integrar_cliente_aluguel_connect(request: Request, db: Session = Depen
     return {
         "ok": True, "acao": "criado" if criado else "atualizado", "id": contato.id,
         "integracao": contato.integracao, "ultimo_mes_aluguel": contato.ultimo_mes_aluguel,
+    }
+
+
+@app.get("/api/integracoes/connect/campanha-aluguel/cliente")
+def api_connect_campanha_aluguel_cliente(
+    request: Request, telefone: str = "", db: Session = Depends(get_db)
+):
+    """Informa ao Connect se o telefone participou de campanha de aluguel do Organiza."""
+    _validar_chave_connect(request)
+    normalizado = _normalizar_telefone_csv_aluguel(telefone)
+    if not normalizado:
+        return {"ok": True, "participou": False, "motivo": "telefone_invalido"}
+    _pais, _ddi, _telefone, numero_chave = normalizado
+    contato = db.query(CampanhaAluguelContato).filter(
+        CampanhaAluguelContato.numero_chave == numero_chave
+    ).first()
+    if not contato:
+        return {"ok": True, "participou": False}
+    dest = (
+        db.query(CampanhaAluguelDestinatario)
+        .join(Campanha, Campanha.id == CampanhaAluguelDestinatario.campanha_id)
+        .filter(
+            CampanhaAluguelDestinatario.contato_id == contato.id,
+            func.upper(Campanha.lista_tipo) == "ALUGUEL",
+            ~CampanhaAluguelDestinatario.status.in_(["IGNORADO"]),
+        )
+        .order_by(
+            CampanhaAluguelDestinatario.enviado_em.desc().nullslast(),
+            Campanha.iniciado_em.desc().nullslast(),
+            Campanha.criado_em.desc(),
+            Campanha.id.desc(),
+        )
+        .first()
+    )
+    if not dest or not dest.campanha:
+        return {"ok": True, "participou": False}
+    campanha = dest.campanha
+    return {
+        "ok": True,
+        "participou": True,
+        "campanha_id": campanha.id,
+        "campanha_nome": campanha.nome,
+        "campanha_status": campanha.status,
+        "destinatario_status": dest.status,
+        "enviado_em": dest.enviado_em.isoformat() if dest.enviado_em else None,
     }
 
 
@@ -6813,6 +6891,65 @@ async def api_solvoz_atualizacao_oferta(
 
 
 
+
+def _validar_integracao_connect(request: Request) -> None:
+    esperada = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    recebida = (request.headers.get("X-API-Key") or "").strip()
+    if not esperada:
+        raise HTTPException(status_code=503, detail="CONNECT_API_KEY/ORGANIZA_API_KEY não configurada no Organiza.")
+    if not recebida or not hmac.compare_digest(recebida, esperada):
+        raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+
+@app.get("/api/integracoes/connect/campanha-karaoke10")
+def api_connect_campanha_karaoke10(telefone: str, request: Request, db: Session = Depends(get_db)):
+    """Confirma se o telefone participou da campanha de aluguel mais recente do Organiza."""
+    _validar_integracao_connect(request)
+    campanha = (
+        db.query(Campanha)
+        .filter(func.upper(Campanha.lista_tipo) == "ALUGUEL")
+        .order_by(func.coalesce(Campanha.iniciado_em, Campanha.criado_em).desc(), Campanha.id.desc())
+        .first()
+    )
+    if not campanha:
+        return JSONResponse({"ok": True, "participou": False})
+    digitos = re.sub(r"\D", "", telefone or "")
+    if digitos.startswith("55") and len(digitos) >= 12:
+        sem_ddi = digitos[2:]
+    else:
+        sem_ddi = digitos
+    candidatos = {digitos, sem_ddi, ("55" + sem_ddi) if sem_ddi else ""}
+    candidatos.discard("")
+    destinos = (
+        db.query(CampanhaAluguelDestinatario)
+        .options(joinedload(CampanhaAluguelDestinatario.contato))
+        .filter(CampanhaAluguelDestinatario.campanha_id == campanha.id)
+        .all()
+    )
+    dest = None
+    for item in destinos:
+        contato = item.contato
+        if not contato:
+            continue
+        nums = {
+            re.sub(r"\D", "", contato.numero_chave or ""),
+            re.sub(r"\D", "", contato.whatsapp_completo() or ""),
+            re.sub(r"\D", "", contato.telefone or ""),
+        }
+        if candidatos & nums:
+            dest = item
+            break
+    if not dest:
+        return JSONResponse({
+            "ok": True, "participou": False, "campanha_id": int(campanha.id), "campanha_nome": campanha.nome
+        })
+    return JSONResponse({
+        "ok": True, "participou": True, "campanha_id": int(campanha.id),
+        "campanha_nome": campanha.nome, "status_envio": dest.status or "PENDENTE",
+        "enviado_em": dest.enviado_em.isoformat() if dest.enviado_em else None,
+    })
+
+
 def _google_oauth_state(usuario: Usuario) -> str:
     bruto = f"{int(usuario.id)}|{int(datetime.now().timestamp())}"
     sig = hmac.new(CHAVE_SESSAO.encode(), bruto.encode(), hashlib.sha256).hexdigest()[:24]
@@ -6830,12 +6967,65 @@ def _google_oauth_state_valido(state: str, usuario: Usuario) -> bool:
         return False
 
 
+def _atualizacao_meta_compra(db: Session, compra: AtualizacaoCompra) -> dict:
+    cliente = compra.cliente or db.get(Cliente, compra.cliente_id)
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+    cadastro_ok = bool(cliente and _gmail_valido(cliente.email) and telefone_valido(cliente.telefone, cliente.pais, cliente.ddi))
+    if compra.concluido_em:
+        etapa = 3
+        etapa_rotulo = "Concluído"
+    elif not cadastro_ok:
+        etapa = 1
+        etapa_rotulo = "Etapa 1/3 · Cadastro pendente"
+    elif (compra.status or '').upper() == 'A_PAGAR':
+        etapa = 2
+        etapa_rotulo = "Etapa 2/3 · Aguardando pagamento"
+    else:
+        etapa = 3
+        if compra.email_arquivos_enviado_em or compra.arquivos_liberados_em:
+            etapa_rotulo = "Etapa 3/3 · Arquivos enviados / atendimento"
+        elif ag and ag.status in ('RESERVADO', 'CONCLUIDO'):
+            etapa_rotulo = "Etapa 3/3 · Atendimento agendado" if ag.status == 'RESERVADO' else "Concluído"
+        else:
+            etapa_rotulo = "Etapa 3/3 · Aguardando atendimento"
+    local = 'indefinido'
+    local_rotulo = 'Atendimento a definir'
+    if ag:
+        if ag.tipo == 'CASA':
+            local, local_rotulo = 'online', 'Online / AnyDesk'
+        elif ag.tipo == 'CLIENTE':
+            local, local_rotulo = 'casa', 'Casa do cliente'
+        else:
+            local, local_rotulo = 'loja', 'Loja'
+    elif compra.email_arquivos_enviado_em or compra.arquivos_liberados_em:
+        local, local_rotulo = 'online', 'Online / AnyDesk'
+    total = int(compra.valor_a_pagar_centavos or 0) + int(compra.frete_centavos or 0)
+    pago = int(compra.valor_pago_centavos or 0)
+    return {
+        'etapa': etapa, 'etapa_rotulo': etapa_rotulo, 'local': local, 'local_rotulo': local_rotulo,
+        'agendamento': ag, 'concluido': bool(compra.concluido_em),
+        'saldo': max(total - pago, 0), 'total': total, 'pago': pago,
+    }
+
+
 @app.get("/organiza/atualizacoes", response_class=HTMLResponse)
 def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     links_padrao = _atualizacao_links_padrao_sync(db)
     pacotes = _atualizacao_pacotes_sync_solvoz(db)
     filtro = (request.query_params.get("filtro") or "").strip().lower()
-    compras = db.query(AtualizacaoCompra).options(selectinload(AtualizacaoCompra.cliente)).order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc()).limit(100).all()
+    busca_compras = (request.query_params.get("busca_compras") or "").strip()
+    etapas_filtro = {x for x in request.query_params.getlist("etapa") if x in {'1','2','3'}}
+    status_filtro = {x for x in request.query_params.getlist("status_fin") if x in {'pago','a_pagar'}}
+    locais_filtro = {x for x in request.query_params.getlist("local") if x in {'online','loja','casa','indefinido'}}
+    mostrar_concluidos = (request.query_params.get("concluidos") or "") == "1"
+
+    compras_base = (
+        db.query(AtualizacaoCompra)
+        .options(selectinload(AtualizacaoCompra.cliente))
+        .order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc())
+        .limit(300)
+        .all()
+    )
     agendamentos = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all()
     campanha_atual = db.query(Campanha).filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO").order_by(func.coalesce(Campanha.iniciado_em, Campanha.criado_em).desc(), Campanha.id.desc()).first()
     campanha_resultado = None
@@ -6855,9 +7045,6 @@ def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_loga
             q_compras = q_compras.filter(AtualizacaoCompra.criado_em >= campanha_atual.iniciado_em)
         compras_campanha = q_compras.order_by(AtualizacaoCompra.criado_em.desc(), AtualizacaoCompra.id.desc()).all()
 
-        # Resultado da campanha = valor da atualização vendida, sem frete/deslocamento.
-        # O snapshot da oferta do destinatário funciona como teto para impedir que um
-        # lançamento manual incorreto distorça o painel (ex.: R$ 2.250 em uma oferta de R$ 250).
         total_contratado = 0
         total_recebido = 0
         total_frete = 0
@@ -6885,18 +7072,35 @@ def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_loga
             "recebido": total_recebido, "em_aberto": max(total_contratado - total_recebido, 0), "frete": total_frete,
         }
 
-        if filtro in ("compras", "pagas", "a_pagar"):
-            compras = compras_campanha
-            if filtro == "pagas":
-                compras = [c for c in compras if c.status == "PAGO"]
-            elif filtro == "a_pagar":
-                compras = [c for c in compras if c.status == "A_PAGAR"]
+    if filtro in ("compras", "pagas", "a_pagar"):
+        compras = list(compras_campanha)
+        if filtro == "pagas":
+            compras = [c for c in compras if c.status == "PAGO"]
+        elif filtro == "a_pagar":
+            compras = [c for c in compras if c.status == "A_PAGAR"]
+    else:
+        compras = list(compras_base)
+
+    compra_meta = {int(c.id): _atualizacao_meta_compra(db, c) for c in compras}
+    if busca_compras:
+        termo = busca_compras.casefold()
+        compras = [c for c in compras if termo in ((c.cliente.nome if c.cliente else '') or '').casefold()]
+    if etapas_filtro:
+        compras = [c for c in compras if str(compra_meta.get(int(c.id), {}).get('etapa')) in etapas_filtro]
+    if status_filtro:
+        compras = [c for c in compras if (c.status or '').lower() in status_filtro]
+    if locais_filtro:
+        compras = [c for c in compras if compra_meta.get(int(c.id), {}).get('local') in locais_filtro]
+    if not mostrar_concluidos:
+        compras = [c for c in compras if not compra_meta.get(int(c.id), {}).get('concluido')]
 
     google = _google_integracao(db)
     return templates.TemplateResponse("organiza/atualizacoes.html", {
         "request": request, "usuario": usuario, "links_padrao": links_padrao, "pacotes": pacotes, "compras": compras,
         "agendamentos": agendamentos, "campanha_resultado": campanha_resultado, "campanha_valores": campanha_valores,
-        "filtro": filtro, "google": google, "google_configurado": _google_configurado(),
+        "compra_meta": compra_meta, "filtro": filtro, "busca_compras": busca_compras, "etapas_filtro": etapas_filtro,
+        "status_filtro": status_filtro, "locais_filtro": locais_filtro, "mostrar_concluidos": mostrar_concluidos,
+        "google": google, "google_configurado": _google_configurado(),
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 
@@ -7063,7 +7267,6 @@ async def atualizacao_admin_editar_lancamento(cliente_id: int, compra_id: int, r
     compra = db.query(AtualizacaoCompra).filter(
         AtualizacaoCompra.id == compra_id,
         AtualizacaoCompra.cliente_id == cliente_id,
-        func.upper(AtualizacaoCompra.origem) == "MANUAL",
         AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")),
     ).first()
     cliente = db.get(Cliente, cliente_id)
@@ -7113,6 +7316,45 @@ async def atualizacao_admin_editar_lancamento(cliente_id: int, compra_id: int, r
     msg = f"Lançamento manual atualizado. Status: {'PAGO' if compra.status == 'PAGO' else 'A PAGAR'} · saldo R$ {saldo/100:.2f}".replace('.', ',')
     return RedirectResponse(f"/organiza/clientes/{cliente_id}?atualizacao_sucesso=" + quote_plus(msg), status_code=303)
 
+
+
+@app.post("/organiza/atualizacoes/{compra_id}/concluir")
+def atualizacao_admin_concluir(
+    compra_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)
+):
+    compra = db.query(AtualizacaoCompra).filter(
+        AtualizacaoCompra.id == compra_id,
+        AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")),
+    ).first()
+    if not compra:
+        raise HTTPException(404)
+    cliente = db.get(Cliente, compra.cliente_id)
+    if not cliente:
+        raise HTTPException(404)
+    pacote_final = (compra.pacote_fim or '').strip()
+    if not pacote_final:
+        return RedirectResponse("/organiza/atualizacoes?erro=" + quote_plus("Compra sem pacote final definido."), status_code=303)
+    indice_final = _pacote_indice(pacote_final)
+    alteradas = 0
+    for eq in db.query(Equipamento).filter(Equipamento.cliente_id == cliente.id).all():
+        if (eq.status or 'Ativo').strip().lower() != 'ativo':
+            continue
+        indice_atual = _pacote_indice(eq.pacote)
+        if indice_final is None or indice_atual is None or indice_atual <= indice_final:
+            eq.pacote = pacote_final
+            eq.falta_pacote = calcular_falta_pacote(pacote_final, obter_pacote_atual(db))
+            alteradas += 1
+    cliente.pacote = pacote_final
+    cliente.falta_pacote = calcular_falta_pacote(pacote_final, obter_pacote_atual(db))
+    cliente.atualizacao_oferta_status = "CONCLUIDO"
+    cliente.atualizacao_oferta_atualizado_em = datetime.now()
+    compra.concluido_em = compra.concluido_em or datetime.now()
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+    if ag and ag.status == "RESERVADO":
+        ag.status = "CONCLUIDO"
+    db.commit()
+    msg = f"Atualização concluída. Cliente e {alteradas} máquina(s) ativa(s) foram atualizados para {pacote_final}."
+    return RedirectResponse("/organiza/atualizacoes?mensagem=" + quote_plus(msg) + "#compras-campanha", status_code=303)
 
 @app.post("/organiza/clientes/{cliente_id}/atualizacoes/{compra_id}/enviar-casa")
 def atualizacao_admin_enviar_casa(cliente_id: int, compra_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
