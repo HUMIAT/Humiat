@@ -906,6 +906,20 @@ class AtualizacaoAgendamento(Base):
     cliente = relationship("Cliente")
 
 
+class AtualizacaoPreReserva(Base):
+    __tablename__ = "atualizacao_pre_reservas"
+    id = Column(Integer, primary_key=True)
+    token = Column(String(80), nullable=False, unique=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
+    tipo = Column(String(20), nullable=False, index=True)
+    data_hora = Column(DateTime, nullable=False, index=True)
+    expira_em = Column(DateTime, nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="PENDENTE", index=True)
+    order_nsu = Column(String(120), nullable=True, index=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class OrganizaGoogleIntegracao(Base):
     __tablename__ = "organiza_google_integracao"
     id = Column(Integer, primary_key=True)
@@ -2152,12 +2166,21 @@ def _cliente_resumo_visual(cliente: Cliente | None) -> dict:
     pacote = ((equipamento.pacote or '').strip() if equipamento else '') or '-'
     identificacao = rotulo_maquina(equipamento) if equipamento else '-'
     email = (getattr(cliente, 'email', '') or '').strip() or None
+    telefone_ok = bool(cliente and telefone_valido(getattr(cliente, 'telefone', None)))
+    documento = limpar_documento(getattr(cliente, 'documento', '') or '')
+    cadastro_ok = bool(
+        cliente and (getattr(cliente, 'nome', '') or '').strip() and telefone_ok and _gmail_valido(email)
+        and len(documento) in (11, 14) and (getattr(cliente, 'cep', '') or '').strip()
+        and (getattr(cliente, 'endereco_numero', '') or '').strip()
+    )
     return {
         'equipamento_base': equipamento,
         'pacote_base': pacote,
         'identificacao_base': identificacao,
         'email': email,
         'email_ok': _gmail_valido(email),
+        'cadastro_ok': cadastro_ok,
+        'cadastro_url': f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{cliente.token_ficha}" if cliente and cliente.token_ficha else '',
         'municipio': (getattr(cliente, 'municipio', None) or getattr(cliente, 'cidade', None) or '').strip() or None,
         'empresa': (getattr(cliente, 'empresa', None) or '').strip() or None,
     }
@@ -2201,6 +2224,13 @@ def clientes(request: Request, busca: str = "", usuario: Usuario = Depends(usuar
         like = f"%{termo}%"
         query = query.filter(or_(Cliente.nome.ilike(like), Cliente.telefone.ilike(like), Cliente.empresa.ilike(like), Cliente.municipio.ilike(like), Cliente.cidade.ilike(like), Cliente.email.ilike(like)))
     lista = query.order_by(Cliente.nome.asc()).all()
+    alterou_token = False
+    for cliente in lista:
+        if not cliente.token_ficha:
+            cliente.token_ficha = secrets.token_urlsafe(24)
+            alterou_token = True
+    if alterou_token:
+        db.commit()
     resumos_clientes = {int(cliente.id): _cliente_resumo_visual(cliente) for cliente in lista}
     return templates.TemplateResponse("organiza/clientes.html", {
         "request": request, "usuario": usuario, "clientes": lista, "busca": busca,
@@ -6146,6 +6176,14 @@ def _atualizacao_horario_ocupado(db: Session, momento: datetime, ignorar_agendam
         ),
     ).first():
         return True
+    agora = datetime.now()
+    if db.query(AtualizacaoPreReserva).filter(
+        AtualizacaoPreReserva.status == "PENDENTE",
+        AtualizacaoPreReserva.expira_em > agora,
+        AtualizacaoPreReserva.data_hora >= inicio,
+        AtualizacaoPreReserva.data_hora <= fim,
+    ).first():
+        return True
     return False
 
 
@@ -6379,6 +6417,20 @@ def _google_calendar_manual_excluir(db: Session, evento: AgendaManual) -> None:
         evento.google_sync_em = datetime.now()
 
 
+def _atualizacao_email_link(item: dict) -> tuple[str, str]:
+    """Retorna URL e rótulo amigáveis para o e-mail de atualização.
+
+    Arquivos do Drive usam a rota de download. Pastas continuam abrindo no Drive,
+    pois o Google não oferece download direto de pasta sem compactação prévia.
+    """
+    url = str(item.get("url") or "").strip()
+    file_id = str(item.get("file_id") or "").strip()
+    eh_pasta = "/folders/" in url
+    if file_id and not eh_pasta:
+        return f"https://drive.google.com/uc?export=download&id={urllib.parse.quote(file_id, safe='')}", "Baixar arquivo"
+    return url, ("Abrir pasta" if eh_pasta else "Abrir arquivo")
+
+
 def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: AtualizacaoCompra) -> None:
     gmail = (cliente.email or "").strip().lower()
     if not _gmail_valido(gmail):
@@ -6392,10 +6444,11 @@ def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: Atuali
         cliente.token_ficha = secrets.token_urlsafe(24)
     agenda_url = f"{PUBLIC_BASE_URL.rstrip('/')}/atualizacao/{cliente.token_ficha}/{compra.id}/agenda?tipo=CASA"
     pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
-    lista_texto = "\n".join(f"- {x['nome']}: {x['url']}" for x in links)
+    links_email = [dict(x, email_url=_atualizacao_email_link(x)[0], email_acao=_atualizacao_email_link(x)[1]) for x in links]
+    lista_texto = "\n".join(f"- {x['nome']}: {x['email_url']}" for x in links_email)
     lista_html = "".join(
-        f'<p style="margin:8px 0"><a href="{html.escape(x["url"])}" style="display:inline-block;padding:11px 16px;background:#e6003c;color:white;text-decoration:none;border-radius:8px;font-weight:700">Abrir {html.escape(x["nome"])}</a></p>'
-        for x in links
+        f'<div style="margin:10px 0;padding:12px;border:1px solid #e5e7eb;border-radius:10px"><strong style="display:block;margin-bottom:8px">{html.escape(x["nome"])}</strong><a href="{html.escape(x["email_url"])}" style="display:inline-block;padding:11px 16px;background:#e6003c;color:white;text-decoration:none;border-radius:8px;font-weight:700">{html.escape(x["email_acao"])}</a></div>'
+        for x in links_email
     )
     texto = (
         f"Olá, {cliente.nome}!\n\nSua atualização Karaokê RJ está pronta.\n"
@@ -6580,11 +6633,99 @@ def api_solvoz_atualizacao_contexto(
         "nome": (cliente.nome or "").strip(),
         "email": (cliente.email or "").strip().lower(),
         "gmail_ok": _gmail_valido(cliente.email),
+        "cadastro_ok": bool(_gmail_valido(cliente.email) and telefone_valido(cliente.telefone)),
+        "cadastro_url": f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{cliente.token_ficha}",
         "whatsapp": re.sub(r"\D", "", cliente.whatsapp_completo() or ""),
         "pacotes": pacotes_oferta,
         "pacotes_comprados": _atualizacao_pacotes_comprados(db, cliente.id),
         "compras": compras,
     })
+
+
+@app.post("/api/integracoes/solvoz/clientes/{cliente_id}/atualizacao-pre-reserva")
+async def api_solvoz_atualizacao_pre_reserva(
+    cliente_id: int,
+    request: Request,
+    x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
+    db: Session = Depends(get_db),
+):
+    """Bloqueia um horário por 30 minutos enquanto o cliente conclui a InfinitePay."""
+    _validar_token_solvoz(x_solvoz_token)
+    cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
+    if not cliente:
+        raise HTTPException(404, "Cliente não encontrado.")
+    try:
+        data = await request.json() if "application/json" in (request.headers.get("content-type") or "").lower() else dict(await request.form())
+    except Exception:
+        data = {}
+    tipo = str((data or {}).get("tipo") or "").strip().upper()
+    if tipo not in {"LOJA", "CLIENTE"}:
+        raise HTTPException(400, "Escolha Loja ou Casa do cliente.")
+    raw = str((data or {}).get("data_hora") or "").strip()
+    try:
+        momento = datetime.fromisoformat(raw)
+    except Exception:
+        raise HTTPException(400, "Informe uma data e hora válidas.")
+    if not _atualizacao_horario_valido(tipo, momento):
+        regra = "segunda a sexta, das 14:00 às 18:00" if tipo == "LOJA" else "um horário futuro combinado com o técnico"
+        raise HTTPException(409, f"Escolha {regra}.")
+    agora = datetime.now()
+    db.query(AtualizacaoPreReserva).filter(
+        AtualizacaoPreReserva.status == "PENDENTE", AtualizacaoPreReserva.expira_em <= agora
+    ).update({"status": "EXPIRADA"}, synchronize_session=False)
+    db.commit()
+    if _atualizacao_horario_ocupado(db, momento):
+        raise HTTPException(409, "Esse horário não está disponível. Escolha outro.")
+    token = secrets.token_urlsafe(28)
+    pre = AtualizacaoPreReserva(
+        token=token, cliente_id=cliente.id, tipo=tipo, data_hora=momento,
+        expira_em=agora + timedelta(minutes=30), status="PENDENTE",
+    )
+    db.add(pre); db.commit(); db.refresh(pre)
+    return JSONResponse({
+        "ok": True, "token": token, "tipo": tipo, "data_hora": momento.isoformat(),
+        "expira_em": pre.expira_em.isoformat(), "minutos": 30,
+    })
+
+
+def _atualizacao_confirmar_pre_reserva(db: Session, cliente: Cliente, compra: AtualizacaoCompra, token: str) -> AtualizacaoAgendamento | None:
+    token = (token or "").strip()
+    if not token:
+        return None
+    pre = db.query(AtualizacaoPreReserva).filter(
+        AtualizacaoPreReserva.token == token, AtualizacaoPreReserva.cliente_id == cliente.id
+    ).first()
+    if not pre or pre.status == "CANCELADA":
+        return None
+    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+    if not ag:
+        # Mesmo se os 30 minutos expiraram durante a InfinitePay, tenta preservar
+        # o horário se ninguém o ocupou depois.
+        ocupado = _atualizacao_horario_ocupado(db, pre.data_hora)
+        # A própria pré-reserva pode ser a linha encontrada; neutraliza antes da nova checagem.
+        status_original = pre.status
+        pre.status = "CONFIRMANDO"
+        db.flush()
+        ocupado = _atualizacao_horario_ocupado(db, pre.data_hora)
+        if ocupado:
+            pre.status = "EXPIRADA"
+            db.commit()
+            return None
+        ag = AtualizacaoAgendamento(
+            compra_id=compra.id, cliente_id=cliente.id, tipo=pre.tipo,
+            data_hora=pre.data_hora, duracao_minutos=ATUALIZACAO_DURACAO_MINUTOS, status="RESERVADO",
+        )
+        db.add(ag); db.flush()
+    pre.status = "CONFIRMADA"
+    pre.order_nsu = compra.order_nsu
+    db.commit(); db.refresh(ag)
+    _google_calendar_sincronizar(db, ag, cliente, compra)
+    db.commit()
+    try:
+        _atualizacao_enviar_email_agendamento(db, cliente, compra, ag)
+    except Exception:
+        pass
+    return ag
 
 
 @app.post("/api/integracoes/solvoz/clientes/{cliente_id}/atualizacao-oferta")
@@ -6623,13 +6764,31 @@ async def api_solvoz_atualizacao_oferta(
     # link não rebaixa o cadastro nem oferece os mesmos pacotes de novo.
     compra_existente = _atualizacao_compra_cobrindo(db, cliente.id, pacotes) if pacotes else None
     if status == "PAGO":
+        modalidade = str(data.get("modalidade") or "ONLINE").strip().upper()
+        if modalidade not in {"ONLINE", "LOJA", "CLIENTE"}:
+            modalidade = "ONLINE"
+        valor_base = int(data.get("valor_promocional_centavos") or 0)
+        frete_centavos = max(0, int(data.get("frete_centavos") or 0))
+        total_pago = int(data.get("valor_pago_centavos") or (valor_base + frete_centavos))
         compra = _atualizacao_registrar_compra(
             db, cliente, pacotes, origem="SOLVOZ", order_nsu=str(data.get("order_nsu") or ""),
             valor_normal_centavos=int(data.get("valor_normal_centavos") or 0),
-            valor_pago_centavos=int(data.get("valor_promocional_centavos") or 0),
-            forma_pagamento="InfinitePay",
+            valor_a_pagar_centavos=valor_base, frete_centavos=frete_centavos,
+            valor_pago_centavos=total_pago, forma_pagamento="InfinitePay", status="PAGO",
         )
-        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": "PAGO", "compra_id": compra.id})
+        pos_status = "PAGO"
+        if modalidade == "ONLINE":
+            try:
+                _atualizacao_enviar_email_casa(db, cliente, compra)
+                pos_status = "ARQUIVOS_ENVIADOS"
+            except Exception as exc:
+                compra.email_erro = str(exc)[:1200]
+                db.commit()
+                pos_status = "PAGO_EMAIL_PENDENTE"
+        else:
+            ag = _atualizacao_confirmar_pre_reserva(db, cliente, compra, str(data.get("pre_reserva_token") or ""))
+            pos_status = "AGENDADO" if ag else "PAGO_AGENDAMENTO_PENDENTE"
+        return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": "PAGO", "pos_status": pos_status, "compra_id": compra.id})
     if compra_existente:
         return JSONResponse({"ok": True, "cliente_id": cliente.id, "status": compra_existente.status or "A_PAGAR", "preservado": True, "compra_id": compra_existente.id})
     if (cliente.atualizacao_oferta_status or "").upper() in ("PAGO", "A_PAGAR"):
@@ -8426,7 +8585,12 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
     db.commit()
     proximo_fluxo = (request.query_params.get("next") or "").strip()
     base_publica = PUBLIC_BASE_URL.rstrip("/")
-    if proximo_fluxo.startswith(base_publica + "/atualizacao/") or proximo_fluxo.startswith("/atualizacao/"):
+    solvoz_base = SOLVOZ_BASE_URL.rstrip("/")
+    destino_atualizacao = (
+        proximo_fluxo.startswith(base_publica + "/atualizacao/") or proximo_fluxo.startswith("/atualizacao/")
+        or (solvoz_base and proximo_fluxo.startswith(solvoz_base + "/atualizacoes/karaokerj/"))
+    )
+    if destino_atualizacao:
         separador = "&" if "?" in proximo_fluxo else "?"
         return RedirectResponse(proximo_fluxo + separador + "cadastro=ok", status_code=303)
     destino = f"/cadastro/{token}?salvo=1"
