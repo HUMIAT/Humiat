@@ -1,0 +1,35 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean estoque-mov-pagina">
+  <div class="titulo-linha mov-topo">
+    <div><p class="tag">Estoque</p><h1>Movimentação completa</h1><p class="texto-suave">Consulte entradas, saídas físicas e reservas atuais entre datas. As reservas mostram exatamente onde o item está comprometido.</p></div>
+    <div class="mov-acoes"><a class="botao" href="/organiza/estoque">Voltar ao estoque</a></div>
+  </div>
+
+  <section class="cartao filtros-mov">
+    <form method="get" class="filtros-grid">
+      <label>De<input type="date" name="data_inicio" value="{{ data_inicio }}"></label>
+      <label>Até<input type="date" name="data_fim" value="{{ data_fim }}"></label>
+      <label>Item<select name="item_id"><option value="">Todos</option>{% for i in itens %}<option value="{{ i.id }}" {% if item_id == i.id %}selected{% endif %}>{{ i.nome }}</option>{% endfor %}</select></label>
+      <label>Tipo<select name="tipo"><option value="">Todos</option><option value="ENTRADA" {% if tipo=='ENTRADA' %}selected{% endif %}>Entrada</option><option value="SAIDA" {% if tipo=='SAIDA' %}selected{% endif %}>Saída</option><option value="RESERVA" {% if tipo=='RESERVA' %}selected{% endif %}>Reserva atual</option></select></label>
+      <label>Origem<select name="origem"><option value="">Todas</option><option value="VENDA" {% if origem=='VENDA' %}selected{% endif %}>Venda</option><option value="MANUTENCAO" {% if origem=='MANUTENCAO' %}selected{% endif %}>Manutenção</option><option value="MANUAL" {% if origem=='MANUAL' %}selected{% endif %}>Manual</option><option value="CONTAGEM" {% if origem=='CONTAGEM' %}selected{% endif %}>Contagem</option><option value="ESTORNO" {% if origem=='ESTORNO' %}selected{% endif %}>Estorno</option></select></label>
+      <div class="filtro-botoes"><button class="botao primario" type="submit">Consultar</button><a class="botao secundario" href="/organiza/estoque/movimentacoes">Limpar</a></div>
+    </form>
+  </section>
+
+  <section class="cartao planilha-mov-card">
+    <div class="mov-resumo"><div><strong>{{ total_registros }}</strong><span>registro(s)</span></div><a class="botao pequeno" href="/organiza/estoque/movimentacoes.csv?data_inicio={{ data_inicio|urlencode }}&data_fim={{ data_fim|urlencode }}&item_id={{ item_id or '' }}&tipo={{ tipo|urlencode }}&origem={{ origem|urlencode }}">Exportar CSV</a></div>
+    <div class="planilha-scroll"><table class="mov-table"><thead><tr><th>DATA</th><th>TIPO</th><th>ITEM</th><th>COR</th><th>QTD.</th><th>ORIGEM</th><th>CLIENTE</th><th>STATUS</th><th>OBSERVAÇÃO</th></tr></thead><tbody>
+      {% for h in linhas %}<tr>
+        <td>{{ h.data.strftime('%d/%m/%Y %H:%M') if h.data else '-' }}</td><td><span class="mov-tipo mov-{{ h.tipo|lower }}">{{ h.tipo }}</span></td>
+        <td><strong>{{ h.item.nome if h.item else '-' }}</strong></td><td>{{ h.cor or '—' }}</td><td class="num">{{ '%g'|format(h.quantidade) }}</td>
+        <td>{% if h.url %}<a href="{{ h.url }}">{{ h.origem }}</a>{% else %}{{ h.origem }}{% endif %}</td><td>{{ h.cliente or '—' }}</td><td>{{ h.status or '—' }}</td><td>{{ h.observacao or '—' }}</td>
+      </tr>{% else %}<tr><td colspan="9" class="vazio">Nenhum registro encontrado para os filtros informados.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  <div class="aviso-historico"><strong>Primeira implantação:</strong> as baixas automáticas experimentais removidas na 1.1.66 não entram no saldo atual. A consulta acima passa a ser a referência operacional do estoque desta implantação em diante.</div>
+</section>
+<style>
+.mov-topo{align-items:flex-end}.mov-acoes{display:flex;gap:8px}.filtros-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr)) auto;gap:10px;align-items:end}.filtros-grid label{display:grid;gap:5px;font-weight:800;font-size:12px}.filtros-grid input,.filtros-grid select{width:100%}.filtro-botoes{display:flex;gap:6px}.planilha-mov-card{padding:0;overflow:hidden}.mov-resumo{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #dbe3ee}.mov-resumo>div{display:flex;align-items:baseline;gap:6px}.mov-resumo strong{font-size:21px}.mov-resumo span{color:#64748b}.planilha-scroll{overflow:auto;max-width:100%}.mov-table{width:100%;border-collapse:separate;border-spacing:0;min-width:1200px;font-size:12px}.mov-table th{position:sticky;top:0;background:#eef3f9;padding:8px 10px;text-align:left;border-bottom:1px solid #ccd7e5;white-space:nowrap}.mov-table td{padding:7px 10px;border-bottom:1px solid #e2e8f0;vertical-align:top;white-space:nowrap}.mov-table td:last-child{white-space:normal;min-width:260px}.mov-table .num{text-align:right;font-variant-numeric:tabular-nums}.mov-table a{font-weight:800;color:#2563eb}.mov-tipo{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900}.mov-reserva{background:#eef2ff;color:#4338ca}.mov-entrada{background:#ecfdf3;color:#027a48}.mov-saida{background:#fff1f0;color:#b42318}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.aviso-historico{margin-top:12px;padding:12px 14px;border:1px solid #dbe3ee;border-radius:12px;background:#f8fafc;color:#475467;font-size:12px}@media(max-width:1000px){.filtros-grid{grid-template-columns:1fr 1fr}.filtro-botoes{grid-column:1/-1}.mov-topo{align-items:flex-start;flex-direction:column}.mov-acoes{width:100%}.mov-acoes .botao{width:100%;text-align:center}}
+</style>
+{% endblock %}

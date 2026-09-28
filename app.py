@@ -10463,6 +10463,104 @@ async def cupom_venda_editar(cupom_id: int, request: Request, usuario: Usuario =
     return RedirectResponse("/organiza/cupons-venda?salvo=1", status_code=303)
 
 
+
+def _data_filtro_estoque(valor: str | None):
+    try:
+        return datetime.strptime((valor or "").strip(), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: int | None = None,
+                       tipo: str = "", origem: str = "") -> list[dict]:
+    """Une o razão físico com as reservas atuais para consulta operacional.
+
+    Movimentos físicos permanecem em estoque_movimentos. Reservas aparecem enquanto a
+    Venda/Manutenção estiver A FAZER, permitindo saber exatamente onde o item está comprometido.
+    """
+    tipo = (tipo or "").strip().upper()
+    origem = (origem or "").strip().upper()
+    inicio_dt = datetime.combine(data_inicio, time.min) if data_inicio else None
+    fim_dt = datetime.combine(data_fim, time.max) if data_fim else None
+
+    q_mov = db.query(EstoqueMovimento).options(selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario))
+    if item_id:
+        q_mov = q_mov.filter(EstoqueMovimento.item_id == int(item_id))
+    if inicio_dt:
+        q_mov = q_mov.filter(EstoqueMovimento.criado_em >= inicio_dt)
+    if fim_dt:
+        q_mov = q_mov.filter(EstoqueMovimento.criado_em <= fim_dt)
+    if tipo in {"ENTRADA", "SAIDA"}:
+        q_mov = q_mov.filter(EstoqueMovimento.tipo == tipo)
+    elif tipo == "RESERVA":
+        q_mov = q_mov.filter(text("1=0"))
+    if origem:
+        q_mov = q_mov.filter(EstoqueMovimento.origem_tipo == origem)
+    movimentos = q_mov.order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).all()
+
+    q_res = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item))
+    if item_id:
+        q_res = q_res.filter(EstoqueReserva.item_id == int(item_id))
+    if inicio_dt:
+        q_res = q_res.filter(EstoqueReserva.criado_em >= inicio_dt)
+    if fim_dt:
+        q_res = q_res.filter(EstoqueReserva.criado_em <= fim_dt)
+    if tipo in {"ENTRADA", "SAIDA"}:
+        q_res = q_res.filter(text("1=0"))
+    if origem:
+        q_res = q_res.filter(EstoqueReserva.origem_tipo == origem)
+    reservas = q_res.order_by(EstoqueReserva.criado_em.desc(), EstoqueReserva.id.desc()).all()
+
+    venda_ids = {int(x.origem_id) for x in movimentos + reservas if (x.origem_tipo or "").upper() == "VENDA" and x.origem_id}
+    manut_ids = {int(x.origem_id) for x in movimentos + reservas if (x.origem_tipo or "").upper() == "MANUTENCAO" and x.origem_id}
+    vendas = {}
+    manutencoes = {}
+    if venda_ids:
+        vendas = {e.id: e for e in db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id.in_(venda_ids)).all()}
+    if manut_ids:
+        manutencoes = {m.id: m for m in db.query(Manutencao).options(selectinload(Manutencao.cliente)).filter(Manutencao.id.in_(manut_ids)).all()}
+
+    def origem_info(origem_tipo, origem_id):
+        ot = (origem_tipo or "").upper()
+        oid = int(origem_id) if origem_id else None
+        if ot == "VENDA" and oid:
+            eq = vendas.get(oid)
+            cliente = eq.cliente.nome if eq and eq.cliente else ""
+            status = eq.status if eq else ""
+            url = f"/organiza/clientes/{eq.cliente_id}/equipamentos/{eq.id}/editar" if eq else ""
+            return f"Venda #{oid}", cliente, status, url
+        if ot == "MANUTENCAO" and oid:
+            m = manutencoes.get(oid)
+            cliente = m.cliente.nome if m and m.cliente else ""
+            status = m.status if m else ""
+            return f"Manutenção #{oid}", cliente, status, f"/organiza/manutencoes/{oid}"
+        if ot == "CONTAGEM":
+            return "Contagem física", "", "", ""
+        if ot == "ESTORNO":
+            return f"Estorno #{oid}" if oid else "Estorno", "", "", ""
+        return "Entrada manual" if ot == "MANUAL" else (ot or "Manual"), "", "", ""
+
+    linhas = []
+    for m in movimentos:
+        rotulo, cliente, status, url = origem_info(m.origem_tipo, m.origem_id)
+        linhas.append({
+            "id": m.id, "data": m.criado_em, "tipo": (m.tipo or "").upper(), "item": m.item,
+            "cor": m.cor or "", "quantidade": float(m.quantidade or 0), "origem_tipo": (m.origem_tipo or "").upper(),
+            "origem": rotulo, "cliente": cliente, "status": status, "url": url,
+            "observacao": m.observacao or "", "fisico": True, "pode_estornar": (m.origem_tipo or "").upper() == "MANUAL",
+        })
+    for r in reservas:
+        rotulo, cliente, status, url = origem_info(r.origem_tipo, r.origem_id)
+        linhas.append({
+            "id": r.id, "data": r.criado_em, "tipo": "RESERVA", "item": r.item,
+            "cor": r.cor or "", "quantidade": float(r.quantidade or 0), "origem_tipo": (r.origem_tipo or "").upper(),
+            "origem": rotulo, "cliente": cliente, "status": status, "url": url,
+            "observacao": r.observacao or "", "fisico": False, "pode_estornar": False,
+        })
+    linhas.sort(key=lambda x: (x["data"] or datetime.min, x["id"] or 0), reverse=True)
+    return linhas
+
+
 @app.get("/organiza/estoque", response_class=HTMLResponse)
 def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     linhas, cores = estoque_saldos(db)
@@ -10470,22 +10568,68 @@ def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado),
     if q:
         linhas = [l for l in linhas if q in (l["item"].nome or "").upper() or q in (l["item"].codigo or "").upper()]
     itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
-    movimentos = db.query(EstoqueMovimento).options(
-        selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario)
-    ).order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).limit(80).all()
-    reservas = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item)).order_by(
-        EstoqueReserva.criado_em.desc(), EstoqueReserva.id.desc()
-    ).limit(120).all()
+    historico_recente = _historico_estoque(db)[:100]
     itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
     compras = relatorio_compras_estoque(db)
     return templates.TemplateResponse("organiza/estoque.html", {
         "request": request, "usuario": usuario, "linhas": linhas, "cores_estoque": cores,
-        "itens": itens, "itens_cor_ids": itens_cor_ids, "movimentos": movimentos, "reservas": reservas,
+        "itens": itens, "itens_cor_ids": itens_cor_ids, "historico_recente": historico_recente,
         "q": q, "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
         "cor_pendente": ESTOQUE_COR_PENDENTE,
         "total_compras": round(sum(float(x["custo_total"] or 0) for x in compras), 2),
         "qtd_compras": len(compras),
     })
+
+
+
+@app.get("/organiza/estoque/movimentacoes", response_class=HTMLResponse)
+def estoque_movimentacoes(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    inicio_txt = (request.query_params.get("data_inicio") or "").strip()
+    fim_txt = (request.query_params.get("data_fim") or "").strip()
+    tipo = (request.query_params.get("tipo") or "").strip().upper()
+    origem = (request.query_params.get("origem") or "").strip().upper()
+    try:
+        item_id = int(request.query_params.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    linhas = _historico_estoque(
+        db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt),
+        item_id=item_id or None, tipo=tipo, origem=origem,
+    )
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+    return templates.TemplateResponse("organiza/estoque_movimentacoes.html", {
+        "request": request, "usuario": usuario, "linhas": linhas, "itens": itens,
+        "data_inicio": inicio_txt, "data_fim": fim_txt, "tipo": tipo, "origem": origem,
+        "item_id": item_id, "total_registros": len(linhas),
+    })
+
+
+@app.get("/organiza/estoque/movimentacoes.csv")
+def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    inicio_txt = (request.query_params.get("data_inicio") or "").strip()
+    fim_txt = (request.query_params.get("data_fim") or "").strip()
+    tipo = (request.query_params.get("tipo") or "").strip().upper()
+    origem = (request.query_params.get("origem") or "").strip().upper()
+    try:
+        item_id = int(request.query_params.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    linhas = _historico_estoque(
+        db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt),
+        item_id=item_id or None, tipo=tipo, origem=origem,
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
+    writer.writerow(["DATA", "TIPO", "ITEM", "COR", "QUANTIDADE", "ORIGEM", "CLIENTE", "STATUS", "OBSERVACAO"])
+    for l in linhas:
+        writer.writerow([
+            l["data"].strftime("%d/%m/%Y %H:%M") if l["data"] else "", l["tipo"],
+            l["item"].nome if l["item"] else "", l["cor"], f'{float(l["quantidade"]):g}',
+            l["origem"], l["cliente"], l["status"], l["observacao"],
+        ])
+    conteudo = "\ufeff" + buffer.getvalue()
+    return Response(content=conteudo.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="movimentacao_estoque.csv"'})
 
 
 @app.get("/organiza/estoque/contagem", response_class=HTMLResponse)
@@ -10623,11 +10767,19 @@ async def estoque_entrada(request: Request, usuario: Usuario = Depends(usuario_l
 @app.post("/organiza/estoque/movimentos/{movimento_id}/excluir")
 def estoque_movimento_excluir(movimento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
-    if not mov or mov.origem_tipo != "MANUAL":
-        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Somente lançamentos manuais podem ser excluídos."), status_code=303)
-    db.delete(mov)
+    if not mov or (mov.origem_tipo or "").upper() != "MANUAL":
+        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Somente lançamentos manuais podem ser estornados."), status_code=303)
+    ja = db.query(EstoqueMovimento.id).filter(EstoqueMovimento.origem_tipo == "ESTORNO", EstoqueMovimento.origem_id == mov.id).first()
+    if ja:
+        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Este lançamento já foi estornado."), status_code=303)
+    db.add(EstoqueMovimento(
+        item_id=mov.item_id, tipo="SAIDA" if (mov.tipo or "").upper() == "ENTRADA" else "ENTRADA",
+        quantidade=float(mov.quantidade or 0), cor=mov.cor, origem_tipo="ESTORNO", origem_id=mov.id,
+        custo_unitario=mov.custo_unitario, observacao=f"Estorno do lançamento manual #{mov.id}", usuario_id=usuario.id,
+    ))
+    mov.observacao = ((mov.observacao or "") + f" | ESTORNADO em {datetime.now().strftime('%d/%m/%Y %H:%M')}").strip(" |")
     db.commit()
-    return RedirectResponse("/organiza/estoque?ok=" + quote_plus("Lançamento manual excluído."), status_code=303)
+    return RedirectResponse("/organiza/estoque?ok=" + quote_plus("Lançamento manual estornado e mantido no histórico."), status_code=303)
 
 
 @app.get("/organiza/itens", response_class=HTMLResponse)
