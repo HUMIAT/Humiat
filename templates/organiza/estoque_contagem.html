@@ -2,44 +2,82 @@
 {% block conteudo %}
 <section class="pagina-clean contagem-pagina">
   <div class="titulo-linha contagem-topo">
-    <div><p class="tag">Estoque</p><h1>Planilha de contagem</h1><p class="texto-suave">Conte somente o estoque físico. Vendas e manutenções a fazer permanecem reservadas separadamente.</p></div>
-    <div class="acoes"><a class="botao secundario" href="/organiza/estoque">Voltar ao estoque</a><a class="botao" href="/organiza/estoque/contagem.csv">Baixar CSV (Excel)</a><button class="botao" type="button" onclick="window.print()">Imprimir</button></div>
+    <div>
+      <p class="tag">Estoque</p>
+      <h1>Planilha de contagem</h1>
+      <p class="texto-suave">A contagem pode ser feita em etapas. O que já foi salvo fica marcado como CONTADO e não precisa ser contado novamente.</p>
+    </div>
+    <div class="acoes no-print">
+      <a class="botao secundario" href="/organiza/estoque">Voltar ao estoque</a>
+      <a class="botao" href="/organiza/estoque/contagem.csv">Baixar CSV (Excel)</a>
+      <button class="botao" type="button" onclick="window.print()">Imprimir</button>
+      <form method="post" action="/organiza/estoque/contagem/nova" class="form-nova-contagem" onsubmit="return confirm('Iniciar uma nova contagem? Isso limpa somente as marcações CONTADO; o estoque físico não será alterado.')">
+        <button class="botao secundario" type="submit">Iniciar nova contagem</button>
+      </form>
+    </div>
   </div>
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   {% if ok %}<div class="alerta sucesso">{{ ok }}</div>{% endif %}
 
+  <div class="resumo-contagem">
+    <span><strong>{{ total_salvos }}</strong> contado(s)</span>
+    <span><strong>{{ total_pendentes }}</strong> pendente(s)</span>
+    <label class="no-print"><input type="checkbox" id="somente-pendentes"> Mostrar somente pendentes</label>
+  </div>
+
   <form method="post" action="/organiza/estoque/contagem" id="form-contagem">
     <div class="cartao planilha-card">
-      <div class="aviso-contagem"><strong>Primeira implantação:</strong> preencha a contagem física real e o estoque mínimo. Campos de contagem em branco não alteram o saldo.</div>
+      <div class="aviso-contagem"><strong>Contagem parcial:</strong> preencha somente o que foi contado agora. Campo em branco não altera o saldo. Nos itens com cor, informe apenas as cores que já foram contadas.</div>
       <div class="planilha-scroll">
         <table class="planilha-contagem" id="tabela-contagem">
-          <thead><tr><th>ITEM</th><th>COR</th><th>ESTOQUE SISTEMA</th><th>CONTAGEM FÍSICA</th><th>DIFERENÇA</th><th>ESTOQUE MÍNIMO</th><th>OBSERVAÇÃO</th></tr></thead>
+          <thead><tr><th>ITEM</th><th>COR</th><th>STATUS</th><th>ESTOQUE SISTEMA</th><th>CONTAGEM FÍSICA</th><th>DIFERENÇA</th><th>ESTOQUE MÍNIMO</th><th>OBSERVAÇÃO</th></tr></thead>
           <tbody>
           {% for l in linhas %}
-            <tr data-item-id="{{ l.item.id }}" data-controla-cor="{{ 1 if l.controla_cor else 0 }}" data-sistema="{{ l.fisico }}">
-              <td class="item"><input type="hidden" name="item_id" value="{{ l.item.id }}"><strong>{{ l.item.nome }}</strong>{% if l.controla_cor %}<button type="button" class="add-cor no-print" onclick="adicionarCor(this)">+ cor</button>{% endif %}</td>
-              <td>{% if l.controla_cor %}<input class="cor" name="cor" value="{{ l.cor }}" placeholder="COR">{% else %}<input type="hidden" name="cor" value=""><span>—</span>{% endif %}</td>
+            <tr class="{% if l.salvo %}linha-contada{% endif %}" data-item-id="{{ l.item.id }}" data-controla-cor="{{ 1 if l.controla_cor else 0 }}" data-sistema="{{ l.fisico }}" data-salvo="{{ 1 if l.salvo else 0 }}">
+              <td class="item">
+                <input type="hidden" name="item_id" value="{{ l.item.id }}">
+                <input type="hidden" name="salvo_original" value="{{ 1 if l.salvo else 0 }}" class="salvo-original">
+                <strong>{{ l.item.nome }}</strong>
+                {% if l.controla_cor %}<button type="button" class="add-cor no-print" onclick="adicionarCor(this)">+ cor</button>{% endif %}
+              </td>
+              <td>
+                {% if l.controla_cor %}
+                  <input class="cor" name="cor" value="{{ l.cor }}" placeholder="COR" {% if l.salvo %}readonly{% endif %}>
+                {% else %}
+                  <input type="hidden" name="cor" value=""><span>—</span>
+                {% endif %}
+              </td>
+              <td class="status-contagem">
+                {% if l.salvo %}
+                  <span class="badge-contado">CONTADO</span>
+                  <button type="button" class="editar-contado no-print" onclick="editarContado(this)">Corrigir</button>
+                {% else %}
+                  <span class="badge-pendente">PENDENTE</span>
+                {% endif %}
+              </td>
               <td class="num sistema">{{ '%g'|format(l.fisico) }}</td>
-              <td><input class="numero contagem" name="contagem" inputmode="decimal" placeholder=""></td>
-              <td class="num diferenca">—</td>
-              <td><input class="numero minimo" name="minimo" inputmode="decimal" value="{{ '%g'|format(l.minimo) }}"></td>
-              <td><input name="observacao_linha" placeholder=""></td>
+              <td><input class="numero contagem" name="contagem" inputmode="decimal" value="{% if l.salvo %}{{ '%g'|format(l.contagem_salva) }}{% endif %}" placeholder="" {% if l.salvo %}readonly{% endif %}></td>
+              <td class="num diferenca">{% if l.salvo %}0{% else %}—{% endif %}</td>
+              <td><input class="numero minimo" name="minimo" inputmode="decimal" value="{% if l.controla_cor and not l.cor and not l.salvo %}{% else %}{{ '%g'|format(l.minimo) }}{% endif %}" {% if l.salvo %}readonly{% endif %}></td>
+              <td><input name="observacao_linha" value="{{ l.observacao_salva }}" placeholder="" {% if l.salvo %}readonly{% endif %}></td>
             </tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
-    <div class="barra-salvar no-print"><span>Confira a contagem antes de aplicar. O ajuste fica registrado no histórico do estoque.</span><button class="botao primario" type="submit" onclick="return confirm('Aplicar esta contagem física ao estoque?')">Aplicar contagem</button></div>
+    <div class="barra-salvar no-print"><span>Você pode salvar quantas vezes precisar. Os itens já contados continuam marcados.</span><button class="botao primario" type="submit">Salvar contagem parcial</button></div>
   </form>
 </section>
 <style>
-.contagem-topo{align-items:flex-end}.acoes{display:flex;gap:7px;flex-wrap:wrap}.planilha-card{padding:0;overflow:hidden}.aviso-contagem{padding:11px 14px;background:#fff8dd;border-bottom:1px solid #eadca3;font-size:12px}.planilha-scroll{overflow:auto}.planilha-contagem{width:100%;border-collapse:separate;border-spacing:0;min-width:1100px;font-size:12px}.planilha-contagem th{position:sticky;top:0;background:#eaf0f7;padding:8px;border-right:1px solid #d8e0ea;border-bottom:1px solid #cbd5e1;z-index:2;text-align:left;font-size:11px}.planilha-contagem td{padding:5px 7px;border-right:1px solid #e6ecf3;border-bottom:1px solid #e3e8ef;background:#fff}.planilha-contagem td.item{min-width:320px}.planilha-contagem .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-contagem input{width:100%;min-width:90px;border:1px solid transparent;background:transparent;border-radius:4px;padding:6px}.planilha-contagem input:focus{background:#fff;border-color:#2563eb;outline:none;box-shadow:0 0 0 2px rgba(37,99,235,.12)}.planilha-contagem input.numero{text-align:right}.planilha-contagem input.cor{min-width:110px;text-transform:uppercase}.planilha-contagem tr:hover td{background:#f8fbff}.add-cor{margin-left:8px;border:0;background:none;color:#2563eb;font-weight:800;cursor:pointer;font-size:11px}.diferenca.neg{color:#b42318;font-weight:800}.diferenca.pos{color:#18743c;font-weight:800}.barra-salvar{position:sticky;bottom:0;background:#fff;border:1px solid #dbe3ee;box-shadow:0 -6px 20px rgba(15,23,42,.08);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:10px;border-radius:12px}.barra-salvar span{font-size:12px;color:#64748b}@media(max-width:800px){.acoes{width:100%}.barra-salvar{align-items:stretch;flex-direction:column}}
-@media print{.sidebar,.topbar,.no-print,.acoes,.alerta{display:none!important}.pagina-clean{padding:0!important}.planilha-card{box-shadow:none;border:0}.planilha-scroll{overflow:visible}.planilha-contagem{min-width:0;font-size:9px}.planilha-contagem th{position:static}.planilha-contagem input{border-bottom:1px solid #999!important;border-radius:0;padding:2px}.planilha-contagem .item{min-width:220px!important}}
+.contagem-topo{align-items:flex-end}.acoes{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.form-nova-contagem{display:inline}.resumo-contagem{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:10px 0;padding:10px 12px;background:#fff;border:1px solid #dbe3ee;border-radius:10px;font-size:12px}.resumo-contagem label{margin-left:auto;display:flex;gap:6px;align-items:center}.planilha-card{padding:0;overflow:hidden}.aviso-contagem{padding:11px 14px;background:#fff8dd;border-bottom:1px solid #eadca3;font-size:12px}.planilha-scroll{overflow:auto}.planilha-contagem{width:100%;border-collapse:separate;border-spacing:0;min-width:1220px;font-size:12px}.planilha-contagem th{position:sticky;top:0;background:#eaf0f7;padding:8px;border-right:1px solid #d8e0ea;border-bottom:1px solid #cbd5e1;z-index:2;text-align:left;font-size:11px}.planilha-contagem td{padding:5px 7px;border-right:1px solid #e6ecf3;border-bottom:1px solid #e3e8ef;background:#fff}.planilha-contagem td.item{min-width:300px}.planilha-contagem .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-contagem input{width:100%;min-width:90px;border:1px solid transparent;background:transparent;border-radius:4px;padding:6px}.planilha-contagem input:focus{background:#fff;border-color:#2563eb;outline:none;box-shadow:0 0 0 2px rgba(37,99,235,.12)}.planilha-contagem input[readonly]{color:#475569;cursor:default}.planilha-contagem input.numero{text-align:right}.planilha-contagem input.cor{min-width:110px;text-transform:uppercase}.planilha-contagem tr:hover td{background:#f8fbff}.planilha-contagem tr.linha-contada td{background:#f0fdf4}.planilha-contagem tr.linha-contada:hover td{background:#e9f9ee}.add-cor{margin-left:8px;border:0;background:none;color:#2563eb;font-weight:800;cursor:pointer;font-size:11px}.diferenca.neg{color:#b42318;font-weight:800}.diferenca.pos{color:#18743c;font-weight:800}.badge-contado,.badge-pendente{display:inline-block;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900}.badge-contado{background:#dcfce7;color:#166534}.badge-pendente{background:#f1f5f9;color:#64748b}.editar-contado{border:0;background:none;color:#2563eb;font-size:10px;font-weight:800;cursor:pointer;margin-left:5px}.barra-salvar{position:sticky;bottom:0;background:#fff;border:1px solid #dbe3ee;box-shadow:0 -6px 20px rgba(15,23,42,.08);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:10px;border-radius:12px}.barra-salvar span{font-size:12px;color:#64748b}.oculto-pendente{display:none!important}@media(max-width:800px){.acoes{width:100%}.barra-salvar{align-items:stretch;flex-direction:column}.resumo-contagem label{margin-left:0}}
+@media print{.sidebar,.topbar,.no-print,.acoes,.alerta,.resumo-contagem{display:none!important}.pagina-clean{padding:0!important}.planilha-card{box-shadow:none;border:0}.planilha-scroll{overflow:visible}.planilha-contagem{min-width:0;font-size:9px}.planilha-contagem th{position:static}.planilha-contagem input{border-bottom:1px solid #999!important;border-radius:0;padding:2px}.planilha-contagem .item{min-width:220px!important}}
 </style>
 <script>
 function atualizarDiferenca(tr){const base=parseFloat(tr.dataset.sistema||'0')||0;const inp=tr.querySelector('.contagem');const cel=tr.querySelector('.diferenca');if(!inp||inp.value.trim()===''){cel.textContent='—';cel.className='num diferenca';return;}const val=parseFloat(inp.value.replace(',','.'));if(Number.isNaN(val)){cel.textContent='?';return;}const d=val-base;cel.textContent=(d>0?'+':'')+d.toLocaleString('pt-BR',{maximumFractionDigits:4});cel.className='num diferenca '+(d<0?'neg':d>0?'pos':'');}
 document.querySelectorAll('#tabela-contagem tbody tr').forEach(tr=>{const inp=tr.querySelector('.contagem');if(inp)inp.addEventListener('input',()=>atualizarDiferenca(tr));});
-function adicionarCor(btn){const tr=btn.closest('tr');const novo=tr.cloneNode(true);novo.dataset.sistema='0';novo.querySelector('.cor').value='';novo.querySelector('.contagem').value='';novo.querySelector('.minimo').value='0';novo.querySelector('.sistema').textContent='0';novo.querySelector('.diferenca').textContent='—';const add=novo.querySelector('.add-cor');if(add)add.remove();novo.querySelector('.contagem').addEventListener('input',()=>atualizarDiferenca(novo));tr.parentNode.insertBefore(novo,tr.nextSibling);novo.querySelector('.cor').focus();}
+function editarContado(btn){const tr=btn.closest('tr');tr.querySelectorAll('input[readonly]').forEach(i=>i.removeAttribute('readonly'));tr.dataset.salvo='0';tr.classList.remove('linha-contada');const salvo=tr.querySelector('.salvo-original');if(salvo)salvo.value='0';const status=tr.querySelector('.status-contagem');status.innerHTML='<span class="badge-pendente">CORREÇÃO</span>';const inp=tr.querySelector('.contagem');if(inp){inp.focus();inp.select();}}
+function adicionarCor(btn){const tr=btn.closest('tr');const novo=tr.cloneNode(true);novo.dataset.sistema='0';novo.dataset.salvo='0';novo.classList.remove('linha-contada','oculto-pendente');const salvoNovo=novo.querySelector('.salvo-original');if(salvoNovo)salvoNovo.value='0';novo.querySelectorAll('input[readonly]').forEach(i=>i.removeAttribute('readonly'));novo.querySelector('.cor').value='';novo.querySelector('.contagem').value='';novo.querySelector('.minimo').value='';novo.querySelector('[name="observacao_linha"]').value='';novo.querySelector('.sistema').textContent='0';novo.querySelector('.diferenca').textContent='—';novo.querySelector('.status-contagem').innerHTML='<span class="badge-pendente">PENDENTE</span>';const add=novo.querySelector('.add-cor');if(add)add.remove();novo.querySelector('.contagem').addEventListener('input',()=>atualizarDiferenca(novo));tr.parentNode.insertBefore(novo,tr.nextSibling);novo.querySelector('.cor').focus();}
+const chk=document.getElementById('somente-pendentes');if(chk){chk.addEventListener('change',()=>{document.querySelectorAll('#tabela-contagem tbody tr').forEach(tr=>{tr.classList.toggle('oculto-pendente',chk.checked&&tr.dataset.salvo==='1');});});}
 </script>
 {% endblock %}

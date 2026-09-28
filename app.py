@@ -1180,6 +1180,22 @@ class EstoqueMinimo(Base):
     item = relationship("Item")
 
 
+class EstoqueContagemProgresso(Base):
+    """Marca o progresso da contagem física para permitir implantação por etapas."""
+    __tablename__ = "estoque_contagem_progresso"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    cor = Column(String(80), nullable=False, default="", index=True)
+    quantidade = Column(Float, nullable=False, default=0)
+    minimo = Column(Float, nullable=True)
+    observacao = Column(Text, nullable=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    item = relationship("Item")
+    usuario = relationship("Usuario")
+
+
 class NFSERascunho(Base):
     """Rascunho de NFS-e centralizado no Organiza.
 
@@ -1623,20 +1639,69 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
     return linhas, cores_saida
 
 
+def _mapa_progresso_contagem(db: Session) -> dict[tuple[int, str], EstoqueContagemProgresso]:
+    return {
+        (p.item_id, normalizar_cor(p.cor)): p
+        for p in db.query(EstoqueContagemProgresso).order_by(EstoqueContagemProgresso.id.asc()).all()
+    }
+
+
+def _salvar_progresso_contagem(
+    db: Session, item_id: int, cor: str | None, quantidade: float, minimo: float | None,
+    observacao: str | None, usuario_id: int | None,
+) -> EstoqueContagemProgresso:
+    cor_n = normalizar_cor(cor)
+    registro = db.query(EstoqueContagemProgresso).filter(
+        EstoqueContagemProgresso.item_id == int(item_id), EstoqueContagemProgresso.cor == cor_n
+    ).first()
+    if not registro:
+        registro = EstoqueContagemProgresso(item_id=int(item_id), cor=cor_n)
+        db.add(registro)
+    registro.quantidade = max(float(quantidade or 0), 0)
+    registro.minimo = None if minimo is None else max(float(minimo or 0), 0)
+    registro.observacao = (observacao or '').strip() or None
+    registro.usuario_id = usuario_id
+    registro.atualizado_em = datetime.now()
+    return registro
+
+
 def _linhas_contagem_estoque(db: Session) -> list[dict]:
     linhas, cores = estoque_saldos(db)
+    progresso = _mapa_progresso_contagem(db)
     saida = []
     for l in linhas:
         item = l["item"]
         if item_controla_cor(item):
-            conhecidas = [c for c in cores.get(item.id, []) if c["cor"] != ESTOQUE_COR_PENDENTE]
+            por_cor = {c["cor"]: c for c in cores.get(item.id, []) if c["cor"] != ESTOQUE_COR_PENDENTE}
+            # Uma cor já contada precisa continuar aparecendo mesmo que seu saldo e mínimo sejam zero.
+            for (pid, pcor), prog in progresso.items():
+                if pid == item.id and pcor:
+                    por_cor.setdefault(pcor, {"cor": pcor, "fisico": _estoque_fisico_chave(db, item.id, pcor), "minimo": _mapa_minimos_estoque(db).get((item.id, pcor), 0)})
+            conhecidas = [por_cor[k] for k in sorted(por_cor)]
             if conhecidas:
                 for c in conhecidas:
-                    saida.append({"item": item, "cor": c["cor"], "fisico": c["fisico"], "minimo": c["minimo"], "controla_cor": True})
+                    prog = progresso.get((item.id, normalizar_cor(c["cor"])))
+                    saida.append({
+                        "item": item, "cor": c["cor"], "fisico": c["fisico"], "minimo": c["minimo"],
+                        "controla_cor": True, "salvo": bool(prog),
+                        "contagem_salva": float(prog.quantidade) if prog else None,
+                        "observacao_salva": (prog.observacao or "") if prog else "",
+                        "atualizado_em": prog.atualizado_em if prog else None,
+                    })
             else:
-                saida.append({"item": item, "cor": "", "fisico": 0.0, "minimo": 0.0, "controla_cor": True})
+                saida.append({
+                    "item": item, "cor": "", "fisico": 0.0, "minimo": 0.0, "controla_cor": True,
+                    "salvo": False, "contagem_salva": None, "observacao_salva": "", "atualizado_em": None,
+                })
         else:
-            saida.append({"item": item, "cor": "", "fisico": l["fisico"], "minimo": l["minimo"], "controla_cor": False})
+            prog = progresso.get((item.id, ""))
+            saida.append({
+                "item": item, "cor": "", "fisico": l["fisico"], "minimo": l["minimo"],
+                "controla_cor": False, "salvo": bool(prog),
+                "contagem_salva": float(prog.quantidade) if prog else None,
+                "observacao_salva": (prog.observacao or "") if prog else "",
+                "atualizado_em": prog.atualizado_em if prog else None,
+            })
     return saida
 
 
@@ -10729,8 +10794,11 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
 
 @app.get("/organiza/estoque/contagem", response_class=HTMLResponse)
 def estoque_contagem(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    linhas = _linhas_contagem_estoque(db)
+    total_salvos = sum(1 for l in linhas if l.get("salvo"))
     return templates.TemplateResponse("organiza/estoque_contagem.html", {
-        "request": request, "usuario": usuario, "linhas": _linhas_contagem_estoque(db),
+        "request": request, "usuario": usuario, "linhas": linhas,
+        "total_salvos": total_salvos, "total_pendentes": max(len(linhas) - total_salvos, 0),
         "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
     })
 
@@ -10742,12 +10810,17 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
     cores = form.getlist("cor")
     contagens = form.getlist("contagem")
     minimos = form.getlist("minimo")
+    observacoes = form.getlist("observacao_linha")
+    salvos_originais = form.getlist("salvo_original")
     if not item_ids:
         return RedirectResponse("/organiza/estoque/contagem?erro=" + quote_plus("Nenhuma linha de contagem recebida."), status_code=303)
 
     desejados: dict[tuple[int, str], dict] = {}
     erros = []
     for idx, bruto_id in enumerate(item_ids):
+        if idx < len(salvos_originais) and str(salvos_originais[idx] or "0").strip() == "1":
+            # Linha já contada e não reaberta para correção: preserva o progresso sem reaplicar saldo antigo.
+            continue
         try:
             item_id = int(bruto_id or 0)
         except (TypeError, ValueError):
@@ -10758,11 +10831,18 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
         cor = normalizar_cor(cores[idx] if idx < len(cores) else "") if item_controla_cor(item) else ""
         contagem_txt = str(contagens[idx] if idx < len(contagens) else "").strip()
         minimo_txt = str(minimos[idx] if idx < len(minimos) else "").strip()
-        if item_controla_cor(item) and (contagem_txt or minimo_txt) and not cor:
-            erros.append(f"Informe a cor de {item.nome}.")
+        observacao = str(observacoes[idx] if idx < len(observacoes) else "").strip()
+
+        # Linha totalmente em branco = ainda não contada. Não obriga cor e não altera nada.
+        minimo_relevante = minimo_txt not in ("", "0", "0,0", "0.0", "0,00", "0.00")
+        if item_controla_cor(item) and (contagem_txt or minimo_relevante) and not cor:
+            erros.append(f"Informe a cor de {item.nome} somente na linha que estiver contando.")
             continue
+        if not contagem_txt and not minimo_relevante and not cor:
+            continue
+
         chave = (item.id, cor)
-        registro = desejados.setdefault(chave, {"item": item, "cor": cor, "contagem": None, "minimo": None})
+        registro = desejados.setdefault(chave, {"item": item, "cor": cor, "contagem": None, "minimo": None, "observacao": observacao})
         if contagem_txt != "":
             try:
                 registro["contagem"] = max(float(contagem_txt.replace(",", ".")), 0)
@@ -10779,6 +10859,7 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
         return RedirectResponse("/organiza/estoque/contagem?erro=" + quote_plus(erros[0]), status_code=303)
 
     ajustes = 0
+    salvos = 0
     agora = datetime.now().strftime("%d/%m/%Y %H:%M")
     for registro in desejados.values():
         item = registro["item"]
@@ -10789,32 +10870,54 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
             continue
         atual = _estoque_fisico_chave(db, item.id, cor)
         diferenca = round(float(registro["contagem"]) - atual, 4)
-        if abs(diferenca) <= 0.0001:
-            continue
-        db.add(EstoqueMovimento(
-            item_id=item.id,
-            tipo="ENTRADA" if diferenca > 0 else "SAIDA",
-            quantidade=abs(diferenca),
-            cor=cor or None,
-            origem_tipo="CONTAGEM",
-            custo_unitario=float(item.preco_custo or 0),
-            observacao=f"Ajuste por contagem física em {agora}",
-            usuario_id=usuario.id,
-        ))
-        ajustes += 1
+        if abs(diferenca) > 0.0001:
+            db.add(EstoqueMovimento(
+                item_id=item.id,
+                tipo="ENTRADA" if diferenca > 0 else "SAIDA",
+                quantidade=abs(diferenca),
+                cor=cor or None,
+                origem_tipo="CONTAGEM",
+                custo_unitario=float(item.preco_custo or 0),
+                observacao=f"Ajuste por contagem física em {agora}",
+                usuario_id=usuario.id,
+            ))
+            ajustes += 1
+        _salvar_progresso_contagem(
+            db, item.id, cor, registro["contagem"], registro["minimo"],
+            registro.get("observacao"), usuario.id,
+        )
+        salvos += 1
     db.commit()
-    msg = f"Contagem aplicada. {ajustes} ajuste(s) de estoque realizado(s)."
+    if salvos == 0:
+        msg = "Nenhuma nova contagem preenchida. Os campos em branco foram mantidos pendentes."
+    else:
+        msg = f"Progresso salvo: {salvos} linha(s) contada(s); {ajustes} ajuste(s) de estoque realizado(s)."
     return RedirectResponse("/organiza/estoque/contagem?ok=" + quote_plus(msg), status_code=303)
+
+
+@app.post("/organiza/estoque/contagem/nova")
+def estoque_contagem_nova(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    qtd = db.query(EstoqueContagemProgresso).delete(synchronize_session=False)
+    db.commit()
+    return RedirectResponse(
+        "/organiza/estoque/contagem?ok=" + quote_plus(f"Nova contagem iniciada. {int(qtd or 0)} marcação(ões) de progresso foram liberadas; o estoque físico não foi alterado."),
+        status_code=303,
+    )
 
 
 @app.get("/organiza/estoque/contagem.csv")
 def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["ITEM", "COR", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
+    writer.writerow(["ITEM", "COR", "STATUS", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
     for linha in _linhas_contagem_estoque(db):
+        contagem = linha.get("contagem_salva") if linha.get("salvo") else None
+        diferenca = (float(contagem) - float(linha["fisico"])) if contagem is not None else None
         writer.writerow([
-            linha["item"].nome, linha["cor"], f'{float(linha["fisico"]):g}', "", "", f'{float(linha["minimo"]):g}', ""
+            linha["item"].nome, linha["cor"], "CONTADO" if linha.get("salvo") else "PENDENTE",
+            f'{float(linha["fisico"]):g}', f'{float(contagem):g}' if contagem is not None else "",
+            f'{float(diferenca):g}' if diferenca is not None else "", f'{float(linha["minimo"]):g}',
+            linha.get("observacao_salva") or "",
         ])
     conteudo = "\ufeff" + buffer.getvalue()
     return Response(
