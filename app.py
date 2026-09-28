@@ -1481,25 +1481,32 @@ def _desejado_manutencao_estoque(m: Manutencao, o: Orcamento, db: Session, somen
 
 
 def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
-    """Manutenção a fazer reserva. Ao encerrar uma OS nova, a reserva vira saída física."""
+    """Somente manutenção APROVADA compromete estoque.
+
+    Antes da aprovação não existe reserva. Após a aprovação, somente os itens aprovados
+    ficam reservados. Ao encerrar uma OS nova que já estava reservada, a reserva vira
+    saída física. Isso evita transformar orçamentos ainda em negociação em consumo de estoque.
+    """
     if not m or not m.id:
         return
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     status = (m.status or "").strip()
     cancelada = status in ESTOQUE_MANUTENCAO_CANCELADA or (o and (o.status or "").strip() == "Cancelado")
-    if not o or cancelada:
+    aprovado = _orcamento_aprovado(o) if o else False
+
+    # Sem orçamento aprovado: não reserva e não baixa estoque.
+    if not o or cancelada or not aprovado:
         _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
         return
 
-    aprovado = _orcamento_aprovado(o)
-    desejado = _desejado_manutencao_estoque(m, o, db, somente_aprovados=aprovado)
+    desejado = _desejado_manutencao_estoque(m, o, db, somente_aprovados=True)
     finalizada = status in ESTOQUE_MANUTENCAO_FINAL or bool(m.entregue_em)
     if not finalizada:
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
         _sincronizar_reservas_origem(
             db, "MANUTENCAO", m.id, desejado,
-            observacao=f"Manutenção #{m.id} a fazer",
+            observacao=f"Manutenção #{m.id} aprovada a fazer",
         )
         return
 
@@ -1507,7 +1514,7 @@ def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
         EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id
     ).first() is not None
     _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
-    if reservas_existentes and aprovado:
+    if reservas_existentes:
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, desejado, observacao=f"Manutenção #{m.id} encerrada")
     else:
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
@@ -1691,6 +1698,33 @@ def _migrar_estoque_primeira_implantacao_1166(db: Session) -> int:
             sincronizar_estoque_manutencao(manutencao, db)
     db.commit()
     return int(removidos or 0)
+
+
+def _migrar_reservas_manutencao_aprovada_1168(db: Session) -> int:
+    """Recria reservas de manutenção usando a regra 1.1.68: somente aprovadas."""
+    chave = "estoque_manutencao_somente_aprovada_1_1_68"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0
+
+    removidas = db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo == "MANUTENCAO"
+    ).delete(synchronize_session=False)
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+
+    manutencoes_abertas_ids = [mid for (mid,) in db.query(Manutencao.id).filter(
+        ~Manutencao.status.in_(("Encerrada", "Cancelada", "Cancelado"))
+    ).all()]
+    for manutencao_id in manutencoes_abertas_ids:
+        manutencao = carregar_manutencao(db, manutencao_id)
+        if manutencao:
+            sincronizar_estoque_manutencao(manutencao, db)
+    db.commit()
+    return int(removidas or 0)
 
 
 def contexto_cores_venda(db: Session, equipamento: Equipamento | None) -> list[dict]:
@@ -2832,6 +2866,9 @@ def iniciar_banco():
         removidos_estoque_1166 = _migrar_estoque_primeira_implantacao_1166(db)
         if removidos_estoque_1166:
             print(f"[ESTOQUE] 1.1.66: {removidos_estoque_1166} baixa(s) automática(s) anterior(es) removida(s); operações abertas reservadas.")
+        removidas_manut_1168 = _migrar_reservas_manutencao_aprovada_1168(db)
+        if removidas_manut_1168:
+            print(f"[ESTOQUE] 1.1.68: {removidas_manut_1168} reserva(s) de manutenção refeita(s); somente aprovadas permanecem.")
         db.commit()
     finally:
         db.close()
@@ -10568,18 +10605,70 @@ def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado),
     if q:
         linhas = [l for l in linhas if q in (l["item"].nome or "").upper() or q in (l["item"].codigo or "").upper()]
     itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
-    historico_recente = _historico_estoque(db)[:100]
     itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
     compras = relatorio_compras_estoque(db)
     return templates.TemplateResponse("organiza/estoque.html", {
         "request": request, "usuario": usuario, "linhas": linhas, "cores_estoque": cores,
-        "itens": itens, "itens_cor_ids": itens_cor_ids, "historico_recente": historico_recente,
+        "itens": itens, "itens_cor_ids": itens_cor_ids,
         "q": q, "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
         "cor_pendente": ESTOQUE_COR_PENDENTE,
         "total_compras": round(sum(float(x["custo_total"] or 0) for x in compras), 2),
         "qtd_compras": len(compras),
     })
 
+
+
+def _agrupar_movimentacoes_cliente(linhas: list[dict]) -> list[dict]:
+    """Uma linha por Venda/Manutenção, sem explodir item a item."""
+    grupos: dict[tuple[str, str], dict] = {}
+    for l in linhas:
+        if l["origem_tipo"] not in {"VENDA", "MANUTENCAO"}:
+            continue
+        chave = (l["origem_tipo"], l["origem"])
+        g = grupos.setdefault(chave, {
+            "data": l["data"], "origem_tipo": l["origem_tipo"], "origem": l["origem"],
+            "cliente": l["cliente"], "status": l["status"], "url": l["url"],
+            "itens_ids": set(), "quantidade": 0.0, "tem_saida": False, "tem_reserva": False,
+        })
+        if l["data"] and (not g["data"] or l["data"] > g["data"]):
+            g["data"] = l["data"]
+        if l["item"]:
+            g["itens_ids"].add(l["item"].id)
+        g["quantidade"] += float(l["quantidade"] or 0)
+        g["tem_saida"] = g["tem_saida"] or l["tipo"] == "SAIDA"
+        g["tem_reserva"] = g["tem_reserva"] or l["tipo"] == "RESERVA"
+    saida = []
+    for g in grupos.values():
+        g["itens"] = len(g.pop("itens_ids"))
+        g["tipo"] = "SAIDA" if g.pop("tem_saida") else ("RESERVA" if g.pop("tem_reserva") else "MOVIMENTO")
+        saida.append(g)
+    return sorted(saida, key=lambda x: x["data"] or datetime.min, reverse=True)
+
+
+def _agrupar_movimentacoes_item(linhas: list[dict]) -> list[dict]:
+    """Resumo por item/cor do período: entrada, saída e reserva atual."""
+    grupos: dict[tuple[int, str], dict] = {}
+    for l in linhas:
+        item = l.get("item")
+        if not item:
+            continue
+        cor = (l.get("cor") or "").strip().upper()
+        chave = (item.id, cor)
+        g = grupos.setdefault(chave, {
+            "item": item, "cor": cor, "entradas": 0.0, "saidas": 0.0, "reservas": 0.0,
+        })
+        qtd = float(l.get("quantidade") or 0)
+        if l["tipo"] == "ENTRADA":
+            g["entradas"] += qtd
+        elif l["tipo"] == "SAIDA":
+            g["saidas"] += qtd
+        elif l["tipo"] == "RESERVA":
+            g["reservas"] += qtd
+    saida = []
+    for g in grupos.values():
+        g["movimento_liquido"] = round(g["entradas"] - g["saidas"], 4)
+        saida.append(g)
+    return sorted(saida, key=lambda x: ((x["item"].nome or "").upper(), x["cor"]))
 
 
 @app.get("/organiza/estoque/movimentacoes", response_class=HTMLResponse)
@@ -10596,11 +10685,14 @@ def estoque_movimentacoes(request: Request, usuario: Usuario = Depends(usuario_l
         db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt),
         item_id=item_id or None, tipo=tipo, origem=origem,
     )
+    grupos_clientes = _agrupar_movimentacoes_cliente(linhas)
+    movimentos_itens = _agrupar_movimentacoes_item(linhas)
     itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
     return templates.TemplateResponse("organiza/estoque_movimentacoes.html", {
         "request": request, "usuario": usuario, "linhas": linhas, "itens": itens,
+        "grupos_clientes": grupos_clientes, "movimentos_itens": movimentos_itens,
         "data_inicio": inicio_txt, "data_fim": fim_txt, "tipo": tipo, "origem": origem,
-        "item_id": item_id, "total_registros": len(linhas),
+        "item_id": item_id, "total_clientes": len(grupos_clientes), "total_itens": len(movimentos_itens),
     })
 
 
@@ -10618,18 +10710,21 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
         db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt),
         item_id=item_id or None, tipo=tipo, origem=origem,
     )
+    itens_resumo = _agrupar_movimentacoes_item(linhas)
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["DATA", "TIPO", "ITEM", "COR", "QUANTIDADE", "ORIGEM", "CLIENTE", "STATUS", "OBSERVACAO"])
-    for l in linhas:
+    writer.writerow(["ITEM", "COR", "ENTRADAS", "SAIDAS", "RESERVADO", "MOVIMENTO_LIQUIDO"])
+    for l in itens_resumo:
         writer.writerow([
-            l["data"].strftime("%d/%m/%Y %H:%M") if l["data"] else "", l["tipo"],
-            l["item"].nome if l["item"] else "", l["cor"], f'{float(l["quantidade"]):g}',
-            l["origem"], l["cliente"], l["status"], l["observacao"],
+            l["item"].nome if l["item"] else "", l["cor"], f'{float(l["entradas"]):g}',
+            f'{float(l["saidas"]):g}', f'{float(l["reservas"]):g}', f'{float(l["movimento_liquido"]):g}',
         ])
     conteudo = "\ufeff" + buffer.getvalue()
-    return Response(content=conteudo.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": 'attachment; filename="movimentacao_estoque.csv"'})
+    return Response(
+        content=conteudo,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=movimentacao_estoque_por_item.csv"},
+    )
 
 
 @app.get("/organiza/estoque/contagem", response_class=HTMLResponse)
