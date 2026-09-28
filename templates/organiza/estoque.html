@@ -71,7 +71,6 @@
           <tr class="estoque-linha-item {% if l.disponivel < 0 %}linha-negativa{% endif %}">
             <td class="col-item">
               <strong>{{ l.item.nome }}</strong>
-              {% if l.item.codigo %}<small>{{ l.item.codigo }}</small>{% endif %}
               {% if l.item.id in itens_cor_ids %}<button type="button" class="link-cores" onclick="toggleCores('cores-{{ l.item.id }}', this)">cores ▾</button>{% endif %}
             </td>
             <td class="num">{{ '%g'|format(l.fisico) }}</td>
