@@ -36,6 +36,7 @@
             <th>CATEGORIA</th>
             <th class="num">CUSTO</th>
             <th class="num">PREÇO NORMAL</th>
+            <th>ESTOQUE</th>
             <th>STATUS</th>
             <th class="col-acoes">AÇÕES</th>
           </tr>
@@ -47,6 +48,7 @@
             <td>{{ item.categoria }}</td>
             <td class="num">{{ item.preco_custo|moeda }}</td>
             <td class="num">{{ item.preco_venda|moeda }}</td>
+            <td><span class="pill estoque-status {% if not item.controla_estoque_ui %}fora{% endif %}">{{ 'Sim' if item.controla_estoque_ui else 'Não' }}</span></td>
             <td><span class="pill status-item {% if not item.ativo %}inativo{% endif %}">{{ 'Ativo' if item.ativo else 'Inativo' }}</span></td>
             <td class="col-acoes">
               <div class="acoes-planilha">
@@ -60,17 +62,17 @@
           <dialog id="editar-{{ item.id }}" class="modal-item">
             <form method="post" action="/organiza/itens/{{ item.id }}/editar" class="cartao formulario modal-conteudo">
               <div class="titulo-linha compacto"><h2>Editar item</h2><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
-              <label>Item<input name="nome" value="{{ item.nome }}" required style="text-transform:uppercase"></label>
-              <div class="form-grid tres-campos">
+              <div class="item-form-linha">
+                <label class="campo-item">Item<input name="nome" value="{{ item.nome }}" required style="text-transform:uppercase"></label>
                 <label>Categoria<input name="categoria" value="{{ item.categoria }}" list="categorias"></label>
                 <label>Preço de custo<input name="preco_custo" value="{{ '%.2f'|format(item.preco_custo) }}" inputmode="decimal"></label>
                 <label>Preço normal<input name="preco_venda" value="{{ '%.2f'|format(item.preco_venda) }}" inputmode="decimal" required></label>
+                <div class="campo-acao"><span class="texto-suave estoque-regra">Sistema e Manutenção não controlam estoque.</span><button class="botao primario">Salvar</button></div>
               </div>
-              <button class="botao primario">Salvar alterações</button>
             </form>
           </dialog>
           {% else %}
-          <tr><td colspan="6" class="vazio">Nenhum item encontrado.</td></tr>
+          <tr><td colspan="7" class="vazio">Nenhum item encontrado.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -81,18 +83,18 @@
 <dialog id="novo-item" class="modal-item">
   <form class="cartao formulario modal-conteudo" method="post" action="/organiza/itens/novo">
     <div class="titulo-linha compacto"><div><p class="tag">Cadastro rápido</p><h2>Novo item</h2></div><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
-    <label>Item<input name="nome" required autofocus style="text-transform:uppercase"></label>
-    <div class="form-grid tres-campos">
+    <div class="item-form-linha">
+      <label class="campo-item">Item<input name="nome" required autofocus style="text-transform:uppercase"></label>
       <label>Categoria<input name="categoria" value="Geral" list="categorias"></label>
       <label>Preço de custo<input name="preco_custo" inputmode="decimal" value="0,00"></label>
       <label>Preço normal<input name="preco_venda" inputmode="decimal" required></label>
+      <div class="campo-acao"><span class="texto-suave estoque-regra">Sistema e Manutenção não controlam estoque.</span><button class="botao primario">Salvar</button></div>
     </div>
-    <button class="botao primario">Salvar item</button>
   </form>
 </dialog>
 <datalist id="categorias">{% for c in categorias %}<option value="{{ c }}">{% endfor %}</datalist>
 
 <style>
-.itens-topo{align-items:flex-end}.acoes-itens-topo{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.itens-planilha-card{padding:0;overflow:hidden}.itens-barra{padding:14px 16px;border-bottom:1px solid #dbe3ee}.itens-barra h2{margin:0 0 3px}.itens-busca{display:flex;gap:6px;align-items:center;min-width:min(520px,100%)}.itens-busca input{min-width:280px}.planilha-scroll{overflow:auto;max-width:100%}.planilha-itens{width:100%;border-collapse:separate;border-spacing:0;min-width:900px;font-size:12px}.planilha-itens th{position:sticky;top:0;background:#eaf0f7;padding:8px 10px;border-right:1px solid #d8e0ea;border-bottom:1px solid #cbd5e1;text-align:left;font-size:11px;white-space:nowrap;z-index:2}.planilha-itens td{padding:7px 10px;border-right:1px solid #e6ecf3;border-bottom:1px solid #e3e8ef;background:#fff;vertical-align:middle}.planilha-itens tbody tr:hover td{background:#f8fbff}.planilha-itens .col-item{min-width:340px}.planilha-itens .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-itens th.num{text-align:right}.planilha-itens .col-acoes{width:180px}.acoes-planilha{display:flex;gap:5px;align-items:center;justify-content:flex-start}.acoes-planilha form{margin:0}.status-item{white-space:nowrap}.status-item.inativo{opacity:.65}.planilha-itens tr.linha-inativa td{background:#f8fafc;color:#64748b}.planilha-itens tr.linha-inativa:hover td{background:#f1f5f9}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.tres-campos{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:900px){.itens-topo{align-items:flex-start;flex-direction:column}.acoes-itens-topo{width:100%;justify-content:flex-start}.itens-barra{align-items:stretch;flex-direction:column}.itens-busca{min-width:0;width:100%}.itens-busca input{min-width:0;flex:1}.tres-campos{grid-template-columns:1fr}}
+.itens-topo{align-items:flex-end}.acoes-itens-topo{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.itens-planilha-card{padding:0;overflow:hidden}.itens-barra{padding:14px 16px;border-bottom:1px solid #dbe3ee}.itens-barra h2{margin:0 0 3px}.itens-busca{display:flex;gap:6px;align-items:center;min-width:min(520px,100%)}.itens-busca input{min-width:280px}.planilha-scroll{overflow:auto;max-width:100%}.planilha-itens{width:100%;border-collapse:separate;border-spacing:0;min-width:900px;font-size:12px}.planilha-itens th{position:sticky;top:0;background:#eaf0f7;padding:8px 10px;border-right:1px solid #d8e0ea;border-bottom:1px solid #cbd5e1;text-align:left;font-size:11px;white-space:nowrap;z-index:2}.planilha-itens td{padding:7px 10px;border-right:1px solid #e6ecf3;border-bottom:1px solid #e3e8ef;background:#fff;vertical-align:middle}.planilha-itens tbody tr:hover td{background:#f8fbff}.planilha-itens .col-item{min-width:340px}.planilha-itens .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-itens th.num{text-align:right}.planilha-itens .col-acoes{width:180px}.acoes-planilha{display:flex;gap:5px;align-items:center;justify-content:flex-start}.acoes-planilha form{margin:0}.estoque-status{white-space:nowrap;background:#dcfce7;color:#166534}.estoque-status.fora{background:#f1f5f9;color:#64748b}.status-item{white-space:nowrap}.status-item.inativo{opacity:.65}.planilha-itens tr.linha-inativa td{background:#f8fafc;color:#64748b}.planilha-itens tr.linha-inativa:hover td{background:#f1f5f9}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.modal-item{width:min(1100px,96vw)}.modal-conteudo{width:100%;max-width:none}.item-form-linha{display:grid;grid-template-columns:minmax(280px,2.2fr) minmax(160px,1fr) 140px 140px minmax(120px,.8fr);gap:10px;align-items:end}.item-form-linha label{margin:0}.campo-acao{display:flex;flex-direction:column;gap:6px;align-items:stretch}.campo-acao .botao{width:100%}.estoque-regra{font-size:10px;line-height:1.2}@media(max-width:1000px){.item-form-linha{grid-template-columns:2fr 1fr 1fr 1fr}.campo-acao{grid-column:1/-1;flex-direction:row;align-items:center;justify-content:flex-end}.campo-acao .botao{width:auto}}@media(max-width:900px){.itens-topo{align-items:flex-start;flex-direction:column}.acoes-itens-topo{width:100%;justify-content:flex-start}.itens-barra{align-items:stretch;flex-direction:column}.itens-busca{min-width:0;width:100%}.itens-busca input{min-width:0;flex:1}.item-form-linha{grid-template-columns:1fr}.campo-acao{grid-column:auto;flex-direction:column;align-items:stretch}.campo-acao .botao{width:100%}}
 </style>
 {% endblock %}

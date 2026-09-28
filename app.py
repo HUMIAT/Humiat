@@ -1269,6 +1269,9 @@ class IntegracaoConect(Base):
 #   controlam mínimo e contagem também por cor.
 # -----------------------------------------------------------------------------
 ESTOQUE_ITENS_COR = {"BOTOES", "BOTAO", "COOLER 12 MM", "FITA LED", "LED"}
+# Itens destas categorias são serviços/valores lógicos e não representam material físico.
+ESTOQUE_CATEGORIAS_SEM_CONTROLE = {"SISTEMA", "MANUTENCAO", "MANUTENCOES"}
+ESTOQUE_ITENS_SEM_CONTROLE = {"ATUALIZACAO"}
 ESTOQUE_COR_PENDENTE = "SEM COR DEFINIDA"
 ESTOQUE_VENDA_A_FAZER = {"Solicitar gabinete", "Montagem", "Pronto para entrega"}
 ESTOQUE_MANUTENCAO_FINAL = {"Encerrada"}
@@ -1279,8 +1282,20 @@ def _texto_sem_acento(valor: str) -> str:
     return unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii").strip().upper()
 
 
+def item_controla_estoque(item: Item | None) -> bool:
+    if not item or not bool(item.ativo):
+        return False
+    categoria = _texto_sem_acento(item.categoria)
+    nome = _texto_sem_acento(item.nome)
+    if categoria in ESTOQUE_CATEGORIAS_SEM_CONTROLE:
+        return False
+    if nome in ESTOQUE_ITENS_SEM_CONTROLE:
+        return False
+    return True
+
+
 def item_controla_cor(item: Item | None) -> bool:
-    if not item:
+    if not item_controla_estoque(item):
         return False
     return _texto_sem_acento(item.nome) in ESTOQUE_ITENS_COR
 
@@ -1412,7 +1427,7 @@ def _desejado_venda_estoque(eq: Equipamento, db: Session) -> dict[tuple[int, str
     itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(quantidades.keys()))).all()}
     for item_id, qtd in quantidades.items():
         item = itens.get(item_id)
-        if not item:
+        if not item or not item_controla_estoque(item):
             continue
         for cor, qtd_cor in _distribuir_por_cor(db, "VENDA", eq.id, item, qtd).items():
             desejado[(item_id, cor, None)] = qtd_cor
@@ -1489,7 +1504,7 @@ def _desejado_manutencao_estoque(m: Manutencao, o: Orcamento, db: Session, somen
     desejado: dict[tuple[int, str | None, int | None], float] = {}
     for oi in itens_orcamento:
         item = itens.get(oi.item_id)
-        if not item:
+        if not item or not item_controla_estoque(item):
             continue
         for cor, qtd_cor in _distribuir_por_cor(db, "MANUTENCAO", oi.id, item, oi.quantidade).items():
             desejado[(oi.item_id, cor, oi.id)] = qtd_cor
@@ -1573,7 +1588,10 @@ def _salvar_minimo_estoque(db: Session, item_id: int, cor: str | None, quantidad
 
 
 def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
-    itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+    itens = [
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        if item_controla_estoque(i)
+    ]
     movimentos = db.query(EstoqueMovimento).all()
     reservas = db.query(EstoqueReserva).all()
     minimos = _mapa_minimos_estoque(db)
@@ -1683,6 +1701,7 @@ def _linhas_contagem_estoque(db: Session) -> list[dict]:
                     prog = progresso.get((item.id, normalizar_cor(c["cor"])))
                     saida.append({
                         "item": item, "cor": c["cor"], "fisico": c["fisico"], "minimo": c["minimo"],
+                        "custo_unitario": float(item.preco_custo or 0),
                         "controla_cor": True, "salvo": bool(prog),
                         "contagem_salva": float(prog.quantidade) if prog else None,
                         "observacao_salva": (prog.observacao or "") if prog else "",
@@ -1690,13 +1709,15 @@ def _linhas_contagem_estoque(db: Session) -> list[dict]:
                     })
             else:
                 saida.append({
-                    "item": item, "cor": "", "fisico": 0.0, "minimo": 0.0, "controla_cor": True,
+                    "item": item, "cor": "", "fisico": 0.0, "minimo": 0.0,
+                    "custo_unitario": float(item.preco_custo or 0), "controla_cor": True,
                     "salvo": False, "contagem_salva": None, "observacao_salva": "", "atualizado_em": None,
                 })
         else:
             prog = progresso.get((item.id, ""))
             saida.append({
                 "item": item, "cor": "", "fisico": l["fisico"], "minimo": l["minimo"],
+                "custo_unitario": float(item.preco_custo or 0),
                 "controla_cor": False, "salvo": bool(prog),
                 "contagem_salva": float(prog.quantidade) if prog else None,
                 "observacao_salva": (prog.observacao or "") if prog else "",
@@ -10598,7 +10619,10 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
         q_mov = q_mov.filter(text("1=0"))
     if origem:
         q_mov = q_mov.filter(EstoqueMovimento.origem_tipo == origem)
-    movimentos = q_mov.order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).all()
+    movimentos = [
+        m for m in q_mov.order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).all()
+        if item_controla_estoque(m.item)
+    ]
 
     q_res = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item))
     if item_id:
@@ -10611,7 +10635,10 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
         q_res = q_res.filter(text("1=0"))
     if origem:
         q_res = q_res.filter(EstoqueReserva.origem_tipo == origem)
-    reservas = q_res.order_by(EstoqueReserva.criado_em.desc(), EstoqueReserva.id.desc()).all()
+    reservas = [
+        r for r in q_res.order_by(EstoqueReserva.criado_em.desc(), EstoqueReserva.id.desc()).all()
+        if item_controla_estoque(r.item)
+    ]
 
     venda_ids = {int(x.origem_id) for x in movimentos + reservas if (x.origem_tipo or "").upper() == "VENDA" and x.origem_id}
     manut_ids = {int(x.origem_id) for x in movimentos + reservas if (x.origem_tipo or "").upper() == "MANUTENCAO" and x.origem_id}
@@ -10668,8 +10695,11 @@ def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado),
     linhas, cores = estoque_saldos(db)
     q = (request.query_params.get("q") or "").strip().upper()
     if q:
-        linhas = [l for l in linhas if q in (l["item"].nome or "").upper() or q in (l["item"].codigo or "").upper()]
-    itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        linhas = [l for l in linhas if q in (l["item"].nome or "").upper()]
+    itens = [
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        if item_controla_estoque(i)
+    ]
     itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
     compras = relatorio_compras_estoque(db)
     return templates.TemplateResponse("organiza/estoque.html", {
@@ -10752,7 +10782,10 @@ def estoque_movimentacoes(request: Request, usuario: Usuario = Depends(usuario_l
     )
     grupos_clientes = _agrupar_movimentacoes_cliente(linhas)
     movimentos_itens = _agrupar_movimentacoes_item(linhas)
-    itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+    itens = [
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        if item_controla_estoque(i)
+    ]
     return templates.TemplateResponse("organiza/estoque_movimentacoes.html", {
         "request": request, "usuario": usuario, "linhas": linhas, "itens": itens,
         "grupos_clientes": grupos_clientes, "movimentos_itens": movimentos_itens,
@@ -10796,9 +10829,14 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
 def estoque_contagem(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     linhas = _linhas_contagem_estoque(db)
     total_salvos = sum(1 for l in linhas if l.get("salvo"))
+    valor_contado = round(sum(
+        float(l.get("contagem_salva") or 0) * float(l.get("custo_unitario") or 0)
+        for l in linhas if l.get("salvo")
+    ), 2)
     return templates.TemplateResponse("organiza/estoque_contagem.html", {
         "request": request, "usuario": usuario, "linhas": linhas,
         "total_salvos": total_salvos, "total_pendentes": max(len(linhas) - total_salvos, 0),
+        "valor_contado": valor_contado,
         "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
     })
 
@@ -10826,7 +10864,7 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
         except (TypeError, ValueError):
             continue
         item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
-        if not item:
+        if not item or not item_controla_estoque(item):
             continue
         cor = normalizar_cor(cores[idx] if idx < len(cores) else "") if item_controla_cor(item) else ""
         contagem_txt = str(contagens[idx] if idx < len(contagens) else "").strip()
@@ -10909,13 +10947,15 @@ def estoque_contagem_nova(usuario: Usuario = Depends(usuario_logado), db: Sessio
 def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["ITEM", "COR", "STATUS", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
+    writer.writerow(["ITEM", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
     for linha in _linhas_contagem_estoque(db):
         contagem = linha.get("contagem_salva") if linha.get("salvo") else None
         diferenca = (float(contagem) - float(linha["fisico"])) if contagem is not None else None
         writer.writerow([
             linha["item"].nome, linha["cor"], "CONTADO" if linha.get("salvo") else "PENDENTE",
+            f'{float(linha.get("custo_unitario") or 0):.2f}',
             f'{float(linha["fisico"]):g}', f'{float(contagem):g}' if contagem is not None else "",
+            f'{float(contagem) * float(linha.get("custo_unitario") or 0):.2f}' if contagem is not None else "",
             f'{float(diferenca):g}' if diferenca is not None else "", f'{float(linha["minimo"]):g}',
             linha.get("observacao_salva") or "",
         ])
@@ -10947,8 +10987,8 @@ async def estoque_entrada(request: Request, usuario: Usuario = Depends(usuario_l
         quantidade = float(str(form.get("quantidade") or "0").replace(",", "."))
     except (TypeError, ValueError):
         quantidade = 0
-    if not item or quantidade <= 0:
-        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Informe o item e uma quantidade válida."), status_code=303)
+    if not item or not item_controla_estoque(item) or quantidade <= 0:
+        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Informe um item de estoque e uma quantidade válida."), status_code=303)
     cor = normalizar_cor(form.get("cor")) if item_controla_cor(item) else ""
     if item_controla_cor(item) and not cor:
         return RedirectResponse("/organiza/estoque?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
@@ -10988,6 +11028,8 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
         filtro = f"%{termo}%"
         q = q.filter(or_(Item.nome.ilike(filtro), Item.categoria.ilike(filtro)))
     itens = q.order_by(Item.nome.asc()).all()
+    for item in itens:
+        item.controla_estoque_ui = item_controla_estoque(item)
     categorias = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
     return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca})
 
