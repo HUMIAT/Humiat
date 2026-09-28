@@ -1,0 +1,55 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">Cadastros</p><h1>Cupons de venda</h1><p class="texto-suave">Cadastre descontos que podem ser aplicados às vendas de equipamentos.</p></div>
+    <button class="botao primario" type="button" onclick="document.getElementById('novo-cupom').showModal()">＋ Novo cupom</button>
+  </div>
+  {% if request.query_params.get('salvo') %}<div class="alerta sucesso">Cupom atualizado.</div>{% endif %}
+
+  <section class="cartao tabela-cartao" style="margin-top:16px">
+    <div class="tabela-responsiva">
+      <table>
+        <thead><tr><th>Código</th><th>Descrição</th><th>Desconto</th><th>Status</th><th>Ações</th></tr></thead>
+        <tbody>
+          {% for cupom in cupons %}
+          <tr class="{% if not cupom.ativo %}linha-inativa{% endif %}">
+            <td><strong>{{ cupom.codigo }}</strong></td>
+            <td>{{ cupom.descricao or '—' }}</td>
+            <td>{% if cupom.tipo == 'PERCENTUAL' %}{{ '%.2f'|format(cupom.valor or 0) }}%{% else %}{{ cupom.valor|moeda }}{% endif %}</td>
+            <td><span class="pill">{{ 'Ativo' if cupom.ativo else 'Inativo' }}</span></td>
+            <td><button class="botao pequeno" type="button" onclick="document.getElementById('cupom-{{ cupom.id }}').showModal()">Editar</button></td>
+          </tr>
+          <dialog id="cupom-{{ cupom.id }}" class="modal-item">
+            <form method="post" action="/organiza/cupons-venda/{{ cupom.id }}/editar" class="cartao formulario modal-conteudo">
+              <div class="titulo-linha compacto"><h2>Editar cupom</h2><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
+              <div class="form-grid-organizada dois-colunas">
+                <label>Código<input name="codigo" value="{{ cupom.codigo }}" required></label>
+                <label>Descrição<input name="descricao" value="{{ cupom.descricao or '' }}"></label>
+                <label>Tipo<select name="tipo"><option value="PERCENTUAL" {% if cupom.tipo == 'PERCENTUAL' %}selected{% endif %}>Percentual (%)</option><option value="VALOR" {% if cupom.tipo == 'VALOR' %}selected{% endif %}>Valor (R$)</option></select></label>
+                <label>Valor<input name="valor" inputmode="decimal" value="{{ '%.2f'|format(cupom.valor or 0) }}" required></label>
+                <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="ativo" value="1" style="width:auto" {% if cupom.ativo %}checked{% endif %}> Ativo</label>
+              </div>
+              <button class="botao primario" type="submit">Salvar cupom</button>
+            </form>
+          </dialog>
+          {% else %}<tr><td colspan="5">Nenhum cupom cadastrado.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+
+<dialog id="novo-cupom" class="modal-item">
+  <form method="post" action="/organiza/cupons-venda/novo" class="cartao formulario modal-conteudo">
+    <div class="titulo-linha compacto"><div><p class="tag">Cadastro rápido</p><h2>Novo cupom</h2></div><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
+    <div class="form-grid-organizada dois-colunas">
+      <label>Código<input name="codigo" placeholder="KARAOKE10" required></label>
+      <label>Descrição<input name="descricao" placeholder="Ex.: campanha de setembro"></label>
+      <label>Tipo<select name="tipo"><option value="PERCENTUAL">Percentual (%)</option><option value="VALOR">Valor (R$)</option></select></label>
+      <label>Valor<input name="valor" inputmode="decimal" value="0,00" required></label>
+    </div>
+    <button class="botao primario" type="submit">Salvar cupom</button>
+  </form>
+</dialog>
+{% endblock %}

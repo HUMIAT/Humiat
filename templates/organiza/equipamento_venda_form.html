@@ -14,7 +14,12 @@
         <label>SKU<input name="sku" value="{{ modelo.sku or '' }}" placeholder="KRJ-BIP19-JBL"></label>
         <label>Slug SolVoz<input name="solvoz_slug" value="{{ modelo.solvoz_slug or '' }}"></label>
         <label>Tipo<select name="tipo">{% for tipo in ['JUKEBOX','MALETA','IPHONE','FLIPERAMA'] %}<option value="{{ tipo }}" {% if modelo.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
-        <label>Preço Básico<input name="preco_basico" inputmode="decimal" value="{{ '%.2f'|format(modelo.preco_basico or 0) }}"><small>Plus = Básico + {{ plus_acrescimo|moeda }}.</small></label>
+        <label>Preço Básico<input id="preco-basico" name="preco_basico" inputmode="decimal" value="{{ '%.2f'|format(modelo.preco_basico or 0) }}"><small>Plus = Básico + {{ plus_acrescimo|moeda }}.</small></label>
+        <label>Lucro Básico<input id="lucro-basico" value="{{ lucro_basico|moeda }}" readonly aria-readonly="true"></label>
+        <label>Margem Básico (%)<input id="margem-basico" inputmode="decimal" value="{{ '%.2f'|format(margem_basico) }}"><small>Ao alterar a margem, o Preço Básico é recalculado automaticamente.</small></label>
+        <label>Preço Plus<input id="preco-plus" value="{{ preco_plus|moeda }}" readonly aria-readonly="true"></label>
+        <label>Lucro Plus<input id="lucro-plus" value="{{ lucro_plus|moeda }}" readonly aria-readonly="true"></label>
+        <label>Margem Plus<input id="margem-plus" value="{{ '%.2f'|format(margem_plus) }}%" readonly aria-readonly="true"></label>
         <label style="display:flex;gap:10px;align-items:center;padding-top:26px"><input type="checkbox" name="ativo" value="1" style="width:auto" {% if modelo.ativo %}checked{% endif %}> Ativo nas vendas</label>
         <label class="campo-duplo">Observação<textarea name="observacao">{{ modelo.observacao or '' }}</textarea></label>
       </div>
@@ -22,7 +27,7 @@
 
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>2</span><div><h2>Itens da composição</h2><p>Preço da planilha não é usado. Alterar o custo do Item recalcula automaticamente o custo atual do equipamento.</p></div></div>
-      <div class="alerta informacao"><strong>Custo-base atual:</strong> {{ custo_base|moeda }}. A composição não inclui Microfone nem Catálogo Impresso, pois agora são Opcionais.</div>
+      <div class="alerta informacao"><strong>Custo-base atual:</strong> <span id="custo-base-atual">{{ custo_base|moeda }}</span>. A composição não inclui Microfone nem Catálogo Impresso, pois agora são Opcionais.</div>
       <div style="overflow:auto;margin-top:14px">
         <table class="tabela-clean">
           <thead><tr><th>Item</th><th>Categoria</th><th>Custo atual</th><th style="width:140px">Quantidade</th><th>Subtotal atual</th></tr></thead>
@@ -44,4 +49,43 @@
     <button class="botao primario botao-cheio" type="submit">Salvar equipamento e composição</button>
   </form>
 </section>
+
+<script>
+(() => {
+  const preco=document.getElementById('preco-basico');
+  const margem=document.getElementById('margem-basico');
+  const lucro=document.getElementById('lucro-basico');
+  const precoPlus=document.getElementById('preco-plus');
+  const lucroPlus=document.getElementById('lucro-plus');
+  const margemPlus=document.getElementById('margem-plus');
+  const custoTexto=document.getElementById('custo-base-atual');
+  const qtds=Array.from(document.querySelectorAll('.qtd-composicao'));
+  const plus={{ plus_acrescimo }};
+  let alterandoMargem=false;
+  const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0};
+  const br=v=>(Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  function custoAtual(){return qtds.reduce((t,i)=>t+n(i.value)*Number(i.dataset.custo||0),0)}
+  function atualizarResumo(recalcularPreco=false){
+    const custo=custoAtual();
+    let p=Math.max(n(preco.value),0);
+    if(recalcularPreco){
+      const m=Math.max(Math.min(n(margem.value),99.99),-999);
+      p=(m<100)?custo/(1-m/100):p;
+      preco.value=p.toFixed(2);
+    }
+    const l=p-custo;
+    const m=p?l/p*100:0;
+    const pp=p+plus, lp=pp-custo, mp=pp?lp/pp*100:0;
+    lucro.value=br(l);
+    if(!alterandoMargem) margem.value=m.toFixed(2);
+    precoPlus.value=br(pp); lucroPlus.value=br(lp); margemPlus.value=mp.toFixed(2)+'%';
+    if(custoTexto)custoTexto.textContent=br(custo);
+    qtds.forEach(i=>{const cell=i.closest('tr')?.querySelector('.subtotal-item'); if(cell)cell.textContent=br(n(i.value)*Number(i.dataset.custo||0));});
+  }
+  margem.addEventListener('input',()=>{alterandoMargem=true; atualizarResumo(true); alterandoMargem=false;});
+  preco.addEventListener('input',()=>atualizarResumo(false));
+  qtds.forEach(i=>i.addEventListener('input',()=>atualizarResumo(false)));
+  atualizarResumo(false);
+})();
+</script>
 {% endblock %}

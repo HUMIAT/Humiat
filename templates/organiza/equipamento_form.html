@@ -1,11 +1,12 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean equipamento-pagina">
-  <div class="titulo-linha"><div><p class="tag">Equipamento</p><h1>{{ 'Editar equipamento' if equipamento and equipamento.id else 'Novo equipamento' }}</h1><p class="texto-suave">Cliente: <strong>{{ cliente.nome }}</strong></p></div><a class="botao" href="/organiza/clientes/{{ cliente.id }}">Voltar</a></div>
+  <div class="titulo-linha"><div><p class="tag">Equipamento</p><h1>{{ 'Editar equipamento' if equipamento and equipamento.id else 'Novo equipamento' }}</h1><p class="texto-suave">Cliente: <strong>{{ cliente.nome }}</strong></p></div><a class="botao" href="{{ retorno if retorno else '/organiza/clientes/' ~ cliente.id }}">Voltar</a></div>
   {% if request.query_params.get('criado') %}<div class="alerta sucesso">Venda criada. Agora você pode acompanhar e atualizar o status do equipamento.</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}{% if request.query_params.get('transferido') %}<div class="alerta sucesso">Equipamento transferido para este cliente com sucesso.</div>{% endif %}{% if request.query_params.get('erro_transferencia') %}<div class="alerta erro">{{ request.query_params.get('erro_transferencia') }}</div>{% endif %}
   <form method="post" class="equipamento-form" id="form-equipamento">
     <input type="hidden" name="confirmar_codigo_cliente" id="confirmar-codigo-cliente" value="0">
+    {% if retorno %}<input type="hidden" name="retorno" value="{{ retorno }}">{% endif %}
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Identificação</h2><p>Dados principais da máquina.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
@@ -43,8 +44,16 @@
           </select>
         </label>
         <label>Preço de custo<input id="preco-custo-calculado" name="preco_custo" inputmode="decimal" value="{{ '%.2f'|format(resumo_custo.custo) if equipamento and equipamento.produto_venda_id else (equipamento.preco_custo if equipamento and equipamento.preco_custo else '') }}" {% if equipamento and equipamento.produto_venda_id %}readonly aria-readonly="true"{% endif %}><small>{% if equipamento and equipamento.produto_venda_id %}Calculado pelos Itens + Opcionais.{% else %}Legado/manual até vincular um equipamento comercial.{% endif %}</small></label>
-        <label>Preço de venda unitário<input id="preco-venda-unitario" name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}"></label>
-        <label>Valor total<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}"></label>
+        <label>Preço de venda bruto<input id="preco-venda-unitario" name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}"><small>Preço antes de cupom e desconto manual.</small></label>
+        <label>Cupom
+          <select name="cupom_id" id="cupom-venda">
+            <option value="">Sem cupom</option>
+            {% for cupom in cupons_venda %}<option value="{{ cupom.id }}" {% if equipamento and equipamento.cupom_id == cupom.id %}selected{% endif %}>{{ cupom.codigo }} · {% if cupom.tipo == 'PERCENTUAL' %}{{ '%.2f'|format(cupom.valor or 0) }}%{% else %}{{ cupom.valor|moeda }}{% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Desconto manual (R$)<input id="desconto-manual" name="desconto_manual" inputmode="decimal" value="{{ '%.2f'|format(equipamento.desconto_manual or 0) if equipamento else '0.00' }}"></label>
+        <label>Desconto do cupom<input id="desconto-cupom" value="{{ (equipamento.cupom_desconto_snapshot or 0)|moeda if equipamento else 'R$ 0,00' }}" readonly aria-readonly="true"></label>
+        <label>Valor total final<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}" readonly aria-readonly="true"><small>Calculado após os descontos.</small></label>
         <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" value="{{ equipamento.pago if equipamento and equipamento.pago else '' }}"></label>
         <div class="garantia-recibo">
           <label>Garantia (meses)<input type="number" min="0" name="garantia_meses" value="{{ equipamento.garantia_meses if equipamento and equipamento.garantia_meses is not none else 3 }}"></label>
@@ -291,12 +300,16 @@
   const valor=document.getElementById('valor_total');
   const precoVenda=document.getElementById('preco-venda-unitario');
   const precoCusto=document.getElementById('preco-custo-calculado');
+  const cupom=document.getElementById('cupom-venda');
+  const descontoManual=document.getElementById('desconto-manual');
+  const descontoCupom=document.getElementById('desconto-cupom');
   if (!produto || !catalogo) return;
   const custosModelos={{ custos_modelos|tojson }};
   const precosModelos={{ precos_modelos|tojson }};
   const tiposModelos={{ tipos_modelos|tojson }};
   const nomesModelos={{ nomes_modelos|tojson }};
   const custosOpcionais={{ custos_opcionais|tojson }};
+  const cupons={{ cupons_dados|tojson }};
   const plus={{ plus_acrescimo }};
   const snapshotAtivo={{ 'true' if resumo_custo.snapshot else 'false' }};
   const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0};
@@ -309,13 +322,26 @@
     });
     return total;
   }
+  function valorDescontoCupom(bruto){
+    if(!cupom || !cupom.value) return 0;
+    const dados=cupons[cupom.value];
+    if(!dados) return 0;
+    const v=Number(dados.valor||0);
+    return dados.tipo==='PERCENTUAL' ? bruto*Math.min(v,100)/100 : Math.min(v,bruto);
+  }
   function recalcular(){
     if(snapshotAtivo) return;
     const id=produto.value;
     const base=Number(custosModelos[id]||0);
     const op=custoOpcional();
     const custo=base+op;
-    const venda=n(valor && valor.value ? valor.value : (precoVenda ? precoVenda.value : 0));
+    const bruto=n(precoVenda ? precoVenda.value : 0);
+    const manual=Math.max(n(descontoManual ? descontoManual.value : 0),0);
+    const descCupom=Math.max(valorDescontoCupom(bruto),0);
+    const desconto=Math.min(bruto, manual+descCupom);
+    const venda=Math.max(bruto-desconto,0);
+    if(valor) valor.value=venda.toFixed(2);
+    if(descontoCupom) descontoCupom.value=br(descCupom);
     const lucro=venda-custo;
     const margem=venda ? (lucro/venda*100) : 0;
     const map={
@@ -325,6 +351,7 @@
     Object.entries(map).forEach(([id,text])=>{const el=document.getElementById(id);if(el)el.textContent=text});
     if(id && precoCusto){precoCusto.value=custo.toFixed(2);precoCusto.readOnly=true;}
     else if(precoCusto){precoCusto.readOnly=false;}
+    valor && valor.dispatchEvent(new Event('input'));
   }
   function aplicarProduto(){
     const id=produto.value;
@@ -332,7 +359,6 @@
       if(tipo) tipo.value=tiposModelos[id]||tipo.value;
       if(modelo) modelo.value=nomesModelos[id]||modelo.value;
       const sugerido=Number(precosModelos[id]||0)+(catalogo.value==='PLUS'?plus:0);
-      if(valor) valor.value=sugerido.toFixed(2);
       if(precoVenda) precoVenda.value=sugerido.toFixed(2);
       tipo && tipo.dispatchEvent(new Event('input'));
     }
@@ -343,13 +369,12 @@
     const id=produto.value;
     if(id){
       const sugerido=Number(precosModelos[id]||0)+(catalogo.value==='PLUS'?plus:0);
-      if(valor) valor.value=sugerido.toFixed(2);
       if(precoVenda) precoVenda.value=sugerido.toFixed(2);
     }
     recalcular();
   });
   document.querySelectorAll('[data-opcional]').forEach(el=>el.addEventListener('change',recalcular));
-  [valor,precoVenda].forEach(el=>el&&el.addEventListener('input',recalcular));
+  [precoVenda,descontoManual,cupom].forEach(el=>el&&el.addEventListener(el.tagName==='SELECT'?'change':'input',recalcular));
   recalcular();
 })();
 </script>

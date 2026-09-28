@@ -30,9 +30,18 @@
             <option value="PLUS" {% if dados.get('catalogo_venda') == 'PLUS' %}selected{% endif %}>Plus (+ {{ plus_acrescimo|moeda }})</option>
           </select>
         </label>
+        <label>Cupom
+          <select name="cupom_id" id="cupom-venda">
+            <option value="">Sem cupom</option>
+            {% for cupom in cupons_venda %}<option value="{{ cupom.id }}" {% if dados.get('cupom_id')|string == cupom.id|string %}selected{% endif %}>{{ cupom.codigo }} · {% if cupom.tipo == 'PERCENTUAL' %}{{ '%.2f'|format(cupom.valor or 0) }}%{% else %}{{ cupom.valor|moeda }}{% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Desconto manual (R$)<input name="desconto_manual" id="desconto-manual" inputmode="decimal" value="{{ dados.get('desconto_manual','0,00') }}"></label>
       </div>
       <div class="venda-card-dados" style="margin-top:16px">
-        <div><small>Preço sugerido</small><strong id="preco-sugerido">R$ 0,00</strong></div>
+        <div><small>Preço bruto sugerido</small><strong id="preco-sugerido">R$ 0,00</strong></div>
+        <div><small>Desconto</small><strong id="desconto-sugerido">R$ 0,00</strong></div>
+        <div><small>Preço final</small><strong id="preco-final">R$ 0,00</strong></div>
         <div><small>Custo-base atual</small><strong id="custo-base">R$ 0,00</strong></div>
         <div><small>Observação</small><strong>Opcionais serão somados ao custo conforme a configuração escolhida.</strong></div>
       </div>
@@ -47,18 +56,33 @@
 (() => {
   const produto=document.getElementById('produto-venda');
   const catalogo=document.getElementById('catalogo-venda');
+  const cupom=document.getElementById('cupom-venda');
+  const descontoManual=document.getElementById('desconto-manual');
   const preco=document.getElementById('preco-sugerido');
+  const desconto=document.getElementById('desconto-sugerido');
+  const final=document.getElementById('preco-final');
   const custo=document.getElementById('custo-base');
   const precos={{ precos_modelos|tojson }};
   const custos={{ custos_modelos|tojson }};
+  const cupons={{ cupons_dados|tojson }};
   const plus={{ plus_acrescimo }};
+  const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0};
   const br=v=>(Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  function descontoCupom(bruto){
+    const dados=cupons[cupom.value]; if(!dados) return 0;
+    const v=Number(dados.valor||0);
+    return dados.tipo==='PERCENTUAL' ? bruto*Math.min(v,100)/100 : Math.min(v,bruto);
+  }
   function atualizar(){
     const id=produto.value;
-    preco.textContent=br((precos[id]||0)+(catalogo.value==='PLUS'?plus:0));
+    const bruto=(precos[id]||0)+(catalogo.value==='PLUS'?plus:0);
+    const desc=Math.min(bruto, Math.max(n(descontoManual.value),0)+descontoCupom(bruto));
+    preco.textContent=br(bruto); desconto.textContent=br(desc); final.textContent=br(Math.max(bruto-desc,0));
     custo.textContent=br(custos[id]||0);
   }
-  produto.addEventListener('change',atualizar); catalogo.addEventListener('change',atualizar); atualizar();
+  [produto,catalogo,cupom].forEach(el=>el.addEventListener('change',atualizar));
+  descontoManual.addEventListener('input',atualizar);
+  atualizar();
 })();
 </script>
 {% endblock %}

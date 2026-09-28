@@ -32,7 +32,11 @@
         <div><small>Itens</small><strong>{{ modelo.qtd_itens_composicao }}</strong></div>
         <div><small>Custo-base atual</small><strong>{{ modelo.custo_base_calculado|moeda }}</strong></div>
         <div><small>Preço Básico</small><strong>{{ modelo.preco_basico|moeda }}</strong></div>
+        <div><small>Lucro Básico</small><strong>{{ modelo.lucro_basico_calculado|moeda }}</strong></div>
+        <div><small>Margem Básico</small><strong>{{ '%.2f'|format(modelo.margem_basico_calculada) }}%</strong></div>
         <div><small>Preço Plus</small><strong>{{ modelo.preco_plus_calculado|moeda }}</strong></div>
+        <div><small>Lucro Plus</small><strong>{{ modelo.lucro_plus_calculado|moeda }}</strong></div>
+        <div><small>Margem Plus</small><strong>{{ '%.2f'|format(modelo.margem_plus_calculada) }}%</strong></div>
       </div>
       {% if modelo.qtd_itens_composicao == 0 %}<div class="alerta erro" style="margin-top:12px">Composição ainda não cadastrada. O custo-base ficará R$ 0,00 até informar os Itens e quantidades.</div>{% endif %}
       {% if modelo.observacao %}<p class="texto-suave" style="margin-top:12px">{{ modelo.observacao }}</p>{% endif %}

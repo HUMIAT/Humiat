@@ -174,14 +174,20 @@
     "preco_venda": 100.0
   },
   {
-    "codigo": "31",
-    "nome": "ESPELHO MIC MALETA",
-    "preco_custo": 16.0,
+    "codigo": "",
+    "nome": "ESPELHO DE TECLADO",
+    "preco_custo": 20.0,
     "preco_venda": 50.0
   },
   {
-    "codigo": "32",
-    "nome": "ESPELHO TRASEIRO MALETA",
+    "codigo": "35",
+    "nome": "ESPELHO FLIPERAMA",
+    "preco_custo": 15.0,
+    "preco_venda": 50.0
+  },
+  {
+    "codigo": "31",
+    "nome": "ESPELHO MIC MALETA",
     "preco_custo": 16.0,
     "preco_venda": 50.0
   },
@@ -192,15 +198,15 @@
     "preco_venda": 50.0
   },
   {
-    "codigo": "34",
-    "nome": "ESPELHO TRASEIRO MAQUINA",
+    "codigo": "32",
+    "nome": "ESPELHO TRASEIRO MALETA",
     "preco_custo": 16.0,
     "preco_venda": 50.0
   },
   {
-    "codigo": "35",
-    "nome": "ESPELHO FLIPERAMA",
-    "preco_custo": 15.0,
+    "codigo": "34",
+    "nome": "ESPELHO TRASEIRO MAQUINA",
+    "preco_custo": 16.0,
     "preco_venda": 50.0
   },
   {
@@ -262,6 +268,12 @@
     "nome": "GABINETE FLIPER PORT",
     "preco_custo": 230.0,
     "preco_venda": 350.0
+  },
+  {
+    "codigo": "69",
+    "nome": "GABINETE GUITARRINHA",
+    "preco_custo": 0.0,
+    "preco_venda": 0.0
   },
   {
     "codigo": "46",
@@ -361,12 +373,6 @@
   },
   {
     "codigo": "62",
-    "nome": "TV 32",
-    "preco_custo": 1000.0,
-    "preco_venda": 1200.0
-  },
-  {
-    "codigo": "62",
     "nome": "PLACA DE MICROFONE",
     "preco_custo": 90.0,
     "preco_venda": 250.0
@@ -378,16 +384,16 @@
     "preco_venda": 700.0
   },
   {
+    "codigo": "64",
+    "nome": "RASPBERRY OU PANDORA",
+    "preco_custo": 400.0,
+    "preco_venda": 550.0
+  },
+  {
     "codigo": "68",
     "nome": "SUPORTE DE MIC",
     "preco_custo": 7.0,
     "preco_venda": 20.0
-  },
-  {
-    "codigo": "64",
-    "nome": "RASPBERRY ou PANDORA",
-    "preco_custo": 400.0,
-    "preco_venda": 550.0
   },
   {
     "codigo": "65",
@@ -396,15 +402,15 @@
     "preco_venda": 100.0
   },
   {
+    "codigo": "62",
+    "nome": "TV 32",
+    "preco_custo": 1000.0,
+    "preco_venda": 1200.0
+  },
+  {
     "codigo": "66",
     "nome": "TWEETER JBL",
     "preco_custo": 130.0,
     "preco_venda": 200.0
-  },
-  {
-    "codigo": "69",
-    "nome": "GABINETE GUITARRINHA",
-    "preco_custo": 0.0,
-    "preco_venda": 0.0
   }
 ]

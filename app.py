@@ -625,6 +625,19 @@ class SolVozAcessoCliente(Base):
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class VendaCupom(Base):
+    """Cupom comercial aplicado às vendas de equipamentos."""
+    __tablename__ = "venda_cupons"
+    id = Column(Integer, primary_key=True)
+    codigo = Column(String(80), nullable=False, unique=True, index=True)
+    descricao = Column(String(180), nullable=True)
+    tipo = Column(String(20), nullable=False, default="PERCENTUAL")
+    valor = Column(Float, nullable=False, default=0)
+    ativo = Column(Integer, nullable=False, default=1)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class Equipamento(Base):
     __tablename__ = "equipamentos"
     id = Column(Integer, primary_key=True)
@@ -676,10 +689,16 @@ class Equipamento(Base):
     lucro_snapshot = Column(Float, nullable=True)
     margem_snapshot = Column(Float, nullable=True)
     custo_snapshot_em = Column(DateTime, nullable=True)
+    # 1.1.64: desconto/cupom da venda. preco_venda é o valor bruto; valor é o total final.
+    cupom_id = Column(Integer, ForeignKey("venda_cupons.id"), nullable=True, index=True)
+    cupom_codigo_snapshot = Column(String(80), nullable=True)
+    cupom_desconto_snapshot = Column(Float, nullable=False, default=0)
+    desconto_manual = Column(Float, nullable=False, default=0)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
     produto_venda = relationship("VendaModeloEquipamento")
+    cupom = relationship("VendaCupom")
 
 
 class Campanha(Base):
@@ -1590,8 +1609,24 @@ PLUS_ACRESCIMO = 400.0
 VENDA_STATUS_FINALIZADO = {"ENTREGUE", "VENDIDO"}
 
 
+def normalizar_nome_item(nome: str | None) -> str:
+    return re.sub(r"\s+", " ", (nome or "").strip()).upper()
+
+
+def calcular_desconto_cupom(cupom: VendaCupom | None, preco_bruto: float) -> float:
+    preco = max(float(preco_bruto or 0), 0)
+    if not cupom or not cupom.ativo or preco <= 0:
+        return 0.0
+    valor = max(float(cupom.valor or 0), 0)
+    if (cupom.tipo or "").upper() == "PERCENTUAL":
+        desconto = preco * min(valor, 100.0) / 100.0
+    else:
+        desconto = valor
+    return round(min(desconto, preco), 2)
+
+
 def _garantir_item_venda(db: Session, nome: str, categoria: str = "Composição de equipamentos") -> Item:
-    nome = nome.strip()
+    nome = normalizar_nome_item(nome)
     item = db.query(Item).filter(Item.nome == nome).first()
     if not item:
         item = db.query(Item).filter(func.lower(Item.nome) == nome.lower()).first()
@@ -1726,6 +1761,57 @@ def _migrar_composicoes_venda_1163(db: Session) -> int:
     return corrigidos
 
 
+def _migrar_itens_maiusculos_1164(db: Session) -> int:
+    """Normaliza os nomes dos Itens para MAIÚSCULAS uma única vez."""
+    chave = "itens_maiusculos_1_1_64"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0
+    alterados = 0
+    for item in db.query(Item).order_by(Item.id.asc()).all():
+        novo = normalizar_nome_item(item.nome)
+        if novo and novo != item.nome:
+            repetido = db.query(Item).filter(func.upper(Item.nome) == novo, Item.id != item.id).first()
+            if not repetido:
+                item.nome = novo
+                alterados += 1
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.commit()
+    return alterados
+
+
+def _migrar_espelho_teclado_1164(db: Session) -> int:
+    """Adiciona 1 ESPELHO DE TECLADO a todos os equipamentos comerciais."""
+    chave = "espelho_teclado_composicoes_1_1_64"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    item = _garantir_item_venda(db, "ESPELHO DE TECLADO", "Composição de equipamentos")
+    item.preco_custo = 20.0
+    item.preco_venda = 50.0
+    item.ativo = 1
+    # Mesmo com a migração marcada, reforçamos a regra fixa em todos os modelos.
+    # Isso também cobre equipamentos comerciais criados em versões futuras.
+    adicionados = 0
+    for modelo in db.query(VendaModeloEquipamento).all():
+        comp = db.query(VendaModeloComposicao).filter(
+            VendaModeloComposicao.modelo_id == modelo.id,
+            VendaModeloComposicao.item_id == item.id,
+        ).first()
+        if comp:
+            comp.quantidade = 1
+        else:
+            db.add(VendaModeloComposicao(modelo_id=modelo.id, item_id=item.id, quantidade=1))
+            adicionados += 1
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.commit()
+    return adicionados
+
+
 def custo_base_modelo(db: Session, modelo_id: int | None) -> float:
     if not modelo_id:
         return 0.0
@@ -1766,7 +1852,9 @@ def resumo_custo_venda(eq: Equipamento, db: Session, usar_snapshot: bool = True)
         preco = float(eq.preco_venda_snapshot if eq.preco_venda_snapshot is not None else moeda_num(eq.valor))
         lucro = float(eq.lucro_snapshot if eq.lucro_snapshot is not None else preco - custo)
         margem = float(eq.margem_snapshot if eq.margem_snapshot is not None else ((lucro / preco * 100) if preco else 0))
-        return {"base": round(base,2), "opcionais": round(opcionais,2), "custo": round(custo,2), "preco": round(preco,2), "lucro": round(lucro,2), "margem": round(margem,2), "snapshot": True}
+        bruto = moeda_num(eq.preco_venda) or preco
+        desconto = max(round(bruto - preco, 2), 0)
+        return {"base": round(base,2), "opcionais": round(opcionais,2), "custo": round(custo,2), "preco": round(preco,2), "bruto": round(bruto,2), "desconto": desconto, "lucro": round(lucro,2), "margem": round(margem,2), "snapshot": True}
     if eq.produto_venda_id:
         base = custo_base_modelo(db, eq.produto_venda_id)
         opcionais = custo_opcionais_equipamento(eq, db)
@@ -1776,10 +1864,12 @@ def resumo_custo_venda(eq: Equipamento, db: Session, usar_snapshot: bool = True)
         base = moeda_num(eq.preco_custo)
         opcionais = 0.0
         custo = round(base, 2)
+    bruto = moeda_num(eq.preco_venda or eq.valor)
     preco = moeda_num(eq.valor or eq.preco_venda)
+    desconto = max(round(bruto - preco, 2), 0)
     lucro = round(preco - custo, 2)
     margem = round((lucro / preco * 100) if preco else 0, 2)
-    return {"base": base, "opcionais": opcionais, "custo": custo, "preco": preco, "lucro": lucro, "margem": margem, "snapshot": False}
+    return {"base": base, "opcionais": opcionais, "custo": custo, "preco": preco, "bruto": bruto, "desconto": desconto, "lucro": lucro, "margem": margem, "snapshot": False}
 
 
 def congelar_custo_venda_se_finalizada(eq: Equipamento, db: Session):
@@ -1809,11 +1899,18 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
         custo = float(c.quantidade or 0) * float(c.item.preco_custo or 0) if c.item else 0.0
         custos_opcionais.setdefault(c.campo, {})[c.valor] = round(custo, 2)
         opcoes_por_campo.setdefault(c.campo, []).append(c)
-    resumo = resumo_custo_venda(equipamento, db) if equipamento else {"base":0,"opcionais":0,"custo":0,"preco":0,"lucro":0,"margem":0,"snapshot":False}
+    resumo = resumo_custo_venda(equipamento, db) if equipamento else {"base":0,"opcionais":0,"custo":0,"preco":0,"bruto":0,"desconto":0,"lucro":0,"margem":0,"snapshot":False}
+    cupons = db.query(VendaCupom).filter(VendaCupom.ativo == 1).order_by(VendaCupom.codigo.asc()).all()
+    if equipamento and equipamento.cupom_id and not any(c.id == equipamento.cupom_id for c in cupons):
+        atual = db.query(VendaCupom).filter(VendaCupom.id == equipamento.cupom_id).first()
+        if atual:
+            cupons.append(atual)
+    cupons_dados = {str(c.id): {"codigo": c.codigo, "tipo": c.tipo, "valor": float(c.valor or 0)} for c in cupons}
     return {
         "modelos_venda": modelos, "custos_modelos": custos_modelos, "precos_modelos": precos_modelos,
         "tipos_modelos": tipos_modelos, "nomes_modelos": nomes_modelos, "custos_opcionais": custos_opcionais,
         "opcoes_por_campo": opcoes_por_campo, "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
+        "cupons_venda": sorted(cupons, key=lambda c: (c.codigo or "")), "cupons_dados": cupons_dados,
     }
 
 
@@ -2095,6 +2192,14 @@ def iniciar_banco():
             if "custo_snapshot_em" not in existentes_equipamentos:
                 tipo_dt_snapshot = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
                 conn.execute(text(f"ALTER TABLE equipamentos ADD COLUMN custo_snapshot_em {tipo_dt_snapshot}"))
+            if "cupom_id" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN cupom_id INTEGER"))
+            if "cupom_codigo_snapshot" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN cupom_codigo_snapshot VARCHAR(80)"))
+            if "cupom_desconto_snapshot" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN cupom_desconto_snapshot FLOAT NOT NULL DEFAULT 0"))
+            if "desconto_manual" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN desconto_manual FLOAT NOT NULL DEFAULT 0"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -2123,6 +2228,10 @@ def iniciar_banco():
         corrigidos_1163 = _migrar_composicoes_venda_1163(db)
         if corrigidos_1163:
             print(f"[VENDAS] 1.1.63: {corrigidos_1163} composição(ões) corrigida(s): Guitarrinha 19 e Guitarra 22.")
+        itens_maiusculos = _migrar_itens_maiusculos_1164(db)
+        espelhos_adicionados = _migrar_espelho_teclado_1164(db)
+        if itens_maiusculos or espelhos_adicionados:
+            print(f"[VENDAS] 1.1.64: itens em maiúsculas={itens_maiusculos}; espelhos adicionados={espelhos_adicionados}.")
         # Remove prefixos antigos usados no código do WhatsApp e mantém somente o nome real.
         for cliente_existente in db.query(Cliente).all():
             cliente_existente.nome = limpar_nome_cliente(cliente_existente.nome)
@@ -5740,12 +5849,37 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     eq.sistema_credito = opcao(form.get("sistema_credito"), {"Moedeiro", "Ficheiro", "Teclado", "NA"}, getattr(eq, "sistema_credito", None) or "NA")
     eq.catalogo_impresso = opcao(form.get("catalogo_impresso"), {"Sim", "Não", "NA"}, getattr(eq, "catalogo_impresso", None) or "NA")
 
-    valor_informado = (form.get("valor") or "").strip()
-    if modelo_venda and not valor_informado:
-        valor_padrao = float(modelo_venda.preco_basico or 0) + (PLUS_ACRESCIMO if eq.catalogo_venda == "PLUS" else 0)
-        valor_informado = f"{valor_padrao:.2f}"
-    eq.valor = valor_informado or None
-    eq.preco_venda = (form.get("preco_venda") or "").strip() or eq.valor
+    # Preço bruto, cupom e desconto manual. `valor` passa a ser sempre o total final.
+    # Em vendas já finalizadas, o preço histórico permanece congelado junto com o snapshot.
+    if eq.custo_final_snapshot is None:
+        preco_bruto = moeda_num(form.get("preco_venda") or form.get("valor") or eq.preco_venda or eq.valor)
+        if modelo_venda and preco_bruto <= 0:
+            preco_bruto = float(modelo_venda.preco_basico or 0) + (PLUS_ACRESCIMO if eq.catalogo_venda == "PLUS" else 0)
+
+        try:
+            cupom_id_form = int(form.get("cupom_id") or 0) if "cupom_id" in form else int(eq.cupom_id or 0)
+        except (TypeError, ValueError):
+            cupom_id_form = 0
+        cupom = None
+        if cupom_id_form:
+            cupom = db.query(VendaCupom).filter(VendaCupom.id == cupom_id_form).first()
+            if cupom and not cupom.ativo and int(eq.cupom_id or 0) != int(cupom.id):
+                cupom = None
+        eq.cupom_id = cupom.id if cupom else None
+
+        desconto_manual = moeda_num(form.get("desconto_manual")) if "desconto_manual" in form else float(eq.desconto_manual or 0)
+        desconto_manual = max(float(desconto_manual or 0), 0)
+        desconto_cupom = calcular_desconto_cupom(cupom, preco_bruto)
+        desconto_total = min(preco_bruto, desconto_manual + desconto_cupom)
+        total_final = max(round(preco_bruto - desconto_total, 2), 0)
+
+        eq.preco_venda = f"{preco_bruto:.2f}" if preco_bruto or modelo_venda else None
+        eq.desconto_manual = round(min(desconto_manual, preco_bruto), 2)
+        eq.cupom_codigo_snapshot = cupom.codigo if cupom else None
+        eq.cupom_desconto_snapshot = round(min(desconto_cupom, max(preco_bruto - eq.desconto_manual, 0)), 2)
+        # Se os descontos juntos ultrapassarem o bruto, o total nunca fica negativo.
+        eq.valor = f"{total_final:.2f}" if (eq.preco_venda is not None) else None
+
     # Para modelos vinculados, custo é sempre calculado pelos Itens; custo manual só permanece no legado.
     if not modelo_venda:
         eq.preco_custo = (form.get("preco_custo") or "").strip() or eq.preco_custo
@@ -5971,10 +6105,13 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not cliente or not eq: raise HTTPException(404)
+    retorno = (request.query_params.get("retorno") or f"/organiza/clientes/{cliente_id}").strip()
+    if not (retorno.startswith("/organiza/vendas") or retorno.startswith(f"/organiza/clientes/{cliente_id}")):
+        retorno = f"/organiza/clientes/{cliente_id}"
     tipos, pacotes = opcoes_equipamentos(db)
     clientes_transferencia = db.query(Cliente).filter(Cliente.id != cliente_id).order_by(Cliente.nome.asc()).all()
     transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db), "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db), **contexto_configuracao_venda(db, eq)})
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db), "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db), "retorno": retorno, **contexto_configuracao_venda(db, eq)})
 
 
 
@@ -6011,6 +6148,9 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
     eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id, Equipamento.cliente_id == cliente_id).first()
     if not eq: raise HTTPException(404)
     form = dict(await request.form())
+    retorno = (form.get("retorno") or f"/organiza/clientes/{cliente_id}").strip()
+    if not (retorno.startswith("/organiza/vendas") or retorno.startswith(f"/organiza/clientes/{cliente_id}")):
+        retorno = f"/organiza/clientes/{cliente_id}"
     codigo_anterior = (eq.maquina or "").strip().upper()
     preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
@@ -6032,13 +6172,13 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
             "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db),
             "clientes_transferencia": clientes_transferencia, "transferencias": transferencias,
             "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
-            "solvoz_empresas": empresas_solvoz_ativas(db),
+            "solvoz_empresas": empresas_solvoz_ativas(db), "retorno": retorno,
             **contexto_configuracao_venda(db, eq)
         }, status_code=400)
     db.flush()
     _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
-    return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
+    return RedirectResponse(retorno, status_code=303)
 
 
 
@@ -8457,6 +8597,9 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         eq.custo_final_calculado = resumo_venda["custo"]
         eq.lucro_calculado = resumo_venda["lucro"]
         eq.margem_calculada = resumo_venda["margem"]
+        eq.desconto_calculado = resumo_venda.get("desconto", 0.0)
+        eq.preco_bruto_calculado = resumo_venda.get("bruto", total)
+        eq.cupom_codigo_calculado = (eq.cupom_codigo_snapshot or "").strip()
         eq.custo_snapshot_ativo = resumo_venda["snapshot"]
         eq.catalogo_venda_rotulo = "Plus" if (eq.catalogo_venda or "").upper() == "PLUS" else "Básico"
 
@@ -8928,6 +9071,8 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
         "catalogo_venda": catalogo_venda,
         "valor": f"{preco_padrao:.2f}",
         "preco_venda": f"{preco_padrao:.2f}",
+        "cupom_id": str(form.get("cupom_id") or ""),
+        "desconto_manual": str(form.get("desconto_manual") or "0"),
         "status": "Solicitar gabinete",
         "fabricante": "KARAOKERJ",
         "garantia_meses": "3",
@@ -9551,6 +9696,10 @@ def modelos_venda_lista(request: Request, usuario: Usuario = Depends(usuario_log
     for modelo in modelos:
         modelo.custo_base_calculado = custo_base_modelo(db, modelo.id)
         modelo.preco_plus_calculado = float(modelo.preco_basico or 0) + PLUS_ACRESCIMO
+        modelo.lucro_basico_calculado = round(float(modelo.preco_basico or 0) - modelo.custo_base_calculado, 2)
+        modelo.margem_basico_calculada = round((modelo.lucro_basico_calculado / float(modelo.preco_basico or 0) * 100) if float(modelo.preco_basico or 0) else 0, 2)
+        modelo.lucro_plus_calculado = round(modelo.preco_plus_calculado - modelo.custo_base_calculado, 2)
+        modelo.margem_plus_calculada = round((modelo.lucro_plus_calculado / modelo.preco_plus_calculado * 100) if modelo.preco_plus_calculado else 0, 2)
         modelo.qtd_itens_composicao = db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo.id).count()
     return templates.TemplateResponse("organiza/equipamentos_venda.html", {
         "request": request, "usuario": usuario, "modelos": modelos, "plus_acrescimo": PLUS_ACRESCIMO,
@@ -9575,7 +9724,11 @@ async def modelo_venda_novo(request: Request, usuario: Usuario = Depends(usuario
         preco_basico=moeda_num(form.get("preco_basico")), ativo=1,
         ordem=(db.query(func.max(VendaModeloEquipamento.ordem)).scalar() or 0) + 10,
     )
-    db.add(modelo); db.commit(); db.refresh(modelo)
+    db.add(modelo); db.flush()
+    espelho = _garantir_item_venda(db, "ESPELHO DE TECLADO", "Composição de equipamentos")
+    espelho.preco_custo = 20.0; espelho.preco_venda = 50.0; espelho.ativo = 1
+    db.add(VendaModeloComposicao(modelo_id=modelo.id, item_id=espelho.id, quantidade=1))
+    db.commit(); db.refresh(modelo)
     return RedirectResponse(f"/organiza/equipamentos-venda/{modelo.id}/editar?novo=1", status_code=303)
 
 
@@ -9584,12 +9737,21 @@ def modelo_venda_editar(modelo_id: int, request: Request, usuario: Usuario = Dep
     modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == modelo_id).first()
     if not modelo:
         raise HTTPException(404)
-    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.categoria, Item.nome).all()
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome.asc()).all()
     composicoes = db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo_id).all()
     qtd_por_item = {c.item_id: float(c.quantidade or 0) for c in composicoes}
+    custo_base = custo_base_modelo(db, modelo.id)
+    preco_basico = float(modelo.preco_basico or 0)
+    lucro_basico = round(preco_basico - custo_base, 2)
+    margem_basico = round((lucro_basico / preco_basico * 100) if preco_basico else 0, 2)
+    preco_plus = round(preco_basico + PLUS_ACRESCIMO, 2)
+    lucro_plus = round(preco_plus - custo_base, 2)
+    margem_plus = round((lucro_plus / preco_plus * 100) if preco_plus else 0, 2)
     return templates.TemplateResponse("organiza/equipamento_venda_form.html", {
         "request": request, "usuario": usuario, "modelo": modelo, "itens": itens,
-        "qtd_por_item": qtd_por_item, "custo_base": custo_base_modelo(db, modelo.id),
+        "qtd_por_item": qtd_por_item, "custo_base": custo_base,
+        "lucro_basico": lucro_basico, "margem_basico": margem_basico,
+        "preco_plus": preco_plus, "lucro_plus": lucro_plus, "margem_plus": margem_plus,
         "plus_acrescimo": PLUS_ACRESCIMO,
     })
 
@@ -9635,6 +9797,16 @@ async def modelo_venda_salvar(modelo_id: int, request: Request, usuario: Usuario
                 existente.quantidade += qtd
             else:
                 db.add(VendaModeloComposicao(modelo_id=modelo_id, item_id=item_usado.id, quantidade=qtd))
+    # Regra fixa: toda máquina comercial tem 1 ESPELHO DE TECLADO.
+    espelho = _garantir_item_venda(db, "ESPELHO DE TECLADO", "Composição de equipamentos")
+    espelho.preco_custo = 20.0; espelho.preco_venda = 50.0; espelho.ativo = 1
+    comp_espelho = db.query(VendaModeloComposicao).filter(
+        VendaModeloComposicao.modelo_id == modelo_id, VendaModeloComposicao.item_id == espelho.id
+    ).first()
+    if comp_espelho:
+        comp_espelho.quantidade = 1
+    else:
+        db.add(VendaModeloComposicao(modelo_id=modelo_id, item_id=espelho.id, quantidade=1))
     db.commit()
     return RedirectResponse(f"/organiza/equipamentos-venda/{modelo_id}/editar?salvo=1", status_code=303)
 
@@ -9642,7 +9814,7 @@ async def modelo_venda_salvar(modelo_id: int, request: Request, usuario: Usuario
 @app.get("/organiza/opcionais-venda", response_class=HTMLResponse)
 def opcionais_venda_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     configs = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).order_by(VendaOpcionalConfig.ordem, VendaOpcionalConfig.grupo, VendaOpcionalConfig.valor).all()
-    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.categoria, Item.nome).all()
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome.asc()).all()
     for config in configs:
         config.custo_calculado = round(float(config.quantidade or 0) * float(config.item.preco_custo or 0), 2) if config.item else 0.0
     return templates.TemplateResponse("organiza/opcionais_venda.html", {
@@ -9671,6 +9843,54 @@ async def opcional_venda_salvar(config_id: int, request: Request, usuario: Usuar
     return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
 
 
+@app.get("/organiza/cupons-venda", response_class=HTMLResponse)
+def cupons_venda_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cupons = db.query(VendaCupom).order_by(VendaCupom.ativo.desc(), VendaCupom.codigo.asc()).all()
+    return templates.TemplateResponse("organiza/cupons_venda.html", {
+        "request": request, "usuario": usuario, "cupons": cupons,
+    })
+
+
+@app.post("/organiza/cupons-venda/novo")
+async def cupom_venda_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    codigo = re.sub(r"\s+", "", (form.get("codigo") or "").strip().upper())
+    tipo = (form.get("tipo") or "PERCENTUAL").strip().upper()
+    tipo = "VALOR" if tipo == "VALOR" else "PERCENTUAL"
+    valor = max(moeda_num(form.get("valor")), 0)
+    if tipo == "PERCENTUAL":
+        valor = min(valor, 100)
+    if codigo:
+        existente = db.query(VendaCupom).filter(func.upper(VendaCupom.codigo) == codigo).first()
+        if not existente:
+            db.add(VendaCupom(
+                codigo=codigo, descricao=(form.get("descricao") or "").strip() or None,
+                tipo=tipo, valor=valor, ativo=1,
+            ))
+            db.commit()
+    return RedirectResponse("/organiza/cupons-venda?salvo=1", status_code=303)
+
+
+@app.post("/organiza/cupons-venda/{cupom_id}/editar")
+async def cupom_venda_editar(cupom_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    cupom = db.query(VendaCupom).filter(VendaCupom.id == cupom_id).first()
+    if not cupom:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    codigo = re.sub(r"\s+", "", (form.get("codigo") or "").strip().upper())
+    repetido = db.query(VendaCupom).filter(func.upper(VendaCupom.codigo) == codigo, VendaCupom.id != cupom_id).first() if codigo else None
+    if codigo and not repetido:
+        cupom.codigo = codigo
+    cupom.descricao = (form.get("descricao") or "").strip() or None
+    tipo = (form.get("tipo") or cupom.tipo or "PERCENTUAL").strip().upper()
+    cupom.tipo = "VALOR" if tipo == "VALOR" else "PERCENTUAL"
+    valor = max(moeda_num(form.get("valor")), 0)
+    cupom.valor = min(valor, 100) if cupom.tipo == "PERCENTUAL" else valor
+    cupom.ativo = 1 if str(form.get("ativo") or "").lower() in {"1", "on", "true", "sim"} else 0
+    db.commit()
+    return RedirectResponse("/organiza/cupons-venda?salvo=1", status_code=303)
+
+
 @app.get("/organiza/itens", response_class=HTMLResponse)
 def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     q = db.query(Item)
@@ -9678,7 +9898,7 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
     if termo:
         filtro = f"%{termo}%"
         q = q.filter(or_(Item.nome.ilike(filtro), Item.codigo.ilike(filtro), Item.categoria.ilike(filtro)))
-    itens = q.order_by(Item.ativo.desc(), Item.categoria, Item.nome).all()
+    itens = q.order_by(Item.nome.asc()).all()
     categorias = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
     return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca})
 
@@ -9686,7 +9906,7 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
 @app.post("/organiza/itens/novo")
 async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
-    nome = (form.get("nome") or "").strip()
+    nome = normalizar_nome_item(form.get("nome"))
     destino = (form.get("next") or "/organiza/itens").strip()
     if not destino.startswith("/"):
         destino = "/organiza/itens"
@@ -9711,7 +9931,7 @@ async def item_editar(item_id: int, request: Request, usuario: Usuario = Depends
     if not item:
         raise HTTPException(404)
     form = dict(await request.form())
-    nome = (form.get("nome") or "").strip()
+    nome = normalizar_nome_item(form.get("nome"))
     repetido = db.query(Item).filter(func.lower(Item.nome) == nome.lower(), Item.id != item_id).first() if nome else None
     if nome and not repetido:
         item.nome = nome
@@ -11311,7 +11531,7 @@ def operacao_orcamentos(
     itens_catalogo = (
         db.query(Item)
         .filter(Item.ativo == 1)
-        .order_by(Item.categoria.asc(), Item.nome.asc())
+        .order_by(Item.nome.asc())
         .all()
     )
     grupos_por_cliente = {}

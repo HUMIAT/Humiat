@@ -25,7 +25,7 @@
         </tr>
         <dialog id="editar-{{ item.id }}" class="modal-item"><form method="post" action="/organiza/itens/{{ item.id }}/editar" class="cartao formulario modal-conteudo">
           <div class="titulo-linha compacto"><h2>Editar item</h2><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
-          <label>Descrição<input name="nome" value="{{ item.nome }}" required></label>
+          <label>Descrição<input name="nome" value="{{ item.nome }}" required style="text-transform:uppercase"></label>
           <div class="form-grid"><label>Código<input name="codigo" value="{{ item.codigo or '' }}"></label><label>Categoria<input name="categoria" value="{{ item.categoria }}" list="categorias"></label><label>Preço de custo<input name="preco_custo" value="{{ '%.2f'|format(item.preco_custo) }}" inputmode="decimal"></label><label>Preço normal<input name="preco_venda" value="{{ '%.2f'|format(item.preco_venda) }}" inputmode="decimal" required></label></div>
           <button class="botao primario">Salvar alterações</button>
         </form></dialog>
@@ -35,7 +35,7 @@
 </section>
 <dialog id="novo-item" class="modal-item"><form class="cartao formulario modal-conteudo" method="post" action="/organiza/itens/novo">
   <div class="titulo-linha compacto"><div><p class="tag">Cadastro rápido</p><h2>Novo item</h2></div><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
-  <label>Descrição<input name="nome" required autofocus></label>
+  <label>Descrição<input name="nome" required autofocus style="text-transform:uppercase"></label>
   <div class="form-grid"><label>Código<input name="codigo"></label><label>Categoria<input name="categoria" value="Geral" list="categorias"></label><label>Preço de custo<input name="preco_custo" inputmode="decimal" value="0,00"></label><label>Preço normal<input name="preco_venda" inputmode="decimal" required></label></div>
   <button class="botao primario">Salvar item</button>
 </form></dialog>

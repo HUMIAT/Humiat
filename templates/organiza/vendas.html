@@ -123,6 +123,7 @@
           <small>Código técnico: {{ venda|codigo_tecnico }}</small>
         </div>
         <div class="venda-card-acoes">
+          <a class="botao pequeno primario" href="/organiza/clientes/{{ venda.cliente_id }}/equipamentos/{{ venda.id }}/editar?retorno={{ ('/organiza/vendas?' ~ filtro_query)|urlencode }}">Editar</a>
           <a class="botao pequeno" href="/organiza/vendas/{{ venda.id }}/pagamentos">Registrar pagamento</a>
           <a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}?consulta=1&venda_id={{ venda.id }}{% if campanha_selecionada %}&campanha_id={{ campanha_selecionada.id }}{% endif %}&retorno={{ ('/organiza/vendas?' ~ filtro_query)|urlencode }}">Consultar</a>
         </div>
@@ -164,6 +165,7 @@
       {% endif %}
       <div class="venda-card-dados">
         <div><small>Preço da venda</small><strong>{{ venda.total_calculado|moeda }}</strong></div>
+        {% if venda.desconto_calculado > 0.009 %}<div><small>Desconto{% if venda.cupom_codigo_calculado %} · {{ venda.cupom_codigo_calculado }}{% endif %}</small><strong>- {{ venda.desconto_calculado|moeda }}</strong></div>{% endif %}
         <div><small>Custo final{% if venda.custo_snapshot_ativo %} · histórico{% endif %}</small><strong>{{ venda.custo_final_calculado|moeda }}</strong></div>
         <div><small>Lucro</small><strong>{{ venda.lucro_calculado|moeda }}</strong></div>
         <div><small>Margem</small><strong>{{ '%.2f'|format(venda.margem_calculada) }}%</strong></div>
