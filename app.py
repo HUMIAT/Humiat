@@ -10986,7 +10986,7 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
     termo = busca.strip()
     if termo:
         filtro = f"%{termo}%"
-        q = q.filter(or_(Item.nome.ilike(filtro), Item.codigo.ilike(filtro), Item.categoria.ilike(filtro)))
+        q = q.filter(or_(Item.nome.ilike(filtro), Item.categoria.ilike(filtro)))
     itens = q.order_by(Item.nome.asc()).all()
     categorias = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
     return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca})
@@ -11004,7 +11004,7 @@ async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado)
         if not existente:
             db.add(Item(
                 nome=nome,
-                codigo=(form.get("codigo") or "").strip() or None,
+                codigo=None,
                 categoria=(form.get("categoria") or "Geral").strip() or "Geral",
                 preco_custo=moeda_num(form.get("preco_custo")),
                 preco_venda=moeda_num(form.get("preco_venda")),
@@ -11024,7 +11024,6 @@ async def item_editar(item_id: int, request: Request, usuario: Usuario = Depends
     repetido = db.query(Item).filter(func.lower(Item.nome) == nome.lower(), Item.id != item_id).first() if nome else None
     if nome and not repetido:
         item.nome = nome
-        item.codigo = (form.get("codigo") or "").strip() or None
         item.categoria = (form.get("categoria") or "Geral").strip() or "Geral"
         item.preco_custo = moeda_num(form.get("preco_custo"))
         item.preco_venda = moeda_num(form.get("preco_venda"))

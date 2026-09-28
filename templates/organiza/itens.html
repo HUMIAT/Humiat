@@ -1,43 +1,98 @@
-{% extends "organiza/base.html" %}{% block conteudo %}
-<section class="pagina-clean">
-  <div class="titulo-linha">
-    <div><p class="tag">Cadastro</p><h1>Itens</h1><p class="texto-suave">Tabela usada nos novos orçamentos. Alterações não mudam orçamentos antigos.</p></div>
-    <button class="botao primario" type="button" onclick="document.getElementById('novo-item').showModal()">＋ Novo item</button>
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean itens-pagina">
+  <div class="titulo-linha itens-topo">
+    <div>
+      <p class="tag">Cadastro</p>
+      <h1>Itens</h1>
+      <p class="texto-suave">Cadastro dos materiais usados em estoque, vendas e manutenções. Alterações não mudam orçamentos antigos.</p>
+    </div>
+    <div class="acoes-itens-topo">
+      <a class="botao secundario" href="/organiza/estoque">Estoque</a>
+      <a class="botao secundario" href="/organiza/estoque/contagem">Contagem</a>
+      <a class="botao secundario" href="/organiza/estoque/compras">Compras</a>
+      <button class="botao primario" type="button" onclick="document.getElementById('novo-item').showModal()">＋ Novo item</button>
+    </div>
   </div>
 
-  <section class="cartao tabela-cartao">
-    <form class="busca-linha" method="get">
-      <input name="busca" value="{{ busca }}" placeholder="Buscar por código, descrição ou categoria">
-      <button class="botao">Buscar</button>
-      {% if busca %}<a class="botao" href="/organiza/itens">Limpar</a>{% endif %}
-    </form>
-    <div class="tabela-responsiva">
-      <table><thead><tr><th>Item</th><th>Categoria</th><th>Custo</th><th>Preço normal</th><th>Status</th><th>Ações</th></tr></thead>
-      <tbody>{% for item in itens %}
-        <tr class="{% if not item.ativo %}linha-inativa{% endif %}">
-          <td><strong>{{ item.nome }}</strong><small>{{ item.codigo or 'Sem código' }}</small></td>
-          <td>{{ item.categoria }}</td><td>{{ item.preco_custo|moeda }}</td><td>{{ item.preco_venda|moeda }}</td>
-          <td><span class="pill">{{ 'Ativo' if item.ativo else 'Inativo' }}</span></td>
-          <td><div class="acoes-tabela">
-            <button class="botao pequeno" type="button" onclick="document.getElementById('editar-{{ item.id }}').showModal()">Editar</button>
-            <form method="post" action="/organiza/itens/{{ item.id }}/status"><button class="botao pequeno">{{ 'Inativar' if item.ativo else 'Ativar' }}</button></form>
-          </div></td>
-        </tr>
-        <dialog id="editar-{{ item.id }}" class="modal-item"><form method="post" action="/organiza/itens/{{ item.id }}/editar" class="cartao formulario modal-conteudo">
-          <div class="titulo-linha compacto"><h2>Editar item</h2><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
-          <label>Descrição<input name="nome" value="{{ item.nome }}" required style="text-transform:uppercase"></label>
-          <div class="form-grid"><label>Código<input name="codigo" value="{{ item.codigo or '' }}"></label><label>Categoria<input name="categoria" value="{{ item.categoria }}" list="categorias"></label><label>Preço de custo<input name="preco_custo" value="{{ '%.2f'|format(item.preco_custo) }}" inputmode="decimal"></label><label>Preço normal<input name="preco_venda" value="{{ '%.2f'|format(item.preco_venda) }}" inputmode="decimal" required></label></div>
-          <button class="botao primario">Salvar alterações</button>
-        </form></dialog>
-      {% else %}<tr><td colspan="6">Nenhum item encontrado.</td></tr>{% endfor %}</tbody></table>
+  <section class="cartao planilha-card itens-planilha-card">
+    <div class="planilha-barra itens-barra">
+      <div>
+        <h2>Cadastro de itens</h2>
+        <p class="texto-suave">Itens em ordem alfabética, no mesmo padrão visual das telas de estoque.</p>
+      </div>
+      <form class="estoque-busca itens-busca" method="get">
+        <input name="busca" value="{{ busca }}" placeholder="Buscar por item ou categoria">
+        <button class="botao pequeno" type="submit">Buscar</button>
+        {% if busca %}<a class="botao pequeno secundario" href="/organiza/itens">Limpar</a>{% endif %}
+      </form>
+    </div>
+
+    <div class="planilha-scroll">
+      <table class="planilha-itens">
+        <thead>
+          <tr>
+            <th class="col-item">ITEM</th>
+            <th>CATEGORIA</th>
+            <th class="num">CUSTO</th>
+            <th class="num">PREÇO NORMAL</th>
+            <th>STATUS</th>
+            <th class="col-acoes">AÇÕES</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in itens %}
+          <tr class="{% if not item.ativo %}linha-inativa{% endif %}">
+            <td class="col-item"><strong>{{ item.nome }}</strong></td>
+            <td>{{ item.categoria }}</td>
+            <td class="num">{{ item.preco_custo|moeda }}</td>
+            <td class="num">{{ item.preco_venda|moeda }}</td>
+            <td><span class="pill status-item {% if not item.ativo %}inativo{% endif %}">{{ 'Ativo' if item.ativo else 'Inativo' }}</span></td>
+            <td class="col-acoes">
+              <div class="acoes-planilha">
+                <button class="botao pequeno" type="button" onclick="document.getElementById('editar-{{ item.id }}').showModal()">Editar</button>
+                <form method="post" action="/organiza/itens/{{ item.id }}/status">
+                  <button class="botao pequeno secundario">{{ 'Inativar' if item.ativo else 'Ativar' }}</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          <dialog id="editar-{{ item.id }}" class="modal-item">
+            <form method="post" action="/organiza/itens/{{ item.id }}/editar" class="cartao formulario modal-conteudo">
+              <div class="titulo-linha compacto"><h2>Editar item</h2><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
+              <label>Item<input name="nome" value="{{ item.nome }}" required style="text-transform:uppercase"></label>
+              <div class="form-grid tres-campos">
+                <label>Categoria<input name="categoria" value="{{ item.categoria }}" list="categorias"></label>
+                <label>Preço de custo<input name="preco_custo" value="{{ '%.2f'|format(item.preco_custo) }}" inputmode="decimal"></label>
+                <label>Preço normal<input name="preco_venda" value="{{ '%.2f'|format(item.preco_venda) }}" inputmode="decimal" required></label>
+              </div>
+              <button class="botao primario">Salvar alterações</button>
+            </form>
+          </dialog>
+          {% else %}
+          <tr><td colspan="6" class="vazio">Nenhum item encontrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </section>
 </section>
-<dialog id="novo-item" class="modal-item"><form class="cartao formulario modal-conteudo" method="post" action="/organiza/itens/novo">
-  <div class="titulo-linha compacto"><div><p class="tag">Cadastro rápido</p><h2>Novo item</h2></div><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
-  <label>Descrição<input name="nome" required autofocus style="text-transform:uppercase"></label>
-  <div class="form-grid"><label>Código<input name="codigo"></label><label>Categoria<input name="categoria" value="Geral" list="categorias"></label><label>Preço de custo<input name="preco_custo" inputmode="decimal" value="0,00"></label><label>Preço normal<input name="preco_venda" inputmode="decimal" required></label></div>
-  <button class="botao primario">Salvar item</button>
-</form></dialog>
+
+<dialog id="novo-item" class="modal-item">
+  <form class="cartao formulario modal-conteudo" method="post" action="/organiza/itens/novo">
+    <div class="titulo-linha compacto"><div><p class="tag">Cadastro rápido</p><h2>Novo item</h2></div><button type="button" class="botao pequeno" onclick="this.closest('dialog').close()">Fechar</button></div>
+    <label>Item<input name="nome" required autofocus style="text-transform:uppercase"></label>
+    <div class="form-grid tres-campos">
+      <label>Categoria<input name="categoria" value="Geral" list="categorias"></label>
+      <label>Preço de custo<input name="preco_custo" inputmode="decimal" value="0,00"></label>
+      <label>Preço normal<input name="preco_venda" inputmode="decimal" required></label>
+    </div>
+    <button class="botao primario">Salvar item</button>
+  </form>
+</dialog>
 <datalist id="categorias">{% for c in categorias %}<option value="{{ c }}">{% endfor %}</datalist>
+
+<style>
+.itens-topo{align-items:flex-end}.acoes-itens-topo{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.itens-planilha-card{padding:0;overflow:hidden}.itens-barra{padding:14px 16px;border-bottom:1px solid #dbe3ee}.itens-barra h2{margin:0 0 3px}.itens-busca{display:flex;gap:6px;align-items:center;min-width:min(520px,100%)}.itens-busca input{min-width:280px}.planilha-scroll{overflow:auto;max-width:100%}.planilha-itens{width:100%;border-collapse:separate;border-spacing:0;min-width:900px;font-size:12px}.planilha-itens th{position:sticky;top:0;background:#eaf0f7;padding:8px 10px;border-right:1px solid #d8e0ea;border-bottom:1px solid #cbd5e1;text-align:left;font-size:11px;white-space:nowrap;z-index:2}.planilha-itens td{padding:7px 10px;border-right:1px solid #e6ecf3;border-bottom:1px solid #e3e8ef;background:#fff;vertical-align:middle}.planilha-itens tbody tr:hover td{background:#f8fbff}.planilha-itens .col-item{min-width:340px}.planilha-itens .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-itens th.num{text-align:right}.planilha-itens .col-acoes{width:180px}.acoes-planilha{display:flex;gap:5px;align-items:center;justify-content:flex-start}.acoes-planilha form{margin:0}.status-item{white-space:nowrap}.status-item.inativo{opacity:.65}.planilha-itens tr.linha-inativa td{background:#f8fafc;color:#64748b}.planilha-itens tr.linha-inativa:hover td{background:#f1f5f9}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.tres-campos{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:900px){.itens-topo{align-items:flex-start;flex-direction:column}.acoes-itens-topo{width:100%;justify-content:flex-start}.itens-barra{align-items:stretch;flex-direction:column}.itens-busca{min-width:0;width:100%}.itens-busca input{min-width:0;flex:1}.tres-campos{grid-template-columns:1fr}}
+</style>
 {% endblock %}
