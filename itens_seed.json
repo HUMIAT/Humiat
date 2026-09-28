@@ -400,5 +400,11 @@
     "nome": "TWEETER JBL",
     "preco_custo": 130.0,
     "preco_venda": 200.0
+  },
+  {
+    "codigo": "69",
+    "nome": "GABINETE GUITARRINHA",
+    "preco_custo": 0.0,
+    "preco_venda": 0.0
   }
 ]

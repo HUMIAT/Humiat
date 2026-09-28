@@ -1672,6 +1672,60 @@ def _seed_modelos_e_opcionais_venda(db: Session):
     db.commit()
 
 
+def _migrar_composicoes_venda_1163(db: Session) -> int:
+    """Corrige uma única vez as composições definidas após a 1.1.62.
+
+    - Guitarrinha 19 usa a base da Jukebox/Bipartido 17, trocando gabinete e monitor.
+    - As colunas GUITARRA 19 da planilha correspondem à Guitarra 22, com monitor 22.
+    A marca de migração evita sobrescrever ajustes manuais feitos depois pelo usuário.
+    """
+    chave = "venda_composicoes_1_1_63"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0
+
+    caminho = os.path.join(os.path.dirname(__file__), "equipamentos_venda_seed.json")
+    if not os.path.exists(caminho):
+        return 0
+    with open(caminho, "r", encoding="utf-8") as arquivo:
+        produtos = json.load(arquivo)
+
+    alvos = {"Guitarrinha 19 Premium", "Guitarrinha 19 JBL", "Guitarra 22 Premium", "Guitarra 22 JBL"}
+    corrigidos = 0
+    for dado in produtos:
+        if dado.get("nome") not in alvos:
+            continue
+        modelo = None
+        if dado.get("sku"):
+            modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.sku == dado["sku"]).first()
+        if not modelo and dado.get("solvoz_slug"):
+            modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.solvoz_slug == dado["solvoz_slug"]).first()
+        if not modelo:
+            modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.nome == dado["nome"]).first()
+        if not modelo:
+            continue
+
+        db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo.id).delete(synchronize_session=False)
+        for linha in dado.get("composicao") or []:
+            nome_item = (linha.get("item") or "").strip()
+            qtd = float(linha.get("quantidade") or 0)
+            if not nome_item or qtd <= 0:
+                continue
+            if nome_item.upper() == "AMPLIFICADOR STEREO":
+                nome_item = "AMPLIFICADOR MONO C/ BLUETOOTH"
+            item = _garantir_item_venda(db, nome_item)
+            db.add(VendaModeloComposicao(modelo_id=modelo.id, item_id=item.id, quantidade=qtd))
+        modelo.observacao = dado.get("observacao")
+        corrigidos += 1
+
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.commit()
+    return corrigidos
+
+
 def custo_base_modelo(db: Session, modelo_id: int | None) -> float:
     if not modelo_id:
         return 0.0
@@ -2063,9 +2117,12 @@ def iniciar_banco():
                     for dado in json.load(arquivo):
                         db.add(Item(**dado, categoria="Geral", ativo=1))
                 db.commit()
-        # 1.1.62: catálogo de produtos/composição e mapa de Opcionais.
+        # 1.1.63: catálogo de produtos/composição e mapa de Opcionais.
         # Preços da planilha nunca são importados; custos vêm exclusivamente de Itens.
         _seed_modelos_e_opcionais_venda(db)
+        corrigidos_1163 = _migrar_composicoes_venda_1163(db)
+        if corrigidos_1163:
+            print(f"[VENDAS] 1.1.63: {corrigidos_1163} composição(ões) corrigida(s): Guitarrinha 19 e Guitarra 22.")
         # Remove prefixos antigos usados no código do WhatsApp e mantém somente o nome real.
         for cliente_existente in db.query(Cliente).all():
             cliente_existente.nome = limpar_nome_cliente(cliente_existente.nome)
