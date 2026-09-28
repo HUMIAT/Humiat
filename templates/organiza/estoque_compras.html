@@ -1,0 +1,20 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean compras-estoque">
+  <div class="titulo-linha compras-topo">
+    <div><p class="tag">Estoque</p><h1>Relatório de compras</h1><p class="texto-suave">Somente itens cujo disponível está abaixo do estoque mínimo.</p></div>
+    <div class="acoes"><a class="botao secundario" href="/organiza/estoque">Voltar ao estoque</a><button class="botao" type="button" onclick="window.print()">Imprimir</button></div>
+  </div>
+  <section class="cartao resumo-compra"><span>Total estimado para repor o mínimo</span><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></section>
+  <section class="cartao planilha-card">
+    <div class="planilha-scroll"><table class="planilha-compras">
+      <thead><tr><th>ITEM</th><th>COR</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th><th>CUSTO UNIT.</th><th>TOTAL</th></tr></thead>
+      <tbody>{% for l in compras %}<tr><td><strong>{{ l.item.nome }}</strong></td><td>{{ l.cor or '—' }}</td><td class="num">{{ '%g'|format(l.disponivel) }}</td><td class="num">{{ '%g'|format(l.minimo) }}</td><td class="num comprar">{{ '%g'|format(l.comprar) }}</td><td class="num">R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}</td><td class="num comprar">R$ {{ '%.2f'|format(l.custo_total)|replace('.', ',') }}</td></tr>{% else %}<tr><td colspan="7" class="vazio">Nenhuma compra necessária. Todos os itens estão no mínimo ou acima.</td></tr>{% endfor %}</tbody>
+      <tfoot><tr><td colspan="6"><strong>TOTAL</strong></td><td class="num"><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></td></tr></tfoot>
+    </table></div>
+  </section>
+</section>
+<style>
+.compras-topo{align-items:flex-end}.acoes{display:flex;gap:7px}.resumo-compra{display:flex;justify-content:space-between;align-items:center;padding:14px 18px}.resumo-compra span{color:#64748b}.resumo-compra strong{font-size:24px}.planilha-card{padding:0;overflow:hidden}.planilha-scroll{overflow:auto}.planilha-compras{width:100%;border-collapse:collapse;min-width:850px;font-size:12px}.planilha-compras th{background:#eaf0f7;padding:8px 10px;text-align:left;border:1px solid #d8e0ea;font-size:11px}.planilha-compras td{padding:7px 10px;border:1px solid #e3e8ef}.planilha-compras .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-compras .comprar{font-weight:900;color:#925600}.planilha-compras tfoot td{background:#f5f7fa}.vazio{text-align:center!important;color:#64748b;padding:24px!important}@media print{.sidebar,.topbar,.acoes{display:none!important}.cartao{box-shadow:none}.planilha-scroll{overflow:visible}.planilha-compras{min-width:0;font-size:9px}}
+</style>
+{% endblock %}

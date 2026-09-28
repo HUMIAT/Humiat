@@ -1168,6 +1168,18 @@ class EstoqueCorUso(Base):
     item = relationship("Item")
 
 
+class EstoqueMinimo(Base):
+    """Estoque mínimo por item e, quando aplicável, por cor."""
+    __tablename__ = "estoque_minimos"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    cor = Column(String(80), nullable=False, default="", index=True)
+    quantidade = Column(Float, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    item = relationship("Item")
+
+
 class NFSERascunho(Base):
     """Rascunho de NFS-e centralizado no Organiza.
 
@@ -1231,13 +1243,20 @@ class IntegracaoConect(Base):
 
 
 # -----------------------------------------------------------------------------
-# ESTOQUE 1.1.65
-# O estoque físico é movimentado por entradas manuais e saídas automáticas de
-# vendas/manutenções aprovadas. Manutenções não aprovadas mantêm reserva.
-# Somente BOTOES, COOLER 12 MM e FITA LED possuem detalhamento por cor.
+# ESTOQUE 1.1.66
+# Primeira implantação operacional do estoque:
+# - físico nasce da contagem/entradas;
+# - Vendas a Fazer e Manutenções a Fazer são reservas, não saídas físicas;
+# - ao concluir uma operação nova, a reserva vira saída física;
+# - histórico anterior à implantação nunca é baixado retroativamente;
+# - todo item pode ter estoque mínimo; BOTÕES, COOLER 12 MM e FITA LED/LED
+#   controlam mínimo e contagem também por cor.
 # -----------------------------------------------------------------------------
 ESTOQUE_ITENS_COR = {"BOTOES", "BOTAO", "COOLER 12 MM", "FITA LED", "LED"}
 ESTOQUE_COR_PENDENTE = "SEM COR DEFINIDA"
+ESTOQUE_VENDA_A_FAZER = {"Solicitar gabinete", "Montagem", "Pronto para entrega"}
+ESTOQUE_MANUTENCAO_FINAL = {"Encerrada"}
+ESTOQUE_MANUTENCAO_CANCELADA = {"Cancelada", "Cancelado"}
 
 
 def _texto_sem_acento(valor: str) -> str:
@@ -1340,15 +1359,40 @@ def _sincronizar_saidas_origem(db: Session, origem_tipo: str, origem_id: int, de
             db.delete(mov)
 
 
-def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
-    """Venda consome fisicamente a composição atual. Falta de saldo nunca bloqueia."""
-    if not eq or not eq.id:
-        return
+def _sincronizar_reservas_origem(db: Session, origem_tipo: str, origem_id: int, desejado: dict[tuple[int, str | None, int | None], float], observacao: str = "") -> None:
+    atuais = db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo == origem_tipo,
+        EstoqueReserva.origem_id == int(origem_id),
+    ).all()
+    mapa = {(r.item_id, r.cor or None, r.origem_item_id or None): r for r in atuais}
+    chaves = set()
+    for chave, quantidade in desejado.items():
+        item_id, cor, origem_item_id = chave
+        quantidade = round(max(float(quantidade or 0), 0), 4)
+        if quantidade <= 0:
+            continue
+        chaves.add(chave)
+        reserva = mapa.get(chave)
+        if not reserva:
+            reserva = EstoqueReserva(
+                item_id=item_id, quantidade=quantidade, cor=cor,
+                origem_tipo=origem_tipo, origem_id=int(origem_id), origem_item_id=origem_item_id,
+                observacao=observacao or None,
+            )
+            db.add(reserva)
+        else:
+            reserva.quantidade = quantidade
+            reserva.observacao = observacao or reserva.observacao
+    for chave, reserva in mapa.items():
+        if chave not in chaves:
+            db.delete(reserva)
+
+
+def _desejado_venda_estoque(eq: Equipamento, db: Session) -> dict[tuple[int, str | None, int | None], float]:
     quantidades = _consumo_venda_itens(eq, db)
     desejado: dict[tuple[int, str | None, int | None], float] = {}
     if not quantidades:
-        _sincronizar_saidas_origem(db, "VENDA", eq.id, desejado)
-        return
+        return desejado
     itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(quantidades.keys()))).all()}
     for item_id, qtd in quantidades.items():
         item = itens.get(item_id)
@@ -1356,10 +1400,34 @@ def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
             continue
         for cor, qtd_cor in _distribuir_por_cor(db, "VENDA", eq.id, item, qtd).items():
             desejado[(item_id, cor, None)] = qtd_cor
-    _sincronizar_saidas_origem(
-        db, "VENDA", eq.id, desejado,
-        observacao=f"Venda equipamento #{eq.id} · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
-    )
+    return desejado
+
+
+def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
+    """Venda a fazer reserva. Somente uma venda nova que tinha reserva vira saída ao ser entregue."""
+    if not eq or not eq.id:
+        return
+    status = (eq.status or "").strip()
+    desejado = _desejado_venda_estoque(eq, db)
+    if status in ESTOQUE_VENDA_A_FAZER:
+        _sincronizar_saidas_origem(db, "VENDA", eq.id, {})
+        _sincronizar_reservas_origem(
+            db, "VENDA", eq.id, desejado,
+            observacao=f"Venda #{eq.id} a fazer · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
+        )
+        return
+
+    reservas_existentes = db.query(EstoqueReserva.id).filter(
+        EstoqueReserva.origem_tipo == "VENDA", EstoqueReserva.origem_id == eq.id
+    ).first() is not None
+    _sincronizar_reservas_origem(db, "VENDA", eq.id, {})
+    if status == "Entregue" and reservas_existentes:
+        _sincronizar_saidas_origem(
+            db, "VENDA", eq.id, desejado,
+            observacao=f"Venda equipamento #{eq.id} entregue · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
+        )
+    elif status != "Entregue":
+        _sincronizar_saidas_origem(db, "VENDA", eq.id, {})
 
 
 def salvar_cores_venda(eq: Equipamento, form: dict, db: Session) -> None:
@@ -1398,61 +1466,51 @@ def _orcamento_aprovado(o: Orcamento | None) -> bool:
     ))
 
 
-def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
-    """Antes da aprovação reserva; depois da aprovação transforma em saída."""
-    if not m or not m.id:
-        return
-    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
-    cancelada = (m.status or "").strip().lower() in {"cancelada", "cancelado"} or (o and (o.status or "").strip().lower() == "cancelado")
-    if not o or cancelada:
-        db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id).delete(synchronize_session=False)
-        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
-        return
-
-    itens_orcamento = [oi for oi in o.itens if oi.item_id and int(oi.quantidade or 0) > 0]
+def _desejado_manutencao_estoque(m: Manutencao, o: Orcamento, db: Session, somente_aprovados: bool) -> dict[tuple[int, str | None, int | None], float]:
+    itens_orcamento = [oi for oi in o.itens if oi.item_id and int(oi.quantidade or 0) > 0 and (not somente_aprovados or oi.aprovado)]
     itens_ids = {oi.item_id for oi in itens_orcamento}
     itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(itens_ids))).all()} if itens_ids else {}
-    aprovado = _orcamento_aprovado(o)
-
-    if aprovado:
-        db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id).delete(synchronize_session=False)
-        desejado: dict[tuple[int, str | None, int | None], float] = {}
-        for oi in itens_orcamento:
-            if not oi.aprovado:
-                continue
-            item = itens.get(oi.item_id)
-            if not item:
-                continue
-            for cor, qtd_cor in _distribuir_por_cor(db, "MANUTENCAO", oi.id, item, oi.quantidade).items():
-                desejado[(oi.item_id, cor, oi.id)] = qtd_cor
-        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, desejado, observacao=f"Manutenção #{m.id} aprovada")
-        return
-
-    # Ainda não aprovado: não existe saída física, apenas reserva de tudo que está no orçamento.
-    _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
-    atuais = db.query(EstoqueReserva).filter(
-        EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id
-    ).all()
-    mapa = {(r.item_id, r.cor or None, r.origem_item_id or None): r for r in atuais}
-    desejado_reserva: dict[tuple[int, str | None, int | None], float] = {}
+    desejado: dict[tuple[int, str | None, int | None], float] = {}
     for oi in itens_orcamento:
         item = itens.get(oi.item_id)
         if not item:
             continue
         for cor, qtd_cor in _distribuir_por_cor(db, "MANUTENCAO", oi.id, item, oi.quantidade).items():
-            desejado_reserva[(oi.item_id, cor, oi.id)] = qtd_cor
-    for chave, qtd in desejado_reserva.items():
-        r = mapa.get(chave)
-        if not r:
-            db.add(EstoqueReserva(
-                item_id=chave[0], quantidade=qtd, cor=chave[1], origem_tipo="MANUTENCAO",
-                origem_id=m.id, origem_item_id=chave[2], observacao=f"Manutenção #{m.id} aguardando aprovação",
-            ))
-        else:
-            r.quantidade = qtd
-    for chave, r in mapa.items():
-        if chave not in desejado_reserva:
-            db.delete(r)
+            desejado[(oi.item_id, cor, oi.id)] = qtd_cor
+    return desejado
+
+
+def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
+    """Manutenção a fazer reserva. Ao encerrar uma OS nova, a reserva vira saída física."""
+    if not m or not m.id:
+        return
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    status = (m.status or "").strip()
+    cancelada = status in ESTOQUE_MANUTENCAO_CANCELADA or (o and (o.status or "").strip() == "Cancelado")
+    if not o or cancelada:
+        _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
+        return
+
+    aprovado = _orcamento_aprovado(o)
+    desejado = _desejado_manutencao_estoque(m, o, db, somente_aprovados=aprovado)
+    finalizada = status in ESTOQUE_MANUTENCAO_FINAL or bool(m.entregue_em)
+    if not finalizada:
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
+        _sincronizar_reservas_origem(
+            db, "MANUTENCAO", m.id, desejado,
+            observacao=f"Manutenção #{m.id} a fazer",
+        )
+        return
+
+    reservas_existentes = db.query(EstoqueReserva.id).filter(
+        EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id
+    ).first() is not None
+    _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
+    if reservas_existentes and aprovado:
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, desejado, observacao=f"Manutenção #{m.id} encerrada")
+    else:
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
 
 
 def salvar_cores_manutencao(orcamento_item: OrcamentoItem, form: dict, db: Session) -> None:
@@ -1476,38 +1534,163 @@ def salvar_cores_manutencao(orcamento_item: OrcamentoItem, form: dict, db: Sessi
             db.add(EstoqueCorUso(origem_tipo="MANUTENCAO", origem_id=orcamento_item.id, item_id=orcamento_item.item_id, cor=cor, quantidade=qtd))
 
 
+def _mapa_minimos_estoque(db: Session) -> dict[tuple[int, str], float]:
+    return {(m.item_id, normalizar_cor(m.cor)): max(float(m.quantidade or 0), 0) for m in db.query(EstoqueMinimo).all()}
+
+
+def _salvar_minimo_estoque(db: Session, item_id: int, cor: str | None, quantidade: float) -> None:
+    cor_n = normalizar_cor(cor)
+    registro = db.query(EstoqueMinimo).filter(
+        EstoqueMinimo.item_id == int(item_id), EstoqueMinimo.cor == cor_n
+    ).first()
+    if not registro:
+        registro = EstoqueMinimo(item_id=int(item_id), cor=cor_n, quantidade=0)
+        db.add(registro)
+    registro.quantidade = max(float(quantidade or 0), 0)
+
+
 def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
     itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
     movimentos = db.query(EstoqueMovimento).all()
     reservas = db.query(EstoqueReserva).all()
-    por_item: dict[int, dict] = {i.id: {"item": i, "fisico": 0.0, "reservado": 0.0, "disponivel": 0.0} for i in itens}
+    minimos = _mapa_minimos_estoque(db)
+    por_item: dict[int, dict] = {
+        i.id: {"item": i, "fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0, "reservado": 0.0, "disponivel": 0.0}
+        for i in itens
+    }
     cores: dict[int, dict[str, dict]] = {}
     for mov in movimentos:
         sinal = 1 if (mov.tipo or "").upper() == "ENTRADA" else -1
         if mov.item_id in por_item:
             por_item[mov.item_id]["fisico"] += sinal * float(mov.quantidade or 0)
         if mov.cor:
-            c = cores.setdefault(mov.item_id, {}).setdefault(mov.cor, {"fisico": 0.0, "reservado": 0.0})
+            c = cores.setdefault(mov.item_id, {}).setdefault(mov.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
             c["fisico"] += sinal * float(mov.quantidade or 0)
     for res in reservas:
+        campo = "vendas_a_fazer" if (res.origem_tipo or "").upper() == "VENDA" else "manutencoes_a_fazer"
         if res.item_id in por_item:
-            por_item[res.item_id]["reservado"] += float(res.quantidade or 0)
+            por_item[res.item_id][campo] += float(res.quantidade or 0)
         if res.cor:
-            c = cores.setdefault(res.item_id, {}).setdefault(res.cor, {"fisico": 0.0, "reservado": 0.0})
-            c["reservado"] += float(res.quantidade or 0)
+            c = cores.setdefault(res.item_id, {}).setdefault(res.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
+            c[campo] += float(res.quantidade or 0)
+
+    # Cores cadastradas apenas no mínimo também precisam aparecer mesmo sem movimento.
+    for (item_id, cor), qtd in minimos.items():
+        if cor:
+            cores.setdefault(item_id, {}).setdefault(cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
+
     linhas = []
-    for dados in por_item.values():
-        dados["fisico"] = round(dados["fisico"], 4)
-        dados["reservado"] = round(dados["reservado"], 4)
-        dados["disponivel"] = round(dados["fisico"] - dados["reservado"], 4)
-        linhas.append(dados)
     cores_saida: dict[int, list[dict]] = {}
-    for item_id, mapa in cores.items():
-        cores_saida[item_id] = []
-        for cor, d in sorted(mapa.items(), key=lambda x: x[0]):
-            fisico = round(d["fisico"], 4); reservado = round(d["reservado"], 4)
-            cores_saida[item_id].append({"cor": cor, "fisico": fisico, "reservado": reservado, "disponivel": round(fisico-reservado,4)})
+    for item in itens:
+        dados = por_item[item.id]
+        dados["fisico"] = round(dados["fisico"], 4)
+        dados["vendas_a_fazer"] = round(dados["vendas_a_fazer"], 4)
+        dados["manutencoes_a_fazer"] = round(dados["manutencoes_a_fazer"], 4)
+        dados["reservado"] = round(dados["vendas_a_fazer"] + dados["manutencoes_a_fazer"], 4)
+        dados["disponivel"] = round(dados["fisico"] - dados["reservado"], 4)
+
+        linhas_cor = []
+        if item_controla_cor(item):
+            for cor, c in sorted(cores.get(item.id, {}).items(), key=lambda x: x[0]):
+                fisico = round(c["fisico"], 4)
+                vendas = round(c["vendas_a_fazer"], 4)
+                manut = round(c["manutencoes_a_fazer"], 4)
+                disponivel = round(fisico - vendas - manut, 4)
+                minimo = round(float(minimos.get((item.id, cor), 0) or 0), 4)
+                comprar = round(max(minimo - disponivel, 0), 4) if minimo > 0 and cor != ESTOQUE_COR_PENDENTE else 0.0
+                linhas_cor.append({
+                    "cor": cor, "fisico": fisico, "vendas_a_fazer": vendas, "manutencoes_a_fazer": manut,
+                    "reservado": round(vendas + manut, 4), "disponivel": disponivel, "minimo": minimo,
+                    "comprar": comprar, "custo_compra": round(comprar * float(item.preco_custo or 0), 2),
+                })
+            minimo_total = round(sum(c["minimo"] for c in linhas_cor if c["cor"] != ESTOQUE_COR_PENDENTE), 4)
+            comprar_total = round(sum(c["comprar"] for c in linhas_cor), 4)
+        else:
+            minimo_total = round(float(minimos.get((item.id, ""), 0) or 0), 4)
+            comprar_total = round(max(minimo_total - dados["disponivel"], 0), 4) if minimo_total > 0 else 0.0
+        dados["minimo"] = minimo_total
+        dados["comprar"] = comprar_total
+        dados["custo_compra"] = round(comprar_total * float(item.preco_custo or 0), 2)
+        linhas.append(dados)
+        cores_saida[item.id] = linhas_cor
     return linhas, cores_saida
+
+
+def _linhas_contagem_estoque(db: Session) -> list[dict]:
+    linhas, cores = estoque_saldos(db)
+    saida = []
+    for l in linhas:
+        item = l["item"]
+        if item_controla_cor(item):
+            conhecidas = [c for c in cores.get(item.id, []) if c["cor"] != ESTOQUE_COR_PENDENTE]
+            if conhecidas:
+                for c in conhecidas:
+                    saida.append({"item": item, "cor": c["cor"], "fisico": c["fisico"], "minimo": c["minimo"], "controla_cor": True})
+            else:
+                saida.append({"item": item, "cor": "", "fisico": 0.0, "minimo": 0.0, "controla_cor": True})
+        else:
+            saida.append({"item": item, "cor": "", "fisico": l["fisico"], "minimo": l["minimo"], "controla_cor": False})
+    return saida
+
+
+def _estoque_fisico_chave(db: Session, item_id: int, cor: str | None = None) -> float:
+    cor_n = normalizar_cor(cor)
+    q = db.query(EstoqueMovimento).filter(EstoqueMovimento.item_id == int(item_id))
+    if cor_n:
+        q = q.filter(EstoqueMovimento.cor == cor_n)
+    else:
+        q = q.filter(or_(EstoqueMovimento.cor.is_(None), EstoqueMovimento.cor == ""))
+    total = 0.0
+    for mov in q.all():
+        total += (1 if (mov.tipo or "").upper() == "ENTRADA" else -1) * float(mov.quantidade or 0)
+    return round(total, 4)
+
+
+def relatorio_compras_estoque(db: Session) -> list[dict]:
+    linhas, cores = estoque_saldos(db)
+    compras = []
+    for l in linhas:
+        item = l["item"]
+        if item_controla_cor(item):
+            for c in cores.get(item.id, []):
+                if c["cor"] == ESTOQUE_COR_PENDENTE or c["comprar"] <= 0:
+                    continue
+                compras.append({"item": item, "cor": c["cor"], "disponivel": c["disponivel"], "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": c["custo_compra"]})
+        elif l["comprar"] > 0:
+            compras.append({"item": item, "cor": "", "disponivel": l["disponivel"], "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": l["custo_compra"]})
+    return sorted(compras, key=lambda x: ((x["item"].nome or "").upper(), x["cor"]))
+
+
+def _migrar_estoque_primeira_implantacao_1166(db: Session) -> int:
+    """Zera baixas automáticas anteriores e inicia somente com operações A FAZER reservadas."""
+    chave = "estoque_primeira_implantacao_1_1_66"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0
+    removidos = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.tipo == "SAIDA", EstoqueMovimento.origem_tipo.in_(("VENDA", "MANUTENCAO"))
+    ).delete(synchronize_session=False)
+    db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo.in_(("VENDA", "MANUTENCAO"))).delete(synchronize_session=False)
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+
+    vendas_abertas = db.query(Equipamento).filter(
+        Equipamento.produto_venda_id.isnot(None), Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))
+    ).all()
+    for venda in vendas_abertas:
+        sincronizar_estoque_venda(venda, db)
+    manutencoes_abertas_ids = [mid for (mid,) in db.query(Manutencao.id).filter(
+        ~Manutencao.status.in_(("Encerrada", "Cancelada", "Cancelado"))
+    ).all()]
+    for manutencao_id in manutencoes_abertas_ids:
+        manutencao = carregar_manutencao(db, manutencao_id)
+        if manutencao:
+            sincronizar_estoque_manutencao(manutencao, db)
+    db.commit()
+    return int(removidos or 0)
 
 
 def contexto_cores_venda(db: Session, equipamento: Equipamento | None) -> list[dict]:
@@ -2643,21 +2826,12 @@ def iniciar_banco():
         for equipamento_existente in db.query(Equipamento).all():
             equipamento_existente.fabricante = equipamento_existente.fabricante or "KARAOKERJ"
 
-        # 1.1.65: ativa o estoque somente para operações ainda em andamento.
-        # Vendas já entregues antes da implantação não são baixadas retroativamente.
-        vendas_abertas_estoque = db.query(Equipamento).filter(
-            Equipamento.produto_venda_id.isnot(None),
-            Equipamento.status.in_(("Solicitar gabinete", "Montagem", "Pronto para entrega")),
-        ).all()
-        for venda_aberta in vendas_abertas_estoque:
-            sincronizar_estoque_venda(venda_aberta, db)
-        manutencoes_abertas_ids = [mid for (mid,) in db.query(Manutencao.id).filter(
-            ~Manutencao.status.in_(("Encerrada", "Cancelada", "Cancelado"))
-        ).all()]
-        for manutencao_id in manutencoes_abertas_ids:
-            manutencao_aberta = carregar_manutencao(db, manutencao_id)
-            if manutencao_aberta:
-                sincronizar_estoque_manutencao(manutencao_aberta, db)
+        # 1.1.66: primeira implantação oficial do estoque.
+        # Remove baixas automáticas de testes/versões anteriores e passa a considerar
+        # somente Vendas a Fazer e Manutenções a Fazer como reservas operacionais.
+        removidos_estoque_1166 = _migrar_estoque_primeira_implantacao_1166(db)
+        if removidos_estoque_1166:
+            print(f"[ESTOQUE] 1.1.66: {removidos_estoque_1166} baixa(s) automática(s) anterior(es) removida(s); operações abertas reservadas.")
         db.commit()
     finally:
         db.close()
@@ -10298,16 +10472,124 @@ def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado),
     itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
     movimentos = db.query(EstoqueMovimento).options(
         selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario)
-    ).order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).limit(120).all()
+    ).order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).limit(80).all()
     reservas = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item)).order_by(
         EstoqueReserva.criado_em.desc(), EstoqueReserva.id.desc()
     ).limit(120).all()
     itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
+    compras = relatorio_compras_estoque(db)
     return templates.TemplateResponse("organiza/estoque.html", {
         "request": request, "usuario": usuario, "linhas": linhas, "cores_estoque": cores,
         "itens": itens, "itens_cor_ids": itens_cor_ids, "movimentos": movimentos, "reservas": reservas,
         "q": q, "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
         "cor_pendente": ESTOQUE_COR_PENDENTE,
+        "total_compras": round(sum(float(x["custo_total"] or 0) for x in compras), 2),
+        "qtd_compras": len(compras),
+    })
+
+
+@app.get("/organiza/estoque/contagem", response_class=HTMLResponse)
+def estoque_contagem(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    return templates.TemplateResponse("organiza/estoque_contagem.html", {
+        "request": request, "usuario": usuario, "linhas": _linhas_contagem_estoque(db),
+        "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
+    })
+
+
+@app.post("/organiza/estoque/contagem")
+async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = await request.form()
+    item_ids = form.getlist("item_id")
+    cores = form.getlist("cor")
+    contagens = form.getlist("contagem")
+    minimos = form.getlist("minimo")
+    if not item_ids:
+        return RedirectResponse("/organiza/estoque/contagem?erro=" + quote_plus("Nenhuma linha de contagem recebida."), status_code=303)
+
+    desejados: dict[tuple[int, str], dict] = {}
+    erros = []
+    for idx, bruto_id in enumerate(item_ids):
+        try:
+            item_id = int(bruto_id or 0)
+        except (TypeError, ValueError):
+            continue
+        item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+        if not item:
+            continue
+        cor = normalizar_cor(cores[idx] if idx < len(cores) else "") if item_controla_cor(item) else ""
+        contagem_txt = str(contagens[idx] if idx < len(contagens) else "").strip()
+        minimo_txt = str(minimos[idx] if idx < len(minimos) else "").strip()
+        if item_controla_cor(item) and (contagem_txt or minimo_txt) and not cor:
+            erros.append(f"Informe a cor de {item.nome}.")
+            continue
+        chave = (item.id, cor)
+        registro = desejados.setdefault(chave, {"item": item, "cor": cor, "contagem": None, "minimo": None})
+        if contagem_txt != "":
+            try:
+                registro["contagem"] = max(float(contagem_txt.replace(",", ".")), 0)
+            except ValueError:
+                erros.append(f"Contagem inválida para {item.nome} {cor}.".strip())
+        if minimo_txt != "":
+            try:
+                registro["minimo"] = max(float(minimo_txt.replace(",", ".")), 0)
+            except ValueError:
+                erros.append(f"Estoque mínimo inválido para {item.nome} {cor}.".strip())
+
+    if erros:
+        db.rollback()
+        return RedirectResponse("/organiza/estoque/contagem?erro=" + quote_plus(erros[0]), status_code=303)
+
+    ajustes = 0
+    agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    for registro in desejados.values():
+        item = registro["item"]
+        cor = registro["cor"]
+        if registro["minimo"] is not None:
+            _salvar_minimo_estoque(db, item.id, cor, registro["minimo"])
+        if registro["contagem"] is None:
+            continue
+        atual = _estoque_fisico_chave(db, item.id, cor)
+        diferenca = round(float(registro["contagem"]) - atual, 4)
+        if abs(diferenca) <= 0.0001:
+            continue
+        db.add(EstoqueMovimento(
+            item_id=item.id,
+            tipo="ENTRADA" if diferenca > 0 else "SAIDA",
+            quantidade=abs(diferenca),
+            cor=cor or None,
+            origem_tipo="CONTAGEM",
+            custo_unitario=float(item.preco_custo or 0),
+            observacao=f"Ajuste por contagem física em {agora}",
+            usuario_id=usuario.id,
+        ))
+        ajustes += 1
+    db.commit()
+    msg = f"Contagem aplicada. {ajustes} ajuste(s) de estoque realizado(s)."
+    return RedirectResponse("/organiza/estoque/contagem?ok=" + quote_plus(msg), status_code=303)
+
+
+@app.get("/organiza/estoque/contagem.csv")
+def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
+    writer.writerow(["ITEM", "COR", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
+    for linha in _linhas_contagem_estoque(db):
+        writer.writerow([
+            linha["item"].nome, linha["cor"], f'{float(linha["fisico"]):g}', "", "", f'{float(linha["minimo"]):g}', ""
+        ])
+    conteudo = "\ufeff" + buffer.getvalue()
+    return Response(
+        content=conteudo.encode("utf-8"), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="contagem_estoque.csv"'},
+    )
+
+
+@app.get("/organiza/estoque/compras", response_class=HTMLResponse)
+def estoque_relatorio_compras(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    compras = relatorio_compras_estoque(db)
+    return templates.TemplateResponse("organiza/estoque_compras.html", {
+        "request": request, "usuario": usuario, "compras": compras,
+        "total": round(sum(float(x["custo_total"] or 0) for x in compras), 2),
     })
 
 
@@ -11564,6 +11846,9 @@ def manutencao_encerrar(
     # O equipamento volta imediatamente ao estoque operacional.
     if m.equipamento:
         m.equipamento.status = "Ativo"
+
+    # A reserva da Manutenção a Fazer vira saída física somente agora, no encerramento.
+    sincronizar_estoque_manutencao(m, db)
 
     # A agenda é derivada da própria manutenção e deixa de exibir a OS assim
     # que entregue_em/status Encerrada são gravados. Mantemos retirada_em como

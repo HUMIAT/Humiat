@@ -1,93 +1,128 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean estoque-pagina">
-  <div class="titulo-linha">
-    <div><p class="tag">Estoque</p><h1>Estoque de itens</h1><p class="texto-suave">Entradas são manuais. Vendas geram saída; manutenções não aprovadas reservam e, ao aprovar, viram saída.</p></div>
+  <div class="titulo-linha estoque-topo">
+    <div>
+      <p class="tag">Estoque</p>
+      <h1>Estoque de itens</h1>
+      <p class="texto-suave">Físico − Vendas a fazer − Manutenções a fazer = disponível. O histórico anterior à implantação não gera baixa retroativa.</p>
+    </div>
+    <div class="acoes-topo-estoque">
+      <a class="botao" href="/organiza/estoque/contagem">Planilha de contagem</a>
+      <a class="botao secundario" href="/organiza/estoque/compras">Relatório de compras{% if qtd_compras %} ({{ qtd_compras }}){% endif %}</a>
+    </div>
   </div>
+
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   {% if ok %}<div class="alerta sucesso">{{ ok }}</div>{% endif %}
 
-  <section class="cartao secao-form">
-    <div class="secao-form-titulo"><span>1</span><div><h2>Registrar entrada</h2><p>Para BOTÕES, COOLER 12 MM e FITA LED, informe também a cor.</p></div></div>
-    <form method="post" action="/organiza/estoque/entrada" class="form-grid-organizada quatro-colunas" id="form-entrada-estoque">
-      <label class="campo-duplo">Item *
-        <select name="item_id" id="estoque-item" required>
-          <option value="">Selecione...</option>
-          {% for item in itens %}<option value="{{ item.id }}">{{ item.nome }}</option>{% endfor %}
-        </select>
-      </label>
-      <label>Quantidade *<input name="quantidade" required inputmode="decimal" placeholder="1"></label>
-      <label id="campo-cor-estoque" hidden>Cor *<input name="cor" id="estoque-cor" list="cores-conhecidas" placeholder="Ex.: AZUL"></label>
-      <label>Custo unitário (opcional)<input name="custo_unitario" inputmode="decimal" placeholder="0,00"></label>
-      <label class="campo-largo">Observação<input name="observacao" placeholder="Ex.: compra fornecedor X / NF 123"></label>
-      <div class="campo-largo"><button class="botao primario" type="submit">Registrar entrada</button></div>
-    </form>
+  <details class="cartao estoque-entrada-detalhe">
+    <summary><strong>+ Registrar entrada de estoque</strong><span>Compra, reposição ou ajuste manual</span></summary>
+    <div class="entrada-conteudo">
+      <form method="post" action="/organiza/estoque/entrada" class="form-grid-organizada quatro-colunas" id="form-entrada-estoque">
+        <label class="campo-duplo">Item *
+          <select name="item_id" id="estoque-item" required>
+            <option value="">Selecione...</option>
+            {% for item in itens %}<option value="{{ item.id }}">{{ item.nome }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Quantidade *<input name="quantidade" required inputmode="decimal" placeholder="1"></label>
+        <label id="campo-cor-estoque" hidden>Cor *<input name="cor" id="estoque-cor" list="cores-conhecidas" placeholder="Ex.: AZUL"></label>
+        <label>Custo unitário (opcional)<input name="custo_unitario" inputmode="decimal" placeholder="0,00"></label>
+        <label class="campo-largo">Observação<input name="observacao" placeholder="Ex.: compra fornecedor X / NF 123"></label>
+        <div class="campo-largo"><button class="botao primario" type="submit">Registrar entrada</button></div>
+      </form>
+    </div>
     <datalist id="cores-conhecidas">
       {% set ns = namespace(cores=[]) %}
       {% for item_id, linhas_cores in cores_estoque.items() %}{% for c in linhas_cores %}{% if c.cor != cor_pendente and c.cor not in ns.cores %}{% set ns.cores = ns.cores + [c.cor] %}<option value="{{ c.cor }}">{% endif %}{% endfor %}{% endfor %}
     </datalist>
-  </section>
+  </details>
 
-  <section class="cartao secao-form">
-    <div class="estoque-cabecalho">
-      <div><h2>Saldos</h2><p class="texto-suave">Disponível = físico − reservado. Saldo negativo é permitido e fica destacado.</p></div>
-      <form method="get" class="estoque-busca"><input name="q" value="{{ q }}" placeholder="Buscar item"><button class="botao" type="submit">Buscar</button>{% if q %}<a class="botao secundario" href="/organiza/estoque">Limpar</a>{% endif %}</form>
+  <section class="cartao planilha-card">
+    <div class="planilha-barra">
+      <div>
+        <h2>Posição do estoque</h2>
+        <p class="texto-suave">Itens em ordem alfabética. Valores reservados são operações ainda a fazer.</p>
+      </div>
+      <div class="planilha-acoes">
+        {% if total_compras > 0 %}<span class="badge-compra">Comprar: R$ {{ '%.2f'|format(total_compras)|replace('.', ',') }}</span>{% endif %}
+        <form method="get" class="estoque-busca"><input name="q" value="{{ q }}" placeholder="Buscar item"><button class="botao pequeno" type="submit">Buscar</button>{% if q %}<a class="botao pequeno secundario" href="/organiza/estoque">Limpar</a>{% endif %}</form>
+      </div>
     </div>
-    <div class="tabela-responsiva">
-      <table class="tabela estoque-tabela">
-        <thead><tr><th>Item</th><th>Físico</th><th>Reservado</th><th>Disponível</th><th>Detalhamento</th></tr></thead>
-        <tbody>
-        {% for l in linhas %}
+
+    <div class="planilha-scroll">
+      <table class="planilha-estoque">
+        <thead>
           <tr>
-            <td><strong>{{ l.item.nome }}</strong>{% if l.item.codigo %}<small class="estoque-codigo">{{ l.item.codigo }}</small>{% endif %}</td>
-            <td class="numero">{{ '%g'|format(l.fisico) }}</td>
-            <td class="numero">{{ '%g'|format(l.reservado) }}</td>
-            <td class="numero {% if l.disponivel < 0 %}estoque-negativo{% endif %}"><strong>{{ '%g'|format(l.disponivel) }}</strong></td>
-            <td>
-              {% if l.item.id in itens_cor_ids %}
-                <details class="estoque-cores"><summary>Ver cores</summary>
-                  {% if cores_estoque.get(l.item.id) %}
-                  <div class="cores-grid">
-                    {% for c in cores_estoque.get(l.item.id) %}
-                    <div class="cor-card {% if c.disponivel < 0 %}negativo{% endif %}"><strong>{{ c.cor }}</strong><span>Físico {{ '%g'|format(c.fisico) }}</span><span>Reservado {{ '%g'|format(c.reservado) }}</span><span>Disponível {{ '%g'|format(c.disponivel) }}</span></div>
-                    {% endfor %}
-                  </div>
-                  {% else %}<small>Sem movimentação por cor.</small>{% endif %}
-                </details>
-              {% else %}<span class="texto-suave">—</span>{% endif %}
+            <th class="col-item">ITEM</th>
+            <th>FÍSICO</th>
+            <th>VENDAS<br>A FAZER</th>
+            <th>MANUT.<br>A FAZER</th>
+            <th>DISPONÍVEL</th>
+            <th>MÍNIMO</th>
+            <th>COMPRAR</th>
+            <th>CUSTO COMPRA</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in linhas %}
+          <tr class="linha-item {% if l.disponivel < 0 %}linha-negativa{% endif %}">
+            <td class="col-item">
+              <strong>{{ l.item.nome }}</strong>
+              {% if l.item.codigo %}<small>{{ l.item.codigo }}</small>{% endif %}
+              {% if l.item.id in itens_cor_ids %}<button type="button" class="link-cores" onclick="toggleCores('cores-{{ l.item.id }}', this)">cores ▾</button>{% endif %}
+            </td>
+            <td class="num">{{ '%g'|format(l.fisico) }}</td>
+            <td class="num reserva-venda">{{ '%g'|format(l.vendas_a_fazer) }}</td>
+            <td class="num reserva-manut">{{ '%g'|format(l.manutencoes_a_fazer) }}</td>
+            <td class="num forte {% if l.disponivel < 0 %}negativo{% endif %}">{{ '%g'|format(l.disponivel) }}</td>
+            <td class="num">{{ '%g'|format(l.minimo) }}</td>
+            <td class="num {% if l.comprar > 0 %}comprar{% endif %}">{{ '%g'|format(l.comprar) }}</td>
+            <td class="num {% if l.custo_compra > 0 %}comprar{% endif %}">R$ {{ '%.2f'|format(l.custo_compra)|replace('.', ',') }}</td>
+          </tr>
+          {% if l.item.id in itens_cor_ids %}
+          <tr id="cores-{{ l.item.id }}" class="linha-cores" hidden>
+            <td colspan="8">
+              {% if cores_estoque.get(l.item.id) %}
+              <table class="subplanilha">
+                <thead><tr><th>COR</th><th>FÍSICO</th><th>VENDAS A FAZER</th><th>MANUT. A FAZER</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th></tr></thead>
+                <tbody>
+                {% for c in cores_estoque.get(l.item.id) %}
+                  <tr class="{% if c.disponivel < 0 %}linha-negativa{% endif %}"><td><strong>{{ c.cor }}</strong></td><td class="num">{{ '%g'|format(c.fisico) }}</td><td class="num">{{ '%g'|format(c.vendas_a_fazer) }}</td><td class="num">{{ '%g'|format(c.manutencoes_a_fazer) }}</td><td class="num {% if c.disponivel < 0 %}negativo{% endif %}">{{ '%g'|format(c.disponivel) }}</td><td class="num">{{ '%g'|format(c.minimo) }}</td><td class="num {% if c.comprar > 0 %}comprar{% endif %}">{{ '%g'|format(c.comprar) }}</td></tr>
+                {% endfor %}
+                </tbody>
+              </table>
+              {% else %}<span class="texto-suave">As cores aparecerão depois da primeira contagem/entrada.</span>{% endif %}
             </td>
           </tr>
-        {% else %}<tr><td colspan="5" class="texto-suave">Nenhum item encontrado.</td></tr>{% endfor %}
+          {% endif %}
+          {% else %}<tr><td colspan="8" class="vazio">Nenhum item encontrado.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
   </section>
 
-  <section class="cartao secao-form">
-    <div class="secao-form-titulo"><span>2</span><div><h2>Reservas de manutenção</h2><p>Enquanto o orçamento não está aprovado, os itens ficam reservados e continuam no estoque físico.</p></div></div>
-    <div class="tabela-responsiva"><table class="tabela"><thead><tr><th>Item</th><th>Cor</th><th>Qtd.</th><th>Origem</th></tr></thead><tbody>
-      {% for r in reservas %}<tr><td>{{ r.item.nome }}</td><td>{{ r.cor or '—' }}</td><td>{{ '%g'|format(r.quantidade) }}</td><td>Manutenção #{{ r.origem_id }}</td></tr>
-      {% else %}<tr><td colspan="4" class="texto-suave">Nenhuma reserva ativa.</td></tr>{% endfor %}
-    </tbody></table></div>
-  </section>
-
-  <section class="cartao secao-form">
-    <div class="secao-form-titulo"><span>3</span><div><h2>Movimentações recentes</h2><p>Saídas automáticas de vendas/manutenções e entradas lançadas manualmente.</p></div></div>
-    <div class="tabela-responsiva"><table class="tabela"><thead><tr><th>Data</th><th>Tipo</th><th>Item</th><th>Cor</th><th>Qtd.</th><th>Origem</th><th></th></tr></thead><tbody>
-      {% for m in movimentos %}<tr>
-        <td>{{ m.criado_em.strftime('%d/%m/%Y %H:%M') if m.criado_em else '-' }}</td>
-        <td><span class="estoque-tipo {{ (m.tipo or '')|lower }}">{{ m.tipo }}</span></td>
-        <td>{{ m.item.nome }}</td><td>{{ m.cor or '—' }}</td><td>{{ '%g'|format(m.quantidade) }}</td>
-        <td>{% if m.origem_tipo == 'VENDA' %}Venda #{{ m.origem_id }}{% elif m.origem_tipo == 'MANUTENCAO' %}Manutenção #{{ m.origem_id }}{% else %}Entrada manual{% endif %}</td>
-        <td>{% if m.origem_tipo == 'MANUAL' %}<form method="post" action="/organiza/estoque/movimentos/{{ m.id }}/excluir" onsubmit="return confirm('Excluir este lançamento manual?')"><button class="botao pequeno perigo" type="submit">Excluir</button></form>{% endif %}</td>
-      </tr>{% else %}<tr><td colspan="7" class="texto-suave">Nenhuma movimentação.</td></tr>{% endfor %}
-    </tbody></table></div>
-  </section>
+  <details class="cartao historico-estoque">
+    <summary><strong>Movimentações recentes</strong><span>Entradas, contagens e saídas concluídas</span></summary>
+    <div class="planilha-scroll">
+      <table class="planilha-estoque compacta"><thead><tr><th>DATA</th><th>TIPO</th><th>ITEM</th><th>COR</th><th>QTD.</th><th>ORIGEM</th><th></th></tr></thead><tbody>
+        {% for m in movimentos %}<tr>
+          <td>{{ m.criado_em.strftime('%d/%m/%Y %H:%M') if m.criado_em else '-' }}</td>
+          <td>{{ m.tipo }}</td><td>{{ m.item.nome }}</td><td>{{ m.cor or '—' }}</td><td class="num">{{ '%g'|format(m.quantidade) }}</td>
+          <td>{% if m.origem_tipo == 'VENDA' %}Venda #{{ m.origem_id }}{% elif m.origem_tipo == 'MANUTENCAO' %}Manutenção #{{ m.origem_id }}{% elif m.origem_tipo == 'CONTAGEM' %}Contagem física{% else %}Entrada manual{% endif %}</td>
+          <td>{% if m.origem_tipo == 'MANUAL' %}<form method="post" action="/organiza/estoque/movimentos/{{ m.id }}/excluir" onsubmit="return confirm('Excluir este lançamento manual?')"><button class="botao pequeno perigo" type="submit">Excluir</button></form>{% endif %}</td>
+        </tr>{% else %}<tr><td colspan="7" class="vazio">Nenhuma movimentação.</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </details>
 </section>
 <style>
-.estoque-cabecalho{display:flex;align-items:end;justify-content:space-between;gap:16px;flex-wrap:wrap}.estoque-cabecalho h2{margin:0}.estoque-busca{display:flex;gap:8px;flex-wrap:wrap}.estoque-busca input{min-width:220px}.estoque-codigo{display:block;color:#64748b;margin-top:3px}.estoque-tabela .numero{text-align:right;font-variant-numeric:tabular-nums}.estoque-negativo{color:#b42318}.estoque-cores summary{cursor:pointer;color:#2563eb;font-weight:700}.cores-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:7px;margin-top:8px;min-width:320px}.cor-card{border:1px solid #dbe3ee;border-radius:9px;padding:8px;display:grid;gap:2px;background:#f8fafc;font-size:12px}.cor-card.negativo{border-color:#f2b8b5;background:#fff4f3}.cor-card span{color:#64748b}.estoque-tipo{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:800;background:#eef2f7}.estoque-tipo.entrada{background:#e9f8ee;color:#18743c}.estoque-tipo.saida{background:#fff0ef;color:#a42c24}@media(max-width:700px){.estoque-busca,.estoque-busca input{width:100%}.cores-grid{min-width:240px}}
+.estoque-topo{align-items:flex-end}.acoes-topo-estoque{display:flex;gap:8px;flex-wrap:wrap}.estoque-entrada-detalhe,.historico-estoque{padding:0;overflow:hidden}.estoque-entrada-detalhe>summary,.historico-estoque>summary{list-style:none;cursor:pointer;padding:14px 18px;display:flex;gap:10px;align-items:center;justify-content:space-between}.estoque-entrada-detalhe>summary::-webkit-details-marker,.historico-estoque>summary::-webkit-details-marker{display:none}.estoque-entrada-detalhe>summary span,.historico-estoque>summary span{font-size:12px;color:#64748b}.entrada-conteudo{padding:0 18px 18px}.planilha-card{padding:0;overflow:hidden}.planilha-barra{padding:14px 16px;display:flex;align-items:flex-end;justify-content:space-between;gap:14px;border-bottom:1px solid #dbe3ee;flex-wrap:wrap}.planilha-barra h2{margin:0 0 3px}.planilha-acoes{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.estoque-busca{display:flex;gap:6px;align-items:center}.estoque-busca input{min-width:210px}.badge-compra{padding:7px 10px;border-radius:8px;background:#fff3cd;color:#7a4b00;font-weight:800;font-size:12px}.planilha-scroll{overflow:auto;max-width:100%}.planilha-estoque{width:100%;border-collapse:separate;border-spacing:0;min-width:980px;font-size:12px}.planilha-estoque th{position:sticky;top:0;z-index:2;background:#eef3f9;color:#24324a;font-size:11px;letter-spacing:.02em;text-align:right;padding:8px 10px;border-bottom:1px solid #ccd7e5;border-right:1px solid #dde5ef;white-space:nowrap}.planilha-estoque th.col-item{text-align:left;left:0;z-index:3}.planilha-estoque td{padding:7px 10px;border-bottom:1px solid #e2e8f0;border-right:1px solid #eef2f7;background:#fff;white-space:nowrap}.planilha-estoque td.col-item{position:sticky;left:0;z-index:1;min-width:310px;max-width:420px;white-space:normal}.planilha-estoque td.col-item small{display:block;color:#7a889d;margin-top:2px}.planilha-estoque tr:hover td{background:#f8fbff}.planilha-estoque tr:hover td.col-item{background:#f8fbff}.planilha-estoque .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-estoque .forte{font-weight:900}.planilha-estoque .negativo{color:#b42318}.planilha-estoque .comprar{color:#9a5a00;font-weight:900;background:#fffaf0}.linha-negativa td{background:#fff7f6}.link-cores{border:0;background:none;color:#2563eb;padding:0;margin-top:4px;font-weight:700;font-size:11px;cursor:pointer}.linha-cores td{padding:8px 20px;background:#f8fafc!important}.subplanilha{width:100%;border-collapse:collapse;font-size:11px}.subplanilha th{position:static!important;background:#e8eef6!important;padding:6px 8px!important}.subplanilha td{position:static!important;padding:6px 8px!important;background:#fff!important}.compacta{min-width:800px}.compacta th{position:static}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.reserva-venda{color:#0f5fb5}.reserva-manut{color:#7a4ea3}@media(max-width:800px){.acoes-topo-estoque,.planilha-acoes,.estoque-busca{width:100%}.estoque-busca input{flex:1;min-width:0}.planilha-estoque td.col-item{min-width:230px}}
+@media print{.sidebar,.topbar,.acoes-topo-estoque,.estoque-entrada-detalhe,.historico-estoque,.estoque-busca{display:none!important}.planilha-card{box-shadow:none;border:0}.planilha-scroll{overflow:visible}.planilha-estoque{min-width:0;font-size:9px}.planilha-estoque th{position:static}.planilha-estoque td.col-item{position:static}}
 </style>
 <script>
+function toggleCores(id, btn){const row=document.getElementById(id); row.hidden=!row.hidden; btn.textContent=row.hidden?'cores ▾':'cores ▴';}
 (() => {
   const item=document.getElementById('estoque-item'); const campo=document.getElementById('campo-cor-estoque'); const cor=document.getElementById('estoque-cor');
   const comCor=new Set({{ itens_cor_ids|tojson }}.map(String));
