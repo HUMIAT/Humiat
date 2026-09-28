@@ -218,6 +218,20 @@
             <label class="check"><input type="checkbox" name="opcional" {% if i.opcional %}checked{% endif %}> Opcional</label>
             <button class="botao" type="submit">Salvar</button>
           </form>
+          {% set corinfo = estoque_cores_orcamento.get(i.id) if estoque_cores_orcamento else none %}
+          {% if corinfo %}
+          <form class="estoque-cor-manutencao" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/item/{{ i.id }}/cores">
+            <div class="estoque-cor-manutencao-topo"><strong>Cores consumidas / reservadas</strong><small>Precisa {{ '%g'|format(corinfo.quantidade) }} · informado {{ '%g'|format(corinfo.informado) }}</small></div>
+            <div class="estoque-cor-manutencao-grid">
+              {% for uso in corinfo.usos %}
+              <div><input name="cor_{{ loop.index }}" value="{{ uso.cor }}" list="cores-manut-{{ i.id }}" placeholder="COR"><input name="qtd_{{ loop.index }}" value="{{ uso.quantidade }}" inputmode="decimal" placeholder="Qtd."></div>
+              {% endfor %}
+            </div>
+            <datalist id="cores-manut-{{ i.id }}">{% for c in corinfo.cores_saldo %}<option value="{{ c.cor }}">{{ c.disponivel }} disponível{% endfor %}</datalist>
+            {% if corinfo.cores_saldo %}<div class="estoque-cor-disponiveis">{% for c in corinfo.cores_saldo %}<span class="{% if c.disponivel < 0 %}negativo{% endif %}">{{ c.cor }}: {{ '%g'|format(c.disponivel) }}</span>{% endfor %}</div>{% endif %}
+            <button class="botao pequeno" type="submit">Salvar cores</button>
+          </form>
+          {% endif %}
           <form method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/item/{{ i.id }}/excluir" onsubmit="return confirm('Excluir item?')">
             <button class="botao perigo pequeno" type="submit">Excluir</button>
           </form>
@@ -618,4 +632,8 @@ function prepararItemOrcamento(form) {
 }
 </script>
 
+
+<style>
+.estoque-cor-manutencao{margin:10px 0;padding:10px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.estoque-cor-manutencao-topo{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px}.estoque-cor-manutencao-topo small{color:#64748b}.estoque-cor-manutencao-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:7px;margin-bottom:7px}.estoque-cor-manutencao-grid>div{display:grid;grid-template-columns:1fr 64px;gap:5px}.estoque-cor-manutencao-grid input{min-width:0}.estoque-cor-disponiveis{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 8px}.estoque-cor-disponiveis span{font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #dbe3ee;background:#fff}.estoque-cor-disponiveis span.negativo{color:#b42318;border-color:#f2b8b5}@media(max-width:760px){.estoque-cor-manutencao-grid{grid-template-columns:1fr}}
+</style>
 {% endblock %}

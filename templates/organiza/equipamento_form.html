@@ -88,6 +88,28 @@
         <div><small>Margem</small><strong id="resumo-margem">{{ '%.2f'|format(resumo_custo.margem) }}%</strong></div>
       </div>
       {% if resumo_custo.snapshot %}<div class="alerta informacao" style="margin-top:10px">Venda finalizada: o custo está congelado pelo snapshot histórico e não muda com alterações futuras nos Itens.</div>{% endif %}
+
+      {% if estoque_cores_venda %}
+      <div class="estoque-venda-cores">
+        <h3>Consumo por cor</h3>
+        <p class="texto-suave">Somente BOTÕES, COOLER 12 MM e LED/FITA LED usam cor. A soma informada deve corresponder à quantidade da composição. Falta de estoque não bloqueia a venda; o saldo da cor pode ficar negativo.</p>
+        {% for bloco in estoque_cores_venda %}
+        <div class="estoque-cor-bloco">
+          <div class="estoque-cor-titulo"><strong>{{ bloco.item.nome }}</strong><span>Composição: {{ '%g'|format(bloco.quantidade) }} · Informado: {{ '%g'|format(bloco.informado) }}</span></div>
+          <div class="estoque-cor-linhas">
+            {% for uso in bloco.usos %}
+            <div class="estoque-cor-linha">
+              <input name="estoque_cor_{{ bloco.item.id }}_{{ loop.index }}" value="{{ uso.cor }}" list="cores-item-{{ bloco.item.id }}" placeholder="COR">
+              <input name="estoque_qtd_{{ bloco.item.id }}_{{ loop.index }}" value="{{ uso.quantidade }}" inputmode="decimal" placeholder="Qtd.">
+            </div>
+            {% endfor %}
+          </div>
+          <datalist id="cores-item-{{ bloco.item.id }}">{% for c in bloco.cores_saldo %}<option value="{{ c.cor }}">{{ c.disponivel }} disponível{% endfor %}</datalist>
+          {% if bloco.cores_saldo %}<div class="estoque-saldos-cores">{% for c in bloco.cores_saldo %}<span class="{% if c.disponivel < 0 %}negativo{% endif %}">{{ c.cor }}: {{ '%g'|format(c.disponivel) }}</span>{% endfor %}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
     </section>
 
     <section class="cartao secao-form">
@@ -211,6 +233,10 @@
   </section>
   {% endif %}
 </section>
+
+<style>
+.estoque-venda-cores{margin-top:18px;padding-top:16px;border-top:1px solid #e2e8f0}.estoque-venda-cores h3{margin:0 0 4px}.estoque-cor-bloco{margin-top:12px;border:1px solid #dbe3ee;border-radius:12px;padding:12px;background:#f8fafc}.estoque-cor-titulo{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.estoque-cor-titulo span{font-size:12px;color:#64748b}.estoque-cor-linhas{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin-top:10px}.estoque-cor-linha{display:grid;grid-template-columns:minmax(90px,1fr) 72px;gap:6px}.estoque-cor-linha input{min-width:0}.estoque-saldos-cores{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.estoque-saldos-cores span{font-size:11px;background:#fff;border:1px solid #dbe3ee;border-radius:999px;padding:3px 7px}.estoque-saldos-cores span.negativo{color:#b42318;border-color:#f2b8b5;background:#fff4f3}@media(max-width:760px){.estoque-cor-linhas{grid-template-columns:1fr}.estoque-cor-linha{grid-template-columns:1fr 90px}}
+</style>
 <script>
 (function(){const t=document.getElementById('valor_total'),p=document.getElementById('valor_recebido'),f=document.getElementById('valor_restante'); const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0}; const a=()=>f.value=Math.max(n(t.value)-n(p.value),0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});t.addEventListener('input',a);p.addEventListener('input',a);a();})();
 </script>

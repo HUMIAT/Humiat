@@ -1118,6 +1118,56 @@ class PagamentoVenda(Base):
 
 
 
+class EstoqueMovimento(Base):
+    """Movimento físico de estoque. Entrada soma; saída reduz o saldo físico."""
+    __tablename__ = "estoque_movimentos"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    tipo = Column(String(20), nullable=False, index=True)  # ENTRADA | SAIDA
+    quantidade = Column(Float, nullable=False, default=0)
+    cor = Column(String(80), nullable=True, index=True)
+    origem_tipo = Column(String(30), nullable=False, default="MANUAL", index=True)
+    origem_id = Column(Integer, nullable=True, index=True)
+    origem_item_id = Column(Integer, nullable=True, index=True)
+    custo_unitario = Column(Float, nullable=True)
+    observacao = Column(Text, nullable=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    item = relationship("Item")
+    usuario = relationship("Usuario")
+
+
+class EstoqueReserva(Base):
+    """Reserva operacional. Não altera o físico; reduz somente o saldo disponível."""
+    __tablename__ = "estoque_reservas"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    quantidade = Column(Float, nullable=False, default=0)
+    cor = Column(String(80), nullable=True, index=True)
+    origem_tipo = Column(String(30), nullable=False, default="MANUTENCAO", index=True)
+    origem_id = Column(Integer, nullable=False, index=True)
+    origem_item_id = Column(Integer, nullable=True, index=True)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    item = relationship("Item")
+
+
+class EstoqueCorUso(Base):
+    """Distribuição por cor dos itens que variam conforme a arte da máquina."""
+    __tablename__ = "estoque_cor_usos"
+    id = Column(Integer, primary_key=True)
+    origem_tipo = Column(String(30), nullable=False, index=True)  # VENDA | MANUTENCAO
+    origem_id = Column(Integer, nullable=False, index=True)       # Equipamento.id ou OrcamentoItem.id
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    cor = Column(String(80), nullable=False)
+    quantidade = Column(Float, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    item = relationship("Item")
+
+
 class NFSERascunho(Base):
     """Rascunho de NFS-e centralizado no Organiza.
 
@@ -1178,6 +1228,334 @@ class IntegracaoConect(Base):
     # Quando marcado, o lançamento permanece no histórico, mas não entra em envios automáticos.
     ignorado = Column(Integer, nullable=False, default=0)
 
+
+
+# -----------------------------------------------------------------------------
+# ESTOQUE 1.1.65
+# O estoque físico é movimentado por entradas manuais e saídas automáticas de
+# vendas/manutenções aprovadas. Manutenções não aprovadas mantêm reserva.
+# Somente BOTOES, COOLER 12 MM e FITA LED possuem detalhamento por cor.
+# -----------------------------------------------------------------------------
+ESTOQUE_ITENS_COR = {"BOTOES", "BOTAO", "COOLER 12 MM", "FITA LED", "LED"}
+ESTOQUE_COR_PENDENTE = "SEM COR DEFINIDA"
+
+
+def _texto_sem_acento(valor: str) -> str:
+    return unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii").strip().upper()
+
+
+def item_controla_cor(item: Item | None) -> bool:
+    if not item:
+        return False
+    return _texto_sem_acento(item.nome) in ESTOQUE_ITENS_COR
+
+
+def normalizar_cor(valor: str | None) -> str:
+    cor = re.sub(r"\s+", " ", str(valor or "").strip().upper())
+    return cor[:80]
+
+
+def _consumo_venda_itens(eq: Equipamento, db: Session) -> dict[int, float]:
+    """Quantidade atual que a venda consome, somando base + Opcionais."""
+    desejado: dict[int, float] = {}
+    if not eq or not eq.produto_venda_id:
+        return desejado
+    composicao = db.query(VendaModeloComposicao).filter(
+        VendaModeloComposicao.modelo_id == eq.produto_venda_id
+    ).all()
+    for comp in composicao:
+        if comp.item_id and float(comp.quantidade or 0) > 0:
+            desejado[comp.item_id] = desejado.get(comp.item_id, 0.0) + float(comp.quantidade or 0)
+    configs = db.query(VendaOpcionalConfig).filter(
+        VendaOpcionalConfig.ativo == 1,
+        VendaOpcionalConfig.item_id.isnot(None),
+    ).all()
+    for cfg in configs:
+        if str(getattr(eq, cfg.campo, "") or "") == str(cfg.valor or ""):
+            qtd = float(cfg.quantidade or 0)
+            if qtd > 0:
+                desejado[cfg.item_id] = desejado.get(cfg.item_id, 0.0) + qtd
+    return {k: round(v, 4) for k, v in desejado.items() if v > 0}
+
+
+def _usos_cor(db: Session, origem_tipo: str, origem_id: int, item_id: int) -> list[EstoqueCorUso]:
+    return db.query(EstoqueCorUso).filter(
+        EstoqueCorUso.origem_tipo == origem_tipo,
+        EstoqueCorUso.origem_id == int(origem_id),
+        EstoqueCorUso.item_id == int(item_id),
+    ).order_by(EstoqueCorUso.id.asc()).all()
+
+
+def _distribuir_por_cor(db: Session, origem_tipo: str, origem_id: int, item: Item, quantidade: float) -> dict[str | None, float]:
+    quantidade = max(float(quantidade or 0), 0)
+    if quantidade <= 0:
+        return {}
+    if not item_controla_cor(item):
+        return {None: round(quantidade, 4)}
+    restante = quantidade
+    resultado: dict[str | None, float] = {}
+    for uso in _usos_cor(db, origem_tipo, origem_id, item.id):
+        if restante <= 0:
+            break
+        cor = normalizar_cor(uso.cor)
+        qtd = max(float(uso.quantidade or 0), 0)
+        if not cor or qtd <= 0:
+            continue
+        qtd_usada = min(qtd, restante)
+        resultado[cor] = resultado.get(cor, 0.0) + qtd_usada
+        restante -= qtd_usada
+    if restante > 0.0001:
+        resultado[ESTOQUE_COR_PENDENTE] = resultado.get(ESTOQUE_COR_PENDENTE, 0.0) + restante
+    return {k: round(v, 4) for k, v in resultado.items() if v > 0}
+
+
+def _sincronizar_saidas_origem(db: Session, origem_tipo: str, origem_id: int, desejado: dict[tuple[int, str | None, int | None], float], observacao: str = "") -> None:
+    """Mantém uma saída atual por item/cor/origem sem duplicar em novas edições."""
+    atuais = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.tipo == "SAIDA",
+        EstoqueMovimento.origem_tipo == origem_tipo,
+        EstoqueMovimento.origem_id == int(origem_id),
+    ).all()
+    mapa = {(m.item_id, m.cor or None, m.origem_item_id or None): m for m in atuais}
+    chaves = set()
+    for chave, quantidade in desejado.items():
+        item_id, cor, origem_item_id = chave
+        quantidade = round(max(float(quantidade or 0), 0), 4)
+        if quantidade <= 0:
+            continue
+        chaves.add(chave)
+        mov = mapa.get(chave)
+        if not mov:
+            mov = EstoqueMovimento(
+                item_id=item_id, tipo="SAIDA", quantidade=quantidade, cor=cor,
+                origem_tipo=origem_tipo, origem_id=int(origem_id), origem_item_id=origem_item_id,
+                observacao=observacao or None,
+            )
+            db.add(mov)
+        else:
+            mov.quantidade = quantidade
+            mov.observacao = observacao or mov.observacao
+    for chave, mov in mapa.items():
+        if chave not in chaves:
+            db.delete(mov)
+
+
+def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
+    """Venda consome fisicamente a composição atual. Falta de saldo nunca bloqueia."""
+    if not eq or not eq.id:
+        return
+    quantidades = _consumo_venda_itens(eq, db)
+    desejado: dict[tuple[int, str | None, int | None], float] = {}
+    if not quantidades:
+        _sincronizar_saidas_origem(db, "VENDA", eq.id, desejado)
+        return
+    itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(quantidades.keys()))).all()}
+    for item_id, qtd in quantidades.items():
+        item = itens.get(item_id)
+        if not item:
+            continue
+        for cor, qtd_cor in _distribuir_por_cor(db, "VENDA", eq.id, item, qtd).items():
+            desejado[(item_id, cor, None)] = qtd_cor
+    _sincronizar_saidas_origem(
+        db, "VENDA", eq.id, desejado,
+        observacao=f"Venda equipamento #{eq.id} · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
+    )
+
+
+def salvar_cores_venda(eq: Equipamento, form: dict, db: Session) -> None:
+    """Salva distribuição por cor informada na mesma edição de equipamento da venda."""
+    if not eq or not eq.id:
+        return
+    quantidades = _consumo_venda_itens(eq, db)
+    if not quantidades:
+        return
+    itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(quantidades.keys()))).all()}
+    for item_id, item in itens.items():
+        if not item_controla_cor(item):
+            continue
+        prefixo = f"estoque_cor_{item_id}_"
+        if not any(str(k).startswith(prefixo) for k in form.keys()):
+            continue
+        db.query(EstoqueCorUso).filter(
+            EstoqueCorUso.origem_tipo == "VENDA",
+            EstoqueCorUso.origem_id == int(eq.id),
+            EstoqueCorUso.item_id == int(item_id),
+        ).delete(synchronize_session=False)
+        for idx in range(1, 13):
+            cor = normalizar_cor(form.get(f"estoque_cor_{item_id}_{idx}"))
+            try:
+                qtd = float(str(form.get(f"estoque_qtd_{item_id}_{idx}") or "0").replace(",", "."))
+            except (TypeError, ValueError):
+                qtd = 0
+            if cor and qtd > 0:
+                db.add(EstoqueCorUso(origem_tipo="VENDA", origem_id=eq.id, item_id=item_id, cor=cor, quantidade=qtd))
+
+
+def _orcamento_aprovado(o: Orcamento | None) -> bool:
+    return bool(o and (
+        (o.status or "") in ("Aprovado", "Aprovado parcialmente", "Aprovado manualmente")
+        or (o.status or "").startswith("Aprovado:")
+    ))
+
+
+def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
+    """Antes da aprovação reserva; depois da aprovação transforma em saída."""
+    if not m or not m.id:
+        return
+    o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+    cancelada = (m.status or "").strip().lower() in {"cancelada", "cancelado"} or (o and (o.status or "").strip().lower() == "cancelado")
+    if not o or cancelada:
+        db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id).delete(synchronize_session=False)
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
+        return
+
+    itens_orcamento = [oi for oi in o.itens if oi.item_id and int(oi.quantidade or 0) > 0]
+    itens_ids = {oi.item_id for oi in itens_orcamento}
+    itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(itens_ids))).all()} if itens_ids else {}
+    aprovado = _orcamento_aprovado(o)
+
+    if aprovado:
+        db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id).delete(synchronize_session=False)
+        desejado: dict[tuple[int, str | None, int | None], float] = {}
+        for oi in itens_orcamento:
+            if not oi.aprovado:
+                continue
+            item = itens.get(oi.item_id)
+            if not item:
+                continue
+            for cor, qtd_cor in _distribuir_por_cor(db, "MANUTENCAO", oi.id, item, oi.quantidade).items():
+                desejado[(oi.item_id, cor, oi.id)] = qtd_cor
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, desejado, observacao=f"Manutenção #{m.id} aprovada")
+        return
+
+    # Ainda não aprovado: não existe saída física, apenas reserva de tudo que está no orçamento.
+    _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
+    atuais = db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id
+    ).all()
+    mapa = {(r.item_id, r.cor or None, r.origem_item_id or None): r for r in atuais}
+    desejado_reserva: dict[tuple[int, str | None, int | None], float] = {}
+    for oi in itens_orcamento:
+        item = itens.get(oi.item_id)
+        if not item:
+            continue
+        for cor, qtd_cor in _distribuir_por_cor(db, "MANUTENCAO", oi.id, item, oi.quantidade).items():
+            desejado_reserva[(oi.item_id, cor, oi.id)] = qtd_cor
+    for chave, qtd in desejado_reserva.items():
+        r = mapa.get(chave)
+        if not r:
+            db.add(EstoqueReserva(
+                item_id=chave[0], quantidade=qtd, cor=chave[1], origem_tipo="MANUTENCAO",
+                origem_id=m.id, origem_item_id=chave[2], observacao=f"Manutenção #{m.id} aguardando aprovação",
+            ))
+        else:
+            r.quantidade = qtd
+    for chave, r in mapa.items():
+        if chave not in desejado_reserva:
+            db.delete(r)
+
+
+def salvar_cores_manutencao(orcamento_item: OrcamentoItem, form: dict, db: Session) -> None:
+    if not orcamento_item or not orcamento_item.id or not orcamento_item.item_id:
+        return
+    item = db.query(Item).filter(Item.id == orcamento_item.item_id).first()
+    if not item_controla_cor(item):
+        return
+    db.query(EstoqueCorUso).filter(
+        EstoqueCorUso.origem_tipo == "MANUTENCAO",
+        EstoqueCorUso.origem_id == int(orcamento_item.id),
+        EstoqueCorUso.item_id == int(orcamento_item.item_id),
+    ).delete(synchronize_session=False)
+    for idx in range(1, 13):
+        cor = normalizar_cor(form.get(f"cor_{idx}"))
+        try:
+            qtd = float(str(form.get(f"qtd_{idx}") or "0").replace(",", "."))
+        except (TypeError, ValueError):
+            qtd = 0
+        if cor and qtd > 0:
+            db.add(EstoqueCorUso(origem_tipo="MANUTENCAO", origem_id=orcamento_item.id, item_id=orcamento_item.item_id, cor=cor, quantidade=qtd))
+
+
+def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+    movimentos = db.query(EstoqueMovimento).all()
+    reservas = db.query(EstoqueReserva).all()
+    por_item: dict[int, dict] = {i.id: {"item": i, "fisico": 0.0, "reservado": 0.0, "disponivel": 0.0} for i in itens}
+    cores: dict[int, dict[str, dict]] = {}
+    for mov in movimentos:
+        sinal = 1 if (mov.tipo or "").upper() == "ENTRADA" else -1
+        if mov.item_id in por_item:
+            por_item[mov.item_id]["fisico"] += sinal * float(mov.quantidade or 0)
+        if mov.cor:
+            c = cores.setdefault(mov.item_id, {}).setdefault(mov.cor, {"fisico": 0.0, "reservado": 0.0})
+            c["fisico"] += sinal * float(mov.quantidade or 0)
+    for res in reservas:
+        if res.item_id in por_item:
+            por_item[res.item_id]["reservado"] += float(res.quantidade or 0)
+        if res.cor:
+            c = cores.setdefault(res.item_id, {}).setdefault(res.cor, {"fisico": 0.0, "reservado": 0.0})
+            c["reservado"] += float(res.quantidade or 0)
+    linhas = []
+    for dados in por_item.values():
+        dados["fisico"] = round(dados["fisico"], 4)
+        dados["reservado"] = round(dados["reservado"], 4)
+        dados["disponivel"] = round(dados["fisico"] - dados["reservado"], 4)
+        linhas.append(dados)
+    cores_saida: dict[int, list[dict]] = {}
+    for item_id, mapa in cores.items():
+        cores_saida[item_id] = []
+        for cor, d in sorted(mapa.items(), key=lambda x: x[0]):
+            fisico = round(d["fisico"], 4); reservado = round(d["reservado"], 4)
+            cores_saida[item_id].append({"cor": cor, "fisico": fisico, "reservado": reservado, "disponivel": round(fisico-reservado,4)})
+    return linhas, cores_saida
+
+
+def contexto_cores_venda(db: Session, equipamento: Equipamento | None) -> list[dict]:
+    if not equipamento or not equipamento.id:
+        return []
+    quantidades = _consumo_venda_itens(equipamento, db)
+    if not quantidades:
+        return []
+    _, cores_saldo = estoque_saldos(db)
+    itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(quantidades.keys()))).all()}
+    saida = []
+    for item_id, qtd in quantidades.items():
+        item = itens.get(item_id)
+        if not item_controla_cor(item):
+            continue
+        usos = _usos_cor(db, "VENDA", equipamento.id, item_id)
+        linhas = [{"cor": u.cor, "quantidade": float(u.quantidade or 0)} for u in usos]
+        while len(linhas) < 6:
+            linhas.append({"cor": "", "quantidade": ""})
+        saida.append({
+            "item": item, "quantidade": qtd, "usos": linhas[:12],
+            "cores_saldo": [c for c in cores_saldo.get(item_id, []) if c["cor"] != ESTOQUE_COR_PENDENTE],
+            "informado": round(sum(float(u.quantidade or 0) for u in usos), 4),
+        })
+    return saida
+
+
+def contexto_cores_manutencao(db: Session, orcamento: Orcamento | None) -> dict[int, dict]:
+    if not orcamento:
+        return {}
+    itens_ids = {oi.item_id for oi in orcamento.itens if oi.item_id}
+    itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(list(itens_ids))).all()} if itens_ids else {}
+    _, cores_saldo = estoque_saldos(db)
+    saida = {}
+    for oi in orcamento.itens:
+        item = itens.get(oi.item_id)
+        if not item_controla_cor(item):
+            continue
+        usos = _usos_cor(db, "MANUTENCAO", oi.id, item.id)
+        linhas = [{"cor": u.cor, "quantidade": float(u.quantidade or 0)} for u in usos]
+        while len(linhas) < 6:
+            linhas.append({"cor": "", "quantidade": ""})
+        saida[oi.id] = {
+            "item": item, "quantidade": float(oi.quantidade or 0), "usos": linhas[:12],
+            "cores_saldo": [c for c in cores_saldo.get(item.id, []) if c["cor"] != ESTOQUE_COR_PENDENTE],
+            "informado": round(sum(float(u.quantidade or 0) for u in usos), 4),
+        }
+    return saida
 
 def limpar_telefone(valor: str) -> str:
     return re.sub(r"\D", "", valor or "")
@@ -1911,6 +2289,7 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
         "tipos_modelos": tipos_modelos, "nomes_modelos": nomes_modelos, "custos_opcionais": custos_opcionais,
         "opcoes_por_campo": opcoes_por_campo, "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
         "cupons_venda": sorted(cupons, key=lambda c: (c.codigo or "")), "cupons_dados": cupons_dados,
+        "estoque_cores_venda": contexto_cores_venda(db, equipamento),
     }
 
 
@@ -2263,6 +2642,22 @@ def iniciar_banco():
         # Apenas completa fabricante e identificações vazias, preservando todo o histórico.
         for equipamento_existente in db.query(Equipamento).all():
             equipamento_existente.fabricante = equipamento_existente.fabricante or "KARAOKERJ"
+
+        # 1.1.65: ativa o estoque somente para operações ainda em andamento.
+        # Vendas já entregues antes da implantação não são baixadas retroativamente.
+        vendas_abertas_estoque = db.query(Equipamento).filter(
+            Equipamento.produto_venda_id.isnot(None),
+            Equipamento.status.in_(("Solicitar gabinete", "Montagem", "Pronto para entrega")),
+        ).all()
+        for venda_aberta in vendas_abertas_estoque:
+            sincronizar_estoque_venda(venda_aberta, db)
+        manutencoes_abertas_ids = [mid for (mid,) in db.query(Manutencao.id).filter(
+            ~Manutencao.status.in_(("Encerrada", "Cancelada", "Cancelado"))
+        ).all()]
+        for manutencao_id in manutencoes_abertas_ids:
+            manutencao_aberta = carregar_manutencao(db, manutencao_id)
+            if manutencao_aberta:
+                sincronizar_estoque_manutencao(manutencao_aberta, db)
         db.commit()
     finally:
         db.close()
@@ -6176,6 +6571,8 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
             **contexto_configuracao_venda(db, eq)
         }, status_code=400)
     db.flush()
+    salvar_cores_venda(eq, form, db)
+    sincronizar_estoque_venda(eq, db)
     _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
     return RedirectResponse(retorno, status_code=303)
@@ -9085,6 +9482,7 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     garantir_identificacao_equipamento(db, eq)
     db.add(eq)
     db.flush()
+    sincronizar_estoque_venda(eq, db)
     reordenar_series_cliente(db, cliente.id)
     _sincronizar_pacote_cliente(db, cliente.id)
     db.commit()
@@ -9891,6 +10289,65 @@ async def cupom_venda_editar(cupom_id: int, request: Request, usuario: Usuario =
     return RedirectResponse("/organiza/cupons-venda?salvo=1", status_code=303)
 
 
+@app.get("/organiza/estoque", response_class=HTMLResponse)
+def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    linhas, cores = estoque_saldos(db)
+    q = (request.query_params.get("q") or "").strip().upper()
+    if q:
+        linhas = [l for l in linhas if q in (l["item"].nome or "").upper() or q in (l["item"].codigo or "").upper()]
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+    movimentos = db.query(EstoqueMovimento).options(
+        selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario)
+    ).order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).limit(120).all()
+    reservas = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item)).order_by(
+        EstoqueReserva.criado_em.desc(), EstoqueReserva.id.desc()
+    ).limit(120).all()
+    itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
+    return templates.TemplateResponse("organiza/estoque.html", {
+        "request": request, "usuario": usuario, "linhas": linhas, "cores_estoque": cores,
+        "itens": itens, "itens_cor_ids": itens_cor_ids, "movimentos": movimentos, "reservas": reservas,
+        "q": q, "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
+        "cor_pendente": ESTOQUE_COR_PENDENTE,
+    })
+
+
+@app.post("/organiza/estoque/entrada")
+async def estoque_entrada(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    try:
+        item_id = int(form.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+    try:
+        quantidade = float(str(form.get("quantidade") or "0").replace(",", "."))
+    except (TypeError, ValueError):
+        quantidade = 0
+    if not item or quantidade <= 0:
+        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Informe o item e uma quantidade válida."), status_code=303)
+    cor = normalizar_cor(form.get("cor")) if item_controla_cor(item) else ""
+    if item_controla_cor(item) and not cor:
+        return RedirectResponse("/organiza/estoque?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
+    custo = moeda_num(form.get("custo_unitario")) if (form.get("custo_unitario") or "").strip() else None
+    obs = (form.get("observacao") or "").strip() or None
+    db.add(EstoqueMovimento(
+        item_id=item.id, tipo="ENTRADA", quantidade=quantidade, cor=cor or None,
+        origem_tipo="MANUAL", custo_unitario=custo, observacao=obs, usuario_id=usuario.id,
+    ))
+    db.commit()
+    return RedirectResponse("/organiza/estoque?ok=" + quote_plus(f"Entrada registrada: {item.nome} × {quantidade:g}."), status_code=303)
+
+
+@app.post("/organiza/estoque/movimentos/{movimento_id}/excluir")
+def estoque_movimento_excluir(movimento_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
+    if not mov or mov.origem_tipo != "MANUAL":
+        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Somente lançamentos manuais podem ser excluídos."), status_code=303)
+    db.delete(mov)
+    db.commit()
+    return RedirectResponse("/organiza/estoque?ok=" + quote_plus("Lançamento manual excluído."), status_code=303)
+
+
 @app.get("/organiza/itens", response_class=HTMLResponse)
 def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     q = db.query(Item)
@@ -10081,7 +10538,7 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
         + "\n\nRetiradas de segunda a sexta-feira, somente das 14:00 às 17:00."
         + "\n\nKaraokê RJ"
     ) if orcamento and prontas_cliente else ""
-    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada})
+    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada, "estoque_cores_orcamento": contexto_cores_manutencao(db, orcamento)})
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/encerrar-pendente")
@@ -10122,6 +10579,7 @@ async def manutencao_encerrar_pendente(
         m.status = "Cancelada"
     m.entrega_prevista_em = None
     m.retirada_em = None
+    sincronizar_estoque_manutencao(m, db)
     db.commit()
 
     destino = (form.get("destino") or "").strip()
@@ -10255,6 +10713,8 @@ async def orcamento_adicionar_item(manutencao_id: int, request: Request, usuario
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro=Use o campo Valor obrigatório da manutenção", status_code=303)
     if descricao:
         db.add(OrcamentoItem(orcamento_id=o.id, item_id=item.id if item else None, descricao=descricao, quantidade=max(int(form.get("quantidade") or 1),1), preco_custo=item.preco_custo if item else moeda_num(form.get("preco_custo")), preco_venda=moeda_num(form.get("preco_venda")) or (item.preco_venda if item else 0), opcional=1 if form.get("opcional") else 0, aprovado=0 if form.get("opcional") else 1))
+        db.flush()
+        sincronizar_estoque_manutencao(m, db)
         db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
@@ -10268,9 +10728,37 @@ def orcamento_excluir_item(manutencao_id: int, orcamento_item_id: int, usuario: 
     item = db.query(OrcamentoItem).filter(OrcamentoItem.id == orcamento_item_id, OrcamentoItem.orcamento_id.in_(orcamento_ids)).first()
     if item:
         db.delete(item)
+        db.flush()
+        sincronizar_estoque_manutencao(m, db)
         db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/orcamento/item/{orcamento_item_id}/cores")
+async def orcamento_item_cores_salvar(
+    manutencao_id: int,
+    orcamento_item_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    ids_orcamentos = [o.id for o in m.orcamentos]
+    oi = db.query(OrcamentoItem).filter(
+        OrcamentoItem.id == orcamento_item_id,
+        OrcamentoItem.orcamento_id.in_(ids_orcamentos),
+    ).first()
+    if not oi:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    salvar_cores_manutencao(oi, form, db)
+    db.flush()
+    sincronizar_estoque_manutencao(m, db)
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-2", status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/etapa-2/salvar")
@@ -10442,6 +10930,7 @@ async def aprovar_manual(
 
     origem = "correção administrativa" if o.aprovado_em else "aprovação manual"
     registrar_aprovacao_orcamento(o, modalidade, origem)
+    sincronizar_estoque_manutencao(m, db)
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-3", status_code=303)
 
@@ -11008,6 +11497,10 @@ async def orcamento_item_editar(manutencao_id: int, orcamento_item_id: int, requ
     item.preco_venda = moeda_num(form.get("preco_venda"))
     item.opcional = 1 if form.get("opcional") else 0
     if not item.opcional: item.aprovado = 1
+    m = carregar_manutencao(db, manutencao_id)
+    db.flush()
+    if m:
+        sincronizar_estoque_manutencao(m, db)
     db.commit(); return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pagamento/{pagamento_id}/editar")
@@ -11981,6 +12474,7 @@ async def operacao_aprovacao_manual(
                 "todos" if acao == "todos" else "obrigatorios",
                 f"manual por {usuario.nome}",
             )
+        sincronizar_estoque_manutencao(manutencao, db)
 
     db.commit()
 
@@ -13433,6 +13927,7 @@ async def orcamento_responder(token: str, request: Request, db: Session = Depend
     else:
         modalidade = "todos" if acao == "aprovar" else "obrigatorios"
         registrar_aprovacao_orcamento(o, modalidade, "cliente")
+    sincronizar_estoque_manutencao(o.manutencao, db)
     db.commit()
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         if acao == "cancelar":

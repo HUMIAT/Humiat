@@ -39,6 +39,7 @@
         <a class="{% if request.url.path.startswith('/organiza/central') %}ativo{% endif %}" href="/organiza/central"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg></span> Central Operacional</a>
         <a class="{% if request.url.path.startswith('/organiza/manutencoes') %}ativo{% endif %}" href="/organiza/manutencoes"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5 5L3 18l3 3 6.7-6.7a4 4 0 0 0 5-5l-2.5 2.5-3-3z"/></svg></span> Manutenções</a>
         <a class="{% if request.url.path.startswith('/organiza/vendas') or request.url.path.startswith('/organiza/relatorios/vendas') %}ativo{% endif %}" href="/organiza/vendas"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h12l3 5v15H3V7z"/><path d="M3 7h18M8 11h8M8 15h8"/></svg></span> Vendas</a>
+        <a class="{% if request.url.path.startswith('/organiza/estoque') %}ativo{% endif %}" href="/organiza/estoque"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></svg></span> Estoque</a>
       </div>
       <div class="menu-grupo">
         <strong>Financeiro e documentos</strong>
