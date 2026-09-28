@@ -140,11 +140,11 @@
       </div>
       {% endif %}
       {% if venda.excesso_calculado > 0.009 %}<div class="alerta erro alerta-venda">Atenção: há {{ venda.excesso_calculado|moeda }} registrado acima do valor da venda.</div>{% endif %}
-      {% if (venda.som and venda.som != 'NA') or (venda.hdmi_tela_2 and venda.hdmi_tela_2 != 'NA') or (venda.teclado_bluetooth and venda.teclado_bluetooth != 'NA') or (venda.microfone and venda.microfone != 'NA') or (venda.sistema_credito and venda.sistema_credito != 'NA') or (venda.catalogo_impresso and venda.catalogo_impresso != 'NA') %}
+      {% if venda.produto_venda_id or (venda.hdmi_tela_2 and venda.hdmi_tela_2 != 'NA') or (venda.teclado_bluetooth and venda.teclado_bluetooth != 'NA') or (venda.microfone and venda.microfone != 'NA') or (venda.sistema_credito and venda.sistema_credito != 'NA') or (venda.catalogo_impresso and venda.catalogo_impresso != 'NA') %}
       <div class="opcionais-venda-wrap venda-card-opcionais">
         <table class="opcionais-venda-tabela">
           <thead><tr>
-            {% if venda.som and venda.som != 'NA' %}<th>Som</th>{% endif %}
+            {% if venda.produto_venda_id %}<th>Catálogo</th>{% endif %}
             {% if venda.hdmi_tela_2 and venda.hdmi_tela_2 != 'NA' %}<th>HDMI Tela 2</th>{% endif %}
             {% if venda.teclado_bluetooth and venda.teclado_bluetooth != 'NA' %}<th>Teclado Bluetooth</th>{% endif %}
             {% if venda.microfone and venda.microfone != 'NA' %}<th>Microfone</th>{% endif %}
@@ -152,7 +152,7 @@
             {% if venda.catalogo_impresso and venda.catalogo_impresso != 'NA' %}<th>Catálogo Impresso</th>{% endif %}
           </tr></thead>
           <tbody><tr>
-            {% if venda.som and venda.som != 'NA' %}<td>{{ venda.som }}</td>{% endif %}
+            {% if venda.produto_venda_id %}<td>{{ venda.catalogo_venda_rotulo }}</td>{% endif %}
             {% if venda.hdmi_tela_2 and venda.hdmi_tela_2 != 'NA' %}<td>{{ venda.hdmi_tela_2 }}</td>{% endif %}
             {% if venda.teclado_bluetooth and venda.teclado_bluetooth != 'NA' %}<td>{{ venda.teclado_bluetooth }}</td>{% endif %}
             {% if venda.microfone and venda.microfone != 'NA' %}<td>{{ venda.microfone }}</td>{% endif %}
@@ -163,11 +163,13 @@
       </div>
       {% endif %}
       <div class="venda-card-dados">
-        <div><small>Compra</small><strong>{{ venda.data_compra|data_br }}</strong></div>
-        <div><small>Entrega</small><strong>{{ venda.previsao_entrega|data_br }}</strong></div>
-        <div><small>Total</small><strong>{{ venda.total_calculado|moeda }}</strong></div>
+        <div><small>Preço da venda</small><strong>{{ venda.total_calculado|moeda }}</strong></div>
+        <div><small>Custo final{% if venda.custo_snapshot_ativo %} · histórico{% endif %}</small><strong>{{ venda.custo_final_calculado|moeda }}</strong></div>
+        <div><small>Lucro</small><strong>{{ venda.lucro_calculado|moeda }}</strong></div>
+        <div><small>Margem</small><strong>{{ '%.2f'|format(venda.margem_calculada) }}%</strong></div>
         <div><small>Recebido</small><strong>{{ venda.recebido_calculado|moeda }}</strong></div>
         <div class="saldo"><small>Falta</small><strong>{{ venda.falta_calculada|moeda }}</strong></div>
+        <div><small>Entrega</small><strong>{{ venda.previsao_entrega|data_br }}</strong></div>
       </div>
     </article>
     {% else %}<div class="cartao vazio">Nenhuma venda encontrada com estes filtros.</div>{% endfor %}

@@ -5,7 +5,7 @@
     <div>
       <p class="tag">Venda</p>
       <h1>Nova venda</h1>
-      <p class="texto-suave">Informe somente o WhatsApp do cliente e o equipamento. O restante do cadastro será preenchido pelo próprio cliente no link público.</p>
+      <p class="texto-suave">Informe o WhatsApp, o equipamento comercial e o catálogo. O restante do cadastro será preenchido no fluxo da venda.</p>
     </div>
     <a class="botao" href="/organiza/vendas">Voltar</a>
   </div>
@@ -13,23 +13,52 @@
 
   <form method="post" class="venda-form" id="vendaForm">
     <section class="cartao secao-form">
-      <div class="secao-form-titulo"><span>1</span><div><h2>Dados iniciais</h2><p>Somente dois campos são necessários para iniciar a venda.</p></div></div>
-      <div class="form-grid-organizada duas-colunas">
+      <div class="secao-form-titulo"><span>1</span><div><h2>Dados iniciais</h2><p>Premium/JBL já faz parte do equipamento. Básico/Plus é a variante de catálogo.</p></div></div>
+      <div class="form-grid-organizada tres-colunas">
         <label>WhatsApp do cliente *
           <input name="telefone" required inputmode="numeric" maxlength="15" placeholder="21999999999" value="{{ dados.get('telefone','') }}">
         </label>
         <label>Equipamento *
-          <select name="tipo" required>
+          <select name="produto_venda_id" id="produto-venda" required>
             <option value="">Selecione</option>
-            {% for tipo in tipos %}<option value="{{ tipo }}" {% if dados.get('tipo') == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}
+            {% for modelo in modelos_venda %}<option value="{{ modelo.id }}" {% if dados.get('produto_venda_id')|string == modelo.id|string %}selected{% endif %}>{{ modelo.nome }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Catálogo *
+          <select name="catalogo_venda" id="catalogo-venda">
+            <option value="BASICO" {% if dados.get('catalogo_venda','BASICO') != 'PLUS' %}selected{% endif %}>Básico</option>
+            <option value="PLUS" {% if dados.get('catalogo_venda') == 'PLUS' %}selected{% endif %}>Plus (+ {{ plus_acrescimo|moeda }})</option>
           </select>
         </label>
       </div>
+      <div class="venda-card-dados" style="margin-top:16px">
+        <div><small>Preço sugerido</small><strong id="preco-sugerido">R$ 0,00</strong></div>
+        <div><small>Custo-base atual</small><strong id="custo-base">R$ 0,00</strong></div>
+        <div><small>Observação</small><strong>Opcionais serão somados ao custo conforme a configuração escolhida.</strong></div>
+      </div>
       <div class="alerta informacao" style="margin-top:16px">
-        Ao salvar, o Organiza criará a venda e preparará o link de cadastro para ser enviado ao WhatsApp do cliente.
+        Ao salvar, o Organiza criará a venda já vinculada ao produto correto e preparará o link de cadastro para o WhatsApp do cliente.
       </div>
     </section>
     <button class="botao primario botao-cheio salvar-venda" type="submit">Criar venda e gerar link de cadastro</button>
   </form>
 </section>
+<script>
+(() => {
+  const produto=document.getElementById('produto-venda');
+  const catalogo=document.getElementById('catalogo-venda');
+  const preco=document.getElementById('preco-sugerido');
+  const custo=document.getElementById('custo-base');
+  const precos={{ precos_modelos|tojson }};
+  const custos={{ custos_modelos|tojson }};
+  const plus={{ plus_acrescimo }};
+  const br=v=>(Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  function atualizar(){
+    const id=produto.value;
+    preco.textContent=br((precos[id]||0)+(catalogo.value==='PLUS'?plus:0));
+    custo.textContent=br(custos[id]||0);
+  }
+  produto.addEventListener('change',atualizar); catalogo.addEventListener('change',atualizar); atualizar();
+})();
+</script>
 {% endblock %}

@@ -664,9 +664,22 @@ class Equipamento(Base):
     microfone = Column(String(20), nullable=False, default="Com fio")
     sistema_credito = Column(String(20), nullable=False, default="NA")
     catalogo_impresso = Column(String(10), nullable=False, default="NA")
+    # 1.1.62: vínculo comercial/custo de produção. O cadastro mestre fica separado
+    # da máquina física do cliente para permitir composição e custos por modelo.
+    produto_venda_id = Column(Integer, ForeignKey("venda_modelos_equipamento.id"), nullable=True, index=True)
+    catalogo_venda = Column(String(20), nullable=False, default="BASICO")
+    produto_venda_nome_snapshot = Column(String(180), nullable=True)
+    custo_base_snapshot = Column(Float, nullable=True)
+    custo_opcionais_snapshot = Column(Float, nullable=True)
+    custo_final_snapshot = Column(Float, nullable=True)
+    preco_venda_snapshot = Column(Float, nullable=True)
+    lucro_snapshot = Column(Float, nullable=True)
+    margem_snapshot = Column(Float, nullable=True)
+    custo_snapshot_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
+    produto_venda = relationship("VendaModeloEquipamento")
 
 
 class Campanha(Base):
@@ -818,6 +831,48 @@ class Item(Base):
     preco_venda = Column(Float, nullable=False, default=0)
     ativo = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
+
+
+class VendaModeloEquipamento(Base):
+    """Produto comercial vendido, alinhado ao nome/slug do SolVoz."""
+    __tablename__ = "venda_modelos_equipamento"
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(180), nullable=False, unique=True)
+    sku = Column(String(80), nullable=True, unique=True, index=True)
+    tipo = Column(String(80), nullable=False, default="JUKEBOX")
+    solvoz_slug = Column(String(120), nullable=True, unique=True, index=True)
+    preco_basico = Column(Float, nullable=False, default=0)
+    ativo = Column(Integer, nullable=False, default=1)
+    ordem = Column(Integer, nullable=False, default=0)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class VendaModeloComposicao(Base):
+    """Quantidade de cada Item que compõe o custo-base do modelo de venda."""
+    __tablename__ = "venda_modelo_composicao"
+    id = Column(Integer, primary_key=True)
+    modelo_id = Column(Integer, ForeignKey("venda_modelos_equipamento.id"), nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    quantidade = Column(Float, nullable=False, default=1)
+    modelo = relationship("VendaModeloEquipamento")
+    item = relationship("Item")
+
+
+class VendaOpcionalConfig(Base):
+    """Mapeia cada escolha de Opcional a um Item do Organiza e sua quantidade."""
+    __tablename__ = "venda_opcionais_config"
+    id = Column(Integer, primary_key=True)
+    campo = Column(String(50), nullable=False, index=True)
+    grupo = Column(String(100), nullable=False)
+    valor = Column(String(80), nullable=False)
+    rotulo = Column(String(100), nullable=False)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=True, index=True)
+    quantidade = Column(Float, nullable=False, default=1)
+    ordem = Column(Integer, nullable=False, default=0)
+    ativo = Column(Integer, nullable=False, default=1)
+    item = relationship("Item")
 
 
 class AgendaManual(Base):
@@ -1531,6 +1586,183 @@ def _vincular_equipe_interna_ao_cadastro_clientes(db: Session) -> int:
     return alterados
 
 
+PLUS_ACRESCIMO = 400.0
+VENDA_STATUS_FINALIZADO = {"ENTREGUE", "VENDIDO"}
+
+
+def _garantir_item_venda(db: Session, nome: str, categoria: str = "Composição de equipamentos") -> Item:
+    nome = nome.strip()
+    item = db.query(Item).filter(Item.nome == nome).first()
+    if not item:
+        item = db.query(Item).filter(func.lower(Item.nome) == nome.lower()).first()
+    if item:
+        return item
+    item = Item(nome=nome, categoria=categoria, preco_custo=0, preco_venda=0, ativo=1)
+    db.add(item)
+    db.flush()
+    return item
+
+
+def _seed_modelos_e_opcionais_venda(db: Session):
+    """Cria a estrutura inicial sem importar nenhum preço da planilha.
+
+    A planilha é usada apenas para quantidade/composição. Custos sempre vêm de
+    catalogo_itens. Itens inexistentes entram com custo zero para cadastro posterior.
+    """
+    caminho = os.path.join(os.path.dirname(__file__), "equipamentos_venda_seed.json")
+    if os.path.exists(caminho):
+        with open(caminho, "r", encoding="utf-8") as arquivo:
+            produtos = json.load(arquivo)
+        for dado in produtos:
+            modelo = None
+            if dado.get("sku"):
+                modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.sku == dado["sku"]).first()
+            if not modelo and dado.get("solvoz_slug"):
+                modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.solvoz_slug == dado["solvoz_slug"]).first()
+            novo = modelo is None
+            if novo:
+                modelo = VendaModeloEquipamento(
+                    nome=dado["nome"], sku=dado.get("sku"), tipo=dado.get("tipo") or "JUKEBOX",
+                    solvoz_slug=dado.get("solvoz_slug"), preco_basico=float(dado.get("preco_basico") or 0),
+                    ativo=1, ordem=int(dado.get("ordem") or 0), observacao=dado.get("observacao"),
+                )
+                db.add(modelo)
+                db.flush()
+            # A composição automática é aplicada somente quando o produto nasce.
+            # Depois, o cadastro do Organiza é a fonte e não é sobrescrito em deploys.
+            if novo:
+                for linha in dado.get("composicao") or []:
+                    nome_item = (linha.get("item") or "").strip()
+                    qtd = float(linha.get("quantidade") or 0)
+                    if not nome_item or qtd <= 0:
+                        continue
+                    # Regra consolidada: qualquer Stereo vira Mono.
+                    if nome_item.upper() == "AMPLIFICADOR STEREO":
+                        nome_item = "AMPLIFICADOR MONO C/ BLUETOOTH"
+                    item = _garantir_item_venda(db, nome_item)
+                    db.add(VendaModeloComposicao(modelo_id=modelo.id, item_id=item.id, quantidade=qtd))
+
+    opcionais = [
+        ("hdmi_tela_2", "HDMI Tela 2", "NA", "NA", None, 0, 10),
+        ("hdmi_tela_2", "HDMI Tela 2", "Sim", "Com HDMI Tela 2", "HDMI TELA 2", 1, 20),
+        ("teclado_bluetooth", "Teclado Bluetooth", "NA", "NA", None, 0, 30),
+        ("teclado_bluetooth", "Teclado Bluetooth", "Sim", "Com Teclado Bluetooth", "TECLADO BLUETOOTH", 1, 40),
+        ("microfone", "Microfone", "NA", "NA", None, 0, 50),
+        # A composição histórica traz 2 microfones com fio; agora eles entram pelo Opcional.
+        ("microfone", "Microfone", "Com fio", "Com fio", "MICROFONE", 2, 60),
+        ("microfone", "Microfone", "Sem fio", "Sem fio", "MICROFONE SEM FIO", 1, 70),
+        ("sistema_credito", "Sistema de Crédito", "NA", "NA", None, 0, 80),
+        ("sistema_credito", "Sistema de Crédito", "Moedeiro", "Moedeiro", "MOEDEIRO", 1, 90),
+        ("sistema_credito", "Sistema de Crédito", "Ficheiro", "Ficheiro", "FICHEIRO", 1, 100),
+        ("sistema_credito", "Sistema de Crédito", "Teclado", "Teclado", "TECLADO SISTEMA DE CREDITO", 1, 110),
+        ("catalogo_impresso", "Catálogo Impresso", "NA", "NA", None, 0, 120),
+        ("catalogo_impresso", "Catálogo Impresso", "Sim", "Impresso", "CATALOGO ENCARDENADO", 1, 130),
+    ]
+    for campo, grupo, valor, rotulo, item_nome, quantidade, ordem in opcionais:
+        existente = db.query(VendaOpcionalConfig).filter(
+            VendaOpcionalConfig.campo == campo, VendaOpcionalConfig.valor == valor
+        ).first()
+        if existente:
+            continue
+        item = _garantir_item_venda(db, item_nome, "Opcionais de venda") if item_nome else None
+        db.add(VendaOpcionalConfig(
+            campo=campo, grupo=grupo, valor=valor, rotulo=rotulo,
+            item_id=item.id if item else None, quantidade=float(quantidade or 0), ordem=ordem, ativo=1,
+        ))
+    db.commit()
+
+
+def custo_base_modelo(db: Session, modelo_id: int | None) -> float:
+    if not modelo_id:
+        return 0.0
+    linhas = (
+        db.query(VendaModeloComposicao)
+        .options(selectinload(VendaModeloComposicao.item))
+        .filter(VendaModeloComposicao.modelo_id == modelo_id)
+        .all()
+    )
+    return round(sum(float(linha.quantidade or 0) * float(linha.item.preco_custo or 0) for linha in linhas if linha.item), 2)
+
+
+def _opcional_config_por_escolha(db: Session, campo: str, valor: str | None):
+    valor = (valor or "NA").strip()
+    return db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).filter(
+        VendaOpcionalConfig.campo == campo,
+        VendaOpcionalConfig.valor == valor,
+        VendaOpcionalConfig.ativo == 1,
+    ).first()
+
+
+def custo_opcionais_equipamento(eq: Equipamento, db: Session) -> float:
+    if not eq.produto_venda_id:
+        return 0.0
+    total = 0.0
+    for campo in ("hdmi_tela_2", "teclado_bluetooth", "microfone", "sistema_credito", "catalogo_impresso"):
+        config = _opcional_config_por_escolha(db, campo, getattr(eq, campo, "NA"))
+        if config and config.item:
+            total += float(config.quantidade or 0) * float(config.item.preco_custo or 0)
+    return round(total, 2)
+
+
+def resumo_custo_venda(eq: Equipamento, db: Session, usar_snapshot: bool = True) -> dict:
+    if usar_snapshot and eq.custo_final_snapshot is not None:
+        base = float(eq.custo_base_snapshot or 0)
+        opcionais = float(eq.custo_opcionais_snapshot or 0)
+        custo = float(eq.custo_final_snapshot or 0)
+        preco = float(eq.preco_venda_snapshot if eq.preco_venda_snapshot is not None else moeda_num(eq.valor))
+        lucro = float(eq.lucro_snapshot if eq.lucro_snapshot is not None else preco - custo)
+        margem = float(eq.margem_snapshot if eq.margem_snapshot is not None else ((lucro / preco * 100) if preco else 0))
+        return {"base": round(base,2), "opcionais": round(opcionais,2), "custo": round(custo,2), "preco": round(preco,2), "lucro": round(lucro,2), "margem": round(margem,2), "snapshot": True}
+    if eq.produto_venda_id:
+        base = custo_base_modelo(db, eq.produto_venda_id)
+        opcionais = custo_opcionais_equipamento(eq, db)
+        custo = round(base + opcionais, 2)
+    else:
+        # Legado: o custo digitado era o custo total; não somar opcionais para não duplicar histórico.
+        base = moeda_num(eq.preco_custo)
+        opcionais = 0.0
+        custo = round(base, 2)
+    preco = moeda_num(eq.valor or eq.preco_venda)
+    lucro = round(preco - custo, 2)
+    margem = round((lucro / preco * 100) if preco else 0, 2)
+    return {"base": base, "opcionais": opcionais, "custo": custo, "preco": preco, "lucro": lucro, "margem": margem, "snapshot": False}
+
+
+def congelar_custo_venda_se_finalizada(eq: Equipamento, db: Session):
+    if (eq.status or "").strip().upper() not in VENDA_STATUS_FINALIZADO or eq.custo_final_snapshot is not None:
+        return
+    resumo = resumo_custo_venda(eq, db, usar_snapshot=False)
+    eq.produto_venda_nome_snapshot = (eq.produto_venda.nome if eq.produto_venda else eq.modelo) or None
+    eq.custo_base_snapshot = resumo["base"]
+    eq.custo_opcionais_snapshot = resumo["opcionais"]
+    eq.custo_final_snapshot = resumo["custo"]
+    eq.preco_venda_snapshot = resumo["preco"]
+    eq.lucro_snapshot = resumo["lucro"]
+    eq.margem_snapshot = resumo["margem"]
+    eq.custo_snapshot_em = datetime.now()
+
+
+def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = None) -> dict:
+    modelos = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.ativo == 1).order_by(VendaModeloEquipamento.ordem, VendaModeloEquipamento.nome).all()
+    custos_modelos = {str(m.id): custo_base_modelo(db, m.id) for m in modelos}
+    precos_modelos = {str(m.id): float(m.preco_basico or 0) for m in modelos}
+    tipos_modelos = {str(m.id): m.tipo for m in modelos}
+    nomes_modelos = {str(m.id): m.nome for m in modelos}
+    configs = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).filter(VendaOpcionalConfig.ativo == 1).order_by(VendaOpcionalConfig.ordem).all()
+    custos_opcionais = {}
+    opcoes_por_campo = {}
+    for c in configs:
+        custo = float(c.quantidade or 0) * float(c.item.preco_custo or 0) if c.item else 0.0
+        custos_opcionais.setdefault(c.campo, {})[c.valor] = round(custo, 2)
+        opcoes_por_campo.setdefault(c.campo, []).append(c)
+    resumo = resumo_custo_venda(equipamento, db) if equipamento else {"base":0,"opcionais":0,"custo":0,"preco":0,"lucro":0,"margem":0,"snapshot":False}
+    return {
+        "modelos_venda": modelos, "custos_modelos": custos_modelos, "precos_modelos": precos_modelos,
+        "tipos_modelos": tipos_modelos, "nomes_modelos": nomes_modelos, "custos_opcionais": custos_opcionais,
+        "opcoes_por_campo": opcoes_por_campo, "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
+    }
+
+
 @app.on_event("startup")
 def iniciar_banco():
     Base.metadata.create_all(bind=engine)
@@ -1797,6 +2029,18 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN sistema_credito VARCHAR(20) NOT NULL DEFAULT 'NA'"))
             if "catalogo_impresso" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_impresso VARCHAR(10) NOT NULL DEFAULT 'NA'"))
+            if "produto_venda_id" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN produto_venda_id INTEGER"))
+            if "catalogo_venda" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_venda VARCHAR(20) NOT NULL DEFAULT 'BASICO'"))
+            if "produto_venda_nome_snapshot" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN produto_venda_nome_snapshot VARCHAR(180)"))
+            for coluna in ("custo_base_snapshot", "custo_opcionais_snapshot", "custo_final_snapshot", "preco_venda_snapshot", "lucro_snapshot", "margem_snapshot"):
+                if coluna not in existentes_equipamentos:
+                    conn.execute(text(f"ALTER TABLE equipamentos ADD COLUMN {coluna} FLOAT"))
+            if "custo_snapshot_em" not in existentes_equipamentos:
+                tipo_dt_snapshot = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+                conn.execute(text(f"ALTER TABLE equipamentos ADD COLUMN custo_snapshot_em {tipo_dt_snapshot}"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -1819,6 +2063,9 @@ def iniciar_banco():
                     for dado in json.load(arquivo):
                         db.add(Item(**dado, categoria="Geral", ativo=1))
                 db.commit()
+        # 1.1.62: catálogo de produtos/composição e mapa de Opcionais.
+        # Preços da planilha nunca são importados; custos vêm exclusivamente de Itens.
+        _seed_modelos_e_opcionais_venda(db)
         # Remove prefixos antigos usados no código do WhatsApp e mantém somente o nome real.
         for cliente_existente in db.query(Cliente).all():
             cliente_existente.nome = limpar_nome_cliente(cliente_existente.nome)
@@ -5386,8 +5633,21 @@ def nfae_campos_faltantes(dados: dict) -> list[str]:
 
 
 def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
-    eq.tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip()) or None
-    eq.modelo = (form.get("modelo") or "").strip() or None
+    try:
+        produto_venda_id = int(form.get("produto_venda_id") or 0)
+    except (TypeError, ValueError):
+        produto_venda_id = 0
+    modelo_venda = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == produto_venda_id, VendaModeloEquipamento.ativo == 1).first() if produto_venda_id else None
+    if modelo_venda:
+        eq.produto_venda = modelo_venda
+        eq.produto_venda_id = modelo_venda.id
+        eq.tipo = tipo_equipamento_padrao(modelo_venda.tipo) or modelo_venda.tipo
+        eq.modelo = modelo_venda.nome
+    else:
+        eq.tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip()) or None
+        eq.modelo = (form.get("modelo") or "").strip() or None
+    catalogo_form = (form.get("catalogo_venda") or getattr(eq, "catalogo_venda", None) or "BASICO").strip().upper()
+    eq.catalogo_venda = "PLUS" if catalogo_form == "PLUS" else "BASICO"
     codigo_padrao_nfae, descricao_padrao_nfae = nfae_padrao_produto(eq.tipo)
     eq.nota_codigo = re.sub(r"[^A-Za-z0-9._-]", "", (form.get("nota_codigo") or "").strip()) or codigo_padrao_nfae
     eq.nota_descricao = (form.get("nota_descricao") or "").strip() or descricao_padrao_nfae
@@ -5397,7 +5657,10 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     # Nenhuma máquina fica sem pacote. O valor ausente recebe o primeiro pacote disponível.
     # Este valor é derivado do pacote instalado e nunca é informado manualmente.
     eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
-    eq.plano = (form.get("plano") or "").strip() or None
+    if modelo_venda:
+        eq.plano = "PLUS" if eq.catalogo_venda == "PLUS" else "BÁSICO"
+    else:
+        eq.plano = (form.get("plano") or "").strip() or None
     try:
         solvoz_empresa_id = int(form.get("solvoz_empresa_id") or 0)
     except (TypeError, ValueError):
@@ -5411,16 +5674,24 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         texto = (valor or "").strip()
         return texto if texto in permitidos else padrao
 
-    eq.som = opcao(form.get("som"), {"Premium", "JBL", "NA"}, "NA")
-    eq.hdmi_tela_2 = opcao(form.get("hdmi_tela_2"), {"Sim", "Não", "NA"}, "NA")
-    eq.teclado_bluetooth = opcao(form.get("teclado_bluetooth"), {"Sim", "Não", "NA"}, "NA")
-    eq.microfone = opcao(form.get("microfone"), {"Com fio", "Sem fio", "NA"}, "Com fio")
-    eq.sistema_credito = opcao(form.get("sistema_credito"), {"Moedeiro", "Ficheiro", "Teclado", "NA"}, "NA")
-    eq.catalogo_impresso = opcao(form.get("catalogo_impresso"), {"Sim", "Não", "NA"}, "NA")
+    # Som deixou de ser Opcional: Premium/JBL pertence ao próprio modelo comercial.
+    if modelo_venda:
+        eq.som = "NA"
+    eq.hdmi_tela_2 = opcao(form.get("hdmi_tela_2"), {"Sim", "Não", "NA"}, getattr(eq, "hdmi_tela_2", None) or "NA")
+    eq.teclado_bluetooth = opcao(form.get("teclado_bluetooth"), {"Sim", "Não", "NA"}, getattr(eq, "teclado_bluetooth", None) or "NA")
+    eq.microfone = opcao(form.get("microfone"), {"Com fio", "Sem fio", "NA"}, getattr(eq, "microfone", None) or "Com fio")
+    eq.sistema_credito = opcao(form.get("sistema_credito"), {"Moedeiro", "Ficheiro", "Teclado", "NA"}, getattr(eq, "sistema_credito", None) or "NA")
+    eq.catalogo_impresso = opcao(form.get("catalogo_impresso"), {"Sim", "Não", "NA"}, getattr(eq, "catalogo_impresso", None) or "NA")
 
-    eq.valor = (form.get("valor") or "").strip() or None
-    eq.preco_custo = (form.get("preco_custo") or "").strip() or None
-    eq.preco_venda = (form.get("preco_venda") or "").strip() or None
+    valor_informado = (form.get("valor") or "").strip()
+    if modelo_venda and not valor_informado:
+        valor_padrao = float(modelo_venda.preco_basico or 0) + (PLUS_ACRESCIMO if eq.catalogo_venda == "PLUS" else 0)
+        valor_informado = f"{valor_padrao:.2f}"
+    eq.valor = valor_informado or None
+    eq.preco_venda = (form.get("preco_venda") or "").strip() or eq.valor
+    # Para modelos vinculados, custo é sempre calculado pelos Itens; custo manual só permanece no legado.
+    if not modelo_venda:
+        eq.preco_custo = (form.get("preco_custo") or "").strip() or eq.preco_custo
     eq.pago = (form.get("pago") or "").strip() or None
     # O saldo é sempre calculado no servidor para não depender do navegador.
     total = moeda_num(eq.valor)
@@ -5448,6 +5719,11 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         eq.garantia_meses = max(int(form.get("garantia_meses") or 3), 0)
     except ValueError:
         eq.garantia_meses = 3
+
+    if modelo_venda:
+        resumo_atual = resumo_custo_venda(eq, db, usar_snapshot=False)
+        eq.preco_custo = f"{resumo_atual['custo']:.2f}"
+    congelar_custo_venda_se_finalizada(eq, db)
 
 
 def _chave_ordenacao_equipamento(equipamento: Equipamento):
@@ -5585,6 +5861,7 @@ def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depen
         "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
         "pacote_atual": obter_pacote_atual(db),
         "solvoz_empresas": empresas_solvoz_ativas(db),
+        **contexto_configuracao_venda(db),
     })
 
 
@@ -5593,7 +5870,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente: raise HTTPException(404)
     form = dict(await request.form())
-    if not (form.get("tipo") or "").strip():
+    if not (form.get("tipo") or "").strip() and not (form.get("produto_venda_id") or "").strip():
         eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form, db)
         tipos, pacotes = opcoes_equipamentos(db)
         return templates.TemplateResponse("organiza/equipamento_form.html", {
@@ -5602,6 +5879,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
             "proxima_maquina": proximo_codigo_maquina(db),
             "proximo_numero_cliente": proximo_numero_cliente(db, cliente_id),
             "solvoz_empresas": empresas_solvoz_ativas(db),
+            **contexto_configuracao_venda(db, eq),
         }, status_code=400)
     eq = Equipamento(cliente_id=cliente_id); preencher_equipamento(eq, form, db)
     garantir_identificacao_equipamento(db, eq)
@@ -5622,6 +5900,7 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
             "proximo_numero_cliente": eq.numero_maquina_cliente,
             "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
             "solvoz_empresas": empresas_solvoz_ativas(db),
+            **contexto_configuracao_venda(db, eq),
         }, status_code=400)
     db.add(eq)
     db.flush()
@@ -5638,7 +5917,7 @@ def equipamento_editar(cliente_id: int, equipamento_id: int, request: Request, u
     tipos, pacotes = opcoes_equipamentos(db)
     clientes_transferencia = db.query(Cliente).filter(Cliente.id != cliente_id).order_by(Cliente.nome.asc()).all()
     transferencias = db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == equipamento_id).order_by(TransferenciaEquipamento.criado_em.desc()).all()
-    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db), "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db)})
+    return templates.TemplateResponse("organiza/equipamento_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq, "erro": "", "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db), "clientes_transferencia": clientes_transferencia, "transferencias": transferencias, "solvoz_empresas": empresas_solvoz_ativas(db), **contexto_configuracao_venda(db, eq)})
 
 
 
@@ -5696,7 +5975,8 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
             "erro": erro_identificacao, "tipos": tipos, "pacotes": pacotes, "primeiro_pacote": _primeiro_pacote_disponivel(db),
             "clientes_transferencia": clientes_transferencia, "transferencias": transferencias,
             "confirmar_duplicado": bool(duplicado_cliente and not confirmou_duplicado),
-            "solvoz_empresas": empresas_solvoz_ativas(db)
+            "solvoz_empresas": empresas_solvoz_ativas(db),
+            **contexto_configuracao_venda(db, eq)
         }, status_code=400)
     db.flush()
     _sincronizar_pacote_cliente(db, cliente_id)
@@ -8114,6 +8394,14 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         eq.recebido_calculado = recebido
         eq.falta_calculada = max(round(total - recebido, 2), 0)
         eq.excesso_calculado = max(round(recebido - total, 2), 0)
+        resumo_venda = resumo_custo_venda(eq, db)
+        eq.custo_base_calculado = resumo_venda["base"]
+        eq.custo_opcionais_calculado = resumo_venda["opcionais"]
+        eq.custo_final_calculado = resumo_venda["custo"]
+        eq.lucro_calculado = resumo_venda["lucro"]
+        eq.margem_calculada = resumo_venda["margem"]
+        eq.custo_snapshot_ativo = resumo_venda["snapshot"]
+        eq.catalogo_venda_rotulo = "Plus" if (eq.catalogo_venda or "").upper() == "PLUS" else "Básico"
 
     q = (request.query_params.get("q") or "").strip().lower()
     pagamento = (request.query_params.get("pagamento") or "todos").strip()
@@ -8496,6 +8784,9 @@ def vendas_relatorio(
     total_recebido = round(sum(eq.recebido_calculado for eq in vendas), 2)
     total_falta = round(sum(eq.falta_calculada for eq in vendas), 2)
     total_excesso = round(sum(eq.excesso_calculado for eq in vendas), 2)
+    total_custo = round(sum(eq.custo_final_calculado for eq in vendas), 2)
+    total_lucro = round(sum(eq.lucro_calculado for eq in vendas), 2)
+    margem_total = round((total_lucro / total_vendido * 100) if total_vendido else 0, 2)
 
     return templates.TemplateResponse("organiza/vendas_relatorio.html", {
         "request": request,
@@ -8507,6 +8798,9 @@ def vendas_relatorio(
         "total_recebido": total_recebido,
         "total_falta": total_falta,
         "total_excesso": total_excesso,
+        "total_custo": total_custo,
+        "total_lucro": total_lucro,
+        "margem_total": margem_total,
         "q": dados["q"],
         "pagamento_filtro": dados["pagamento_filtro"],
         "valor_filtro": dados["valor_filtro"],
@@ -8520,31 +8814,37 @@ def vendas_relatorio(
 @app.get("/organiza/vendas/nova", response_class=HTMLResponse)
 def venda_nova(request: Request, cliente_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
-    tipos, pacotes = opcoes_equipamentos(db)
+    contexto = contexto_configuracao_venda(db)
     return templates.TemplateResponse("organiza/venda_nova.html", {
         "request": request, "usuario": usuario, "clientes": clientes,
-        "cliente_id": cliente_id, "erro": "", "dados": {}, "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes
+        "cliente_id": cliente_id, "erro": "", "dados": {}, "status_venda": STATUS_VENDA,
+        **contexto,
     })
 
 
 @app.post("/organiza/vendas/nova")
 async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
-    tipos, pacotes = opcoes_equipamentos(db)
+    contexto = contexto_configuracao_venda(db)
     telefone = limpar_telefone(form.get("telefone") or "")
-    tipo = tipo_equipamento_padrao((form.get("tipo") or "").strip())
+    try:
+        produto_venda_id = int(form.get("produto_venda_id") or 0)
+    except (TypeError, ValueError):
+        produto_venda_id = 0
+    produto = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == produto_venda_id, VendaModeloEquipamento.ativo == 1).first() if produto_venda_id else None
+    catalogo_venda = "PLUS" if (form.get("catalogo_venda") or "").strip().upper() == "PLUS" else "BASICO"
 
     if not telefone_valido(telefone):
         return templates.TemplateResponse("organiza/venda_nova.html", {
             "request": request, "usuario": usuario, "clientes": [], "cliente_id": 0,
             "erro": "Informe um WhatsApp válido com DDD.", "dados": form,
-            "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes,
+            "status_venda": STATUS_VENDA, **contexto,
         }, status_code=400)
-    if not tipo:
+    if not produto:
         return templates.TemplateResponse("organiza/venda_nova.html", {
             "request": request, "usuario": usuario, "clientes": [], "cliente_id": 0,
             "erro": "Informe o equipamento vendido.", "dados": form,
-            "status_venda": STATUS_VENDA, "tipos": tipos, "pacotes": pacotes,
+            "status_venda": STATUS_VENDA, **contexto,
         }, status_code=400)
 
     cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
@@ -8565,11 +8865,20 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     # Na abertura da venda o atendente informa somente WhatsApp + equipamento.
     # Os demais dados pertencem ao cliente e são preenchidos no link público.
     eq = Equipamento(cliente_id=cliente.id)
+    preco_padrao = float(produto.preco_basico or 0) + (PLUS_ACRESCIMO if catalogo_venda == "PLUS" else 0)
     preencher_equipamento(eq, {
-        "tipo": tipo,
+        "produto_venda_id": str(produto.id),
+        "catalogo_venda": catalogo_venda,
+        "valor": f"{preco_padrao:.2f}",
+        "preco_venda": f"{preco_padrao:.2f}",
         "status": "Solicitar gabinete",
         "fabricante": "KARAOKERJ",
         "garantia_meses": "3",
+        "microfone": "Com fio",
+        "hdmi_tela_2": "NA",
+        "teclado_bluetooth": "NA",
+        "sistema_credito": "NA",
+        "catalogo_impresso": "NA",
     }, db)
     garantir_identificacao_equipamento(db, eq)
     db.add(eq)
@@ -9177,6 +9486,132 @@ def carregar_manutencao(db: Session, manutencao_id: int):
         selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
         selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
     ).filter(Manutencao.id == manutencao_id).first()
+
+
+@app.get("/organiza/equipamentos-venda", response_class=HTMLResponse)
+def modelos_venda_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    modelos = db.query(VendaModeloEquipamento).order_by(VendaModeloEquipamento.ativo.desc(), VendaModeloEquipamento.ordem, VendaModeloEquipamento.nome).all()
+    for modelo in modelos:
+        modelo.custo_base_calculado = custo_base_modelo(db, modelo.id)
+        modelo.preco_plus_calculado = float(modelo.preco_basico or 0) + PLUS_ACRESCIMO
+        modelo.qtd_itens_composicao = db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo.id).count()
+    return templates.TemplateResponse("organiza/equipamentos_venda.html", {
+        "request": request, "usuario": usuario, "modelos": modelos, "plus_acrescimo": PLUS_ACRESCIMO,
+    })
+
+
+@app.post("/organiza/equipamentos-venda/novo")
+async def modelo_venda_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    sku = (form.get("sku") or "").strip() or None
+    if not nome:
+        return RedirectResponse("/organiza/equipamentos-venda?erro=nome", status_code=303)
+    existente = db.query(VendaModeloEquipamento).filter(func.lower(VendaModeloEquipamento.nome) == nome.lower()).first()
+    if existente:
+        return RedirectResponse(f"/organiza/equipamentos-venda/{existente.id}/editar", status_code=303)
+    if sku and db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.sku == sku).first():
+        sku = None
+    modelo = VendaModeloEquipamento(
+        nome=nome, sku=sku, solvoz_slug=(form.get("solvoz_slug") or "").strip() or None,
+        tipo=tipo_equipamento_padrao((form.get("tipo") or "JUKEBOX").strip()) or "JUKEBOX",
+        preco_basico=moeda_num(form.get("preco_basico")), ativo=1,
+        ordem=(db.query(func.max(VendaModeloEquipamento.ordem)).scalar() or 0) + 10,
+    )
+    db.add(modelo); db.commit(); db.refresh(modelo)
+    return RedirectResponse(f"/organiza/equipamentos-venda/{modelo.id}/editar?novo=1", status_code=303)
+
+
+@app.get("/organiza/equipamentos-venda/{modelo_id}/editar", response_class=HTMLResponse)
+def modelo_venda_editar(modelo_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == modelo_id).first()
+    if not modelo:
+        raise HTTPException(404)
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.categoria, Item.nome).all()
+    composicoes = db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo_id).all()
+    qtd_por_item = {c.item_id: float(c.quantidade or 0) for c in composicoes}
+    return templates.TemplateResponse("organiza/equipamento_venda_form.html", {
+        "request": request, "usuario": usuario, "modelo": modelo, "itens": itens,
+        "qtd_por_item": qtd_por_item, "custo_base": custo_base_modelo(db, modelo.id),
+        "plus_acrescimo": PLUS_ACRESCIMO,
+    })
+
+
+@app.post("/organiza/equipamentos-venda/{modelo_id}/editar")
+async def modelo_venda_salvar(modelo_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    modelo = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == modelo_id).first()
+    if not modelo:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    nome = (form.get("nome") or "").strip()
+    sku = (form.get("sku") or "").strip() or None
+    slug = (form.get("solvoz_slug") or "").strip() or None
+    if nome:
+        duplicado_nome = db.query(VendaModeloEquipamento).filter(func.lower(VendaModeloEquipamento.nome) == nome.lower(), VendaModeloEquipamento.id != modelo_id).first()
+        if not duplicado_nome:
+            modelo.nome = nome
+    modelo.sku = sku
+    modelo.solvoz_slug = slug
+    modelo.tipo = tipo_equipamento_padrao((form.get("tipo") or modelo.tipo or "JUKEBOX").strip()) or "JUKEBOX"
+    modelo.preco_basico = moeda_num(form.get("preco_basico"))
+    modelo.ativo = 1 if str(form.get("ativo") or "").lower() in {"1", "on", "true", "sim"} else 0
+    modelo.observacao = (form.get("observacao") or "").strip() or None
+
+    db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo_id).delete(synchronize_session=False)
+    itens = db.query(Item).filter(Item.ativo == 1).all()
+    for item in itens:
+        raw = str(form.get(f"qtd_{item.id}") or "").strip().replace(",", ".")
+        try:
+            qtd = float(raw or 0)
+        except ValueError:
+            qtd = 0
+        if qtd > 0:
+            # Garantia extra no cadastro: Stereo jamais entra em composição nova.
+            item_usado = item
+            if item.nome.strip().upper() == "AMPLIFICADOR STEREO":
+                item_usado = _garantir_item_venda(db, "AMPLIFICADOR MONO C/ BLUETOOTH")
+            existente = db.query(VendaModeloComposicao).filter(
+                VendaModeloComposicao.modelo_id == modelo_id,
+                VendaModeloComposicao.item_id == item_usado.id,
+            ).first()
+            if existente:
+                existente.quantidade += qtd
+            else:
+                db.add(VendaModeloComposicao(modelo_id=modelo_id, item_id=item_usado.id, quantidade=qtd))
+    db.commit()
+    return RedirectResponse(f"/organiza/equipamentos-venda/{modelo_id}/editar?salvo=1", status_code=303)
+
+
+@app.get("/organiza/opcionais-venda", response_class=HTMLResponse)
+def opcionais_venda_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    configs = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).order_by(VendaOpcionalConfig.ordem, VendaOpcionalConfig.grupo, VendaOpcionalConfig.valor).all()
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.categoria, Item.nome).all()
+    for config in configs:
+        config.custo_calculado = round(float(config.quantidade or 0) * float(config.item.preco_custo or 0), 2) if config.item else 0.0
+    return templates.TemplateResponse("organiza/opcionais_venda.html", {
+        "request": request, "usuario": usuario, "configs": configs, "itens": itens,
+    })
+
+
+@app.post("/organiza/opcionais-venda/{config_id}/editar")
+async def opcional_venda_salvar(config_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    config = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    try:
+        item_id = int(form.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first() if item_id else None
+    config.item_id = item.id if item else None
+    try:
+        config.quantidade = max(float(str(form.get("quantidade") or "0").replace(",", ".")), 0)
+    except ValueError:
+        config.quantidade = 0
+    config.ativo = 1 if str(form.get("ativo") or "").lower() in {"1", "on", "true", "sim"} else 0
+    db.commit()
+    return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
 
 
 @app.get("/organiza/itens", response_class=HTMLResponse)

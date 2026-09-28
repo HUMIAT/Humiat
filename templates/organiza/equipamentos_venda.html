@@ -1,0 +1,43 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">Cadastros</p><h1>Equipamentos de venda</h1><p class="texto-suave">Produtos comerciais alinhados ao SolVoz. O custo-base é calculado pela composição usando o custo atual dos Itens do Organiza.</p></div>
+    <a class="botao" href="/organiza/opcionais-venda">Configurar Opcionais</a>
+  </div>
+  <div class="alerta informacao"><strong>Catálogo:</strong> Básico usa o preço-base. Plus acrescenta {{ plus_acrescimo|moeda }} ao preço de venda. Premium/JBL pertence ao próprio equipamento e não é um Opcional.</div>
+  <details class="cartao" style="margin-top:16px">
+    <summary style="cursor:pointer;font-weight:800">+ Novo equipamento comercial</summary>
+    <form method="post" action="/organiza/equipamentos-venda/novo" class="form-grid-organizada tres-colunas" style="margin-top:16px">
+      <label>Nome *<input name="nome" required placeholder="Ex.: Novo modelo JBL"></label>
+      <label>SKU<input name="sku" placeholder="KRJ-NOVO-JBL"></label>
+      <label>Slug SolVoz<input name="solvoz_slug" placeholder="novo-modelo-jbl"></label>
+      <label>Tipo<select name="tipo"><option>JUKEBOX</option><option>MALETA</option><option>IPHONE</option><option>FLIPERAMA</option></select></label>
+      <label>Preço Básico<input name="preco_basico" inputmode="decimal" value="0,00"></label>
+      <div style="display:flex;align-items:end"><button class="botao primario" type="submit">Criar e montar composição</button></div>
+    </form>
+  </details>
+  <div class="grid-cards" style="margin-top:16px">
+    {% for modelo in modelos %}
+    <article class="cartao">
+      <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <span class="pill">{{ 'Ativo' if modelo.ativo else 'Inativo' }}</span>
+          <h3 style="margin:10px 0 4px">{{ modelo.nome }}</h3>
+          <p class="texto-suave" style="margin:0">SKU {{ modelo.sku or '—' }} · SolVoz: {{ modelo.solvoz_slug or '—' }}</p>
+        </div>
+        <a class="botao pequeno primario" href="/organiza/equipamentos-venda/{{ modelo.id }}/editar">Editar composição</a>
+      </div>
+      <div class="venda-card-dados" style="margin-top:16px">
+        <div><small>Itens</small><strong>{{ modelo.qtd_itens_composicao }}</strong></div>
+        <div><small>Custo-base atual</small><strong>{{ modelo.custo_base_calculado|moeda }}</strong></div>
+        <div><small>Preço Básico</small><strong>{{ modelo.preco_basico|moeda }}</strong></div>
+        <div><small>Preço Plus</small><strong>{{ modelo.preco_plus_calculado|moeda }}</strong></div>
+      </div>
+      {% if modelo.qtd_itens_composicao == 0 %}<div class="alerta erro" style="margin-top:12px">Composição ainda não cadastrada. O custo-base ficará R$ 0,00 até informar os Itens e quantidades.</div>{% endif %}
+      {% if modelo.observacao %}<p class="texto-suave" style="margin-top:12px">{{ modelo.observacao }}</p>{% endif %}
+    </article>
+    {% else %}<div class="cartao vazio">Nenhum equipamento comercial cadastrado.</div>{% endfor %}
+  </div>
+</section>
+{% endblock %}

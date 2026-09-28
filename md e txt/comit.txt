@@ -1,3 +1,3 @@
 git add .
-git commit -m "Organiza 1.1.52 - padroniza lote de nao enviados, adiciona filtros e otimiza campanhas"
+git commit -m "Organiza 1.1.62 - adiciona custo de produção, opcionais por item, lucro e margem nas vendas"
 git push origin main

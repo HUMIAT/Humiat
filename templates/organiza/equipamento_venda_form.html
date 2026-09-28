@@ -1,0 +1,47 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean">
+  <div class="titulo-linha">
+    <div><p class="tag">Composição</p><h1>{{ modelo.nome }}</h1><p class="texto-suave">Altere quantidades. O custo unitário sempre vem do cadastro de Itens.</p></div>
+    <a class="botao" href="/organiza/equipamentos-venda">Voltar</a>
+  </div>
+  {% if request.query_params.get('salvo') %}<div class="alerta sucesso">Equipamento e composição atualizados.</div>{% endif %}
+  <form method="post">
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>1</span><div><h2>Produto comercial</h2><p>Nome e código preparados para o futuro vínculo Organiza → SolVoz.</p></div></div>
+      <div class="form-grid-organizada tres-colunas">
+        <label>Nome<input name="nome" value="{{ modelo.nome }}" required></label>
+        <label>SKU<input name="sku" value="{{ modelo.sku or '' }}" placeholder="KRJ-BIP19-JBL"></label>
+        <label>Slug SolVoz<input name="solvoz_slug" value="{{ modelo.solvoz_slug or '' }}"></label>
+        <label>Tipo<select name="tipo">{% for tipo in ['JUKEBOX','MALETA','IPHONE','FLIPERAMA'] %}<option value="{{ tipo }}" {% if modelo.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
+        <label>Preço Básico<input name="preco_basico" inputmode="decimal" value="{{ '%.2f'|format(modelo.preco_basico or 0) }}"><small>Plus = Básico + {{ plus_acrescimo|moeda }}.</small></label>
+        <label style="display:flex;gap:10px;align-items:center;padding-top:26px"><input type="checkbox" name="ativo" value="1" style="width:auto" {% if modelo.ativo %}checked{% endif %}> Ativo nas vendas</label>
+        <label class="campo-duplo">Observação<textarea name="observacao">{{ modelo.observacao or '' }}</textarea></label>
+      </div>
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>2</span><div><h2>Itens da composição</h2><p>Preço da planilha não é usado. Alterar o custo do Item recalcula automaticamente o custo atual do equipamento.</p></div></div>
+      <div class="alerta informacao"><strong>Custo-base atual:</strong> {{ custo_base|moeda }}. A composição não inclui Microfone nem Catálogo Impresso, pois agora são Opcionais.</div>
+      <div style="overflow:auto;margin-top:14px">
+        <table class="tabela-clean">
+          <thead><tr><th>Item</th><th>Categoria</th><th>Custo atual</th><th style="width:140px">Quantidade</th><th>Subtotal atual</th></tr></thead>
+          <tbody>
+          {% for item in itens %}
+            {% set qtd = qtd_por_item.get(item.id, 0) %}
+            <tr>
+              <td><strong>{{ item.nome }}</strong></td>
+              <td>{{ item.categoria }}</td>
+              <td>{{ item.preco_custo|moeda }}</td>
+              <td><input class="qtd-composicao" type="number" min="0" step="0.01" name="qtd_{{ item.id }}" value="{{ '%g'|format(qtd) if qtd else '' }}" data-custo="{{ item.preco_custo or 0 }}"></td>
+              <td class="subtotal-item">{{ ((item.preco_custo or 0) * qtd)|moeda }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <button class="botao primario botao-cheio" type="submit">Salvar equipamento e composição</button>
+  </form>
+</section>
+{% endblock %}

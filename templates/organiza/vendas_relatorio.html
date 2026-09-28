@@ -58,18 +58,11 @@
   </div>
 
   <div class="relatorio-resumo">
-    <div class="cartao resumo-item">
-      <small>Valor total dos equipamentos</small>
-      <strong>{{ total_vendido|moeda }}</strong>
-    </div>
-    <div class="cartao resumo-item">
-      <small>Total recebido</small>
-      <strong>{{ total_recebido|moeda }}</strong>
-    </div>
-    <div class="cartao resumo-item saldo">
-      <small>Total a receber</small>
-      <strong>{{ total_falta|moeda }}</strong>
-    </div>
+    <div class="cartao resumo-item"><small>Valor total vendido</small><strong>{{ total_vendido|moeda }}</strong></div>
+    <div class="cartao resumo-item"><small>Custo total</small><strong>{{ total_custo|moeda }}</strong></div>
+    <div class="cartao resumo-item"><small>Lucro total</small><strong>{{ total_lucro|moeda }}</strong><small>Margem: {{ '%.2f'|format(margem_total) }}%</small></div>
+    <div class="cartao resumo-item"><small>Total recebido</small><strong>{{ total_recebido|moeda }}</strong></div>
+    <div class="cartao resumo-item saldo"><small>Total a receber</small><strong>{{ total_falta|moeda }}</strong></div>
   </div>
 
   {% if total_excesso > 0.009 %}
@@ -87,7 +80,11 @@
           <th>Status</th>
           <th>Data da compra</th>
           <th>Data de entrega</th>
-          <th class="numero">Valor total</th>
+          <th>Catálogo</th>
+          <th class="numero">Preço</th>
+          <th class="numero">Custo</th>
+          <th class="numero">Lucro</th>
+          <th class="numero">Margem</th>
           <th class="numero">Recebido</th>
           <th class="numero">Falta receber</th>
         </tr>
@@ -106,21 +103,28 @@
           <td>{{ venda.status or '-' }}</td>
           <td>{{ venda.data_compra|data_br }}</td>
           <td>{{ venda.previsao_entrega|data_br }}</td>
+          <td>{{ venda.catalogo_venda_rotulo if venda.produto_venda_id else '-' }}</td>
           <td class="numero">{{ venda.total_calculado|moeda }}</td>
+          <td class="numero">{{ venda.custo_final_calculado|moeda }}</td>
+          <td class="numero">{{ venda.lucro_calculado|moeda }}</td>
+          <td class="numero">{{ '%.2f'|format(venda.margem_calculada) }}%</td>
           <td class="numero">{{ venda.recebido_calculado|moeda }}</td>
           <td class="numero falta">{{ venda.falta_calculada|moeda }}</td>
         </tr>
         {% else %}
         <tr>
-          <td class="vazio-relatorio" colspan="8">Nenhuma venda encontrada com estes filtros.</td>
+          <td class="vazio-relatorio" colspan="12">Nenhuma venda encontrada com estes filtros.</td>
         </tr>
         {% endfor %}
       </tbody>
       {% if vendas %}
       <tfoot>
         <tr>
-          <th colspan="5">Totais</th>
+          <th colspan="6">Totais</th>
           <th class="numero">{{ total_vendido|moeda }}</th>
+          <th class="numero">{{ total_custo|moeda }}</th>
+          <th class="numero">{{ total_lucro|moeda }}</th>
+          <th class="numero">{{ '%.2f'|format(margem_total) }}%</th>
           <th class="numero">{{ total_recebido|moeda }}</th>
           <th class="numero">{{ total_falta|moeda }}</th>
         </tr>
@@ -140,14 +144,14 @@
 .relatorio-filtros>div{display:grid;gap:4px;min-width:0}
 .relatorio-filtros small,.resumo-item small{color:#64748b;font-size:12px}
 .relatorio-filtros strong{font-size:13px;overflow-wrap:anywhere}
-.relatorio-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.relatorio-resumo{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:14px}
 .resumo-item{display:grid;gap:6px;padding:16px}
 .resumo-item strong{font-size:21px}
 .resumo-item.saldo{border-color:#fdba74;background:#fff7ed}
 .resumo-item.saldo strong,.tabela-relatorio .falta{color:#c2410c}
 .relatorio-alerta{margin:0 0 14px}
 .tabela-relatorio-wrap{overflow-x:auto;padding:0}
-.tabela-relatorio{width:100%;border-collapse:collapse;min-width:1050px}
+.tabela-relatorio{width:100%;border-collapse:collapse;min-width:1450px}
 .tabela-relatorio th,.tabela-relatorio td{padding:12px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;font-size:13px}
 .tabela-relatorio thead th{background:#f8fafc;color:#334155;font-size:12px;white-space:nowrap}
 .tabela-relatorio tbody td strong,.tabela-relatorio tbody td small{display:block}

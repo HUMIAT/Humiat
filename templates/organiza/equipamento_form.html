@@ -9,8 +9,15 @@
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Identificação</h2><p>Dados principais da máquina.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
+        <label class="campo-duplo">Equipamento comercial
+          <select name="produto_venda_id" id="produto-venda-id">
+            <option value="">Cadastro legado / sem vínculo comercial</option>
+            {% for modelo_venda in modelos_venda %}<option value="{{ modelo_venda.id }}" {% if equipamento and equipamento.produto_venda_id == modelo_venda.id %}selected{% endif %}>{{ modelo_venda.nome }}</option>{% endfor %}
+          </select>
+          <small>Use o mesmo produto do SolVoz. Premium/JBL já faz parte deste nome.</small>
+        </label>
         <label>Tipo *<select name="tipo" id="tipo-equipamento" required><option value="">Selecione</option>{% for tipo in tipos %}<option value="{{ tipo }}" {% if equipamento and equipamento.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></label>
-        <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}"></label>
+        <label class="campo-duplo">Nome / modelo da máquina<input name="modelo" id="modelo-equipamento" value="{{ equipamento.modelo if equipamento and equipamento.modelo else '' }}"></label>
         <label>Código da máquina para o monitor (código técnico)<input name="maquina" value="{{ equipamento.maquina if equipamento and equipamento.maquina else proxima_maquina }}" required pattern="KRJ[0-9]{5}" placeholder="KRJ00001"><small>Identificação técnica única do equipamento.</small></label>
         <label>Ordem definida pelo cliente<input id="numero-cliente" type="number" min="1" name="numero_maquina_cliente" value="{{ equipamento.numero_maquina_cliente if equipamento and equipamento.numero_maquina_cliente else proximo_numero_cliente }}" required><small>O sistema monta JUK1, MAL1, IPH1 ou FLIP1 conforme o tipo.</small></label>
         <label class="campo-duplo">Pré-visualização<input id="previa-identificacao" value="{{ equipamento|rotulo_maquina if equipamento else 'JUK' ~ proximo_numero_cliente }} · {{ equipamento.tipo if equipamento and equipamento.tipo else 'JUKEBOX' }} {{ equipamento.modelo if equipamento and equipamento.modelo else '' }}" readonly aria-readonly="true"><small>Identificação operacional do cliente. O código KRJ permanece separado.</small></label>
@@ -29,8 +36,14 @@
       <div class="form-grid-organizada quatro-colunas">
         <label>Data da compra<input type="date" name="data_compra" value="{{ equipamento.data_compra if equipamento and equipamento.data_compra else '' }}"></label>
         <label>Data prevista de entrega<input type="date" name="previsao_entrega" value="{{ equipamento.previsao_entrega if equipamento and equipamento.previsao_entrega else '' }}"></label>
-        <label>Preço de custo<input name="preco_custo" inputmode="decimal" value="{{ equipamento.preco_custo if equipamento and equipamento.preco_custo else '' }}"></label>
-        <label>Preço de venda unitário<input name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}"></label>
+        <label>Catálogo
+          <select name="catalogo_venda" id="catalogo-venda">
+            <option value="BASICO" {% if not equipamento or equipamento.catalogo_venda != 'PLUS' %}selected{% endif %}>Básico</option>
+            <option value="PLUS" {% if equipamento and equipamento.catalogo_venda == 'PLUS' %}selected{% endif %}>Plus (+ {{ plus_acrescimo|moeda }})</option>
+          </select>
+        </label>
+        <label>Preço de custo<input id="preco-custo-calculado" name="preco_custo" inputmode="decimal" value="{{ '%.2f'|format(resumo_custo.custo) if equipamento and equipamento.produto_venda_id else (equipamento.preco_custo if equipamento and equipamento.preco_custo else '') }}" {% if equipamento and equipamento.produto_venda_id %}readonly aria-readonly="true"{% endif %}><small>{% if equipamento and equipamento.produto_venda_id %}Calculado pelos Itens + Opcionais.{% else %}Legado/manual até vincular um equipamento comercial.{% endif %}</small></label>
+        <label>Preço de venda unitário<input id="preco-venda-unitario" name="preco_venda" inputmode="decimal" value="{{ equipamento.preco_venda if equipamento and equipamento.preco_venda else '' }}"></label>
         <label>Valor total<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}"></label>
         <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" value="{{ equipamento.pago if equipamento and equipamento.pago else '' }}"></label>
         <div class="garantia-recibo">
@@ -45,45 +58,27 @@
       </div>
       <div class="venda-opcionais">
         <h3>Opcionais da venda</h3>
+        <p class="texto-suave">Cada escolha está ligada diretamente a um Item do Organiza. Som não é Opcional: Premium/JBL pertence ao equipamento.</p>
         <div class="form-grid-organizada tres-colunas">
-          <label>Som
-            <select name="som">
-              {% set som_atual = equipamento.som if equipamento and equipamento.som else 'NA' %}
-              {% for op in ['Premium','JBL','NA'] %}<option value="{{ op }}" {% if som_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
+          {% set campos_opcionais = [('hdmi_tela_2','HDMI Tela 2','NA'),('teclado_bluetooth','Teclado Bluetooth','NA'),('microfone','Microfone','Com fio'),('sistema_credito','Sistema de Crédito','NA'),('catalogo_impresso','Catálogo Impresso','NA')] %}
+          {% for campo, titulo, padrao in campos_opcionais %}
+          {% set atual = (equipamento|attr(campo)) if equipamento else padrao %}
+          <label>{{ titulo }}
+            <select name="{{ campo }}" data-opcional="{{ campo }}">
+              {% for config in opcoes_por_campo.get(campo, []) %}<option value="{{ config.valor }}" {% if atual == config.valor %}selected{% endif %}>{{ config.rotulo }}</option>{% endfor %}
             </select>
           </label>
-          <label>HDMI Tela 2
-            <select name="hdmi_tela_2">
-              {% set hdmi_atual = equipamento.hdmi_tela_2 if equipamento and equipamento.hdmi_tela_2 else 'NA' %}
-              {% for op in ['Sim','Não','NA'] %}<option value="{{ op }}" {% if hdmi_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
-            </select>
-          </label>
-          <label>Teclado Bluetooth
-            <select name="teclado_bluetooth">
-              {% set teclado_atual = equipamento.teclado_bluetooth if equipamento and equipamento.teclado_bluetooth else 'NA' %}
-              {% for op in ['Sim','Não','NA'] %}<option value="{{ op }}" {% if teclado_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
-            </select>
-          </label>
-          <label>Microfone
-            <select name="microfone">
-              {% set microfone_atual = equipamento.microfone if equipamento and equipamento.microfone else 'Com fio' %}
-              {% for op in ['Com fio','Sem fio','NA'] %}<option value="{{ op }}" {% if microfone_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
-            </select>
-          </label>
-          <label>Sistema de Crédito
-            <select name="sistema_credito">
-              {% set credito_atual = equipamento.sistema_credito if equipamento and equipamento.sistema_credito else 'NA' %}
-              {% for op in ['Moedeiro','Ficheiro','Teclado','NA'] %}<option value="{{ op }}" {% if credito_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
-            </select>
-          </label>
-          <label>Catálogo Impresso
-            <select name="catalogo_impresso">
-              {% set catalogo_impresso_atual = equipamento.catalogo_impresso if equipamento and equipamento.catalogo_impresso else 'NA' %}
-              {% for op in ['Sim','Não','NA'] %}<option value="{{ op }}" {% if catalogo_impresso_atual == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
-            </select>
-          </label>
+          {% endfor %}
         </div>
       </div>
+      <div class="venda-card-dados" id="resumo-custo-venda" style="margin-top:16px">
+        <div><small>Custo base</small><strong id="resumo-custo-base">{{ resumo_custo.base|moeda }}</strong></div>
+        <div><small>Opcionais</small><strong id="resumo-custo-opcionais">{{ resumo_custo.opcionais|moeda }}</strong></div>
+        <div><small>Custo final</small><strong id="resumo-custo-final">{{ resumo_custo.custo|moeda }}</strong></div>
+        <div><small>Lucro</small><strong id="resumo-lucro">{{ resumo_custo.lucro|moeda }}</strong></div>
+        <div><small>Margem</small><strong id="resumo-margem">{{ '%.2f'|format(resumo_custo.margem) }}%</strong></div>
+      </div>
+      {% if resumo_custo.snapshot %}<div class="alerta informacao" style="margin-top:10px">Venda finalizada: o custo está congelado pelo snapshot histórico e não muda com alterações futuras nos Itens.</div>{% endif %}
     </section>
 
     <section class="cartao secao-form">
@@ -284,6 +279,78 @@
   }
   tipo.addEventListener('change',()=>atualizar(false));
   atualizar(false);
+})();
+</script>
+
+<script>
+(() => {
+  const produto=document.getElementById('produto-venda-id');
+  const catalogo=document.getElementById('catalogo-venda');
+  const tipo=document.getElementById('tipo-equipamento');
+  const modelo=document.getElementById('modelo-equipamento');
+  const valor=document.getElementById('valor_total');
+  const precoVenda=document.getElementById('preco-venda-unitario');
+  const precoCusto=document.getElementById('preco-custo-calculado');
+  if (!produto || !catalogo) return;
+  const custosModelos={{ custos_modelos|tojson }};
+  const precosModelos={{ precos_modelos|tojson }};
+  const tiposModelos={{ tipos_modelos|tojson }};
+  const nomesModelos={{ nomes_modelos|tojson }};
+  const custosOpcionais={{ custos_opcionais|tojson }};
+  const plus={{ plus_acrescimo }};
+  const snapshotAtivo={{ 'true' if resumo_custo.snapshot else 'false' }};
+  const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0};
+  const br=v=>(Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  function custoOpcional(){
+    let total=0;
+    document.querySelectorAll('[data-opcional]').forEach(select=>{
+      const mapa=custosOpcionais[select.dataset.opcional]||{};
+      total += Number(mapa[select.value]||0);
+    });
+    return total;
+  }
+  function recalcular(){
+    if(snapshotAtivo) return;
+    const id=produto.value;
+    const base=Number(custosModelos[id]||0);
+    const op=custoOpcional();
+    const custo=base+op;
+    const venda=n(valor && valor.value ? valor.value : (precoVenda ? precoVenda.value : 0));
+    const lucro=venda-custo;
+    const margem=venda ? (lucro/venda*100) : 0;
+    const map={
+      'resumo-custo-base':br(base),'resumo-custo-opcionais':br(op),'resumo-custo-final':br(custo),
+      'resumo-lucro':br(lucro),'resumo-margem':margem.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%'
+    };
+    Object.entries(map).forEach(([id,text])=>{const el=document.getElementById(id);if(el)el.textContent=text});
+    if(id && precoCusto){precoCusto.value=custo.toFixed(2);precoCusto.readOnly=true;}
+    else if(precoCusto){precoCusto.readOnly=false;}
+  }
+  function aplicarProduto(){
+    const id=produto.value;
+    if(id){
+      if(tipo) tipo.value=tiposModelos[id]||tipo.value;
+      if(modelo) modelo.value=nomesModelos[id]||modelo.value;
+      const sugerido=Number(precosModelos[id]||0)+(catalogo.value==='PLUS'?plus:0);
+      if(valor) valor.value=sugerido.toFixed(2);
+      if(precoVenda) precoVenda.value=sugerido.toFixed(2);
+      tipo && tipo.dispatchEvent(new Event('input'));
+    }
+    recalcular();
+  }
+  produto.addEventListener('change',aplicarProduto);
+  catalogo.addEventListener('change',()=>{
+    const id=produto.value;
+    if(id){
+      const sugerido=Number(precosModelos[id]||0)+(catalogo.value==='PLUS'?plus:0);
+      if(valor) valor.value=sugerido.toFixed(2);
+      if(precoVenda) precoVenda.value=sugerido.toFixed(2);
+    }
+    recalcular();
+  });
+  document.querySelectorAll('[data-opcional]').forEach(el=>el.addEventListener('change',recalcular));
+  [valor,precoVenda].forEach(el=>el&&el.addEventListener('input',recalcular));
+  recalcular();
 })();
 </script>
 

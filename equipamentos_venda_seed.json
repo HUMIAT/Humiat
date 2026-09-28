@@ -1,0 +1,1315 @@
+[
+  {
+    "nome": "Karaokê Portátil",
+    "sku": "KRJ-PORTATIL",
+    "tipo": "MALETA",
+    "solvoz_slug": "portatil",
+    "preco_basico": 2500,
+    "ordem": 10,
+    "origem_planilha": "MALETA",
+    "composicao": [
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CABO HDMI",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X P2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P2 FEMEA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P2 MACHO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "COOLER 8 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO MIC MALETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MALETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSOR HDMI",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE MALETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE COOLER 8MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA DE MICROFONE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      }
+    ]
+  },
+  {
+    "nome": "Bipartido 17 Premium",
+    "sku": "KRJ-BIP17-PREM",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "bipartido-17-premium",
+    "preco_basico": 3600,
+    "ordem": 20,
+    "origem_planilha": "JUKEBOX 17 MONO",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 2.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER PREMIUM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 STURDY",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE JUKEBOX 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITOR 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER PREMIUM",
+        "quantidade": 1.0
+      }
+    ]
+  },
+  {
+    "nome": "Bipartido 17 JBL",
+    "sku": "KRJ-BIP17-JBL",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "bipartido-17-jbl",
+    "preco_basico": 4200,
+    "ordem": 30,
+    "origem_planilha": "JUKEBOX 17 STEREO JBL",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER JBL",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 JBL",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE JUKEBOX 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITOR 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER JBL",
+        "quantidade": 1.0
+      }
+    ]
+  },
+  {
+    "nome": "Bipartido 19 Premium",
+    "sku": "KRJ-BIP19-PREM",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "bipartido-19-premium",
+    "preco_basico": 4600,
+    "ordem": 40,
+    "origem_planilha": "JUKEBOX 19 STEREO PREMIUM DUPLA",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER PREMIUM",
+        "quantidade": 2.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 STURDY",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE JUKEBOX 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 2.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITO19",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER PREMIUM",
+        "quantidade": 2.0
+      }
+    ]
+  },
+  {
+    "nome": "Bipartido 19 JBL",
+    "sku": "KRJ-BIP19-JBL",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "bipartido-19-jbl",
+    "preco_basico": 5400,
+    "ordem": 50,
+    "origem_planilha": "JUKEBOX 19 STEREO JBL DUPLA",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER JBL",
+        "quantidade": 2.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 JBL",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE JUKEBOX 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 2.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITO19",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER JBL",
+        "quantidade": 2.0
+      }
+    ]
+  },
+  {
+    "nome": "Guitarrinha 19 Premium",
+    "sku": "KRJ-GUIT19-PREM",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "guitarrinha-19-premium",
+    "preco_basico": 4100,
+    "ordem": 60,
+    "origem_planilha": "GUITARRA 19 STEREO PREMIUM DUPLA",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER PREMIUM",
+        "quantidade": 2.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 STURDY",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE MINI IPHONE OU HEINEKEN",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 2.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITO19",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER PREMIUM",
+        "quantidade": 2.0
+      }
+    ]
+  },
+  {
+    "nome": "Guitarrinha 19 JBL",
+    "sku": "KRJ-GUIT19-JBL",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "guitarrinha-19-jbl",
+    "preco_basico": 4700,
+    "ordem": 70,
+    "origem_planilha": "GUITARRA 19 STEREO JBL DUPLA",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 2.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER JBL",
+        "quantidade": 2.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 JBL",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 2.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE MINI IPHONE OU HEINEKEN",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 2.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITO19",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER JBL",
+        "quantidade": 2.0
+      }
+    ]
+  },
+  {
+    "nome": "Guitarra 22 Premium",
+    "sku": "KRJ-GUIT22-PREM",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "guitarra-22-premium",
+    "preco_basico": 5500,
+    "ordem": 80,
+    "origem_planilha": null,
+    "observacao": "A planilha fornecida não possui uma coluna correspondente à Guitarra 22; composição deve ser cadastrada no Organiza.",
+    "composicao": []
+  },
+  {
+    "nome": "Guitarra 22 JBL",
+    "sku": "KRJ-GUIT22-JBL",
+    "tipo": "JUKEBOX",
+    "solvoz_slug": "guitarra-22-jbl",
+    "preco_basico": 6300,
+    "ordem": 90,
+    "origem_planilha": null,
+    "observacao": "A planilha fornecida não possui uma coluna correspondente à Guitarra 22; composição deve ser cadastrada no Organiza.",
+    "composicao": []
+  },
+  {
+    "nome": "iPhone 17 Premium",
+    "sku": "KRJ-IPH17-PREM",
+    "tipo": "IPHONE",
+    "solvoz_slug": "iphone-17-premium",
+    "preco_basico": 4600,
+    "ordem": 100,
+    "origem_planilha": "HEINEKEN OU IPHONE EM LED 17 STEREO JBL (quantidades; áudio convertido para Premium)",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER PREMIUM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 STURDY",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE IPHONE OU HEINEKEN EM LED",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITOR 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER PREMIUM",
+        "quantidade": 1.0
+      }
+    ]
+  },
+  {
+    "nome": "iPhone 17 JBL",
+    "sku": "KRJ-IPH17-JBL",
+    "tipo": "IPHONE",
+    "solvoz_slug": "iphone-17-jbl",
+    "preco_basico": 5200,
+    "ordem": 110,
+    "origem_planilha": "HEINEKEN OU IPHONE EM LED 17 STEREO JBL",
+    "composicao": [
+      {
+        "item": "AMPLIFICADOR MONO C/ BLUETOOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BLUETTOTH",
+        "quantidade": 1.0
+      },
+      {
+        "item": "BOTOES",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO BIPOLAR",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO DE FORÇA",
+        "quantidade": 3.0
+      },
+      {
+        "item": "CABO LIGAR PLACA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO P2 X RCA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO SATA",
+        "quantidade": 5.0
+      },
+      {
+        "item": "CABO USB X PS2",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CABO VGA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CAPA CORNETA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR 2 PINOS",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR FORÇA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "CONECTOR P10 FEMEA",
+        "quantidade": 4.0
+      },
+      {
+        "item": "CONECTOR P10 MACHO",
+        "quantidade": 4.0
+      },
+      {
+        "item": "COOLER 12 MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "DRIVER JBL",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO MIC MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "ESPELHO TRASEIRO MAQUINA",
+        "quantidade": 1.0
+      },
+      {
+        "item": "EXTENSAO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FALANTE 12 JBL",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FITA LED",
+        "quantidade": 1.0
+      },
+      {
+        "item": "FONTE C3TECK",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GABINETE IPHONE OU HEINEKEN EM LED",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE 12 FALANTE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "GRADE COOLER 12MM",
+        "quantidade": 1.0
+      },
+      {
+        "item": "HD",
+        "quantidade": 1.0
+      },
+      {
+        "item": "INTERFACE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MEMORIA 2GB",
+        "quantidade": 1.0
+      },
+      {
+        "item": "MONITOR 17",
+        "quantidade": 1.0
+      },
+      {
+        "item": "PLACA MAE",
+        "quantidade": 1.0
+      },
+      {
+        "item": "SUPORTE DE MIC",
+        "quantidade": 2.0
+      },
+      {
+        "item": "TECLADO",
+        "quantidade": 1.0
+      },
+      {
+        "item": "TWEETER JBL",
+        "quantidade": 1.0
+      }
+    ]
+  }
+]
