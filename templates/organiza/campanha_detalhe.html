@@ -18,6 +18,8 @@
   {% if erro == 'selecione_lote' %}<div class="alerta info">Escolha um lote antes de iniciar o envio.</div>{% endif %}
   {% if recuperacao == 'nenhum' %}<div class="alerta info">Todos os clientes elegíveis desta campanha já foram enviados/processados. Nenhum lote complementar foi criado.</div>{% endif %}
   {% if recuperacao and recuperacao not in ['nenhum','indisponivel'] %}<div class="alerta sucesso">Lote complementar criado com {{ recuperacao }} cliente(s) não enviado(s){% if lotes_recuperacao %} · lote(s) {{ lotes_recuperacao }}{% endif %}.</div>{% endif %}
+  {% if reenvio == 'nenhum' %}<div class="alerta info">Nenhum cliente pendente de fechamento foi encontrado para reenvio.</div>{% endif %}
+  {% if reenvio and reenvio != 'nenhum' %}<div class="alerta sucesso">Reenvio preparado para {{ reenvio }} cliente(s) que ainda não fecharam{% if lotes_reenvio %} · lote(s) {{ lotes_reenvio }}{% endif %}.</div>{% endif %}
 
   <section class="cartao campanha-resumo-card">
     <div class="campanha-resumo-topo">
@@ -28,13 +30,28 @@
         <div><small>Processados</small><strong>{{ contagens.processados }} / {{ contagens.total }}</strong></div>
       {% endif %}
     </div>
-    <div class="campanha-mensagem-preview">{{ campanha.mensagem }}</div>
+    <div class="campanha-mensagem-preview">{{ mensagem_preview }}</div>
     {% if campanha.lista_tipo == 'ATUALIZACAO' %}
       <div class="campanha-link-preview"><small>Link da campanha</small><span>Dinâmico por cliente, conforme a versão do equipamento até {{ campanha.pacote_alvo }}.</span></div>
     {% elif campanha.link %}
       <div class="campanha-link-preview"><small>Link da campanha</small><a href="{{ campanha.link }}" target="_blank" rel="noopener">{{ campanha.link }}</a></div>
     {% endif %}
   </section>
+
+  {% if campanha.status != 'RASCUNHO' and nao_fechados_disponiveis %}
+  <section class="cartao campanha-resumo-card">
+    <div class="campanha-resumo-topo">
+      <div>
+        <small>Reenvio da promoção prorrogada</small>
+        <strong>{{ nao_fechados_disponiveis }} ainda não fecharam</strong>
+      </div>
+      <form method="post" action="/organiza/campanhas/{{ campanha.id }}/reenvio-nao-fechados" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='Refazendo lotes...'; return true;">
+        <button class="botao primario" type="submit">Refazer lotes para quem não fechou</button>
+      </form>
+    </div>
+    <p class="texto-suave">Cria novos lotes de reenvio sem apagar os lotes anteriores. Atualização exclui compras PAGO/A_PAGAR; Aluguel exclui contatos com novo aluguel registrado no Connect desde o início da campanha.</p>
+  </section>
+  {% endif %}
 
   {% if campanha.status != 'RASCUNHO' and nao_enviados_disponiveis %}
   <section class="cartao campanha-resumo-card">
