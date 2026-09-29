@@ -4720,6 +4720,13 @@ def _valores_atualizacao_cliente(pacotes: list[str], promo_override: dict | None
     # Durante uma campanha preparada usamos o snapshot congelado e não
     # consultamos o SolVoz novamente a cada cliente.
     promo = dict(promo_override or _solvoz_atualizacao_promocao_config())
+    # Extensão especial do mês de aniversário solicitada para as campanhas atuais.
+    # Mantém os mesmos valores promocionais e estende somente o prazo até 10/10/2026.
+    if date.today() <= CAMPANHA_ANIVERSARIO_VALIDA_ATE:
+        promo["ativo"] = True
+        promo["vigente"] = True
+        promo["valida_ate"] = CAMPANHA_ANIVERSARIO_VALIDA_ATE.isoformat()
+        promo["valida_ate_br"] = CAMPANHA_ANIVERSARIO_VALIDA_ATE.strftime("%d/%m/%Y")
     quantidade = max(1, len(pacotes or []))
     preco_pacote = max(1, int(promo.get("preco_pacote_centavos") or ATUALIZACAO_PRECO_PACOTE_CENTAVOS))
     normal = quantidade * preco_pacote
@@ -5078,11 +5085,35 @@ def _rotulo_lista_campanha(campanha: Campanha | None) -> str:
     return "Clientes de Aluguel" if campanha and (campanha.lista_tipo or "").upper() == "ALUGUEL" else "Clientes de Atualização"
 
 
+CAMPANHA_ANIVERSARIO_VALIDA_ATE = date(2026, 10, 10)
+CAMPANHA_ANIVERSARIO_SITE = "www.karaokerj.com.br"
+CAMPANHA_ANIVERSARIO_DESTAQUE = (
+    "🎉 NOVIDADE! PRORROGAMOS A PROMOÇÃO!\n"
+    "Agora você pode aproveitar as condições especiais da Karaokê RJ até 10/10/2026.\n"
+    "🎤 Mês de aniversário Karaokê RJ: o Karaokê Plus sai pelo preço do Básico!\n"
+    f"{CAMPANHA_ANIVERSARIO_SITE}"
+)
+
+
+def _campanha_mensagem_base_promocional(campanha: Campanha) -> str:
+    """Mantém a mensagem original, retirando o prazo antigo e adicionando o aviso novo acima."""
+    mensagem = (campanha.mensagem or "").strip()
+    # Remove somente referências ao encerramento antigo. O restante do anúncio é preservado.
+    for padrao in (
+        r"(?i)\b30/09/2026\b", r"(?i)\b30/09/26\b", r"(?i)\b30/09\b",
+        r"(?i)\b30-09-2026\b", r"(?i)\b2026-09-30\b",
+    ):
+        mensagem = re.sub(padrao, "", mensagem)
+    mensagem = re.sub(r"[ \t]+\n", "\n", mensagem)
+    mensagem = re.sub(r"\n{3,}", "\n\n", mensagem).strip()
+    return f"{CAMPANHA_ANIVERSARIO_DESTAQUE}\n\n{mensagem}".strip()
+
+
 def _mensagem_campanha(
     campanha: Campanha, pessoa, pacotes_override: list[str] | None = None,
     valores_override: dict | None = None, link_override: str | None = None,
 ) -> str:
-    mensagem = (campanha.mensagem or "").strip().replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
+    mensagem = _campanha_mensagem_base_promocional(campanha).replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
     if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
         pacotes = list(pacotes_override or []) or _pacotes_atualizacao_cliente(campanha, pessoa)
         link = link_override if link_override is not None else _link_atualizacao_cliente(campanha, pessoa, pacotes)
@@ -5582,6 +5613,102 @@ def campanha_criar_lote_nao_enviados(campanha_id: int, usuario: Usuario = Depend
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao=nenhum", status_code=303)
     lotes_txt = ",".join(str(n) for n in numeros)
     return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao={total}&lotes_recuperacao={lotes_txt}", status_code=303)
+
+
+def _ids_fechados_campanha(db: Session, campanha: Campanha) -> set[int]:
+    """Retorna IDs de clientes/contatos que já fecharam desde o início da campanha."""
+    inicio = campanha.iniciado_em or campanha.criado_em
+    if (campanha.lista_tipo or "ATUALIZACAO").upper() == "ALUGUEL":
+        q = db.query(CampanhaAluguelContato.id).filter(CampanhaAluguelContato.ultimo_aluguel_em.isnot(None))
+        if inicio:
+            q = q.filter(CampanhaAluguelContato.ultimo_aluguel_em >= inicio.date())
+        return {int(x[0]) for x in q.all()}
+
+    q = db.query(AtualizacaoCompra.cliente_id).filter(AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")))
+    if inicio:
+        q = q.filter(AtualizacaoCompra.criado_em >= inicio)
+    return {int(x[0]) for x in q.distinct().all() if x[0] is not None}
+
+
+def _quantidade_nao_fechados_campanha(db: Session, campanha: Campanha) -> int:
+    modelo = _modelo_destinatario_campanha(campanha)
+    pessoa_id_attr = "contato_id" if (campanha.lista_tipo or "").upper() == "ALUGUEL" else "cliente_id"
+    fechados = _ids_fechados_campanha(db, campanha)
+    destinos = db.query(modelo).filter(
+        modelo.campanha_id == campanha.id,
+        ~modelo.status.in_(["IGNORADO"]),
+    ).all()
+    return sum(1 for d in destinos if int(getattr(d, pessoa_id_attr) or 0) not in fechados)
+
+
+def _criar_lotes_reenvio_nao_fechados(db: Session, campanha: Campanha) -> tuple[int, list[int]]:
+    """Cria novos lotes somente com quem participou e ainda não fechou.
+
+    Preserva os lotes anteriores como histórico e regenera a mensagem pronta com
+    o novo aviso/prazo antes do reenvio.
+    """
+    lista_tipo = (campanha.lista_tipo or "ATUALIZACAO").upper()
+    modelo = _modelo_destinatario_campanha(campanha)
+    pessoa_id_attr = "contato_id" if lista_tipo == "ALUGUEL" else "cliente_id"
+    rel_attr = "contato" if lista_tipo == "ALUGUEL" else "cliente"
+    fechados = _ids_fechados_campanha(db, campanha)
+    destinos = db.query(modelo).filter(
+        modelo.campanha_id == campanha.id,
+        ~modelo.status.in_(["IGNORADO"]),
+    ).order_by(modelo.id.asc()).all()
+
+    candidatos = [d for d in destinos if int(getattr(d, pessoa_id_attr) or 0) not in fechados]
+    if not candidatos:
+        return 0, []
+
+    promo_snapshot = _solvoz_atualizacao_promocao_config() if lista_tipo == "ATUALIZACAO" else None
+    pacotes_disponiveis = None
+    if promo_snapshot is not None:
+        pacotes_disponiveis = [str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()]
+
+    max_lote = int(db.query(func.max(CampanhaLote.numero)).filter(CampanhaLote.campanha_id == campanha.id).scalar() or 0)
+    numeros: list[int] = []
+    for idx, dest in enumerate(candidatos):
+        pessoa = getattr(dest, rel_attr, None)
+        if not pessoa:
+            continue
+        numero = max_lote + 1 + (idx // CAMPANHA_LOTE_TAMANHO)
+        if numero not in numeros:
+            numeros.append(numero)
+        dest.status = "PENDENTE"
+        dest.lote_numero = numero
+        dest.reservado_por_id = None
+        dest.reservado_em = None
+        _preparar_snapshot_destinatario(
+            campanha, dest, pessoa, promo_snapshot=promo_snapshot, pacotes_disponiveis=pacotes_disponiveis
+        )
+
+    db.flush()
+    _garantir_lotes_campanha(db, campanha)
+    for numero in numeros:
+        lote = db.query(CampanhaLote).filter(
+            CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == numero
+        ).first()
+        if lote:
+            lote.reservado_por_id = None
+            lote.reservado_em = None
+            lote.concluido_em = None
+    campanha.status = "ATIVA"
+    campanha.finalizado_em = None
+    db.commit()
+    return len(candidatos), numeros
+
+
+@app.post("/organiza/campanhas/{campanha_id}/reenvio-nao-fechados")
+def campanha_reenvio_nao_fechados(campanha_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    total, numeros = _criar_lotes_reenvio_nao_fechados(db, campanha)
+    if not total:
+        return RedirectResponse(f"/organiza/campanhas/{campanha.id}?reenvio=nenhum", status_code=303)
+    lotes_txt = ",".join(str(n) for n in numeros)
+    return RedirectResponse(f"/organiza/campanhas/{campanha.id}?reenvio={total}&lotes_reenvio={lotes_txt}", status_code=303)
 
 
 def _reservar_lote_escolhido(db: Session, campanha: Campanha, usuario: Usuario, lote_numero: int) -> CampanhaLote | None:
@@ -6417,6 +6544,7 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
     total_previsto = contagens["total"]
     lotes = _resumo_lotes_campanha(db, campanha) if total_previsto else []
     nao_enviados_disponiveis = _quantidade_nao_enviados_campanha(db, campanha) if campanha.status != "RASCUNHO" else 0
+    nao_fechados_disponiveis = _quantidade_nao_fechados_campanha(db, campanha) if campanha.status != "RASCUNHO" else 0
     return templates.TemplateResponse("organiza/campanha_detalhe.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
         "rotulo_lista": _rotulo_lista_campanha(campanha),
@@ -6425,9 +6553,13 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
         "lotes": lotes,
         "tamanho_lote": CAMPANHA_LOTE_TAMANHO,
         "nao_enviados_disponiveis": nao_enviados_disponiveis,
+        "nao_fechados_disponiveis": nao_fechados_disponiveis,
+        "mensagem_preview": _campanha_mensagem_base_promocional(campanha),
         "erro": request.query_params.get("erro", ""),
         "recuperacao": request.query_params.get("recuperacao", ""),
         "lotes_recuperacao": request.query_params.get("lotes_recuperacao", ""),
+        "reenvio": request.query_params.get("reenvio", ""),
+        "lotes_reenvio": request.query_params.get("lotes_reenvio", ""),
     })
 
 
