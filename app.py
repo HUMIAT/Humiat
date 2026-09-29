@@ -701,6 +701,8 @@ class Equipamento(Base):
     cupom_codigo_snapshot = Column(String(80), nullable=True)
     cupom_desconto_snapshot = Column(Float, nullable=False, default=0)
     desconto_manual = Column(Float, nullable=False, default=0)
+    # 1.1.79: frete da venda é separado do preço do equipamento e não recebe desconto/cupom.
+    frete_venda = Column(Float, nullable=False, default=0)
     # 1.1.74: correção manual do material efetivamente usado nesta máquina.
     # Quando manual=0, o consumo continua acompanhando composição + Opcionais.
     estoque_uso_override = Column(Text, nullable=True)
@@ -1241,6 +1243,7 @@ def _infinitepay_criar_cobranca_organiza(
     valor: float,
     cliente: Cliente | None,
     descricao: str,
+    itens_checkout: list[dict] | None = None,
 ) -> InfinitePayCobrancaOrganiza:
     origem_tipo = str(origem_tipo or "").strip().upper()
     valor_centavos = int(round(max(float(valor or 0), 0) * 100))
@@ -1272,16 +1275,36 @@ def _infinitepay_criar_cobranca_organiza(
     db.add(cobranca)
     db.flush()
 
+    itens_validos = []
+    for item in (itens_checkout or []):
+        try:
+            quantidade = max(int(item.get("quantity") or 1), 1)
+            preco = max(int(item.get("price") or 0), 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if preco <= 0:
+            continue
+        itens_validos.append({
+            "quantity": quantidade,
+            "price": preco,
+            "description": str(item.get("description") or descricao or f"{origem_tipo} #{origem_id}")[:180],
+        })
+    total_itens = sum(int(i["quantity"]) * int(i["price"]) for i in itens_validos)
+    if total_itens != valor_centavos:
+        # Cobrança parcial ou valor diferente do detalhamento completo: envia um único item
+        # para garantir que o checkout tenha exatamente o valor solicitado.
+        itens_validos = [{
+            "quantity": 1,
+            "price": valor_centavos,
+            "description": str(descricao or f"{origem_tipo} #{origem_id}")[:180],
+        }]
+
     payload = {
         "handle": INFINITEPAY_HANDLE,
         "order_nsu": order_nsu,
         "redirect_url": _infinitepay_public_url("/organiza/infinitepay/retorno"),
         "webhook_url": _infinitepay_public_url("/api/integracoes/infinitepay/organiza/webhook"),
-        "items": [{
-            "quantity": 1,
-            "price": valor_centavos,
-            "description": str(descricao or f"{origem_tipo} #{origem_id}")[:180],
-        }],
+        "items": itens_validos,
     }
     customer = _infinitepay_customer(cliente)
     if customer:
@@ -2995,12 +3018,13 @@ def resumo_custo_venda(eq: Equipamento, db: Session, usar_snapshot: bool = True)
         base = float(eq.custo_base_snapshot or 0)
         opcionais = float(eq.custo_opcionais_snapshot or 0)
         custo = float(eq.custo_final_snapshot or 0)
-        preco = float(eq.preco_venda_snapshot if eq.preco_venda_snapshot is not None else moeda_num(eq.valor))
+        preco = float(eq.preco_venda_snapshot if eq.preco_venda_snapshot is not None else max(moeda_num(eq.valor) - float(eq.frete_venda or 0), 0))
         lucro = float(eq.lucro_snapshot if eq.lucro_snapshot is not None else preco - custo)
         margem = float(eq.margem_snapshot if eq.margem_snapshot is not None else ((lucro / preco * 100) if preco else 0))
         bruto = moeda_num(eq.preco_venda) or preco
+        frete = max(float(eq.frete_venda or 0), 0)
         desconto = max(round(bruto - preco, 2), 0)
-        return {"base": round(base,2), "opcionais": round(opcionais,2), "custo": round(custo,2), "preco": round(preco,2), "bruto": round(bruto,2), "desconto": desconto, "lucro": round(lucro,2), "margem": round(margem,2), "snapshot": True}
+        return {"base": round(base,2), "opcionais": round(opcionais,2), "custo": round(custo,2), "preco": round(preco,2), "bruto": round(bruto,2), "desconto": desconto, "frete": round(frete,2), "total": round(preco+frete,2), "lucro": round(lucro,2), "margem": round(margem,2), "snapshot": True}
     if eq.produto_venda_id:
         base = custo_base_modelo(db, eq.produto_venda_id)
         opcionais = custo_opcionais_equipamento(eq, db)
@@ -3011,11 +3035,13 @@ def resumo_custo_venda(eq: Equipamento, db: Session, usar_snapshot: bool = True)
         opcionais = 0.0
         custo = round(base, 2)
     bruto = moeda_num(eq.preco_venda or eq.valor)
-    preco = moeda_num(eq.valor or eq.preco_venda)
+    frete = max(float(eq.frete_venda or 0), 0)
+    total = moeda_num(eq.valor or eq.preco_venda)
+    preco = max(round(total - frete, 2), 0)
     desconto = max(round(bruto - preco, 2), 0)
     lucro = round(preco - custo, 2)
     margem = round((lucro / preco * 100) if preco else 0, 2)
-    return {"base": base, "opcionais": opcionais, "custo": custo, "preco": preco, "bruto": bruto, "desconto": desconto, "lucro": lucro, "margem": margem, "snapshot": False}
+    return {"base": base, "opcionais": opcionais, "custo": custo, "preco": preco, "bruto": bruto, "desconto": desconto, "frete": round(frete,2), "total": round(total,2), "lucro": lucro, "margem": margem, "snapshot": False}
 
 
 def congelar_custo_venda_se_finalizada(eq: Equipamento, db: Session):
@@ -3045,7 +3071,7 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
         custo = float(c.quantidade or 0) * float(c.item.preco_custo or 0) if c.item else 0.0
         custos_opcionais.setdefault(c.campo, {})[c.valor] = round(custo, 2)
         opcoes_por_campo.setdefault(c.campo, []).append(c)
-    resumo = resumo_custo_venda(equipamento, db) if equipamento else {"base":0,"opcionais":0,"custo":0,"preco":0,"bruto":0,"desconto":0,"lucro":0,"margem":0,"snapshot":False}
+    resumo = resumo_custo_venda(equipamento, db) if equipamento else {"base":0,"opcionais":0,"custo":0,"preco":0,"bruto":0,"desconto":0,"frete":0,"total":0,"lucro":0,"margem":0,"snapshot":False}
     cupons = db.query(VendaCupom).filter(VendaCupom.ativo == 1).order_by(VendaCupom.codigo.asc()).all()
     if equipamento and equipamento.cupom_id and not any(c.id == equipamento.cupom_id for c in cupons):
         atual = db.query(VendaCupom).filter(VendaCupom.id == equipamento.cupom_id).first()
@@ -3354,6 +3380,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN cupom_desconto_snapshot FLOAT NOT NULL DEFAULT 0"))
             if "desconto_manual" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN desconto_manual FLOAT NOT NULL DEFAULT 0"))
+            if "frete_venda" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN frete_venda FLOAT NOT NULL DEFAULT 0"))
             if "estoque_uso_override" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN estoque_uso_override TEXT"))
             if "estoque_uso_manual" not in existentes_equipamentos:
@@ -7086,14 +7114,18 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         desconto_manual = max(float(desconto_manual or 0), 0)
         desconto_cupom = calcular_desconto_cupom(cupom, preco_bruto)
         desconto_total = min(preco_bruto, desconto_manual + desconto_cupom)
-        total_final = max(round(preco_bruto - desconto_total, 2), 0)
+        subtotal_produto = max(round(preco_bruto - desconto_total, 2), 0)
+        frete_venda = moeda_num(form.get("frete_venda")) if "frete_venda" in form else float(eq.frete_venda or 0)
+        frete_venda = max(float(frete_venda or 0), 0)
+        total_final = round(subtotal_produto + frete_venda, 2)
 
         eq.preco_venda = f"{preco_bruto:.2f}" if preco_bruto or modelo_venda else None
         eq.desconto_manual = round(min(desconto_manual, preco_bruto), 2)
+        eq.frete_venda = round(frete_venda, 2)
         eq.cupom_codigo_snapshot = cupom.codigo if cupom else None
         eq.cupom_desconto_snapshot = round(min(desconto_cupom, max(preco_bruto - eq.desconto_manual, 0)), 2)
-        # Se os descontos juntos ultrapassarem o bruto, o total nunca fica negativo.
-        eq.valor = f"{total_final:.2f}" if (eq.preco_venda is not None) else None
+        # Cupom/desconto incidem apenas no equipamento. O frete é somado depois.
+        eq.valor = f"{total_final:.2f}" if (eq.preco_venda is not None or frete_venda > 0) else None
 
     # Para modelos vinculados, custo é sempre calculado pelos Itens; custo manual só permanece no legado.
     if not modelo_venda:
@@ -14510,10 +14542,13 @@ def venda_pagamentos(
         raise HTTPException(404)
     pagamentos = db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == equipamento_id).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
     total = moeda_num(eq.valor)
+    frete = max(float(eq.frete_venda or 0), 0)
+    subtotal_produto = max(round(total - frete, 2), 0)
     recebido = sum(float(p.valor or 0) for p in pagamentos)
     cobranca_infinitepay = _infinitepay_cobranca_pendente(db, "VENDA", eq.id)
     return templates.TemplateResponse("organiza/venda_pagamentos.html", {
         "request": request, "usuario": usuario, "venda": eq, "pagamentos": pagamentos,
+        "subtotal_produto": subtotal_produto, "frete": frete,
         "total": total, "recebido": recebido, "saldo": max(total - recebido, 0),
         "hoje": _hoje_organiza().isoformat(), "erro": request.query_params.get("erro", ""),
         "observacao_padrao": _obs_pagamento_padrao(eq, eq.cliente),
@@ -14580,7 +14615,27 @@ async def venda_pagamento_infinitepay(
     if valor <= 0 or valor > saldo + 0.01:
         msg = quote_plus("Informe um valor válido, limitado ao saldo atual da venda.")
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?infinitepay_erro={msg}", status_code=303)
-    descricao = f"Venda #{eq.id} - {eq.cliente.nome if eq.cliente else 'Cliente'} - {eq.produto_venda_nome_snapshot or eq.modelo or eq.tipo or 'Equipamento'}"
+    produto_nome = eq.produto_venda_nome_snapshot or eq.modelo or eq.tipo or "Equipamento"
+    catalogo_rotulo = "Plus" if (eq.catalogo_venda or "").upper() == "PLUS" else "Básico"
+    frete = max(float(eq.frete_venda or 0), 0)
+    subtotal_produto = max(round(total - frete, 2), 0)
+    descricao = f"Venda #{eq.id} - {eq.cliente.nome if eq.cliente else 'Cliente'} - {produto_nome} - Catálogo {catalogo_rotulo}"
+    itens_checkout = []
+    # Só detalha produto + frete quando o valor solicitado corresponde ao total ainda
+    # integral da venda. Em cobrança parcial, usa um item único com o valor exato.
+    if recebido <= 0.009 and abs(valor - total) <= 0.01:
+        if subtotal_produto > 0:
+            itens_checkout.append({
+                "quantity": 1,
+                "price": int(round(subtotal_produto * 100)),
+                "description": f"{produto_nome} - Catálogo {catalogo_rotulo}",
+            })
+        if frete > 0:
+            itens_checkout.append({
+                "quantity": 1,
+                "price": int(round(frete * 100)),
+                "description": "Frete / entrega",
+            })
     try:
         _infinitepay_criar_cobranca_organiza(
             db,
@@ -14589,6 +14644,7 @@ async def venda_pagamento_infinitepay(
             valor=valor,
             cliente=eq.cliente,
             descricao=descricao,
+            itens_checkout=itens_checkout,
         )
     except Exception as exc:
         msg = quote_plus(str(exc))

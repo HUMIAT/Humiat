@@ -53,7 +53,8 @@
         </label>
         <label>Desconto manual (R$)<input id="desconto-manual" name="desconto_manual" inputmode="decimal" value="{{ '%.2f'|format(equipamento.desconto_manual or 0) if equipamento else '0.00' }}"></label>
         <label>Desconto do cupom<input id="desconto-cupom" value="{{ (equipamento.cupom_desconto_snapshot or 0)|moeda if equipamento else 'R$ 0,00' }}" readonly aria-readonly="true"></label>
-        <label>Valor total final<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}" readonly aria-readonly="true"><small>Calculado após os descontos.</small></label>
+        <label>Frete / entrega<input id="frete-venda" name="frete_venda" inputmode="decimal" value="{{ '%.2f'|format(equipamento.frete_venda or 0) if equipamento else '0.00' }}"><small>Somado após os descontos. Cupom não reduz o frete.</small></label>
+        <label>Valor total final<input id="valor_total" name="valor" inputmode="decimal" value="{{ equipamento.valor if equipamento and equipamento.valor else '' }}" readonly aria-readonly="true"><small>Equipamento após descontos + frete.</small></label>
         <label>Valor recebido<input id="valor_recebido" name="pago" inputmode="decimal" value="{{ equipamento.pago if equipamento and equipamento.pago else '' }}"></label>
         <div class="garantia-recibo">
           <label>Garantia (meses)<input type="number" min="0" name="garantia_meses" value="{{ equipamento.garantia_meses if equipamento and equipamento.garantia_meses is not none else 3 }}"></label>
@@ -372,6 +373,7 @@
   const cupom=document.getElementById('cupom-venda');
   const descontoManual=document.getElementById('desconto-manual');
   const descontoCupom=document.getElementById('desconto-cupom');
+  const freteVenda=document.getElementById('frete-venda');
   if (!produto || !catalogo) return;
   const custosModelos={{ custos_modelos|tojson }};
   const precosModelos={{ precos_modelos|tojson }};
@@ -408,11 +410,14 @@
     const manual=Math.max(n(descontoManual ? descontoManual.value : 0),0);
     const descCupom=Math.max(valorDescontoCupom(bruto),0);
     const desconto=Math.min(bruto, manual+descCupom);
-    const venda=Math.max(bruto-desconto,0);
+    const vendaProduto=Math.max(bruto-desconto,0);
+    const frete=Math.max(n(freteVenda ? freteVenda.value : 0),0);
+    const venda=vendaProduto+frete;
     if(valor) valor.value=venda.toFixed(2);
     if(descontoCupom) descontoCupom.value=br(descCupom);
-    const lucro=venda-custo;
-    const margem=venda ? (lucro/venda*100) : 0;
+    // Frete é separado da margem do equipamento para não inflar o lucro da máquina.
+    const lucro=vendaProduto-custo;
+    const margem=vendaProduto ? (lucro/vendaProduto*100) : 0;
     const map={
       'resumo-custo-base':br(base),'resumo-custo-opcionais':br(op),'resumo-custo-final':br(custo),
       'resumo-lucro':br(lucro),'resumo-margem':margem.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%'
@@ -443,7 +448,7 @@
     recalcular();
   });
   document.querySelectorAll('[data-opcional]').forEach(el=>el.addEventListener('change',recalcular));
-  [precoVenda,descontoManual,cupom].forEach(el=>el&&el.addEventListener(el.tagName==='SELECT'?'change':'input',recalcular));
+  [precoVenda,descontoManual,cupom,freteVenda].forEach(el=>el&&el.addEventListener(el.tagName==='SELECT'?'change':'input',recalcular));
   recalcular();
 })();
 </script>

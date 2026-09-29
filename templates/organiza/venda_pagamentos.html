@@ -15,14 +15,26 @@
   {% if infinitepay_sucesso %}<div class="alerta sucesso">{{ infinitepay_sucesso }}</div>{% endif %}
 
   <div class="venda-card-dados" style="margin-bottom:16px">
+    <div><small>Equipamento após descontos</small><strong>{{ subtotal_produto|moeda }}</strong></div>
+    <div><small>Frete / entrega</small><strong>{{ frete|moeda }}</strong></div>
     <div><small>Total da venda</small><strong>{{ total|moeda }}</strong></div>
     <div><small>Registrado</small><strong>{{ recebido|moeda }}</strong></div>
     <div class="saldo"><small>Saldo</small><strong>{{ saldo|moeda }}</strong></div>
   </div>
 
   <article class="cartao" style="margin-bottom:16px">
+    <h2>Dados da compra</h2>
+    <div class="form-grid" style="margin-top:10px">
+      <div><small>Cliente</small><strong style="display:block">{{ venda.cliente.nome }}</strong></div>
+      <div><small>Equipamento</small><strong style="display:block">{{ venda.produto_venda_nome_snapshot or venda.modelo or venda.tipo or 'Equipamento' }}</strong></div>
+      <div><small>Catálogo</small><strong style="display:block">{{ 'Plus' if venda.catalogo_venda == 'PLUS' else 'Básico' }}</strong></div>
+      <div><small>Entrega</small><strong style="display:block">{% if venda.cliente.entrega_igual_cliente %}{{ venda.cliente.endereco or '' }}{% if venda.cliente.endereco_numero %}, {{ venda.cliente.endereco_numero }}{% endif %}{% else %}{{ venda.cliente.entrega_endereco or '' }}{% if venda.cliente.entrega_numero %}, {{ venda.cliente.entrega_numero }}{% endif %}{% endif %}</strong></div>
+    </div>
+  </article>
+
+  <article class="cartao" style="margin-bottom:16px">
     <h2>InfinitePay</h2>
-    <p class="texto-suave">Gere uma cobrança do saldo total ou de um valor parcial. A confirmação da InfinitePay registra o pagamento automaticamente na venda.</p>
+    <p class="texto-suave">Gere uma cobrança do saldo total ou de um valor parcial. Na cobrança integral, o checkout recebe o equipamento e o frete separados. A confirmação da InfinitePay registra o pagamento automaticamente na venda.</p>
     {% if cobranca_infinitepay %}
       <div class="alerta informacao"><strong>Cobrança pendente: {{ (cobranca_infinitepay.valor_centavos / 100)|moeda }}</strong><br><small>Enquanto estiver pendente, o Organiza reutiliza o mesmo checkout para evitar cobrança duplicada.</small></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
