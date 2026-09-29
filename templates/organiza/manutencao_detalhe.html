@@ -517,21 +517,48 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
     <div class="manutencao-card-header"><div><h2>Registrar pagamento</h2><p class="texto-suave">Use quando houver pagamento. Este registro não muda a etapa da manutenção e não bloqueia o serviço.</p></div></div>
     {% if request.query_params.get('erro_pagamento') %}<div class="alerta erro">{{ request.query_params.get('erro_pagamento') }}</div>{% endif %}
     {% if request.query_params.get('pagamento_salvo') %}<div class="alerta sucesso">Pagamento registrado com sucesso.</div>{% endif %}
+    {% if infinitepay_erro %}<div class="alerta erro">{{ infinitepay_erro }}</div>{% endif %}
+    {% if infinitepay_sucesso %}<div class="alerta sucesso">{{ infinitepay_sucesso }}</div>{% endif %}
     {% if orcamento %}
     <div class="resumo-financeiro">
       <div><small>Total aprovado</small><strong>{{ totais.aprovado|moeda }}</strong></div>
       <div><small>Recebido</small><strong>{{ totais.recebido|moeda }}</strong></div>
       <div><small>Falta receber</small><strong>{{ totais.falta|moeda }}</strong></div>
     </div>
-    <form class="formulario manutencao-subcard" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento/registrar">
-      <div class="manutencao-grid tres">
-        <label>Data<input type="date" name="data" value="{{ m.criado_em.strftime('%Y-%m-%d') }}" required></label>
-        <label>Valor<input name="valor" placeholder="0,00" required></label>
-        <label>Forma / banco<select name="forma" required><option value="">Selecione</option><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select></label>
-      </div>
-      <label>Observação / comprovante<input name="observacao" placeholder="Opcional"></label>
-      <button class="botao primario" type="submit">Registrar pagamento</button>
-    </form>
+
+    <div class="manutencao-subcard pagamento-infinitepay">
+      <div class="manutencao-card-header"><div><h3>InfinitePay</h3><p class="texto-suave">Gere a cobrança do valor que deseja receber. Quando a InfinitePay confirmar, o pagamento entra automaticamente nesta manutenção.</p></div></div>
+      {% if cobranca_infinitepay %}
+        <div class="alerta informacao"><strong>Cobrança pendente: {{ (cobranca_infinitepay.valor_centavos / 100)|moeda }}</strong><br><small>Para evitar duplicidade, enquanto esta cobrança estiver pendente o sistema reutiliza o mesmo checkout.</small></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+          <a class="botao primario" href="{{ cobranca_infinitepay.checkout_url }}" target="_blank" rel="noopener">Abrir InfinitePay</a>
+          <button class="botao" type="button" onclick="copiarInfinitePay('{{ cobranca_infinitepay.checkout_url }}', this)">Copiar link</button>
+        </div>
+      {% elif infinitepay_habilitada and totais.falta > 0.009 %}
+        <form method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento/infinitepay">
+          <div class="manutencao-grid tres">
+            <label>Valor da cobrança<input name="valor" value="{{ '%.2f'|format(totais.falta or 0) }}" inputmode="decimal" required></label>
+            <div style="display:flex;align-items:end"><button class="botao primario" type="submit">Gerar cobrança InfinitePay</button></div>
+          </div>
+        </form>
+      {% elif not infinitepay_habilitada %}
+        <p class="texto-suave">A cobrança InfinitePay ficará disponível depois que o orçamento for aprovado.</p>
+      {% else %}<p class="texto-suave">Não há saldo pendente para cobrar.</p>{% endif %}
+    </div>
+
+    <div class="manutencao-subcard">
+      <h3>Pagamento manual</h3>
+      <p class="texto-suave">Continua disponível para PIX, dinheiro, cartão, transferência ou outra forma recebida fora da InfinitePay.</p>
+      <form class="formulario" method="post" action="/organiza/manutencoes/{{ m.id }}/pagamento/registrar">
+        <div class="manutencao-grid tres">
+          <label>Data<input type="date" name="data" value="{{ hoje_pagamento }}" required></label>
+          <label>Valor<input name="valor" placeholder="0,00" required></label>
+          <label>Forma / banco<select name="forma" required><option value="">Selecione</option><option>PIX</option><option>Dinheiro</option><option>Cartão</option><option>Transferência</option><option>Outro</option></select></label>
+        </div>
+        <label>Observação / comprovante<input name="observacao" placeholder="Opcional"></label>
+        <button class="botao primario" type="submit">Registrar pagamento manual</button>
+      </form>
+    </div>
     {% else %}<p class="texto-suave">O pagamento poderá ser registrado depois que existir um orçamento.</p>{% endif %}
   </details>
 </section>
@@ -636,4 +663,10 @@ function prepararItemOrcamento(form) {
 <style>
 .estoque-cor-manutencao{margin:10px 0;padding:10px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.estoque-cor-manutencao-topo{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px}.estoque-cor-manutencao-topo small{color:#64748b}.estoque-cor-manutencao-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:7px;margin-bottom:7px}.estoque-cor-manutencao-grid>div{display:grid;grid-template-columns:1fr 64px;gap:5px}.estoque-cor-manutencao-grid input{min-width:0}.estoque-cor-disponiveis{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 8px}.estoque-cor-disponiveis span{font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #dbe3ee;background:#fff}.estoque-cor-disponiveis span.negativo{color:#b42318;border-color:#f2b8b5}@media(max-width:760px){.estoque-cor-manutencao-grid{grid-template-columns:1fr}}
 </style>
+<script>
+async function copiarInfinitePay(url, botao){
+  try{await navigator.clipboard.writeText(url);const antigo=botao.textContent;botao.textContent='Link copiado';setTimeout(()=>botao.textContent=antigo,1600)}
+  catch(e){window.prompt('Copie o link da cobrança:', url)}
+}
+</script>
 {% endblock %}

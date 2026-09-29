@@ -11,6 +11,8 @@
   </div>
 
   {% if erro %}<div class="cartao" style="margin-bottom:14px;border-color:#f3b5b5">{{ erro }}</div>{% endif %}
+  {% if infinitepay_erro %}<div class="alerta erro">{{ infinitepay_erro }}</div>{% endif %}
+  {% if infinitepay_sucesso %}<div class="alerta sucesso">{{ infinitepay_sucesso }}</div>{% endif %}
 
   <div class="venda-card-dados" style="margin-bottom:16px">
     <div><small>Total da venda</small><strong>{{ total|moeda }}</strong></div>
@@ -19,7 +21,26 @@
   </div>
 
   <article class="cartao" style="margin-bottom:16px">
-    <h2>Novo pagamento</h2>
+    <h2>InfinitePay</h2>
+    <p class="texto-suave">Gere uma cobrança do saldo total ou de um valor parcial. A confirmação da InfinitePay registra o pagamento automaticamente na venda.</p>
+    {% if cobranca_infinitepay %}
+      <div class="alerta informacao"><strong>Cobrança pendente: {{ (cobranca_infinitepay.valor_centavos / 100)|moeda }}</strong><br><small>Enquanto estiver pendente, o Organiza reutiliza o mesmo checkout para evitar cobrança duplicada.</small></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <a class="botao primario" href="{{ cobranca_infinitepay.checkout_url }}" target="_blank" rel="noopener">Abrir InfinitePay</a>
+        <button class="botao" type="button" onclick="copiarInfinitePay('{{ cobranca_infinitepay.checkout_url }}', this)">Copiar link</button>
+      </div>
+    {% elif infinitepay_habilitada and saldo > 0.009 %}
+      <form method="post" action="/organiza/vendas/{{ venda.id }}/pagamentos/infinitepay" style="margin-top:12px">
+        <div class="form-grid">
+          <label>Valor da cobrança<input name="valor" value="{{ '%.2f'|format(saldo or 0) }}" inputmode="decimal" required></label>
+        </div>
+        <button class="botao primario" type="submit">Gerar cobrança InfinitePay</button>
+      </form>
+    {% elif saldo <= 0.009 %}<p class="texto-suave">Venda sem saldo pendente.</p>{% else %}<p class="texto-suave">InfinitePay não configurada.</p>{% endif %}
+  </article>
+
+  <article class="cartao" style="margin-bottom:16px">
+    <h2>Pagamento manual</h2>
     <form method="post" style="margin-top:14px">
       <div class="form-grid">
         <label>Valor<input name="valor" inputmode="decimal" placeholder="0,00" required></label>
@@ -29,7 +50,7 @@
         </label>
       </div>
       <label>Obs. / nome do comprovante<input name="observacao" placeholder="{{ observacao_padrao }} - nome do comprovante (opcional)"></label>
-      <div style="margin-top:14px"><button class="botao primario" type="submit">Registrar pagamento</button></div>
+      <div style="margin-top:14px"><button class="botao primario" type="submit">Registrar pagamento manual</button></div>
     </form>
   </article>
 
@@ -78,4 +99,10 @@
     </div>
   </article>
 </section>
+<script>
+async function copiarInfinitePay(url, botao){
+  try{await navigator.clipboard.writeText(url);const antigo=botao.textContent;botao.textContent='Link copiado';setTimeout(()=>botao.textContent=antigo,1600)}
+  catch(e){window.prompt('Copie o link da cobrança:', url)}
+}
+</script>
 {% endblock %}

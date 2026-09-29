@@ -38,6 +38,7 @@
       <span class="pagamento-saldo">
         {% if _saldo_manutencao(m)[2] > 0.009 %}
         Saldo: <strong>{{ _saldo_manutencao(m)[2]|moeda }}</strong>
+        <a href="/organiza/manutencoes/{{ m.id }}#pagamento-independente" onclick="event.stopPropagation()" style="display:block;margin-top:4px;font-weight:800;color:#2563eb">InfinitePay / manual</a>
         {% else %}
         <strong>Pagamento concluído</strong>
         {% endif %}

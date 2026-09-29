@@ -71,6 +71,13 @@ GOOGLE_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+# InfinitePay no Organiza. Usa a mesma InfiniteTag da Karaokê RJ já adotada
+# nos demais sistemas, podendo ser alterada por variável de ambiente.
+INFINITEPAY_HANDLE = (os.getenv("INFINITEPAY_HANDLE") or "karaokerj").strip().lstrip("$")
+INFINITEPAY_LINKS_URL = "https://api.checkout.infinitepay.io/links"
+INFINITEPAY_PAYMENT_CHECK_URL = "https://api.checkout.infinitepay.io/payment_check"
+INFINITEPAY_TIMEOUT_SECONDS = max(3, int(os.getenv("INFINITEPAY_TIMEOUT_SECONDS", "15") or 15))
+
 ATUALIZACAO_HORARIOS = {
     "CASA": list(range(10, 21)),  # 10:00 até 20:00, inclusive
     "LOJA": list(range(14, 19)),  # 14:00 até 18:00, inclusive
@@ -1122,6 +1129,264 @@ class PagamentoVenda(Base):
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
     equipamento = relationship("Equipamento")
 
+
+class InfinitePayCobrancaOrganiza(Base):
+    """Cobranças InfinitePay de vendas/manutenções do Organiza.
+
+    O pagamento confirmado vira o mesmo Pagamento/PagamentoVenda já usado pelas
+    telas manuais. A cobrança existe apenas para idempotência e auditoria.
+    """
+    __tablename__ = "organiza_infinitepay_cobrancas"
+    id = Column(Integer, primary_key=True)
+    origem_tipo = Column(String(20), nullable=False, index=True)  # VENDA | MANUTENCAO
+    origem_id = Column(Integer, nullable=False, index=True)
+    order_nsu = Column(String(140), nullable=False, unique=True, index=True)
+    valor_centavos = Column(Integer, nullable=False)
+    status = Column(String(40), nullable=False, default="AGUARDANDO_PAGAMENTO", index=True)
+    checkout_url = Column(String(1200), nullable=True)
+    transaction_nsu = Column(String(180), nullable=True, unique=True, index=True)
+    invoice_slug = Column(String(180), nullable=True)
+    receipt_url = Column(String(1200), nullable=True)
+    capture_method = Column(String(60), nullable=True)
+    installments = Column(Integer, nullable=True)
+    paid_amount_centavos = Column(Integer, nullable=True)
+    pagamento_id = Column(Integer, nullable=True, index=True)
+    pago_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+
+def _hoje_organiza() -> date:
+    """Data operacional do Rio/São Paulo, independente do fuso UTC do servidor."""
+    try:
+        return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    except Exception:
+        return date.today()
+
+
+def _infinitepay_public_url(path: str) -> str:
+    return f"{PUBLIC_BASE_URL.rstrip('/')}/{str(path or '').lstrip('/')}"
+
+
+def _infinitepay_post_organiza(url: str, payload: dict) -> dict:
+    dados = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=dados,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSION}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=INFINITEPAY_TIMEOUT_SECONDS) as resp:
+            bruto = resp.read().decode("utf-8", errors="replace")
+            obj = json.loads(bruto or "{}")
+            return obj if isinstance(obj, dict) else {}
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")[:1200]
+        raise RuntimeError(f"InfinitePay respondeu HTTP {exc.code}: {detalhe}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Não foi possível acessar a InfinitePay: {exc.reason}") from exc
+
+
+def _infinitepay_forma(capture_method: str) -> str:
+    metodo = str(capture_method or "").strip().lower()
+    if "pix" in metodo:
+        return "PIX"
+    if any(x in metodo for x in ("credit", "card", "credito", "cartao", "cartão")):
+        return "Cartão"
+    return "InfinitePay"
+
+
+def _infinitepay_customer(cliente: Cliente | None) -> dict | None:
+    if not cliente:
+        return None
+    email = str(cliente.email or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return None
+    telefone = re.sub(r"\D", "", str(cliente.whatsapp_completo() or cliente.telefone or ""))
+    if telefone and not telefone.startswith("55") and (cliente.pais or "BR").upper() == "BR":
+        telefone = "55" + telefone
+    customer = {
+        "name": str(cliente.nome or "Cliente")[:160],
+        "email": email[:180],
+        "phone_number": ("+" + telefone) if telefone else "",
+    }
+    return {k: v for k, v in customer.items() if v}
+
+
+def _infinitepay_cobranca_pendente(db: Session, origem_tipo: str, origem_id: int):
+    return (
+        db.query(InfinitePayCobrancaOrganiza)
+        .filter(
+            InfinitePayCobrancaOrganiza.origem_tipo == str(origem_tipo).upper(),
+            InfinitePayCobrancaOrganiza.origem_id == int(origem_id),
+            InfinitePayCobrancaOrganiza.status == "AGUARDANDO_PAGAMENTO",
+            InfinitePayCobrancaOrganiza.checkout_url.isnot(None),
+        )
+        .order_by(InfinitePayCobrancaOrganiza.id.desc())
+        .first()
+    )
+
+
+def _infinitepay_criar_cobranca_organiza(
+    db: Session,
+    *,
+    origem_tipo: str,
+    origem_id: int,
+    valor: float,
+    cliente: Cliente | None,
+    descricao: str,
+) -> InfinitePayCobrancaOrganiza:
+    origem_tipo = str(origem_tipo or "").strip().upper()
+    valor_centavos = int(round(max(float(valor or 0), 0) * 100))
+    if origem_tipo not in {"VENDA", "MANUTENCAO"}:
+        raise ValueError("Origem de cobrança inválida.")
+    if valor_centavos <= 0:
+        raise ValueError("Informe um valor válido para a cobrança.")
+
+    pendente = _infinitepay_cobranca_pendente(db, origem_tipo, origem_id)
+    if pendente:
+        if int(pendente.valor_centavos or 0) != valor_centavos:
+            raise ValueError(
+                f"Já existe uma cobrança InfinitePay pendente de R$ {float(pendente.valor_centavos or 0)/100:.2f}. "
+                "Abra essa cobrança antes de gerar outra."
+            )
+        return pendente
+
+    order_nsu = (
+        f"ORGANIZA-{origem_tipo[:3]}-{int(origem_id)}-"
+        f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4).upper()}"
+    )
+    cobranca = InfinitePayCobrancaOrganiza(
+        origem_tipo=origem_tipo,
+        origem_id=int(origem_id),
+        order_nsu=order_nsu,
+        valor_centavos=valor_centavos,
+        status="AGUARDANDO_PAGAMENTO",
+    )
+    db.add(cobranca)
+    db.flush()
+
+    payload = {
+        "handle": INFINITEPAY_HANDLE,
+        "order_nsu": order_nsu,
+        "redirect_url": _infinitepay_public_url("/organiza/infinitepay/retorno"),
+        "webhook_url": _infinitepay_public_url("/api/integracoes/infinitepay/organiza/webhook"),
+        "items": [{
+            "quantity": 1,
+            "price": valor_centavos,
+            "description": str(descricao or f"{origem_tipo} #{origem_id}")[:180],
+        }],
+    }
+    customer = _infinitepay_customer(cliente)
+    if customer:
+        payload["customer"] = customer
+
+    try:
+        resposta = _infinitepay_post_organiza(INFINITEPAY_LINKS_URL, payload)
+        checkout_url = str(resposta.get("url") or "").strip()
+        if not checkout_url.startswith("https://"):
+            raise RuntimeError("InfinitePay não retornou uma URL válida de checkout.")
+        cobranca.checkout_url = checkout_url
+        db.commit()
+        db.refresh(cobranca)
+        return cobranca
+    except Exception:
+        cobranca.status = "ERRO_CHECKOUT"
+        db.commit()
+        raise
+
+
+def _infinitepay_registrar_pagamento_organiza(
+    db: Session,
+    cobranca: InfinitePayCobrancaOrganiza,
+    *,
+    transaction_nsu: str,
+    invoice_slug: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    installments: int = 0,
+    paid_amount_centavos: int = 0,
+) -> bool:
+    cobranca = (
+        db.query(InfinitePayCobrancaOrganiza)
+        .filter(InfinitePayCobrancaOrganiza.id == int(cobranca.id))
+        .with_for_update()
+        .first()
+    )
+    if not cobranca:
+        return False
+    if cobranca.status == "PAGO" and cobranca.pagamento_id:
+        return True
+
+    transaction_nsu = str(transaction_nsu or "").strip()
+    if not transaction_nsu:
+        return False
+    duplicada = db.query(InfinitePayCobrancaOrganiza).filter(
+        InfinitePayCobrancaOrganiza.id != cobranca.id,
+        InfinitePayCobrancaOrganiza.transaction_nsu == transaction_nsu,
+    ).first()
+    if duplicada:
+        return False
+
+    esperado = max(int(cobranca.valor_centavos or 0), 0)
+    informado = max(int(paid_amount_centavos or esperado), 0)
+    efetivo = min(informado, esperado) if esperado > 0 else informado
+    if efetivo <= 0:
+        return False
+    valor = round(efetivo / 100.0, 2)
+    forma = _infinitepay_forma(capture_method)
+    observacao = f"InfinitePay • {cobranca.order_nsu} • {transaction_nsu}"[:1000]
+
+    if cobranca.origem_tipo == "VENDA":
+        eq = db.query(Equipamento).filter(Equipamento.id == cobranca.origem_id).first()
+        if not eq:
+            return False
+        pagamento = PagamentoVenda(
+            equipamento_id=eq.id,
+            data=_hoje_organiza(),
+            valor=valor,
+            banco="InfinitePay",
+            forma=forma,
+            observacao=observacao,
+        )
+        db.add(pagamento)
+        db.flush()
+        cobranca.pagamento_id = pagamento.id
+    elif cobranca.origem_tipo == "MANUTENCAO":
+        m = db.query(Manutencao).filter(Manutencao.id == cobranca.origem_id).first()
+        if not m or not m.orcamentos:
+            return False
+        o = sorted(m.orcamentos, key=lambda x: x.versao)[-1]
+        pagamento = Pagamento(
+            orcamento_id=o.id,
+            data=_hoje_organiza(),
+            valor=valor,
+            forma=forma,
+            banco="InfinitePay",
+            observacao=observacao,
+        )
+        db.add(pagamento)
+        db.flush()
+        cobranca.pagamento_id = pagamento.id
+    else:
+        return False
+
+    cobranca.transaction_nsu = transaction_nsu[:180]
+    cobranca.invoice_slug = str(invoice_slug or "")[:180] or None
+    cobranca.receipt_url = str(receipt_url or "")[:1200] or None
+    cobranca.capture_method = str(capture_method or "")[:60] or None
+    cobranca.installments = int(installments or 0) or None
+    cobranca.paid_amount_centavos = efetivo
+    cobranca.pago_em = datetime.now()
+    cobranca.status = "PAGO"
+    db.commit()
+    return True
 
 
 class EstoqueMovimento(Base):
@@ -11765,7 +12030,18 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
         + "\n\nRetiradas de segunda a sexta-feira, somente das 14:00 às 17:00."
         + "\n\nKaraokê RJ"
     ) if orcamento and prontas_cliente else ""
-    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {"request": request, "usuario": usuario, "m": m, "orcamento": orcamento, "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais, "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente, "mensagem_retirada": mensagem_retirada, "estoque_cores_orcamento": contexto_cores_manutencao(db, orcamento)})
+    cobranca_infinitepay = _infinitepay_cobranca_pendente(db, "MANUTENCAO", m.id)
+    return templates.TemplateResponse("organiza/manutencao_detalhe.html", {
+        "request": request, "usuario": usuario, "m": m, "orcamento": orcamento,
+        "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais,
+        "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente,
+        "mensagem_retirada": mensagem_retirada, "estoque_cores_orcamento": contexto_cores_manutencao(db, orcamento),
+        "hoje_pagamento": _hoje_organiza().isoformat(),
+        "infinitepay_habilitada": bool(INFINITEPAY_HANDLE and orcamento and _orcamento_aprovado(orcamento)),
+        "cobranca_infinitepay": cobranca_infinitepay,
+        "infinitepay_erro": request.query_params.get("infinitepay_erro", ""),
+        "infinitepay_sucesso": request.query_params.get("infinitepay_sucesso", ""),
+    })
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/encerrar-pendente")
@@ -12176,7 +12452,7 @@ async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usu
     if valor > 0:
         db.add(Pagamento(
             orcamento_id=o.id,
-            data=data_form(form.get("data") or "") or date.today(),
+            data=data_form(form.get("data") or "") or _hoje_organiza(),
             valor=valor,
             forma=forma,
             banco=banco,
@@ -12255,7 +12531,7 @@ async def manutencao_pagamento_registrar(
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_pagamento=Orçamento ainda não disponível#pagamento-independente", status_code=303)
     form = dict(await request.form())
     valor = moeda_num((form.get("valor") or "").strip())
-    data_pag = data_form(form.get("data") or "") or date.today()
+    data_pag = data_form(form.get("data") or "") or _hoje_organiza()
     forma = (form.get("forma") or "").strip()
     if valor <= 0 or not forma:
         return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?erro_pagamento=Informe valor e forma de pagamento#pagamento-independente", status_code=303)
@@ -12269,6 +12545,44 @@ async def manutencao_pagamento_registrar(
     db.add(Pagamento(orcamento_id=o.id, data=data_pag, valor=round(valor, 2), forma=forma, banco=forma, observacao=observacao))
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?pagamento_salvo=1#pagamento-independente", status_code=303)
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/pagamento/infinitepay")
+async def manutencao_pagamento_infinitepay(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    if not o or not _orcamento_aprovado(o):
+        msg = quote_plus("A cobrança InfinitePay só pode ser gerada depois que o orçamento estiver aprovado.")
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?infinitepay_erro={msg}#pagamento-independente", status_code=303)
+    totais = totais_orcamento(o)
+    saldo = max(float(totais.get("falta", 0) or 0), 0.0)
+    form = dict(await request.form())
+    valor = moeda_num((form.get("valor") or "").strip()) or saldo
+    if valor <= 0 or valor > saldo + 0.01:
+        msg = quote_plus("Informe um valor válido, limitado ao saldo atual da manutenção.")
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?infinitepay_erro={msg}#pagamento-independente", status_code=303)
+    descricao = f"Manutenção #{m.id} - {m.cliente.nome if m.cliente else 'Cliente'} - {rotulo_maquina(m.equipamento) if m.equipamento else 'Equipamento'}"
+    try:
+        cobranca = _infinitepay_criar_cobranca_organiza(
+            db,
+            origem_tipo="MANUTENCAO",
+            origem_id=m.id,
+            valor=valor,
+            cliente=m.cliente,
+            descricao=descricao,
+        )
+    except Exception as exc:
+        msg = quote_plus(str(exc))
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?infinitepay_erro={msg}#pagamento-independente", status_code=303)
+    msg = quote_plus("Cobrança InfinitePay pronta. Abra ou copie o link abaixo.")
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?infinitepay_sucesso={msg}#pagamento-independente", status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/etapa-4/salvar")
@@ -12316,7 +12630,7 @@ async def manutencao_etapa4_salvar(
         )
 
     if valor > 0:
-        data_pag = data_form(form.get("data") or "") or date.today()
+        data_pag = data_form(form.get("data") or "") or _hoje_organiza()
         banco = (form.get("forma") or "").strip() or None
         nome_comprovante = (form.get("observacao") or "").strip()
         prefixo = _obs_pagamento_padrao(m.equipamento, m.cliente)
@@ -13725,7 +14039,7 @@ def operacao_pagamentos(request: Request, usuario: Usuario = Depends(usuario_log
     pendentes = [m for m in _manutencoes_operacao(db) if etapa_manutencao(m) == 4]
     return templates.TemplateResponse("organiza/operacao_pagamentos.html", {
         "request": request, "usuario": usuario, "grupos": _agrupar_por_cliente(pendentes),
-        "erro": request.query_params.get("erro", ""), "sucesso": request.query_params.get("sucesso", ""), "hoje": date.today().isoformat()
+        "erro": request.query_params.get("erro", ""), "sucesso": request.query_params.get("sucesso", ""), "hoje": _hoje_organiza().isoformat()
     })
 
 
@@ -13753,7 +14067,7 @@ async def operacao_pagamentos_registrar(request: Request, usuario: Usuario = Dep
     # Se os equipamentos já estiverem quitados, esta ação serve apenas para
     # registrar a previsão, confirmar o cliente e liberar a execução.
     valor = moeda_num(form.get("valor")) if saldo_total > 0.009 else 0
-    data_pagamento = data_form(form.get("data")) or date.today()
+    data_pagamento = data_form(form.get("data")) or _hoje_organiza()
     forma = (form.get("forma") or "").strip()
     banco = forma
     observacao = (form.get("observacao") or "").strip()
@@ -14017,7 +14331,13 @@ def _saldos_globais_connect(db: Session) -> list[dict]:
     for manut in manutencoes:
         total, recebido, saldo = _saldo_manutencao(manut)
         saldo = max(float(saldo or 0), 0.0)
-        manutencoes_abertas += saldo
+        orcamento_atual = _orcamento_atual(manut)
+        aprovado_connect = _orcamento_aprovado(orcamento_atual)
+        # O Connect só pode enxergar valor que já foi efetivamente aprovado pelo cliente.
+        # Orçamentos ainda aguardando aprovação continuam visíveis na composição apenas
+        # para acompanhamento interno, sem aumentar o saldo enviado.
+        if aprovado_connect:
+            manutencoes_abertas += saldo
         if saldo > 0.009:
             cliente_nome = (manut.cliente.nome if manut.cliente else "") or "Sem cliente"
             equipamento_nome = rotulo_maquina(manut.equipamento) if manut.equipamento else f"Manutenção #{manut.id}"
@@ -14026,11 +14346,13 @@ def _saldos_globais_connect(db: Session) -> list[dict]:
                 "cliente": cliente_nome,
                 "descricao": equipamento_nome,
                 "status": manut.status or "",
+                "status_orcamento": (orcamento_atual.status if orcamento_atual else "Sem orçamento") or "",
                 "total": round(float(total or 0), 2),
                 "recebido": round(float(recebido or 0), 2),
                 "saldo": round(saldo, 2),
                 "url": f"/organiza/manutencoes/{manut.id}",
                 "finalizado": bool(manut.entregue_em) or (manut.status or "").strip().lower() in {"encerrada", "entregue", "finalizada"},
+                "connect_incluido": bool(aprovado_connect),
             })
     detalhes_manutencoes.sort(key=lambda x: (x["cliente"].lower(), x["id"]))
 
@@ -14078,7 +14400,7 @@ def _saldos_globais_connect(db: Session) -> list[dict]:
             "finalizado": False,
         })
 
-    hoje = date.today().isoformat()
+    hoje = _hoje_organiza().isoformat()
     saldos = [
         {"chave": "vendas", "titulo": "A receber · Vendas", "natureza": "receber", "tipo": "venda", "valor": round(vendas_abertas, 2), "detalhes": detalhes_vendas},
         {"chave": "manutencoes", "titulo": "A receber · Manutenções", "natureza": "receber", "tipo": "manutencao", "valor": round(manutencoes_abertas, 2), "detalhes": detalhes_manutencoes},
@@ -14089,6 +14411,7 @@ def _saldos_globais_connect(db: Session) -> list[dict]:
         saldo["registro_id"] = idx
         saldo["id_externo"] = f"ORGANIZA-SALDO-{saldo['chave'].upper()}"
         saldo["qtd_detalhes"] = len(saldo.get("detalhes") or [])
+        saldo["qtd_enviados"] = sum(1 for d in (saldo.get("detalhes") or []) if d.get("connect_incluido", True))
         saldo["payload"] = {
             "id_externo": saldo["id_externo"],
             "tipo": saldo["tipo"],
@@ -14188,11 +14511,16 @@ def venda_pagamentos(
     pagamentos = db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == equipamento_id).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
     total = moeda_num(eq.valor)
     recebido = sum(float(p.valor or 0) for p in pagamentos)
+    cobranca_infinitepay = _infinitepay_cobranca_pendente(db, "VENDA", eq.id)
     return templates.TemplateResponse("organiza/venda_pagamentos.html", {
         "request": request, "usuario": usuario, "venda": eq, "pagamentos": pagamentos,
         "total": total, "recebido": recebido, "saldo": max(total - recebido, 0),
-        "hoje": date.today().isoformat(), "erro": request.query_params.get("erro", ""),
+        "hoje": _hoje_organiza().isoformat(), "erro": request.query_params.get("erro", ""),
         "observacao_padrao": _obs_pagamento_padrao(eq, eq.cliente),
+        "infinitepay_habilitada": bool(INFINITEPAY_HANDLE),
+        "cobranca_infinitepay": cobranca_infinitepay,
+        "infinitepay_erro": request.query_params.get("infinitepay_erro", ""),
+        "infinitepay_sucesso": request.query_params.get("infinitepay_sucesso", ""),
     })
 
 
@@ -14208,7 +14536,7 @@ async def venda_pagamento_registrar(
         raise HTTPException(404)
     form = dict(await request.form())
     valor = moeda_num(form.get("valor"))
-    data_pag = data_form(form.get("data")) or date.today()
+    data_pag = data_form(form.get("data")) or _hoje_organiza()
     forma = (form.get("forma") or "PIX").strip()
     banco = forma
     nome_comprovante = (form.get("observacao") or "").strip()
@@ -14232,6 +14560,41 @@ async def venda_pagamento_registrar(
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 
+
+
+@app.post("/organiza/vendas/{equipamento_id}/pagamentos/infinitepay")
+async def venda_pagamento_infinitepay(
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    eq = db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id == equipamento_id).first()
+    if not eq or not equipamento_eh_venda(eq):
+        raise HTTPException(404)
+    total = max(float(moeda_num(eq.valor)), 0.0)
+    recebido = sum(float(p.valor or 0) for p in db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == equipamento_id).all())
+    saldo = max(round(total - recebido, 2), 0.0)
+    form = dict(await request.form())
+    valor = moeda_num((form.get("valor") or "").strip()) or saldo
+    if valor <= 0 or valor > saldo + 0.01:
+        msg = quote_plus("Informe um valor válido, limitado ao saldo atual da venda.")
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?infinitepay_erro={msg}", status_code=303)
+    descricao = f"Venda #{eq.id} - {eq.cliente.nome if eq.cliente else 'Cliente'} - {eq.produto_venda_nome_snapshot or eq.modelo or eq.tipo or 'Equipamento'}"
+    try:
+        _infinitepay_criar_cobranca_organiza(
+            db,
+            origem_tipo="VENDA",
+            origem_id=eq.id,
+            valor=valor,
+            cliente=eq.cliente,
+            descricao=descricao,
+        )
+    except Exception as exc:
+        msg = quote_plus(str(exc))
+        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?infinitepay_erro={msg}", status_code=303)
+    msg = quote_plus("Cobrança InfinitePay pronta. Abra ou copie o link abaixo.")
+    return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?infinitepay_sucesso={msg}", status_code=303)
 
 
 @app.post("/organiza/vendas/{equipamento_id}/pagamentos/{pagamento_id}/editar")
@@ -14299,6 +14662,93 @@ def venda_pagamento_excluir(
     db.delete(p)
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
+
+
+@app.get("/organiza/infinitepay/retorno", response_class=HTMLResponse, include_in_schema=False)
+def organiza_infinitepay_retorno(request: Request, db: Session = Depends(get_db)):
+    order_nsu = str(request.query_params.get("order_nsu") or "").strip()
+    transaction_nsu = str(request.query_params.get("transaction_nsu") or request.query_params.get("transaction_id") or "").strip()
+    invoice_slug = str(request.query_params.get("slug") or request.query_params.get("invoice_slug") or "").strip()
+    receipt_url = str(request.query_params.get("receipt_url") or "").strip()
+    capture_method = str(request.query_params.get("capture_method") or "").strip()
+
+    cobranca = None
+    if order_nsu:
+        cobranca = db.query(InfinitePayCobrancaOrganiza).filter(InfinitePayCobrancaOrganiza.order_nsu == order_nsu).first()
+    if not cobranca and transaction_nsu:
+        cobranca = db.query(InfinitePayCobrancaOrganiza).filter(InfinitePayCobrancaOrganiza.transaction_nsu == transaction_nsu).first()
+    if not cobranca:
+        return templates.TemplateResponse("organiza/infinitepay_retorno.html", {
+            "request": request, "status_retorno": "erro",
+            "mensagem": "Não foi possível localizar esta cobrança no Organiza.", "cobranca": None,
+        }, status_code=404, headers={"Cache-Control": "no-store"})
+
+    if cobranca.status != "PAGO" and transaction_nsu and invoice_slug:
+        try:
+            check = _infinitepay_post_organiza(INFINITEPAY_PAYMENT_CHECK_URL, {
+                "handle": INFINITEPAY_HANDLE,
+                "order_nsu": cobranca.order_nsu,
+                "transaction_nsu": transaction_nsu,
+                "slug": invoice_slug,
+            })
+            if bool(check.get("success")) and bool(check.get("paid")):
+                amount = int(check.get("amount") or 0)
+                if amount == int(cobranca.valor_centavos or 0):
+                    _infinitepay_registrar_pagamento_organiza(
+                        db, cobranca,
+                        transaction_nsu=transaction_nsu,
+                        invoice_slug=invoice_slug,
+                        receipt_url=receipt_url,
+                        capture_method=str(check.get("capture_method") or capture_method or ""),
+                        installments=int(check.get("installments") or 0),
+                        paid_amount_centavos=int(check.get("paid_amount") or amount),
+                    )
+        except Exception:
+            pass
+
+    db.refresh(cobranca)
+    pago = cobranca.status == "PAGO"
+    return templates.TemplateResponse("organiza/infinitepay_retorno.html", {
+        "request": request,
+        "status_retorno": "pago" if pago else "pendente",
+        "mensagem": "Pagamento confirmado e registrado no Organiza." if pago else "O pagamento ainda está sendo confirmado. Aguarde alguns instantes.",
+        "cobranca": cobranca,
+    }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+
+
+@app.post("/api/integracoes/infinitepay/organiza/webhook", include_in_schema=False)
+async def organiza_infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "JSON inválido"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"success": False, "message": "Payload inválido"}, status_code=400)
+    order_nsu = str(payload.get("order_nsu") or "").strip()
+    transaction_nsu = str(payload.get("transaction_nsu") or "").strip()
+    if not order_nsu or not transaction_nsu:
+        return JSONResponse({"success": False, "message": "Identificadores ausentes"}, status_code=400)
+    cobranca = db.query(InfinitePayCobrancaOrganiza).filter(InfinitePayCobrancaOrganiza.order_nsu == order_nsu).first()
+    if not cobranca:
+        return JSONResponse({"success": False, "message": "Cobrança não encontrada"}, status_code=400)
+    try:
+        amount = int(payload.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount != int(cobranca.valor_centavos or 0):
+        return JSONResponse({"success": False, "message": "Valor não confere"}, status_code=400)
+    if cobranca.status == "PAGO" and cobranca.pagamento_id:
+        return JSONResponse({"success": True, "message": None})
+    ok = _infinitepay_registrar_pagamento_organiza(
+        db, cobranca,
+        transaction_nsu=transaction_nsu,
+        invoice_slug=str(payload.get("invoice_slug") or payload.get("slug") or ""),
+        receipt_url=str(payload.get("receipt_url") or ""),
+        capture_method=str(payload.get("capture_method") or ""),
+        installments=int(payload.get("installments") or 0),
+        paid_amount_centavos=int(payload.get("paid_amount") or amount),
+    )
+    return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao registrar pagamento"}, status_code=200 if ok else 500)
 
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)
