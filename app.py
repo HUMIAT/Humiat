@@ -1202,6 +1202,24 @@ class EstoqueContagemProgresso(Base):
     usuario = relationship("Usuario")
 
 
+class EstoqueCompraPedido(Base):
+    """Compra de material aguardando chegada. Só aumenta o físico quando confirmada."""
+    __tablename__ = "estoque_compras_pedidos"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
+    cor = Column(String(80), nullable=True, index=True)
+    quantidade = Column(Float, nullable=False, default=0)
+    valor_total = Column(Float, nullable=False, default=0)
+    previsao_entrega = Column(Date, nullable=True, index=True)
+    status = Column(String(20), nullable=False, default="AGUARDANDO", index=True)
+    observacao = Column(Text, nullable=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    recebido_em = Column(DateTime, nullable=True)
+    item = relationship("Item")
+    usuario = relationship("Usuario")
+
+
 class NFSERascunho(Base):
     """Rascunho de NFS-e centralizado no Organiza.
 
@@ -1276,7 +1294,7 @@ class IntegracaoConect(Base):
 # -----------------------------------------------------------------------------
 ESTOQUE_ITENS_COR = {"BOTOES", "BOTAO", "COOLER 12 MM", "FITA LED", "LED"}
 # Categorias padronizadas para leitura de estoque/cadastro.
-CATEGORIAS_ITENS_PADRAO = ["Sistema", "Manutenção", "Informática", "Som", "Cabos e Conectores", "Botões e LEDs", "Geral"]
+CATEGORIAS_ITENS_PADRAO = ["Sistema", "Manutenção", "Info e Eletrônicos", "Som", "Cabos e Conectores", "Botões e LEDs", "Gabinetes", "Espelhos", "Fliperama", "Geral"]
 # Itens destas categorias são serviços/valores lógicos e não representam material físico.
 ESTOQUE_CATEGORIAS_SEM_CONTROLE = {"SISTEMA", "MANUTENCAO", "MANUTENCOES"}
 ESTOQUE_ITENS_SEM_CONTROLE = {"ATUALIZACAO", "CATALOGO ENCARDENADO"}
@@ -1306,6 +1324,12 @@ def _categoria_sugerida_item_1174(nome: str) -> str | None:
     n = _texto_sem_acento(nome)
     if n in {"ATUALIZACAO", "CATALOGO ENCARDENADO"}:
         return "Sistema"
+    if "GABINETE" in n:
+        return "Gabinetes"
+    if "ESPELHO" in n:
+        return "Espelhos"
+    if "FLIPERAMA" in n:
+        return "Fliperama"
     if n.startswith("CABO ") or n.startswith("CONECTOR ") or n in {"EXTENSAO", "EXTENSOR HDMI"}:
         return "Cabos e Conectores"
     if "BOTAO" in n or "BOTOE" in n or n in {"FITA LED", "LED"}:
@@ -1313,7 +1337,7 @@ def _categoria_sugerida_item_1174(nome: str) -> str | None:
     if any(chave in n for chave in ("AMPLIFICADOR", "CAIXA DE SOM", "DRIVER", "FALANTE", "MICROFONE", "TWEETER", "SUPORTE DE MIC")):
         return "Som"
     if any(chave in n for chave in ("BLUET", "CARTA SD", "COOLER", "HD", "MEMORIA", "MONITOR", "MONITO", "PLACA MAE", "RASPBERRY", "PANDORA", "TECLADO", "INTERFACE", "TV 32", "FONTE")):
-        return "Informática"
+        return "Info e Eletrônicos"
     return None
 
 
@@ -1958,6 +1982,36 @@ def _migrar_itens_e_reservas_1174(db: Session) -> tuple[int, int]:
     db.flush()
     return alterados, ressincronizadas
 
+
+
+def _migrar_categorias_itens_1175(db: Session) -> int:
+    """Cria a nova organização de categorias sem exigir edição item a item."""
+    chave = "categorias_itens_planilha_1_1_75"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0
+    alterados = 0
+    for item in db.query(Item).all():
+        cat = _texto_sem_acento(item.categoria)
+        nome = _texto_sem_acento(item.nome)
+        nova = None
+        if cat == "INFORMATICA":
+            nova = "Info e Eletrônicos"
+        elif "GABINETE" in nome:
+            nova = "Gabinetes"
+        elif "ESPELHO" in nome:
+            nova = "Espelhos"
+        elif "FLIPERAMA" in nome:
+            nova = "Fliperama"
+        if nova and item.categoria != nova:
+            item.categoria = nova
+            alterados += 1
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+    return alterados
 
 def contexto_cores_venda(db: Session, equipamento: Equipamento | None) -> list[dict]:
     if not equipamento or not equipamento.id:
@@ -3115,6 +3169,9 @@ def iniciar_banco():
         itens_1174, vendas_1174 = _migrar_itens_e_reservas_1174(db)
         if itens_1174 or vendas_1174:
             print(f"[ESTOQUE] 1.1.74: itens/categorias ajustados={itens_1174}; vendas abertas ressincronizadas={vendas_1174}.")
+        categorias_1175 = _migrar_categorias_itens_1175(db)
+        if categorias_1175:
+            print(f"[ESTOQUE] 1.1.75: categorias reorganizadas={categorias_1175}.")
         db.commit()
     finally:
         db.close()
@@ -11200,10 +11257,79 @@ def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session
 @app.get("/organiza/estoque/compras", response_class=HTMLResponse)
 def estoque_relatorio_compras(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     compras = relatorio_compras_estoque(db)
+    pedidos = db.query(EstoqueCompraPedido).options(selectinload(EstoqueCompraPedido.item)).order_by(
+        EstoqueCompraPedido.status.asc(), EstoqueCompraPedido.previsao_entrega.asc(), EstoqueCompraPedido.id.desc()
+    ).all()
+    itens = [
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria), func.upper(Item.nome)).all()
+        if item_controla_estoque(i)
+    ]
     return templates.TemplateResponse("organiza/estoque_compras.html", {
-        "request": request, "usuario": usuario, "compras": compras,
+        "request": request, "usuario": usuario, "compras": compras, "pedidos": pedidos, "itens": itens,
+        "itens_cor_ids": [i.id for i in itens if item_controla_cor(i)],
         "total": round(sum(float(x["custo_total"] or 0) for x in compras), 2),
+        "ok": request.query_params.get("ok", ""), "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/organiza/estoque/compras/nova")
+async def estoque_compra_nova(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    try:
+        item_id = int(form.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+    try:
+        quantidade = float(str(form.get("quantidade") or "0").replace(",", "."))
+    except (TypeError, ValueError):
+        quantidade = 0
+    valor_total = moeda_num(form.get("valor_total"))
+    previsao = None
+    previsao_txt = (form.get("previsao_entrega") or "").strip()
+    if previsao_txt:
+        try:
+            previsao = date.fromisoformat(previsao_txt)
+        except ValueError:
+            return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe uma data de chegada válida."), status_code=303)
+    if not item or not item_controla_estoque(item) or quantidade <= 0 or valor_total < 0:
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe item, quantidade e valor total válidos."), status_code=303)
+    cor = normalizar_cor(form.get("cor")) if item_controla_cor(item) else ""
+    if item_controla_cor(item) and not cor:
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
+    pedido = EstoqueCompraPedido(
+        item_id=item.id, cor=cor or None, quantidade=quantidade, valor_total=valor_total,
+        previsao_entrega=previsao, status="AGUARDANDO", observacao=(form.get("observacao") or "").strip() or None,
+        usuario_id=usuario.id,
+    )
+    db.add(pedido)
+    db.commit()
+    return RedirectResponse("/organiza/estoque/compras?ok=" + quote_plus(f"Compra registrada: {item.nome} × {quantidade:g}."), status_code=303)
+
+
+@app.post("/organiza/estoque/compras/{pedido_id}/receber")
+def estoque_compra_receber(pedido_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    pedido = db.query(EstoqueCompraPedido).options(selectinload(EstoqueCompraPedido.item)).filter(EstoqueCompraPedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(404)
+    if (pedido.status or "").upper() == "RECEBIDA":
+        return RedirectResponse("/organiza/estoque/compras?ok=" + quote_plus("Esta compra já foi recebida."), status_code=303)
+    existente = db.query(EstoqueMovimento.id).filter(
+        EstoqueMovimento.origem_tipo == "COMPRA", EstoqueMovimento.origem_id == pedido.id, EstoqueMovimento.tipo == "ENTRADA"
+    ).first()
+    if not existente:
+        qtd = float(pedido.quantidade or 0)
+        custo_unitario = (float(pedido.valor_total or 0) / qtd) if qtd > 0 else None
+        db.add(EstoqueMovimento(
+            item_id=pedido.item_id, tipo="ENTRADA", quantidade=qtd, cor=pedido.cor,
+            origem_tipo="COMPRA", origem_id=pedido.id, custo_unitario=custo_unitario,
+            observacao=f"Compra #{pedido.id} recebida" + (f" · {pedido.observacao}" if pedido.observacao else ""),
+            usuario_id=usuario.id,
+        ))
+    pedido.status = "RECEBIDA"
+    pedido.recebido_em = datetime.now()
+    db.commit()
+    return RedirectResponse("/organiza/estoque/compras?ok=" + quote_plus(f"Chegada confirmada. Estoque de {pedido.item.nome} aumentado em {float(pedido.quantidade or 0):g}."), status_code=303)
 
 
 @app.post("/organiza/estoque/entrada")
@@ -11266,7 +11392,43 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
     for categoria in CATEGORIAS_ITENS_PADRAO + existentes:
         if categoria and categoria not in categorias:
             categorias.append(categoria)
-    return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca})
+    return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca, "ok": request.query_params.get("ok", "")})
+
+
+@app.post("/organiza/itens/salvar-planilha")
+async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    alterados = 0
+    ids = []
+    for chave in form.keys():
+        if chave.startswith("categoria_"):
+            try:
+                ids.append(int(chave.split("_", 1)[1]))
+            except (TypeError, ValueError):
+                pass
+    for item in db.query(Item).filter(Item.id.in_(ids or [-1])).all():
+        categoria = (form.get(f"categoria_{item.id}") or item.categoria or "Geral").strip() or "Geral"
+        if _texto_sem_acento(categoria) == "INFORMATICA":
+            categoria = "Info e Eletrônicos"
+        controla = 1 if str(form.get(f"controla_estoque_{item.id}") or "0") == "1" else 0
+        if _texto_sem_acento(categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(item.nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+            controla = 0
+        if item.categoria != categoria or int(item.controla_estoque or 0) != controla:
+            item.categoria = categoria
+            item.controla_estoque = controla
+            alterados += 1
+            if not item_controla_estoque(item):
+                db.query(EstoqueReserva).filter(EstoqueReserva.item_id == item.id).delete(synchronize_session=False)
+    if alterados:
+        for eq_aberto in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
+            sincronizar_estoque_venda(eq_aberto, db)
+        manut_ids = [mid for (mid,) in db.query(Manutencao.id).filter(~Manutencao.status.in_(tuple(ESTOQUE_MANUTENCAO_FINAL | ESTOQUE_MANUTENCAO_CANCELADA))).all()]
+        for mid in manut_ids:
+            manut = carregar_manutencao(db, mid)
+            if manut:
+                sincronizar_estoque_manutencao(manut, db)
+    db.commit()
+    return RedirectResponse("/organiza/itens?ok=" + quote_plus(f"Planilha salva. {alterados} item(ns) alterado(s)."), status_code=303)
 
 
 @app.post("/organiza/itens/novo")
