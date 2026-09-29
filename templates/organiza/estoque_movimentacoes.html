@@ -14,7 +14,7 @@
     <form method="get" class="filtros-grid">
       <label>De<input type="date" name="data_inicio" value="{{ data_inicio }}"></label>
       <label>Até<input type="date" name="data_fim" value="{{ data_fim }}"></label>
-      <label>Item<select name="item_id"><option value="">Todos</option>{% for i in itens %}<option value="{{ i.id }}" {% if item_id == i.id %}selected{% endif %}>{{ i.nome }}</option>{% endfor %}</select></label>
+      <label>Item<select name="item_id"><option value="">Todos</option>{% for i in itens %}<option value="{{ i.id }}" {% if item_id == i.id %}selected{% endif %}>{{ i.categoria }} · {{ i.nome }}</option>{% endfor %}</select></label>
       <label>Tipo<select name="tipo"><option value="">Todos</option><option value="ENTRADA" {% if tipo=='ENTRADA' %}selected{% endif %}>Entrada</option><option value="SAIDA" {% if tipo=='SAIDA' %}selected{% endif %}>Saída</option><option value="RESERVA" {% if tipo=='RESERVA' %}selected{% endif %}>Reserva atual</option></select></label>
       <label>Origem<select name="origem"><option value="">Todas</option><option value="VENDA" {% if origem=='VENDA' %}selected{% endif %}>Venda</option><option value="MANUTENCAO" {% if origem=='MANUTENCAO' %}selected{% endif %}>Manutenção</option><option value="MANUAL" {% if origem=='MANUAL' %}selected{% endif %}>Manual</option><option value="CONTAGEM" {% if origem=='CONTAGEM' %}selected{% endif %}>Contagem</option><option value="ESTORNO" {% if origem=='ESTORNO' %}selected{% endif %}>Estorno</option></select></label>
       <div class="filtro-botoes"><button class="botao primario" type="submit">Consultar</button><a class="botao secundario" href="/organiza/estoque/movimentacoes">Limpar</a></div>
@@ -51,16 +51,17 @@
     </div>
     <div class="planilha-scroll">
       <table class="mov-table item-table">
-        <thead><tr><th>ITEM</th><th>COR</th><th>ENTRADAS</th><th>SAÍDAS</th><th>RESERVADO</th><th>MOV. LÍQUIDO</th></tr></thead>
+        <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th>ENTRADAS</th><th>SAÍDAS</th><th>RESERVADO</th><th>MOV. LÍQUIDO</th></tr></thead>
         <tbody>
           {% for h in movimentos_itens %}<tr>
+            <td>{{ h.item.categoria if h.item else '—' }}</td>
             <td><strong>{{ h.item.nome if h.item else '-' }}</strong></td>
             <td>{{ h.cor or '—' }}</td>
             <td class="num entrada">{{ '%g'|format(h.entradas) }}</td>
             <td class="num saida">{{ '%g'|format(h.saidas) }}</td>
             <td class="num reserva">{{ '%g'|format(h.reservas) }}</td>
             <td class="num forte {% if h.movimento_liquido < 0 %}negativo{% endif %}">{{ '%g'|format(h.movimento_liquido) }}</td>
-          </tr>{% else %}<tr><td colspan="6" class="vazio">Nenhum movimento de Item encontrado para os filtros informados.</td></tr>{% endfor %}
+          </tr>{% else %}<tr><td colspan="7" class="vazio">Nenhum movimento de Item encontrado para os filtros informados.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>

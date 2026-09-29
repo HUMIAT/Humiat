@@ -25,9 +25,9 @@
         <label class="campo-duplo">Número / código do HD<input name="numero_hd" value="{{ equipamento.numero_hd if equipamento and equipamento.numero_hd else '' }}" placeholder="Cole o código gerado pelo monitor"></label>
         <label>Fabricante<select name="fabricante"><option value="KARAOKERJ" {% if not equipamento or not equipamento.fabricante or equipamento.fabricante|upper == 'KARAOKERJ' %}selected{% endif %}>KARAOKERJ</option><option value="OUTROS" {% if equipamento and equipamento.fabricante|upper == 'OUTROS' %}selected{% endif %}>OUTROS</option></select></label>
         <label>Status<select name="status">{% for s in ['Ativo','Solicitar gabinete','Montagem','Pronto para entrega','Entregue','Em manutenção','Vendido','Inativo'] %}<option {% if equipamento and equipamento.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
-        {% set pacote_selecionado = equipamento.pacote if equipamento and equipamento.pacote else primeiro_pacote %}
-        <label>Pacote<select name="pacote" id="pacote-equipamento" required>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if pacote_selecionado == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select><small>Obrigatório. Equipamento sem pacote recebe automaticamente o primeiro pacote disponível.</small></label>
-        <label>Falta pacote<input id="falta-pacote" inputmode="numeric" value="{{ equipamento.falta_pacote if equipamento and equipamento.falta_pacote is not none else '' }}" readonly aria-readonly="true" title="Calculado automaticamente conforme o pacote atual cadastrado"></label>
+        {% set pacote_selecionado = 'NA' if equipamento and equipamento.tipo == 'FLIPERAMA' else (equipamento.pacote if equipamento and equipamento.pacote else primeiro_pacote) %}
+        <label>Pacote<select name="pacote" id="pacote-equipamento" required><option value="NA" {% if pacote_selecionado == 'NA' %}selected{% endif %}>N/A · Não se aplica</option>{% for pacote in pacotes %}<option value="{{ pacote }}" {% if pacote_selecionado == pacote %}selected{% endif %}>{{ pacote }}</option>{% endfor %}</select><small id="pacote-ajuda">Fliperama usa N/A. Nos demais equipamentos o pacote é obrigatório.</small></label>
+        <label>Falta pacote<input id="falta-pacote" inputmode="numeric" value="{% if equipamento and equipamento.tipo == 'FLIPERAMA' %}N/A{% else %}{{ equipamento.falta_pacote if equipamento and equipamento.falta_pacote is not none else '' }}{% endif %}" readonly aria-readonly="true" title="Calculado automaticamente conforme o pacote atual cadastrado"></label>
         <label>Plano<select name="plano"><option value="">Sem plano</option><option value="PLUS" {% if equipamento and equipamento.plano|upper == 'PLUS' %}selected{% endif %}>PLUS</option><option value="BÁSICO" {% if equipamento and equipamento.plano|upper in ['BÁSICO','BASICO'] %}selected{% endif %}>BÁSICO</option></select></label>
       </div>
     </section>
@@ -88,6 +88,36 @@
         <div><small>Margem</small><strong id="resumo-margem">{{ '%.2f'|format(resumo_custo.margem) }}%</strong></div>
       </div>
       {% if resumo_custo.snapshot %}<div class="alerta informacao" style="margin-top:10px">Venda finalizada: o custo está congelado pelo snapshot histórico e não muda com alterações futuras nos Itens.</div>{% endif %}
+
+      {% if equipamento and equipamento.id and equipamento.produto_venda_id %}
+      <div class="estoque-utilizado" id="estoque-utilizado">
+        <div class="estoque-utilizado-cabecalho">
+          <div><h3>Estoque utilizado nesta máquina</h3><p class="texto-suave">Confira os materiais vinculados à composição e aos Opcionais. Se algo estiver diferente do que foi realmente usado, corrija aqui.</p></div>
+          <div class="estoque-utilizado-status"><span class="pill {% if estoque_utilizado_venda.manual %}manual{% endif %}">{{ 'Corrigido manualmente' if estoque_utilizado_venda.manual else 'Automático' }}</span><button type="button" class="botao pequeno secundario" id="estoque-usar-automatico">Usar composição automática</button></div>
+        </div>
+        <input type="hidden" name="estoque_uso_editado" id="estoque-uso-editado" value="0">
+        <input type="hidden" name="estoque_uso_recalcular" id="estoque-uso-recalcular" value="0">
+        <div class="estoque-utilizado-scroll">
+          <table class="estoque-utilizado-tabela" id="estoque-utilizado-tabela">
+            <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>QTD.</th><th>CUSTO UNIT.</th><th>VALOR</th><th></th></tr></thead>
+            <tbody>
+            {% for linha in estoque_utilizado_venda.linhas %}
+              <tr data-idx="{{ loop.index }}">
+                <td class="estoque-uso-categoria">{{ linha.item.categoria }}</td>
+                <td><select name="estoque_uso_item_{{ loop.index }}" class="estoque-uso-item">{% for item_uso in estoque_utilizado_venda.itens %}<option value="{{ item_uso.id }}" data-categoria="{{ item_uso.categoria }}" data-custo="{{ item_uso.preco_custo or 0 }}" {% if item_uso.id == linha.item.id %}selected{% endif %}>{{ item_uso.nome }}</option>{% endfor %}</select></td>
+                <td><input name="estoque_uso_qtd_{{ loop.index }}" class="estoque-uso-qtd" inputmode="decimal" value="{{ '%g'|format(linha.quantidade) }}"></td>
+                <td class="num estoque-uso-custo">{{ linha.custo_unitario|moeda }}</td>
+                <td class="num estoque-uso-total">{{ linha.custo_total|moeda }}</td>
+                <td><button type="button" class="botao pequeno secundario estoque-uso-remover">Remover</button></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+            <tfoot><tr><td colspan="4"><button type="button" class="botao pequeno" id="estoque-uso-adicionar">+ Adicionar item</button></td><td class="num"><strong id="estoque-uso-total-geral">{{ estoque_utilizado_venda.total|moeda }}</strong></td><td></td></tr></tfoot>
+          </table>
+        </div>
+        <template id="estoque-uso-template"><tr data-idx="__IDX__"><td class="estoque-uso-categoria">—</td><td><select name="estoque_uso_item___IDX__" class="estoque-uso-item"><option value="">Selecione...</option>{% for item_uso in estoque_utilizado_venda.itens %}<option value="{{ item_uso.id }}" data-categoria="{{ item_uso.categoria }}" data-custo="{{ item_uso.preco_custo or 0 }}">{{ item_uso.nome }}</option>{% endfor %}</select></td><td><input name="estoque_uso_qtd___IDX__" class="estoque-uso-qtd" inputmode="decimal" value="1"></td><td class="num estoque-uso-custo">R$ 0,00</td><td class="num estoque-uso-total">R$ 0,00</td><td><button type="button" class="botao pequeno secundario estoque-uso-remover">Remover</button></td></tr></template>
+      </div>
+      {% endif %}
 
       {% if estoque_cores_venda %}
       <div class="estoque-venda-cores">
@@ -235,7 +265,7 @@
 </section>
 
 <style>
-.estoque-venda-cores{margin-top:18px;padding-top:16px;border-top:1px solid #e2e8f0}.estoque-venda-cores h3{margin:0 0 4px}.estoque-cor-bloco{margin-top:12px;border:1px solid #dbe3ee;border-radius:12px;padding:12px;background:#f8fafc}.estoque-cor-titulo{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.estoque-cor-titulo span{font-size:12px;color:#64748b}.estoque-cor-linhas{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin-top:10px}.estoque-cor-linha{display:grid;grid-template-columns:minmax(90px,1fr) 72px;gap:6px}.estoque-cor-linha input{min-width:0}.estoque-saldos-cores{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.estoque-saldos-cores span{font-size:11px;background:#fff;border:1px solid #dbe3ee;border-radius:999px;padding:3px 7px}.estoque-saldos-cores span.negativo{color:#b42318;border-color:#f2b8b5;background:#fff4f3}@media(max-width:760px){.estoque-cor-linhas{grid-template-columns:1fr}.estoque-cor-linha{grid-template-columns:1fr 90px}}
+.estoque-utilizado{margin-top:18px;padding-top:16px;border-top:1px solid #e2e8f0}.estoque-utilizado-cabecalho{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.estoque-utilizado-cabecalho h3{margin:0 0 4px}.estoque-utilizado-status{display:flex;gap:7px;align-items:center}.estoque-utilizado-status .pill{background:#eef6ff;color:#174ea6}.estoque-utilizado-status .pill.manual{background:#fff3cd;color:#7a4b00}.estoque-utilizado-scroll{overflow:auto;margin-top:10px}.estoque-utilizado-tabela{width:100%;min-width:850px;border-collapse:collapse;font-size:12px}.estoque-utilizado-tabela th,.estoque-utilizado-tabela td{padding:6px 8px;border:1px solid #e2e8f0;text-align:left}.estoque-utilizado-tabela th{background:#eef3f9;font-size:11px}.estoque-utilizado-tabela .num{text-align:right;font-variant-numeric:tabular-nums}.estoque-utilizado-tabela select,.estoque-utilizado-tabela input{width:100%;min-width:0;padding:6px}.estoque-utilizado-tabela .estoque-uso-qtd{width:78px;text-align:right}.estoque-utilizado-tabela tfoot td{background:#f8fafc}.estoque-venda-cores{margin-top:18px;padding-top:16px;border-top:1px solid #e2e8f0}.estoque-venda-cores h3{margin:0 0 4px}.estoque-cor-bloco{margin-top:12px;border:1px solid #dbe3ee;border-radius:12px;padding:12px;background:#f8fafc}.estoque-cor-titulo{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.estoque-cor-titulo span{font-size:12px;color:#64748b}.estoque-cor-linhas{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin-top:10px}.estoque-cor-linha{display:grid;grid-template-columns:minmax(90px,1fr) 72px;gap:6px}.estoque-cor-linha input{min-width:0}.estoque-saldos-cores{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.estoque-saldos-cores span{font-size:11px;background:#fff;border:1px solid #dbe3ee;border-radius:999px;padding:3px 7px}.estoque-saldos-cores span.negativo{color:#b42318;border-color:#f2b8b5;background:#fff4f3}@media(max-width:760px){.estoque-cor-linhas{grid-template-columns:1fr}.estoque-cor-linha{grid-template-columns:1fr 90px}}
 </style>
 <script>
 (function(){const t=document.getElementById('valor_total'),p=document.getElementById('valor_recebido'),f=document.getElementById('valor_restante'); const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0}; const a=()=>f.value=Math.max(n(t.value)-n(p.value),0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});t.addEventListener('input',a);p.addEventListener('input',a);a();})();
@@ -267,12 +297,25 @@
   }
 
   function atualizarFaltaPacote() {
+    const tipoEl = document.getElementById("tipo-equipamento");
+    const fliperama = (tipoEl?.value || "").toUpperCase() === "FLIPERAMA";
+    if (fliperama) {
+      pacote.value = "NA";
+      pacote.disabled = false;
+      falta.value = "N/A";
+      return;
+    }
+    if (pacote.value === "NA") {
+      const primeira = Array.from(pacote.options).find(o => o.value && o.value !== "NA");
+      if (primeira) pacote.value = primeira.value;
+    }
     const atual = indicePacote(pacoteAtual);
     const instalado = indicePacote(pacote.value);
     falta.value = instalado === null ? "" : Math.max(atual - instalado, 0);
   }
 
   pacote.addEventListener("change", atualizarFaltaPacote);
+  document.getElementById("tipo-equipamento")?.addEventListener("change", atualizarFaltaPacote);
   atualizarFaltaPacote();
 })();
 </script>
@@ -405,6 +448,25 @@
 })();
 </script>
 
+<script>
+(() => {
+  const tabela=document.getElementById('estoque-utilizado-tabela');
+  if(!tabela)return;
+  const editado=document.getElementById('estoque-uso-editado');
+  const recalcular=document.getElementById('estoque-uso-recalcular');
+  const template=document.getElementById('estoque-uso-template');
+  const moeda=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  let prox=Math.max(0,...Array.from(tabela.querySelectorAll('tbody tr')).map(tr=>Number(tr.dataset.idx)||0))+1;
+  function marcar(){editado.value='1';recalcular.value='0';}
+  function atualizaLinha(tr){const sel=tr.querySelector('.estoque-uso-item'),q=tr.querySelector('.estoque-uso-qtd');if(!sel||!q)return;const op=sel.options[sel.selectedIndex];const custo=Number(op?.dataset.custo||0);const qtd=Number((q.value||'0').replace(',','.'))||0;tr.querySelector('.estoque-uso-categoria').textContent=op?.dataset.categoria||'—';tr.querySelector('.estoque-uso-custo').textContent=moeda(custo);tr.querySelector('.estoque-uso-total').textContent=moeda(custo*qtd);atualizaTotal();}
+  function atualizaTotal(){let total=0;tabela.querySelectorAll('tbody tr').forEach(tr=>{const sel=tr.querySelector('.estoque-uso-item'),q=tr.querySelector('.estoque-uso-qtd');if(!sel||!q||!sel.value)return;const op=sel.options[sel.selectedIndex];total+=(Number(op?.dataset.custo||0)||0)*(Number((q.value||'0').replace(',','.'))||0);});const alvo=document.getElementById('estoque-uso-total-geral');if(alvo)alvo.textContent=moeda(total);}
+  function liga(tr){const sel=tr.querySelector('.estoque-uso-item'),q=tr.querySelector('.estoque-uso-qtd'),rem=tr.querySelector('.estoque-uso-remover');if(sel)sel.addEventListener('change',()=>{marcar();atualizaLinha(tr)});if(q)q.addEventListener('input',()=>{marcar();atualizaLinha(tr)});if(rem)rem.addEventListener('click',()=>{marcar();tr.remove();atualizaTotal()});}
+  tabela.querySelectorAll('tbody tr').forEach(liga);
+  document.getElementById('estoque-uso-adicionar')?.addEventListener('click',()=>{marcar();const html=template.innerHTML.replaceAll('__IDX__',String(prox++));const box=document.createElement('tbody');box.innerHTML=html.trim();const tr=box.firstElementChild;tabela.querySelector('tbody').appendChild(tr);liga(tr);tr.querySelector('select')?.focus();});
+  document.getElementById('estoque-usar-automatico')?.addEventListener('click',()=>{if(confirm('Voltar a usar a composição e os Opcionais atuais deste equipamento?')){recalcular.value='1';editado.value='0';document.getElementById('form-equipamento').requestSubmit();}});
+  atualizaTotal();
+})();
+</script>
 {% endblock %}
 
 <style>

@@ -44,36 +44,27 @@
     <div class="planilha-barra">
       <div>
         <h2>Posição do estoque</h2>
-        <p class="texto-suave">Itens em ordem alfabética. Vendas a fazer e manutenções aprovadas reduzem o disponível sem baixar o físico.</p>
+        <p class="texto-suave">Organizado por categoria e depois por item. Vendas a fazer e manutenções aprovadas reduzem o disponível sem baixar o físico.</p>
       </div>
       <div class="planilha-acoes">
-        {% if total_compras > 0 %}<span class="badge-compra">Comprar: R$ {{ '%.2f'|format(total_compras)|replace('.', ',') }}</span>{% endif %}
-        <div class="filtros-rapidos" aria-label="Filtros rápidos do estoque">
-          <button class="filtro-chip ativo" type="button" data-filtro-rapido="todos">Todos</button>
-          <button class="filtro-chip" type="button" data-filtro-rapido="comprar">Comprar</button>
-          <button class="filtro-chip" type="button" data-filtro-rapido="sem_estoque">Sem estoque</button>
-          <button class="filtro-chip" type="button" data-filtro-rapido="abaixo_minimo">Abaixo do mínimo</button>
-          <button class="filtro-chip" type="button" data-filtro-rapido="com_reserva">Com reserva</button>
+        <div class="filtros-linha">
+          <span class="badge-valor">Estoque físico: {{ valor_estoque_fisico|moeda }}</span>
+          {% if total_compras > 0 %}<span class="badge-compra">Comprar: R$ {{ '%.2f'|format(total_compras)|replace('.', ',') }}</span>{% endif %}
+          <div class="filtros-rapidos" aria-label="Filtros rápidos do estoque">
+            <button class="filtro-chip ativo" type="button" data-filtro-rapido="todos">Todos</button>
+            <button class="filtro-chip" type="button" data-filtro-rapido="comprar">Comprar</button>
+            <button class="filtro-chip" type="button" data-filtro-rapido="sem_estoque">Sem estoque</button>
+            <button class="filtro-chip" type="button" data-filtro-rapido="abaixo_minimo">Abaixo do mínimo</button>
+            <button class="filtro-chip" type="button" data-filtro-rapido="com_reserva">Com reserva</button>
+          </div>
+          <div class="filtro-numerico">
+            <select id="filtro-campo" aria-label="Campo para filtrar"><option value="fisico">Físico</option><option value="vendas">Vendas a fazer</option><option value="manut">Manutenção aprovada</option><option value="disponivel" selected>Disponível</option><option value="minimo">Mínimo</option><option value="comprar">Comprar</option></select>
+            <select id="filtro-operador" aria-label="Comparação"><option value=">">Maior que</option><option value="<">Menor que</option><option value="=">Igual a</option></select>
+            <input id="filtro-valor" inputmode="decimal" placeholder="Valor" aria-label="Valor do filtro">
+            <button class="botao pequeno" id="aplicar-filtro" type="button">Aplicar</button><button class="botao pequeno secundario" id="limpar-filtro" type="button">Limpar</button>
+          </div>
+          <form method="get" class="estoque-busca"><input name="q" value="{{ q }}" placeholder="Buscar item/categoria"><button class="botao pequeno" type="submit">Buscar</button>{% if q %}<a class="botao pequeno secundario" href="/organiza/estoque">×</a>{% endif %}</form>
         </div>
-        <div class="filtro-numerico">
-          <select id="filtro-campo" aria-label="Campo para filtrar">
-            <option value="fisico">Físico</option>
-            <option value="vendas">Vendas a fazer</option>
-            <option value="manut">Manutenção aprovada</option>
-            <option value="disponivel" selected>Disponível</option>
-            <option value="minimo">Mínimo</option>
-            <option value="comprar">Comprar</option>
-          </select>
-          <select id="filtro-operador" aria-label="Comparação">
-            <option value=">">Maior que</option>
-            <option value="<">Menor que</option>
-            <option value="=">Igual a</option>
-          </select>
-          <input id="filtro-valor" inputmode="decimal" placeholder="Valor" aria-label="Valor do filtro">
-          <button class="botao pequeno" id="aplicar-filtro" type="button">Aplicar filtro</button>
-          <button class="botao pequeno secundario" id="limpar-filtro" type="button">Limpar filtro</button>
-        </div>
-        <form method="get" class="estoque-busca"><input name="q" value="{{ q }}" placeholder="Buscar item"><button class="botao pequeno" type="submit">Buscar</button>{% if q %}<a class="botao pequeno secundario" href="/organiza/estoque">Limpar busca</a>{% endif %}</form>
       </div>
     </div>
 
@@ -81,6 +72,7 @@
       <table class="planilha-estoque">
         <thead>
           <tr>
+            <th class="col-categoria">CATEGORIA</th>
             <th class="col-item">ITEM</th>
             <th>FÍSICO</th>
             <th>VENDAS<br>A FAZER</th>
@@ -101,6 +93,7 @@
               data-minimo="{{ l.minimo }}"
               data-comprar="{{ l.comprar }}"
               data-cor-row="cores-{{ l.item.id }}">
+            <td class="col-categoria">{{ l.item.categoria }}</td>
             <td class="col-item">
               <strong>{{ l.item.nome }}</strong>
               {% if l.item.id in itens_cor_ids %}<button type="button" class="link-cores" onclick="toggleCores('cores-{{ l.item.id }}', this)">cores ▾</button>{% endif %}
@@ -115,7 +108,7 @@
           </tr>
           {% if l.item.id in itens_cor_ids %}
           <tr id="cores-{{ l.item.id }}" class="linha-cores" hidden>
-            <td colspan="8">
+            <td colspan="9">
               {% if cores_estoque.get(l.item.id) %}
               <table class="subplanilha">
                 <thead><tr><th>COR</th><th>FÍSICO</th><th>VENDAS A FAZER</th><th>MANUT. APROV.</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th></tr></thead>
@@ -129,7 +122,7 @@
             </td>
           </tr>
           {% endif %}
-          {% else %}<tr><td colspan="8" class="vazio">Nenhum item encontrado.</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="9" class="vazio">Nenhum item encontrado.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -137,7 +130,7 @@
 
 </section>
 <style>
-.estoque-topo{align-items:flex-end}.acoes-topo-estoque{display:flex;gap:8px;flex-wrap:wrap}.estoque-entrada-detalhe{padding:0;overflow:hidden}.estoque-entrada-detalhe>summary{list-style:none;cursor:pointer;padding:14px 18px;display:flex;gap:10px;align-items:center;justify-content:space-between}.estoque-entrada-detalhe>summary::-webkit-details-marker{display:none}.estoque-entrada-detalhe>summary span{font-size:12px;color:#64748b}.entrada-conteudo{padding:0 18px 18px}.planilha-card{padding:0;overflow:hidden}.planilha-barra{padding:14px 16px;display:flex;align-items:flex-end;justify-content:space-between;gap:14px;border-bottom:1px solid #dbe3ee;flex-wrap:wrap}.planilha-barra h2{margin:0 0 3px}.planilha-acoes{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.estoque-busca{display:flex;gap:6px;align-items:center}.estoque-busca input{min-width:210px}.badge-compra{padding:7px 10px;border-radius:8px;background:#fff3cd;color:#7a4b00;font-weight:800;font-size:12px}.planilha-scroll{overflow:auto;max-width:100%}.planilha-estoque{width:100%;border-collapse:separate;border-spacing:0;min-width:980px;font-size:12px}.planilha-estoque th{position:sticky;top:0;z-index:2;background:#eef3f9;color:#24324a;font-size:11px;letter-spacing:.02em;text-align:right;padding:8px 10px;border-bottom:1px solid #ccd7e5;border-right:1px solid #dde5ef;white-space:nowrap}.planilha-estoque th.col-item{text-align:left;left:0;z-index:3}.planilha-estoque td{padding:7px 10px;border-bottom:1px solid #e2e8f0;border-right:1px solid #eef2f7;background:#fff;white-space:nowrap}.planilha-estoque td.col-item{position:sticky;left:0;z-index:1;min-width:310px;max-width:420px;white-space:normal}.planilha-estoque td.col-item small{display:block;color:#7a889d;margin-top:2px}.planilha-estoque tr:hover td{background:#f8fbff}.planilha-estoque tr:hover td.col-item{background:#f8fbff}.planilha-estoque .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-estoque .forte{font-weight:900}.planilha-estoque .negativo{color:#b42318}.planilha-estoque .comprar{color:#9a5a00;font-weight:900;background:#fffaf0}.linha-negativa td{background:#fff7f6}.link-cores{border:0;background:none;color:#2563eb;padding:0;margin-top:4px;font-weight:700;font-size:11px;cursor:pointer}.linha-cores td{padding:8px 20px;background:#f8fafc!important}.subplanilha{width:100%;border-collapse:collapse;font-size:11px}.subplanilha th{position:static!important;background:#e8eef6!important;padding:6px 8px!important}.subplanilha td{position:static!important;padding:6px 8px!important;background:#fff!important}.compacta{min-width:800px}.compacta th{position:static}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.reserva-venda{color:#0f5fb5}.reserva-manut{color:#7a4ea3}.reserva-venda a,.reserva-manut a{color:inherit;font-weight:900;text-decoration:underline;text-underline-offset:2px}.estoque-linha-item{display:table-row!important}.estoque-linha-item>td{display:table-cell!important;vertical-align:middle}.mov-tipo{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900}.mov-reserva{background:#eef2ff;color:#4338ca}.mov-entrada{background:#ecfdf3;color:#027a48}.mov-saida{background:#fff1f0;color:#b42318}.filtros-rapidos{display:flex;gap:5px;flex-wrap:wrap}.filtro-chip{border:1px solid #d7e0ec;background:#fff;color:#334155;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:800;cursor:pointer}.filtro-chip:hover{border-color:#9fb3cf;background:#f8fbff}.filtro-chip.ativo{background:#eaf1ff;border-color:#2563eb;color:#1d4ed8}.filtro-numerico{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.filtro-numerico select,.filtro-numerico input{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:11px}.filtro-numerico input{width:82px}.estoque-linha-item.filtrado,.linha-cores.filtrado{display:none!important}@media(max-width:800px){.acoes-topo-estoque,.planilha-acoes,.estoque-busca{width:100%}.estoque-busca input{flex:1;min-width:0}.planilha-estoque td.col-item{min-width:230px}}
+.estoque-topo{align-items:flex-end}.acoes-topo-estoque{display:flex;gap:8px;flex-wrap:wrap}.estoque-entrada-detalhe{padding:0;overflow:hidden}.estoque-entrada-detalhe>summary{list-style:none;cursor:pointer;padding:14px 18px;display:flex;gap:10px;align-items:center;justify-content:space-between}.estoque-entrada-detalhe>summary::-webkit-details-marker{display:none}.estoque-entrada-detalhe>summary span{font-size:12px;color:#64748b}.entrada-conteudo{padding:0 18px 18px}.planilha-card{padding:0;overflow:hidden}.planilha-barra{padding:14px 16px;display:block;border-bottom:1px solid #dbe3ee}.planilha-barra>.planilha-acoes{margin-top:10px}.planilha-barra h2{margin:0 0 3px}.planilha-acoes{display:block;width:100%;min-width:0}.filtros-linha{display:flex;gap:7px;align-items:center;justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}.filtros-rapidos,.filtro-numerico,.estoque-busca{display:flex;gap:5px;align-items:center;white-space:nowrap}.filtro-numerico select{width:auto;min-width:125px}.filtro-numerico input{width:86px;min-width:86px}.estoque-busca input{width:155px;min-width:155px}.badge-compra{padding:7px 10px;border-radius:8px;background:#fff3cd;color:#7a4b00;font-weight:800;font-size:12px}.badge-valor{padding:7px 10px;border-radius:8px;background:#eef6ff;color:#174ea6;font-weight:800;font-size:12px}.planilha-scroll{overflow:auto;max-width:100%}.planilha-estoque{width:100%;border-collapse:separate;border-spacing:0;min-width:980px;font-size:12px}.planilha-estoque th{position:sticky;top:0;z-index:2;background:#eef3f9;color:#24324a;font-size:11px;letter-spacing:.02em;text-align:right;padding:8px 10px;border-bottom:1px solid #ccd7e5;border-right:1px solid #dde5ef;white-space:nowrap}.planilha-estoque th.col-categoria,.planilha-estoque th.col-item{text-align:left}.planilha-estoque .col-categoria{min-width:135px;white-space:nowrap;color:#475569}.planilha-estoque td{padding:7px 10px;border-bottom:1px solid #e2e8f0;border-right:1px solid #eef2f7;background:#fff;white-space:nowrap}.planilha-estoque td.col-item{min-width:310px;max-width:420px;white-space:normal}.planilha-estoque td.col-item small{display:block;color:#7a889d;margin-top:2px}.planilha-estoque tr:hover td{background:#f8fbff}.planilha-estoque .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-estoque .forte{font-weight:900}.planilha-estoque .negativo{color:#b42318}.planilha-estoque .comprar{color:#9a5a00;font-weight:900;background:#fffaf0}.linha-negativa td{background:#fff7f6}.link-cores{border:0;background:none;color:#2563eb;padding:0;margin-top:4px;font-weight:700;font-size:11px;cursor:pointer}.linha-cores td{padding:8px 20px;background:#f8fafc!important}.subplanilha{width:100%;border-collapse:collapse;font-size:11px}.subplanilha th{position:static!important;background:#e8eef6!important;padding:6px 8px!important}.subplanilha td{position:static!important;padding:6px 8px!important;background:#fff!important}.compacta{min-width:800px}.compacta th{position:static}.vazio{text-align:center!important;color:#64748b;padding:24px!important}.reserva-venda{color:#0f5fb5}.reserva-manut{color:#7a4ea3}.reserva-venda a,.reserva-manut a{color:inherit;font-weight:900;text-decoration:underline;text-underline-offset:2px}.estoque-linha-item{display:table-row!important}.estoque-linha-item>td{display:table-cell!important;vertical-align:middle}.mov-tipo{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900}.mov-reserva{background:#eef2ff;color:#4338ca}.mov-entrada{background:#ecfdf3;color:#027a48}.mov-saida{background:#fff1f0;color:#b42318}.filtros-rapidos{display:flex;gap:5px;flex-wrap:nowrap}.filtro-chip{border:1px solid #d7e0ec;background:#fff;color:#334155;border-radius:999px;padding:6px 9px;font-size:11px;font-weight:800;cursor:pointer}.filtro-chip:hover{border-color:#9fb3cf;background:#f8fbff}.filtro-chip.ativo{background:#eaf1ff;border-color:#2563eb;color:#1d4ed8}.filtro-numerico{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.filtro-numerico select,.filtro-numerico input{height:34px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:0 9px;font-size:11px}.filtro-numerico input{width:82px}.estoque-linha-item.filtrado,.linha-cores.filtrado{display:none!important}@media(max-width:1180px){.filtros-linha{justify-content:flex-start}}@media(max-width:800px){.acoes-topo-estoque,.planilha-acoes,.estoque-busca{width:100%}.estoque-busca input{flex:1;min-width:0}.planilha-estoque td.col-item{min-width:230px}}
 @media print{.sidebar,.topbar,.acoes-topo-estoque,.estoque-entrada-detalhe,.estoque-busca{display:none!important}.planilha-card{box-shadow:none;border:0}.planilha-scroll{overflow:visible}.planilha-estoque{min-width:0;font-size:9px}.planilha-estoque th{position:static}.planilha-estoque td.col-item{position:static}}
 </style>
 <script>

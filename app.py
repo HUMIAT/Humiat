@@ -694,6 +694,10 @@ class Equipamento(Base):
     cupom_codigo_snapshot = Column(String(80), nullable=True)
     cupom_desconto_snapshot = Column(Float, nullable=False, default=0)
     desconto_manual = Column(Float, nullable=False, default=0)
+    # 1.1.74: correção manual do material efetivamente usado nesta máquina.
+    # Quando manual=0, o consumo continua acompanhando composição + Opcionais.
+    estoque_uso_override = Column(Text, nullable=True)
+    estoque_uso_manual = Column(Integer, nullable=False, default=0)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
@@ -846,6 +850,8 @@ class Item(Base):
     codigo = Column(String(30), nullable=True)
     nome = Column(String(180), unique=True, nullable=False)
     categoria = Column(String(80), nullable=False, default="Geral")
+    # 1.1.74: controle individual. Categorias lógicas ainda podem forçar fora do estoque.
+    controla_estoque = Column(Integer, nullable=False, default=1)
     preco_custo = Column(Float, nullable=False, default=0)
     preco_venda = Column(Float, nullable=False, default=0)
     ativo = Column(Integer, nullable=False, default=1)
@@ -1269,9 +1275,11 @@ class IntegracaoConect(Base):
 #   controlam mínimo e contagem também por cor.
 # -----------------------------------------------------------------------------
 ESTOQUE_ITENS_COR = {"BOTOES", "BOTAO", "COOLER 12 MM", "FITA LED", "LED"}
+# Categorias padronizadas para leitura de estoque/cadastro.
+CATEGORIAS_ITENS_PADRAO = ["Sistema", "Manutenção", "Informática", "Som", "Cabos e Conectores", "Botões e LEDs", "Geral"]
 # Itens destas categorias são serviços/valores lógicos e não representam material físico.
 ESTOQUE_CATEGORIAS_SEM_CONTROLE = {"SISTEMA", "MANUTENCAO", "MANUTENCOES"}
-ESTOQUE_ITENS_SEM_CONTROLE = {"ATUALIZACAO"}
+ESTOQUE_ITENS_SEM_CONTROLE = {"ATUALIZACAO", "CATALOGO ENCARDENADO"}
 ESTOQUE_COR_PENDENTE = "SEM COR DEFINIDA"
 ESTOQUE_VENDA_A_FAZER = {"Solicitar gabinete", "Montagem", "Pronto para entrega"}
 ESTOQUE_MANUTENCAO_FINAL = {"Encerrada"}
@@ -1291,7 +1299,22 @@ def item_controla_estoque(item: Item | None) -> bool:
         return False
     if nome in ESTOQUE_ITENS_SEM_CONTROLE:
         return False
-    return True
+    return bool(getattr(item, "controla_estoque", 1))
+
+
+def _categoria_sugerida_item_1174(nome: str) -> str | None:
+    n = _texto_sem_acento(nome)
+    if n in {"ATUALIZACAO", "CATALOGO ENCARDENADO"}:
+        return "Sistema"
+    if n.startswith("CABO ") or n.startswith("CONECTOR ") or n in {"EXTENSAO", "EXTENSOR HDMI"}:
+        return "Cabos e Conectores"
+    if "BOTAO" in n or "BOTOE" in n or n in {"FITA LED", "LED"}:
+        return "Botões e LEDs"
+    if any(chave in n for chave in ("AMPLIFICADOR", "CAIXA DE SOM", "DRIVER", "FALANTE", "MICROFONE", "TWEETER", "SUPORTE DE MIC")):
+        return "Som"
+    if any(chave in n for chave in ("BLUET", "CARTA SD", "COOLER", "HD", "MEMORIA", "MONITOR", "MONITO", "PLACA MAE", "RASPBERRY", "PANDORA", "TECLADO", "INTERFACE", "TV 32", "FONTE")):
+        return "Informática"
+    return None
 
 
 def item_controla_cor(item: Item | None) -> bool:
@@ -1305,8 +1328,8 @@ def normalizar_cor(valor: str | None) -> str:
     return cor[:80]
 
 
-def _consumo_venda_itens(eq: Equipamento, db: Session) -> dict[int, float]:
-    """Quantidade atual que a venda consome, somando base + Opcionais."""
+def _consumo_venda_itens_base(eq: Equipamento, db: Session) -> dict[int, float]:
+    """Quantidade calculada pela composição atual + Opcionais atuais."""
     desejado: dict[int, float] = {}
     if not eq or not eq.produto_venda_id:
         return desejado
@@ -1326,6 +1349,81 @@ def _consumo_venda_itens(eq: Equipamento, db: Session) -> dict[int, float]:
             if qtd > 0:
                 desejado[cfg.item_id] = desejado.get(cfg.item_id, 0.0) + qtd
     return {k: round(v, 4) for k, v in desejado.items() if v > 0}
+
+
+def _consumo_venda_itens(eq: Equipamento, db: Session) -> dict[int, float]:
+    """Consumo efetivo da máquina. Override manual vence a composição automática."""
+    if eq and bool(getattr(eq, "estoque_uso_manual", 0)) and (getattr(eq, "estoque_uso_override", None) or "").strip():
+        try:
+            dados = json.loads(eq.estoque_uso_override or "{}")
+            saida = {}
+            for item_id, qtd in (dados or {}).items():
+                try:
+                    iid = int(item_id)
+                    quantidade = round(max(float(qtd or 0), 0), 4)
+                except (TypeError, ValueError):
+                    continue
+                if iid > 0 and quantidade > 0:
+                    saida[iid] = quantidade
+            return saida
+        except Exception:
+            return {}
+    return _consumo_venda_itens_base(eq, db)
+
+
+def contexto_estoque_utilizado_venda(db: Session, equipamento: Equipamento | None) -> dict:
+    quantidades = _consumo_venda_itens(equipamento, db) if equipamento else {}
+    ids = list(quantidades.keys())
+    itens_map = {i.id: i for i in db.query(Item).filter(Item.id.in_(ids)).all()} if ids else {}
+    linhas = []
+    for item_id, qtd in quantidades.items():
+        item = itens_map.get(item_id)
+        if not item or not item_controla_estoque(item):
+            continue
+        linhas.append({
+            "item": item, "quantidade": float(qtd or 0),
+            "custo_unitario": float(item.preco_custo or 0),
+            "custo_total": round(float(qtd or 0) * float(item.preco_custo or 0), 2),
+        })
+    linhas.sort(key=lambda x: ((_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome))))
+    itens_disponiveis = [
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria), func.upper(Item.nome)).all()
+        if item_controla_estoque(i)
+    ]
+    return {
+        "linhas": linhas, "itens": itens_disponiveis,
+        "manual": bool(equipamento and getattr(equipamento, "estoque_uso_manual", 0)),
+        "total": round(sum(x["custo_total"] for x in linhas), 2),
+    }
+
+
+def salvar_estoque_utilizado_venda(eq: Equipamento, form: dict, db: Session) -> None:
+    if not eq or not eq.id:
+        return
+    if str(form.get("estoque_uso_recalcular") or "0") == "1":
+        eq.estoque_uso_manual = 0
+        eq.estoque_uso_override = None
+        return
+    if str(form.get("estoque_uso_editado") or "0") != "1":
+        return
+    quantidades: dict[int, float] = {}
+    for idx in range(1, 61):
+        try:
+            item_id = int(form.get(f"estoque_uso_item_{idx}") or 0)
+        except (TypeError, ValueError):
+            item_id = 0
+        try:
+            qtd = float(str(form.get(f"estoque_uso_qtd_{idx}") or "0").replace(",", "."))
+        except (TypeError, ValueError):
+            qtd = 0
+        if item_id <= 0 or qtd <= 0:
+            continue
+        item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+        if not item or not item_controla_estoque(item):
+            continue
+        quantidades[item_id] = round(quantidades.get(item_id, 0.0) + qtd, 4)
+    eq.estoque_uso_override = json.dumps({str(k): v for k, v in quantidades.items()}, ensure_ascii=False, sort_keys=True)
+    eq.estoque_uso_manual = 1
 
 
 def _usos_cor(db: Session, origem_tipo: str, origem_id: int, item_id: int) -> list[EstoqueCorUso]:
@@ -1451,8 +1549,11 @@ def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
     reservas_existentes = db.query(EstoqueReserva.id).filter(
         EstoqueReserva.origem_tipo == "VENDA", EstoqueReserva.origem_id == eq.id
     ).first() is not None
+    saidas_existentes = db.query(EstoqueMovimento.id).filter(
+        EstoqueMovimento.tipo == "SAIDA", EstoqueMovimento.origem_tipo == "VENDA", EstoqueMovimento.origem_id == eq.id
+    ).first() is not None
     _sincronizar_reservas_origem(db, "VENDA", eq.id, {})
-    if status == "Entregue" and reservas_existentes:
+    if status == "Entregue" and (reservas_existentes or saidas_existentes):
         _sincronizar_saidas_origem(
             db, "VENDA", eq.id, desejado,
             observacao=f"Venda equipamento #{eq.id} entregue · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
@@ -1589,7 +1690,7 @@ def _salvar_minimo_estoque(db: Session, item_id: int, cor: str | None, quantidad
 
 def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
     itens = [
-        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
         if item_controla_estoque(i)
     ]
     movimentos = db.query(EstoqueMovimento).all()
@@ -1751,7 +1852,7 @@ def relatorio_compras_estoque(db: Session) -> list[dict]:
                 compras.append({"item": item, "cor": c["cor"], "disponivel": c["disponivel"], "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": c["custo_compra"]})
         elif l["comprar"] > 0:
             compras.append({"item": item, "cor": "", "disponivel": l["disponivel"], "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": l["custo_compra"]})
-    return sorted(compras, key=lambda x: ((x["item"].nome or "").upper(), x["cor"]))
+    return sorted(compras, key=lambda x: ((_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
 
 
 def _migrar_estoque_primeira_implantacao_1166(db: Session) -> int:
@@ -1811,6 +1912,51 @@ def _migrar_reservas_manutencao_aprovada_1168(db: Session) -> int:
             sincronizar_estoque_manutencao(manutencao, db)
     db.commit()
     return int(removidas or 0)
+
+
+def _migrar_itens_e_reservas_1174(db: Session) -> tuple[int, int]:
+    """Padroniza categorias/controle de estoque e refaz reservas abertas de venda.
+
+    Não altera saídas físicas históricas. A correção vale apenas para posição futura/aberta.
+    """
+    chave = "estoque_itens_categorias_e_reservas_1_1_74"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0, 0
+    alterados = 0
+    for item in db.query(Item).all():
+        categoria_atual = _texto_sem_acento(item.categoria)
+        sugerida = _categoria_sugerida_item_1174(item.nome)
+        if categoria_atual in {"", "GERAL", "COMPOSICAO DE EQUIPAMENTOS", "OPCIONAIS DE VENDA"}:
+            categoria_nova = sugerida or ("Geral" if categoria_atual in {"", "COMPOSICAO DE EQUIPAMENTOS", "OPCIONAIS DE VENDA"} else item.categoria)
+            if categoria_nova and item.categoria != categoria_nova:
+                item.categoria = categoria_nova
+                alterados += 1
+        if _texto_sem_acento(item.categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(item.nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+            if int(getattr(item, "controla_estoque", 1) or 0) != 0:
+                item.controla_estoque = 0
+                alterados += 1
+        elif getattr(item, "controla_estoque", None) is None:
+            item.controla_estoque = 1
+            alterados += 1
+
+    # Recalcula somente reservas de vendas ainda a fazer. Isso corrige vínculos de
+    # Opcionais/Recursos alterados sem mexer em equipamentos já entregues.
+    vendas = db.query(Equipamento).filter(
+        Equipamento.produto_venda_id.isnot(None),
+        Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER)),
+    ).all()
+    ressincronizadas = 0
+    for eq in vendas:
+        sincronizar_estoque_venda(eq, db)
+        ressincronizadas += 1
+
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+    return alterados, ressincronizadas
 
 
 def contexto_cores_venda(db: Session, equipamento: Equipamento | None) -> list[dict]:
@@ -2593,6 +2739,7 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
         "opcoes_por_campo": opcoes_por_campo, "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
         "cupons_venda": sorted(cupons, key=lambda c: (c.codigo or "")), "cupons_dados": cupons_dados,
         "estoque_cores_venda": contexto_cores_venda(db, equipamento),
+        "estoque_utilizado_venda": contexto_estoque_utilizado_venda(db, equipamento),
     }
 
 
@@ -2827,6 +2974,12 @@ def iniciar_banco():
                      WHERE COALESCE(TRIM(evento_cep), '') <> ''
                         OR COALESCE(TRIM(evento_numero), '') <> ''
                 """))
+    if "catalogo_itens" in insp.get_table_names():
+        existentes_itens = {c["name"] for c in insp.get_columns("catalogo_itens")}
+        with engine.begin() as conn:
+            if "controla_estoque" not in existentes_itens:
+                conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN controla_estoque INTEGER NOT NULL DEFAULT 1"))
+
     if "equipamentos" in insp.get_table_names():
         existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
         with engine.begin() as conn:
@@ -2882,6 +3035,10 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN cupom_desconto_snapshot FLOAT NOT NULL DEFAULT 0"))
             if "desconto_manual" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN desconto_manual FLOAT NOT NULL DEFAULT 0"))
+            if "estoque_uso_override" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN estoque_uso_override TEXT"))
+            if "estoque_uso_manual" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN estoque_uso_manual INTEGER NOT NULL DEFAULT 0"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -2955,6 +3112,9 @@ def iniciar_banco():
         removidas_manut_1168 = _migrar_reservas_manutencao_aprovada_1168(db)
         if removidas_manut_1168:
             print(f"[ESTOQUE] 1.1.68: {removidas_manut_1168} reserva(s) de manutenção refeita(s); somente aprovadas permanecem.")
+        itens_1174, vendas_1174 = _migrar_itens_e_reservas_1174(db)
+        if itens_1174 or vendas_1174:
+            print(f"[ESTOQUE] 1.1.74: itens/categorias ajustados={itens_1174}; vendas abertas ressincronizadas={vendas_1174}.")
         db.commit()
     finally:
         db.close()
@@ -3658,6 +3818,16 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     if tipo_filtro:
         equipamentos = [eq for eq in equipamentos if tipo_equipamento_padrao(eq.tipo or "") == tipo_filtro]
     equipamentos = ordenar_equipamentos(equipamentos)
+    for eq_item in equipamentos:
+        if eq_item.produto_venda_id:
+            estoque_ctx = contexto_estoque_utilizado_venda(db, eq_item)
+            eq_item.estoque_utilizado_linhas = estoque_ctx["linhas"]
+            eq_item.estoque_utilizado_total = estoque_ctx["total"]
+            eq_item.estoque_utilizado_manual = estoque_ctx["manual"]
+        else:
+            eq_item.estoque_utilizado_linhas = []
+            eq_item.estoque_utilizado_total = 0
+            eq_item.estoque_utilizado_manual = False
     manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).all()
 
     venda_consulta = None
@@ -4231,7 +4401,7 @@ def _equipamento_ativo_mais_antigo(cliente: Cliente | None) -> Equipamento | Non
 
 
 def _sincronizar_pacote_cliente(db: Session, cliente_id: int, primeiro_pacote: str | None = None) -> tuple[int, int]:
-    """Garante pacote em todas as máquinas e espelha no cadastro do cliente."""
+    """Garante pacote nas máquinas que usam catálogo e mantém Fliperama como N/A."""
     cliente = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first()
     if not cliente:
         return 0, 0
@@ -4241,7 +4411,17 @@ def _sincronizar_pacote_cliente(db: Session, cliente_id: int, primeiro_pacote: s
     primeiro = _normalizar_pacote_cadastrado(primeiro_pacote) or _primeiro_pacote_disponivel(db)
     pacote_atual = obter_pacote_atual(db)
     eq_alterados = 0
+    maquinas_com_pacote = []
     for eq in equipamentos:
+        if tipo_equipamento_padrao(eq.tipo or "") == "FLIPERAMA":
+            if (eq.pacote or "").strip().upper() != "NA":
+                eq.pacote = "NA"
+                eq_alterados += 1
+            if eq.falta_pacote != 0:
+                eq.falta_pacote = 0
+                eq_alterados += 1
+            continue
+        maquinas_com_pacote.append(eq)
         pacote = _normalizar_pacote_cadastrado(eq.pacote) or primeiro
         if (eq.pacote or "").strip() != pacote:
             eq.pacote = pacote
@@ -4250,14 +4430,18 @@ def _sincronizar_pacote_cliente(db: Session, cliente_id: int, primeiro_pacote: s
         if eq.falta_pacote != falta:
             eq.falta_pacote = falta
             eq_alterados += 1
-    ativos = [eq for eq in equipamentos if (eq.status or "").strip().lower() == "ativo"]
-    referencia = min(ativos or equipamentos, key=_chave_equipamento_mais_antigo)
-    pacote_cliente = _normalizar_pacote_cadastrado(referencia.pacote) or primeiro
     cliente_alterado = 0
+    if maquinas_com_pacote:
+        ativos = [eq for eq in maquinas_com_pacote if (eq.status or "").strip().lower() == "ativo"]
+        referencia = min(ativos or maquinas_com_pacote, key=_chave_equipamento_mais_antigo)
+        pacote_cliente = _normalizar_pacote_cadastrado(referencia.pacote) or primeiro
+        falta_cliente = calcular_falta_pacote(pacote_cliente, pacote_atual)
+    else:
+        pacote_cliente = "NA"
+        falta_cliente = 0
     if (cliente.pacote or "").strip() != pacote_cliente:
         cliente.pacote = pacote_cliente
         cliente_alterado = 1
-    falta_cliente = calcular_falta_pacote(cliente.pacote, pacote_atual)
     if cliente.falta_pacote != falta_cliente:
         cliente.falta_pacote = falta_cliente
         cliente_alterado = 1
@@ -4280,7 +4464,17 @@ def _corrigir_consistencia_pacotes(db: Session) -> tuple[int, int, str]:
         equipamentos = list(cliente.equipamentos or [])
         if not equipamentos:
             continue
+        maquinas_com_pacote = []
         for eq in equipamentos:
+            if tipo_equipamento_padrao(eq.tipo or "") == "FLIPERAMA":
+                if (eq.pacote or "").strip().upper() != "NA":
+                    eq.pacote = "NA"
+                    total_eq += 1
+                if eq.falta_pacote != 0:
+                    eq.falta_pacote = 0
+                    total_eq += 1
+                continue
+            maquinas_com_pacote.append(eq)
             pacote = _normalizar_pacote_cadastrado(eq.pacote) or primeiro
             if (eq.pacote or "").strip() != pacote:
                 eq.pacote = pacote
@@ -4289,14 +4483,18 @@ def _corrigir_consistencia_pacotes(db: Session) -> tuple[int, int, str]:
             if eq.falta_pacote != falta:
                 eq.falta_pacote = falta
                 total_eq += 1
-        ativos = [eq for eq in equipamentos if (eq.status or "").strip().lower() == "ativo"]
-        referencia = min(ativos or equipamentos, key=_chave_equipamento_mais_antigo)
-        pacote_cliente = _normalizar_pacote_cadastrado(referencia.pacote) or primeiro
+        if maquinas_com_pacote:
+            ativos = [eq for eq in maquinas_com_pacote if (eq.status or "").strip().lower() == "ativo"]
+            referencia = min(ativos or maquinas_com_pacote, key=_chave_equipamento_mais_antigo)
+            pacote_cliente = _normalizar_pacote_cadastrado(referencia.pacote) or primeiro
+            falta_cliente = calcular_falta_pacote(pacote_cliente, pacote_atual)
+        else:
+            pacote_cliente = "NA"
+            falta_cliente = 0
         alterou_cliente = False
         if (cliente.pacote or "").strip() != pacote_cliente:
             cliente.pacote = pacote_cliente
             alterou_cliente = True
-        falta_cliente = calcular_falta_pacote(cliente.pacote, pacote_atual)
         if cliente.falta_pacote != falta_cliente:
             cliente.falta_pacote = falta_cliente
             alterou_cliente = True
@@ -6509,12 +6707,15 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     codigo_padrao_nfae, descricao_padrao_nfae = nfae_padrao_produto(eq.tipo)
     eq.nota_codigo = re.sub(r"[^A-Za-z0-9._-]", "", (form.get("nota_codigo") or "").strip()) or codigo_padrao_nfae
     eq.nota_descricao = (form.get("nota_descricao") or "").strip() or descricao_padrao_nfae
-    pacote_informado = _normalizar_pacote_cadastrado(form.get("pacote"))
-    pacote_existente = _normalizar_pacote_cadastrado(eq.pacote)
-    eq.pacote = pacote_informado or pacote_existente or _primeiro_pacote_disponivel(db)
-    # Nenhuma máquina fica sem pacote. O valor ausente recebe o primeiro pacote disponível.
-    # Este valor é derivado do pacote instalado e nunca é informado manualmente.
-    eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
+    # Fliperama não utiliza pacote de músicas. Para os demais equipamentos o pacote continua obrigatório.
+    if tipo_equipamento_padrao(eq.tipo or "") == "FLIPERAMA":
+        eq.pacote = "NA"
+        eq.falta_pacote = 0
+    else:
+        pacote_informado = _normalizar_pacote_cadastrado(form.get("pacote"))
+        pacote_existente = _normalizar_pacote_cadastrado(eq.pacote)
+        eq.pacote = pacote_informado or pacote_existente or _primeiro_pacote_disponivel(db)
+        eq.falta_pacote = calcular_falta_pacote(eq.pacote, obter_pacote_atual(db))
     if modelo_venda:
         eq.plano = "PLUS" if eq.catalogo_venda == "PLUS" else "BÁSICO"
     else:
@@ -6787,6 +6988,9 @@ async def equipamento_criar(cliente_id: int, request: Request, usuario: Usuario 
         }, status_code=400)
     db.add(eq)
     db.flush()
+    salvar_estoque_utilizado_venda(eq, form, db)
+    salvar_cores_venda(eq, form, db)
+    sincronizar_estoque_venda(eq, db)
     _sincronizar_pacote_cliente(db, cliente_id)
     db.commit()
     return RedirectResponse(f"/organiza/clientes/{cliente_id}", status_code=303)
@@ -6868,6 +7072,7 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
             **contexto_configuracao_venda(db, eq)
         }, status_code=400)
     db.flush()
+    salvar_estoque_utilizado_venda(eq, form, db)
     salvar_cores_venda(eq, form, db)
     sincronizar_estoque_venda(eq, db)
     _sincronizar_pacote_cliente(db, cliente_id)
@@ -10502,6 +10707,14 @@ async def modelo_venda_salvar(modelo_id: int, request: Request, usuario: Usuario
         comp_espelho.quantidade = 1
     else:
         db.add(VendaModeloComposicao(modelo_id=modelo_id, item_id=espelho.id, quantidade=1))
+    db.flush()
+    # Atualiza reservas abertas que ainda seguem a composição automática.
+    for eq in db.query(Equipamento).filter(
+        Equipamento.produto_venda_id == modelo_id,
+        Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER)),
+    ).all():
+        if not bool(eq.estoque_uso_manual):
+            sincronizar_estoque_venda(eq, db)
     db.commit()
     return RedirectResponse(f"/organiza/equipamentos-venda/{modelo_id}/editar?salvo=1", status_code=303)
 
@@ -10534,6 +10747,17 @@ async def opcional_venda_salvar(config_id: int, request: Request, usuario: Usuar
     except ValueError:
         config.quantidade = 0
     config.ativo = 1 if str(form.get("ativo") or "").lower() in {"1", "on", "true", "sim"} else 0
+    db.flush()
+    # Equipamentos abertos sem correção manual acompanham imediatamente o novo vínculo do Opcional.
+    campo_coluna = getattr(Equipamento, config.campo, None)
+    if campo_coluna is not None:
+        vendas_abertas = db.query(Equipamento).filter(
+            campo_coluna == config.valor,
+            Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER)),
+        ).all()
+        for eq in vendas_abertas:
+            if not bool(eq.estoque_uso_manual):
+                sincronizar_estoque_venda(eq, db)
     db.commit()
     return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
 
@@ -10693,11 +10917,14 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
 @app.get("/organiza/estoque", response_class=HTMLResponse)
 def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     linhas, cores = estoque_saldos(db)
+    valor_estoque_fisico_total = round(sum(
+        float(l.get("fisico") or 0) * float(l["item"].preco_custo or 0) for l in linhas
+    ), 2)
     q = (request.query_params.get("q") or "").strip().upper()
     if q:
-        linhas = [l for l in linhas if q in (l["item"].nome or "").upper()]
+        linhas = [l for l in linhas if q in (l["item"].nome or "").upper() or q in (l["item"].categoria or "").upper()]
     itens = [
-        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
         if item_controla_estoque(i)
     ]
     itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
@@ -10708,7 +10935,7 @@ def estoque_painel(request: Request, usuario: Usuario = Depends(usuario_logado),
         "q": q, "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
         "cor_pendente": ESTOQUE_COR_PENDENTE,
         "total_compras": round(sum(float(x["custo_total"] or 0) for x in compras), 2),
-        "qtd_compras": len(compras),
+        "qtd_compras": len(compras), "valor_estoque_fisico": valor_estoque_fisico_total,
     })
 
 
@@ -10763,7 +10990,7 @@ def _agrupar_movimentacoes_item(linhas: list[dict]) -> list[dict]:
     for g in grupos.values():
         g["movimento_liquido"] = round(g["entradas"] - g["saidas"], 4)
         saida.append(g)
-    return sorted(saida, key=lambda x: ((x["item"].nome or "").upper(), x["cor"]))
+    return sorted(saida, key=lambda x: ((_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
 
 
 @app.get("/organiza/estoque/movimentacoes", response_class=HTMLResponse)
@@ -10783,7 +11010,7 @@ def estoque_movimentacoes(request: Request, usuario: Usuario = Depends(usuario_l
     grupos_clientes = _agrupar_movimentacoes_cliente(linhas)
     movimentos_itens = _agrupar_movimentacoes_item(linhas)
     itens = [
-        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.nome).asc()).all()
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
         if item_controla_estoque(i)
     ]
     return templates.TemplateResponse("organiza/estoque_movimentacoes.html", {
@@ -10811,10 +11038,10 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
     itens_resumo = _agrupar_movimentacoes_item(linhas)
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["ITEM", "COR", "ENTRADAS", "SAIDAS", "RESERVADO", "MOVIMENTO_LIQUIDO"])
+    writer.writerow(["CATEGORIA", "ITEM", "COR", "ENTRADAS", "SAIDAS", "RESERVADO", "MOVIMENTO_LIQUIDO"])
     for l in itens_resumo:
         writer.writerow([
-            l["item"].nome if l["item"] else "", l["cor"], f'{float(l["entradas"]):g}',
+            l["item"].categoria if l["item"] else "", l["item"].nome if l["item"] else "", l["cor"], f'{float(l["entradas"]):g}',
             f'{float(l["saidas"]):g}', f'{float(l["reservas"]):g}', f'{float(l["movimento_liquido"]):g}',
         ])
     conteudo = "\ufeff" + buffer.getvalue()
@@ -10833,10 +11060,14 @@ def estoque_contagem(request: Request, usuario: Usuario = Depends(usuario_logado
         float(l.get("contagem_salva") or 0) * float(l.get("custo_unitario") or 0)
         for l in linhas if l.get("salvo")
     ), 2)
+    valor_fisico_atual = round(sum(
+        float(l.get("fisico") or 0) * float(l.get("custo_unitario") or 0)
+        for l in linhas
+    ), 2)
     return templates.TemplateResponse("organiza/estoque_contagem.html", {
         "request": request, "usuario": usuario, "linhas": linhas,
         "total_salvos": total_salvos, "total_pendentes": max(len(linhas) - total_salvos, 0),
-        "valor_contado": valor_contado,
+        "valor_contado": valor_contado, "valor_fisico_atual": valor_fisico_atual,
         "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
     })
 
@@ -10947,12 +11178,12 @@ def estoque_contagem_nova(usuario: Usuario = Depends(usuario_logado), db: Sessio
 def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["ITEM", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
+    writer.writerow(["CATEGORIA", "ITEM", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
     for linha in _linhas_contagem_estoque(db):
         contagem = linha.get("contagem_salva") if linha.get("salvo") else None
         diferenca = (float(contagem) - float(linha["fisico"])) if contagem is not None else None
         writer.writerow([
-            linha["item"].nome, linha["cor"], "CONTADO" if linha.get("salvo") else "PENDENTE",
+            linha["item"].categoria, linha["item"].nome, linha["cor"], "CONTADO" if linha.get("salvo") else "PENDENTE",
             f'{float(linha.get("custo_unitario") or 0):.2f}',
             f'{float(linha["fisico"]):g}', f'{float(contagem):g}' if contagem is not None else "",
             f'{float(contagem) * float(linha.get("custo_unitario") or 0):.2f}' if contagem is not None else "",
@@ -11027,10 +11258,14 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
     if termo:
         filtro = f"%{termo}%"
         q = q.filter(or_(Item.nome.ilike(filtro), Item.categoria.ilike(filtro)))
-    itens = q.order_by(Item.nome.asc()).all()
+    itens = q.order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
     for item in itens:
         item.controla_estoque_ui = item_controla_estoque(item)
-    categorias = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
+    existentes = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
+    categorias = []
+    for categoria in CATEGORIAS_ITENS_PADRAO + existentes:
+        if categoria and categoria not in categorias:
+            categorias.append(categoria)
     return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca})
 
 
@@ -11044,10 +11279,17 @@ async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado)
     if nome:
         existente = db.query(Item).filter(func.lower(Item.nome) == nome.lower()).first()
         if not existente:
+            categoria = (form.get("categoria") or "Geral").strip() or "Geral"
+            if _texto_sem_acento(nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+                categoria = "Sistema"
+            controla = 1 if str(form.get("controla_estoque") or "1").strip() == "1" else 0
+            if _texto_sem_acento(categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+                controla = 0
             db.add(Item(
                 nome=nome,
                 codigo=None,
-                categoria=(form.get("categoria") or "Geral").strip() or "Geral",
+                categoria=categoria,
+                controla_estoque=controla,
                 preco_custo=moeda_num(form.get("preco_custo")),
                 preco_venda=moeda_num(form.get("preco_venda")),
                 ativo=1,
@@ -11067,8 +11309,25 @@ async def item_editar(item_id: int, request: Request, usuario: Usuario = Depends
     if nome and not repetido:
         item.nome = nome
         item.categoria = (form.get("categoria") or "Geral").strip() or "Geral"
+        if _texto_sem_acento(item.nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+            item.categoria = "Sistema"
+        controla = 1 if str(form.get("controla_estoque") or "1").strip() == "1" else 0
+        if _texto_sem_acento(item.categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(item.nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+            controla = 0
+        item.controla_estoque = controla
         item.preco_custo = moeda_num(form.get("preco_custo"))
         item.preco_venda = moeda_num(form.get("preco_venda"))
+        # Se o item saiu do controle, remove somente reservas futuras. Movimentos físicos históricos permanecem.
+        if not item_controla_estoque(item):
+            db.query(EstoqueReserva).filter(EstoqueReserva.item_id == item.id).delete(synchronize_session=False)
+        # Reaplica a regra aos trabalhos ainda abertos, sem tocar em histórico concluído.
+        for eq_aberto in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
+            sincronizar_estoque_venda(eq_aberto, db)
+        manut_ids = [mid for (mid,) in db.query(Manutencao.id).filter(~Manutencao.status.in_(tuple(ESTOQUE_MANUTENCAO_FINAL | ESTOQUE_MANUTENCAO_CANCELADA))).all()]
+        for mid in manut_ids:
+            manut = carregar_manutencao(db, mid)
+            if manut:
+                sincronizar_estoque_manutencao(manut, db)
         db.commit()
     return RedirectResponse("/organiza/itens", status_code=303)
 
@@ -12202,11 +12461,8 @@ def pagamento_excluir(manutencao_id: int, pagamento_id: int, usuario: Usuario = 
     p = db.query(Pagamento).filter(Pagamento.id == pagamento_id).first()
     if not p:
         raise HTTPException(404)
+    # 1.1.74: manutenção envia ao Connect somente o saldo global atual.
     integ = _registro_integracao(db, "manutencao", p.id)
-    if integ and integ.enviado_em:
-        return RedirectResponse(
-            f"/organiza/manutencoes/{manutencao_id}?erro_fluxo=pagamento_enviado_connect", status_code=303
-        )
     if integ:
         db.delete(integ)
     db.delete(p)
@@ -13391,52 +13647,110 @@ def _payload_manutencao(p: Pagamento, db: Session):
     }
 
 
-def _linhas_central_financeiro(db: Session):
-    linhas = []
+def _saldos_globais_connect(db: Session) -> list[dict]:
+    """Quatro saldos globais espelhados no Connect.
 
-    vendas = db.query(PagamentoVenda).options(
-        selectinload(PagamentoVenda.equipamento).selectinload(Equipamento.cliente)
-    ).order_by(PagamentoVenda.data.desc(), PagamentoVenda.id.desc()).all()
-
-    totais_venda = dict(
-        db.query(PagamentoVenda.equipamento_id, func.sum(PagamentoVenda.valor))
-        .group_by(PagamentoVenda.equipamento_id).all()
+    O Organiza é a fonte da verdade. O Connect apenas consulta o saldo atual.
+    Não há vínculo por cliente, item ou pagamento.
+    """
+    # Vendas: valor total menos pagamentos registrados no Organiza.
+    # Antes de calcular, migra o campo legado `pago` para PagamentoVenda. Isso
+    # impede que vendas antigas já quitadas reapareçam como saldo em aberto na
+    # primeira sincronização global.
+    equipamentos_venda = (
+        db.query(Equipamento)
+        .options(selectinload(Equipamento.cliente))
+        .filter(or_(
+            Equipamento.data_compra.isnot(None),
+            Equipamento.previsao_entrega.isnot(None),
+            Equipamento.valor.isnot(None),
+            Equipamento.pago.isnot(None),
+            Equipamento.status.in_(STATUS_VENDA),
+        ))
+        .all()
     )
-    integracoes = {
-        (i.origem, i.registro_id): i for i in db.query(IntegracaoConect).all()
-    }
+    equipamentos_venda = [eq for eq in equipamentos_venda if equipamento_eh_venda(eq)]
+    _migrar_pagamentos_legados_vendas(db, equipamentos_venda)
 
-    for p in vendas:
-        payload = _payload_venda(p, db, float(totais_venda.get(p.equipamento_id) or 0))
-        integ = integracoes.get(("venda", p.id))
-        hash_atual = _payload_hash(payload)
-        status = (
-            "ignorado" if integ and integ.ignorado
-            else "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em
-            else "atualizado" if integ and integ.enviado_em
-            else "novo"
-        )
-        linhas.append({"origem": "Venda", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/vendas/{p.equipamento_id}/pagamentos", "operacao_chave": f"venda:{p.equipamento_id}"})
+    ids_venda = [eq.id for eq in equipamentos_venda]
+    totais_pag_venda = {}
+    if ids_venda:
+        totais_pag_venda = {
+            int(eid): float(total or 0)
+            for eid, total in db.query(
+                PagamentoVenda.equipamento_id,
+                func.coalesce(func.sum(PagamentoVenda.valor), 0),
+            )
+            .filter(PagamentoVenda.equipamento_id.in_(ids_venda))
+            .group_by(PagamentoVenda.equipamento_id).all()
+        }
 
-    manutencoes = db.query(Pagamento).options(
-        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.cliente),
-        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.equipamento),
-        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
-        selectinload(Pagamento.orcamento).selectinload(Orcamento.manutencao).selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
-    ).order_by(Pagamento.data.desc(), Pagamento.id.desc()).all()
-    for p in manutencoes:
-        payload = _payload_manutencao(p, db)
-        integ = integracoes.get(("manutencao", p.id))
-        hash_atual = _payload_hash(payload)
-        status = (
-            "ignorado" if integ and integ.ignorado
-            else "enviado" if integ and integ.hash_conteudo == hash_atual and integ.enviado_em
-            else "atualizado" if integ and integ.enviado_em
-            else "novo"
+    vendas_abertas = 0.0
+    for eq in equipamentos_venda:
+        total = max(float(moeda_num(eq.valor)), 0.0)
+        # `eq.pago` permanece como fallback de segurança para bases legadas.
+        recebido = max(
+            float(totais_pag_venda.get(eq.id, 0.0)),
+            float(moeda_num(eq.pago)),
+            0.0,
         )
-        linhas.append({"origem": "Manutenção", "registro": p, "payload": payload, "status_sync": status, "integracao": integ, "editar_url": f"/organiza/manutencoes/{p.orcamento.manutencao.id}#etapa-4", "operacao_chave": f"manutencao:{p.orcamento.manutencao_id}"})
-    linhas.sort(key=lambda x: (x["registro"].data, x["registro"].id), reverse=True)
-    return linhas
+        vendas_abertas += max(total - recebido, 0.0)
+
+    # Manutenções: orçamento aprovado menos pagamentos registrados.
+    manutencoes_abertas = 0.0
+    manutencoes = db.query(Manutencao).options(
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
+    ).filter(func.upper(func.coalesce(Manutencao.status, "")) != "CANCELADA").all()
+    for manut in manutencoes:
+        _total, _recebido, saldo = _saldo_manutencao(manut)
+        manutencoes_abertas += max(float(saldo or 0), 0.0)
+
+    # Atualizações: valor real lançado (inclusive adicional/frete) menos o que já foi pago.
+    atualizacoes_abertas = 0.0
+    for compra in db.query(AtualizacaoCompra).all():
+        if (compra.status or "").strip().upper() in {"CANCELADO", "CANCELADA"}:
+            continue
+        total_cent = int(compra.valor_a_pagar_centavos or 0) + int(compra.frete_centavos or 0)
+        pago_cent = int(compra.valor_pago_centavos or 0)
+        atualizacoes_abertas += max((total_cent - pago_cent) / 100.0, 0.0)
+
+    # Estoque: exatamente o total exibido no relatório de compras.
+    estoque_a_pagar = round(sum(float(x.get("custo_total") or 0) for x in relatorio_compras_estoque(db)), 2)
+
+    hoje = date.today().isoformat()
+    saldos = [
+        {"chave": "vendas", "titulo": "A receber · Vendas", "natureza": "receber", "tipo": "venda", "valor": round(vendas_abertas, 2)},
+        {"chave": "manutencoes", "titulo": "A receber · Manutenções", "natureza": "receber", "tipo": "manutencao", "valor": round(manutencoes_abertas, 2)},
+        {"chave": "atualizacoes", "titulo": "A receber · Atualizações", "natureza": "receber", "tipo": "atualizacao", "valor": round(atualizacoes_abertas, 2)},
+        {"chave": "estoque", "titulo": "A pagar · Estoque / Compras", "natureza": "pagar", "tipo": "estoque", "valor": round(estoque_a_pagar, 2)},
+    ]
+    for idx, saldo in enumerate(saldos, start=1):
+        saldo["registro_id"] = idx
+        saldo["id_externo"] = f"ORGANIZA-SALDO-{saldo['chave'].upper()}"
+        saldo["payload"] = {
+            "id_externo": saldo["id_externo"],
+            "tipo": saldo["tipo"],
+            "natureza": saldo["natureza"],
+            "cliente": "Karaokê RJ",
+            "descricao": saldo["titulo"],
+            "valor": saldo["valor"],
+            "falta_receber": saldo["valor"] if saldo["natureza"] == "receber" else 0,
+            "data_pagamento": hoje,
+            "banco": "Organiza",
+            "observacao": "Saldo global calculado no Organiza. O Connect é somente consulta.",
+            "empresa_slug": "karaokerj",
+        }
+        integ = _registro_integracao(db, f"saldo_{saldo['chave']}", idx)
+        saldo["integracao"] = integ
+        saldo["hash_atual"] = _payload_hash(saldo["payload"])
+        if integ and integ.enviado_em and integ.hash_conteudo == saldo["hash_atual"]:
+            saldo["status_sync"] = "sincronizado"
+        elif integ and integ.enviado_em:
+            saldo["status_sync"] = "alterado"
+        else:
+            saldo["status_sync"] = "novo"
+    return saldos
 
 
 @app.get("/organiza/financeiro/conect", response_class=HTMLResponse)
@@ -13445,42 +13759,17 @@ def central_financeiro_conect(
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
-    linhas_todas = _linhas_central_financeiro(db)
-    pendentes = sum(1 for l in linhas_todas if l["status_sync"] not in ("enviado", "ignorado"))
-    filtro_status = (request.query_params.get("status") or "nao_enviados").strip().lower()
-    if filtro_status == "enviados":
-        linhas = [l for l in linhas_todas if l["status_sync"] == "enviado"]
-    elif filtro_status == "todos":
-        linhas = linhas_todas
-    elif filtro_status == "ignorados":
-        linhas = [l for l in linhas_todas if l["status_sync"] == "ignorado"]
-    else:
-        filtro_status = "nao_enviados"
-        linhas = [l for l in linhas_todas if l["status_sync"] not in ("enviado", "ignorado")]
-
-    # Evita gerar uma tabela HTML gigantesca. Mantém o filtro completo, mas
-    # entrega somente uma página por vez ao navegador.
-    total_filtrado = len(linhas)
-    por_pagina = 100
-    try:
-        pagina = max(int(request.query_params.get("pagina") or 1), 1)
-    except (TypeError, ValueError):
-        pagina = 1
-    total_paginas = max((total_filtrado + por_pagina - 1) // por_pagina, 1)
-    pagina = min(pagina, total_paginas)
-    inicio = (pagina - 1) * por_pagina
-    linhas = linhas[inicio:inicio + por_pagina]
-
+    saldos = _saldos_globais_connect(db)
+    total_receber = round(sum(s["valor"] for s in saldos if s["natureza"] == "receber"), 2)
+    total_pagar = round(sum(s["valor"] for s in saldos if s["natureza"] == "pagar"), 2)
+    ultima_sync = max((s["integracao"].enviado_em for s in saldos if s.get("integracao") and s["integracao"].enviado_em), default=None)
     return templates.TemplateResponse("organiza/central_financeiro_conect.html", {
         "request": request,
         "usuario": usuario,
-        "linhas": linhas,
-        "pendentes": pendentes,
-        "filtro_status": filtro_status,
-        "total_registros": len(linhas_todas),
-        "total_filtrado": total_filtrado,
-        "pagina": pagina,
-        "total_paginas": total_paginas,
+        "saldos": saldos,
+        "total_receber": total_receber,
+        "total_pagar": total_pagar,
+        "ultima_sync": ultima_sync,
         "connect_configurado": _connect_configurado(),
         "sucesso": request.query_params.get("sucesso", ""),
         "erro": request.query_params.get("erro", ""),
@@ -13495,273 +13784,33 @@ def central_financeiro_conect_enviar(
     if not _connect_configurado():
         return RedirectResponse("/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.", status_code=303)
 
-    linhas = _linhas_central_financeiro(db)
-    enviar = [l for l in linhas if l["status_sync"] not in ("enviado", "ignorado")]
+    saldos = _saldos_globais_connect(db)
     enviados = 0
-    erros = []
-    for linha in enviar:
-        payload = linha["payload"]
-        try:
+    try:
+        for saldo in saldos:
+            payload = saldo["payload"]
             resposta = _enviar_para_connect(payload)
-            origem = "venda" if linha["origem"] == "Venda" else "manutencao"
-            integ = _registro_integracao(db, origem, linha["registro"].id)
+            origem = f"saldo_{saldo['chave']}"
+            integ = _registro_integracao(db, origem, saldo["registro_id"])
             if not integ:
                 integ = IntegracaoConect(
                     origem=origem,
-                    registro_id=linha["registro"].id,
-                    id_externo=payload["id_externo"],
+                    registro_id=saldo["registro_id"],
+                    id_externo=saldo["id_externo"],
                 )
                 db.add(integ)
             integ.hash_conteudo = _payload_hash(payload)
             integ.enviado_em = datetime.now()
-            integ.ignorado = 0
             integ.resposta = json.dumps(resposta, ensure_ascii=False)[:4000]
-            db.commit()
+            integ.ignorado = 0
             enviados += 1
-        except Exception as exc:
-            db.rollback()
-            erros.append(f'{payload["id_externo"]}: {str(exc)}')
-            break
-
-    if erros:
-        msg = quote_plus(f"{enviados} enviado(s). Erro: {erros[0]}")
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        msg = quote_plus(f"Erro ao sincronizar saldos com o Connect: {str(exc)}")
         return RedirectResponse(f"/organiza/financeiro/conect?erro={msg}", status_code=303)
-    msg = quote_plus(f"{enviados} lançamento(s) enviado(s) ao Connect." if enviados else "Tudo já estava sincronizado.")
-    return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
 
-
-
-def _chave_linha_connect(linha) -> str:
-    origem = "venda" if linha["origem"] == "Venda" else "manutencao"
-    return f"{origem}:{linha['registro'].id}"
-
-
-@app.post("/organiza/financeiro/conect/enviar-selecionados")
-async def central_financeiro_conect_enviar_selecionados(
-    request: Request,
-    usuario: Usuario = Depends(usuario_logado),
-    db: Session = Depends(get_db),
-):
-    if not _connect_configurado():
-        return RedirectResponse("/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.", status_code=303)
-
-    form = await request.form()
-    selecionados = set(form.getlist("selecionados"))
-    if not selecionados:
-        return RedirectResponse("/organiza/financeiro/conect?erro=Selecione pelo menos um lançamento.", status_code=303)
-
-    linhas = [l for l in _linhas_central_financeiro(db) if _chave_linha_connect(l) in selecionados]
-    enviados = 0
-    for linha in linhas:
-        payload = linha["payload"]
-        try:
-            resposta = _enviar_para_connect(payload)
-            origem = "venda" if linha["origem"] == "Venda" else "manutencao"
-            integ = _registro_integracao(db, origem, linha["registro"].id)
-            if not integ:
-                integ = IntegracaoConect(
-                    origem=origem,
-                    registro_id=linha["registro"].id,
-                    id_externo=payload["id_externo"],
-                )
-                db.add(integ)
-            integ.hash_conteudo = _payload_hash(payload)
-            integ.enviado_em = datetime.now()
-            integ.resposta = json.dumps(resposta, ensure_ascii=False)[:4000]
-            integ.ignorado = 0
-            db.commit()
-            enviados += 1
-        except Exception as exc:
-            db.rollback()
-            msg = quote_plus(f"{enviados} enviado(s). Erro em {payload['id_externo']}: {str(exc)}")
-            return RedirectResponse(f"/organiza/financeiro/conect?erro={msg}", status_code=303)
-
-    msg = quote_plus(f"{enviados} lançamento(s) selecionado(s) enviado(s) ao Connect.")
-    return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
-
-
-
-def _normalizar_texto_agrupamento(valor) -> str:
-    return re.sub(r"\s+", " ", (str(valor or "").strip().lower()))
-
-
-def _grupos_connect_selecionados(linhas):
-    """
-    Agrupa somente lançamentos compatíveis com um único lançamento no Connect:
-    mesmo tipo, cliente, data de pagamento e banco.
-    """
-    grupos = {}
-    for linha in linhas:
-        payload = linha["payload"]
-        chave = (
-            payload["tipo"],
-            _normalizar_texto_agrupamento(payload.get("cliente")),
-            payload["data_pagamento"],
-            _normalizar_texto_agrupamento(payload.get("banco")),
-        )
-        grupos.setdefault(chave, []).append(linha)
-    return list(grupos.values())
-
-
-def _payload_grupo_connect(grupo):
-    primeiro = grupo[0]["payload"]
-    chaves_origem = sorted(_chave_linha_connect(l) for l in grupo)
-    assinatura = hashlib.sha256("|".join(chaves_origem).encode("utf-8")).hexdigest()[:16]
-    tipo = primeiro["tipo"]
-    cliente = primeiro.get("cliente") or ""
-    quantidade = len(grupo)
-    valor_total = round(sum(float(l["payload"].get("valor") or 0) for l in grupo), 2)
-
-    # O saldo é apenas informativo. Pagamentos da mesma operação
-    # contam o saldo dessa operação uma única vez.
-    saldos_por_operacao = {}
-    for linha in grupo:
-        chave_operacao = linha.get("operacao_chave") or _chave_linha_connect(linha)
-        saldos_por_operacao[chave_operacao] = float(linha["payload"].get("falta_receber") or 0)
-    falta_receber = round(sum(saldos_por_operacao.values()), 2)
-
-    rotulo_tipo = "Venda" if tipo == "venda" else "Manutenção"
-    descricao = f"{rotulo_tipo} agrupada - {quantidade} lançamento(s)"
-    if cliente:
-        descricao += f" - {cliente}"
-
-    observacoes = []
-    for linha in grupo:
-        obs = (linha["payload"].get("observacao") or "").strip()
-        if obs and obs not in observacoes:
-            observacoes.append(obs)
-
-    return {
-        "id_externo": f"ORGANIZA-GRUPO-{tipo.upper()}-{assinatura}",
-        "tipo": tipo,
-        "cliente": cliente,
-        "descricao": descricao,
-        "valor": valor_total,
-        "falta_receber": falta_receber,
-        "data_pagamento": primeiro["data_pagamento"],
-        "banco": primeiro.get("banco") or "",
-        "observacao": " | ".join(observacoes),
-    }
-
-
-@app.post("/organiza/financeiro/conect/enviar-agrupado")
-async def central_financeiro_conect_enviar_agrupado(
-    request: Request,
-    usuario: Usuario = Depends(usuario_logado),
-    db: Session = Depends(get_db),
-):
-    if not _connect_configurado():
-        return RedirectResponse(
-            "/organiza/financeiro/conect?erro=Configure CONNECT_API_URL no ambiente.",
-            status_code=303,
-        )
-
-    form = await request.form()
-    selecionados = set(form.getlist("selecionados"))
-    if not selecionados:
-        return RedirectResponse(
-            "/organiza/financeiro/conect?erro=Selecione pelo menos um lançamento para agrupar.",
-            status_code=303,
-        )
-
-    linhas = [
-        l for l in _linhas_central_financeiro(db)
-        if _chave_linha_connect(l) in selecionados
-    ]
-    if not linhas:
-        return RedirectResponse(
-            "/organiza/financeiro/conect?erro=Nenhum lançamento válido foi selecionado.",
-            status_code=303,
-        )
-
-    grupos = _grupos_connect_selecionados(linhas)
-    enviados = 0
-
-    for grupo in grupos:
-        payload_grupo = _payload_grupo_connect(grupo)
-
-        try:
-            resposta = _enviar_para_connect(payload_grupo)
-
-            # Cada origem continua controlada individualmente no Organiza,
-            # embora o Connect receba apenas um lançamento com o total agrupado.
-            for linha in grupo:
-                origem = "venda" if linha["origem"] == "Venda" else "manutencao"
-                payload_individual = linha["payload"]
-                integ = _registro_integracao(db, origem, linha["registro"].id)
-
-                if not integ:
-                    integ = IntegracaoConect(
-                        origem=origem,
-                        registro_id=linha["registro"].id,
-                        id_externo=payload_individual["id_externo"],
-                    )
-                    db.add(integ)
-
-                integ.hash_conteudo = _payload_hash(payload_individual)
-                integ.enviado_em = datetime.now()
-                integ.ignorado = 0
-                integ.resposta = json.dumps({
-                    "modo": "agrupado",
-                    "id_externo_grupo": payload_grupo["id_externo"],
-                    "valor_grupo": payload_grupo["valor"],
-                    "quantidade_grupo": len(grupo),
-                    "resposta_connect": resposta,
-                }, ensure_ascii=False)[:4000]
-
-            db.commit()
-            enviados += 1
-
-        except Exception as exc:
-            db.rollback()
-            msg = quote_plus(
-                f"{enviados} grupo(s) enviado(s). Erro no grupo "
-                f"{payload_grupo['cliente']}: {str(exc)}"
-            )
-            return RedirectResponse(
-                f"/organiza/financeiro/conect?erro={msg}",
-                status_code=303,
-            )
-
-    total_origens = len(linhas)
-    msg = quote_plus(
-        f"{total_origens} lançamento(s) agrupado(s) em "
-        f"{enviados} lançamento(s) enviado(s) ao Connect."
-    )
-    return RedirectResponse(
-        f"/organiza/financeiro/conect?sucesso={msg}",
-        status_code=303,
-    )
-
-
-@app.post("/organiza/financeiro/conect/nao-enviar")
-async def central_financeiro_conect_nao_enviar(
-    request: Request,
-    usuario: Usuario = Depends(usuario_logado),
-    db: Session = Depends(get_db),
-):
-    form = await request.form()
-    selecionados = set(form.getlist("selecionados"))
-    if not selecionados:
-        return RedirectResponse("/organiza/financeiro/conect?erro=Selecione pelo menos um lançamento.", status_code=303)
-
-    alterados = 0
-    for linha in _linhas_central_financeiro(db):
-        if _chave_linha_connect(linha) not in selecionados:
-            continue
-        origem = "venda" if linha["origem"] == "Venda" else "manutencao"
-        integ = _registro_integracao(db, origem, linha["registro"].id)
-        if not integ:
-            integ = IntegracaoConect(
-                origem=origem,
-                registro_id=linha["registro"].id,
-                id_externo=linha["payload"]["id_externo"],
-            )
-            db.add(integ)
-        integ.ignorado = 1
-        alterados += 1
-    db.commit()
-    msg = quote_plus(f"{alterados} lançamento(s) marcado(s) como 'Não enviar'.")
+    msg = quote_plus(f"{enviados} saldo(s) sincronizado(s) com o Connect.")
     return RedirectResponse(f"/organiza/financeiro/conect?sucesso={msg}", status_code=303)
 
 
@@ -13803,7 +13852,6 @@ async def venda_pagamento_registrar(
     banco = forma
     nome_comprovante = (form.get("observacao") or "").strip()
     observacao = _obs_pagamento_padrao(eq, eq.cliente, nome_comprovante)
-    nao_enviar_connect = bool(form.get("nao_enviar_connect"))
     if valor <= 0:
         return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Informe um valor válido.", status_code=303)
     total = moeda_num(eq.valor)
@@ -13820,13 +13868,6 @@ async def venda_pagamento_registrar(
         banco=banco, forma=forma, observacao=observacao or None,
     )
     db.add(pagamento)
-    db.flush()
-    if nao_enviar_connect:
-        db.add(IntegracaoConect(
-            origem="venda", registro_id=pagamento.id,
-            id_externo=f"ORGANIZA-VENDA-PAG-{pagamento.id}",
-            ignorado=1,
-        ))
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 
@@ -13890,9 +13931,8 @@ def venda_pagamento_excluir(
     p = db.query(PagamentoVenda).filter(PagamentoVenda.id == pagamento_id, PagamentoVenda.equipamento_id == equipamento_id).first()
     if not p:
         raise HTTPException(404)
+    # 1.1.74: o Connect recebe apenas o saldo global; pagamentos individuais ficam só no Organiza.
     integ = _registro_integracao(db, "venda", p.id)
-    if integ and integ.enviado_em:
-        return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos?erro=Pagamento já enviado ao Connect. Ajuste o registro em vez de excluir.", status_code=303)
     if integ:
         db.delete(integ)
     db.delete(p)

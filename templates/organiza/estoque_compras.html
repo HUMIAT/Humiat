@@ -8,9 +8,9 @@
   <section class="cartao resumo-compra"><span>Total estimado para repor o mínimo</span><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></section>
   <section class="cartao planilha-card">
     <div class="planilha-scroll"><table class="planilha-compras">
-      <thead><tr><th>ITEM</th><th>COR</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th><th>CUSTO UNIT.</th><th>TOTAL</th></tr></thead>
-      <tbody>{% for l in compras %}<tr><td><strong>{{ l.item.nome }}</strong></td><td>{{ l.cor or '—' }}</td><td class="num">{{ '%g'|format(l.disponivel) }}</td><td class="num">{{ '%g'|format(l.minimo) }}</td><td class="num comprar">{{ '%g'|format(l.comprar) }}</td><td class="num">R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}</td><td class="num comprar">R$ {{ '%.2f'|format(l.custo_total)|replace('.', ',') }}</td></tr>{% else %}<tr><td colspan="7" class="vazio">Nenhuma compra necessária. Todos os itens estão no mínimo ou acima.</td></tr>{% endfor %}</tbody>
-      <tfoot><tr><td colspan="6"><strong>TOTAL</strong></td><td class="num"><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></td></tr></tfoot>
+      <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th><th>CUSTO UNIT.</th><th>TOTAL</th></tr></thead>
+      <tbody>{% for l in compras %}<tr><td>{{ l.item.categoria }}</td><td><strong>{{ l.item.nome }}</strong></td><td>{{ l.cor or '—' }}</td><td class="num">{{ '%g'|format(l.disponivel) }}</td><td class="num">{{ '%g'|format(l.minimo) }}</td><td class="num comprar">{{ '%g'|format(l.comprar) }}</td><td class="num">R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}</td><td class="num comprar">R$ {{ '%.2f'|format(l.custo_total)|replace('.', ',') }}</td></tr>{% else %}<tr><td colspan="8" class="vazio">Nenhuma compra necessária. Todos os itens estão no mínimo ou acima.</td></tr>{% endfor %}</tbody>
+      <tfoot><tr><td colspan="7"><strong>TOTAL</strong></td><td class="num"><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></td></tr></tfoot>
     </table></div>
   </section>
 </section>
