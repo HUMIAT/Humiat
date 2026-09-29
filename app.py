@@ -11307,6 +11307,74 @@ async def estoque_compra_nova(request: Request, usuario: Usuario = Depends(usuar
     return RedirectResponse("/organiza/estoque/compras?ok=" + quote_plus(f"Compra registrada: {item.nome} × {quantidade:g}."), status_code=303)
 
 
+@app.post("/organiza/estoque/compras/lote")
+async def estoque_compra_lote(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Registra vários itens de uma compra com uma única data prevista.
+
+    A quantidade é escolhida na planilha de reposição. O valor do pedido é
+    calculado pelo custo atual do item no momento em que o lote é salvo.
+    """
+    form = dict(await request.form())
+    bruto = (form.get("linhas_json") or "").strip()
+    try:
+        linhas = json.loads(bruto) if bruto else []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        linhas = []
+    if not isinstance(linhas, list) or not linhas:
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Marque pelo menos um item para comprar."), status_code=303)
+
+    previsao_txt = (form.get("previsao_entrega") or "").strip()
+    try:
+        previsao = date.fromisoformat(previsao_txt)
+    except (TypeError, ValueError):
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe a data prevista de chegada."), status_code=303)
+    observacao = (form.get("observacao") or "").strip() or None
+
+    consolidadas: dict[tuple[int, str], float] = {}
+    for linha in linhas:
+        if not isinstance(linha, dict):
+            continue
+        try:
+            item_id = int(linha.get("item_id") or 0)
+            quantidade = float(linha.get("quantidade") or 0)
+        except (TypeError, ValueError):
+            continue
+        if item_id <= 0 or quantidade <= 0:
+            continue
+        item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+        if not item or not item_controla_estoque(item):
+            continue
+        cor = normalizar_cor(linha.get("cor")) if item_controla_cor(item) else ""
+        if item_controla_cor(item) and not cor:
+            return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
+        chave = (item.id, cor)
+        consolidadas[chave] = consolidadas.get(chave, 0.0) + quantidade
+
+    if not consolidadas:
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Nenhum item válido foi selecionado para compra."), status_code=303)
+
+    itens_map = {i.id: i for i in db.query(Item).filter(Item.id.in_([k[0] for k in consolidadas])).all()}
+    total_lote = 0.0
+    criados = 0
+    for (item_id, cor), quantidade in consolidadas.items():
+        item = itens_map.get(item_id)
+        if not item:
+            continue
+        valor_total = round(float(item.preco_custo or 0) * float(quantidade), 2)
+        total_lote += valor_total
+        db.add(EstoqueCompraPedido(
+            item_id=item.id, cor=cor or None, quantidade=quantidade, valor_total=valor_total,
+            previsao_entrega=previsao, status="AGUARDANDO", observacao=observacao, usuario_id=usuario.id,
+        ))
+        criados += 1
+    db.commit()
+    total_fmt = f"{total_lote:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return RedirectResponse(
+        "/organiza/estoque/compras?ok=" + quote_plus(f"Compra salva: {criados} item(ns), total estimado de R$ {total_fmt}."),
+        status_code=303,
+    )
+
+
 @app.post("/organiza/estoque/compras/{pedido_id}/receber")
 def estoque_compra_receber(pedido_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     pedido = db.query(EstoqueCompraPedido).options(selectinload(EstoqueCompraPedido.item)).filter(EstoqueCompraPedido.id == pedido_id).first()
@@ -11392,34 +11460,98 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
     for categoria in CATEGORIAS_ITENS_PADRAO + existentes:
         if categoria and categoria not in categorias:
             categorias.append(categoria)
-    return templates.TemplateResponse("organiza/itens.html", {"request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca, "ok": request.query_params.get("ok", "")})
+    return templates.TemplateResponse("organiza/itens.html", {
+        "request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca,
+        "ok": request.query_params.get("ok", ""), "erro": request.query_params.get("erro", ""),
+    })
 
 
 @app.post("/organiza/itens/salvar-planilha")
 async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Salva a planilha de Itens em lote, como uma planilha de Excel.
+
+    A interface envia nome, categoria, custo, preço, controle de estoque e status
+    de todas as linhas visíveis. Não há mais necessidade de abrir cada item ou
+    clicar em Ativar/Inativar individualmente.
+    """
     form = dict(await request.form())
-    alterados = 0
     ids = []
     for chave in form.keys():
-        if chave.startswith("categoria_"):
+        if chave.startswith("nome_"):
             try:
                 ids.append(int(chave.split("_", 1)[1]))
             except (TypeError, ValueError):
                 pass
-    for item in db.query(Item).filter(Item.id.in_(ids or [-1])).all():
+    ids = sorted(set(ids))
+    if not ids:
+        return RedirectResponse("/organiza/itens?erro=" + quote_plus("Nenhum item foi enviado para salvar."), status_code=303)
+
+    itens_edicao = db.query(Item).filter(Item.id.in_(ids)).all()
+    por_id = {i.id: i for i in itens_edicao}
+
+    # Valida os nomes finais antes de gravar qualquer linha para evitar conflito
+    # com a restrição UNIQUE do banco e manter o salvamento realmente em lote.
+    nomes_finais = {}
+    for item_id in ids:
+        item = por_id.get(item_id)
+        if not item:
+            continue
+        nome = normalizar_nome_item(form.get(f"nome_{item_id}")) or item.nome
+        nomes_finais[item_id] = nome
+    nomes_editados_normalizados = {}
+    for item_id, nome in nomes_finais.items():
+        chave = nome.casefold()
+        if chave in nomes_editados_normalizados and nomes_editados_normalizados[chave] != item_id:
+            return RedirectResponse("/organiza/itens?erro=" + quote_plus(f"Nome duplicado na planilha: {nome}."), status_code=303)
+        nomes_editados_normalizados[chave] = item_id
+    existentes_fora = db.query(Item.id, Item.nome).filter(~Item.id.in_(ids)).all()
+    existentes_fora = {str(nome or "").casefold(): iid for iid, nome in existentes_fora}
+    for item_id, nome in nomes_finais.items():
+        if nome.casefold() in existentes_fora:
+            return RedirectResponse("/organiza/itens?erro=" + quote_plus(f"Já existe outro item chamado {nome}."), status_code=303)
+
+    alterados = 0
+    estoque_alterado = False
+    for item_id in ids:
+        item = por_id.get(item_id)
+        if not item:
+            continue
+        nome = nomes_finais[item_id]
         categoria = (form.get(f"categoria_{item.id}") or item.categoria or "Geral").strip() or "Geral"
         if _texto_sem_acento(categoria) == "INFORMATICA":
             categoria = "Info e Eletrônicos"
         controla = 1 if str(form.get(f"controla_estoque_{item.id}") or "0") == "1" else 0
-        if _texto_sem_acento(categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(item.nome) in ESTOQUE_ITENS_SEM_CONTROLE:
+        ativo = 1 if str(form.get(f"ativo_{item.id}") or "0") == "1" else 0
+        custo = moeda_num(form.get(f"custo_{item.id}"))
+        preco = moeda_num(form.get(f"preco_{item.id}"))
+
+        if _texto_sem_acento(categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(nome) in ESTOQUE_ITENS_SEM_CONTROLE:
             controla = 0
-        if item.categoria != categoria or int(item.controla_estoque or 0) != controla:
-            item.categoria = categoria
-            item.controla_estoque = controla
-            alterados += 1
-            if not item_controla_estoque(item):
-                db.query(EstoqueReserva).filter(EstoqueReserva.item_id == item.id).delete(synchronize_session=False)
-    if alterados:
+
+        antes_controlava = item_controla_estoque(item)
+        mudou = (
+            item.nome != nome or item.categoria != categoria or int(item.controla_estoque or 0) != controla
+            or float(item.preco_custo or 0) != float(custo or 0) or float(item.preco_venda or 0) != float(preco or 0)
+            or int(item.ativo or 0) != ativo
+        )
+        if not mudou:
+            continue
+
+        item.nome = nome
+        item.categoria = categoria
+        item.controla_estoque = controla
+        item.preco_custo = custo
+        item.preco_venda = preco
+        item.ativo = ativo
+        depois_controla = item_controla_estoque(item)
+        if antes_controlava != depois_controla:
+            estoque_alterado = True
+        if not depois_controla:
+            db.query(EstoqueReserva).filter(EstoqueReserva.item_id == item.id).delete(synchronize_session=False)
+        alterados += 1
+
+    # Só recalcula reservas abertas quando a própria participação no estoque mudou.
+    if estoque_alterado:
         for eq_aberto in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
             sincronizar_estoque_venda(eq_aberto, db)
         manut_ids = [mid for (mid,) in db.query(Manutencao.id).filter(~Manutencao.status.in_(tuple(ESTOQUE_MANUTENCAO_FINAL | ESTOQUE_MANUTENCAO_CANCELADA))).all()]
@@ -11427,6 +11559,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
             manut = carregar_manutencao(db, mid)
             if manut:
                 sincronizar_estoque_manutencao(manut, db)
+
     db.commit()
     return RedirectResponse("/organiza/itens?ok=" + quote_plus(f"Planilha salva. {alterados} item(ns) alterado(s)."), status_code=303)
 

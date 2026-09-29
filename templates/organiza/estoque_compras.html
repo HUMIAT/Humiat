@@ -2,7 +2,7 @@
 {% block conteudo %}
 <section class="pagina-clean compras-estoque">
   <div class="titulo-linha compras-topo">
-    <div><p class="tag">Estoque</p><h1>Compras</h1><p class="texto-suave">Necessidade atual de reposição + compras já registradas aguardando chegada.</p></div>
+    <div><p class="tag">Estoque</p><h1>Compras</h1><p class="texto-suave">Marque os itens no relatório, ajuste as quantidades e salve a compra de uma vez.</p></div>
     <div class="acoes"><a class="botao secundario" href="/organiza/estoque">Voltar ao estoque</a><button class="botao" type="button" onclick="window.print()">Imprimir</button></div>
   </div>
 
@@ -11,16 +11,19 @@
 
   <section class="cartao resumo-compra"><span>Total estimado para repor o mínimo</span><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></section>
 
-  <section class="cartao compra-registro">
-    <div class="secao-cabecalho"><div><h2>Registrar compra</h2><p class="texto-suave">Informe o item, quantidade, valor total e a previsão de chegada. O estoque só aumenta quando você confirmar a chegada.</p></div></div>
-    <form method="post" action="/organiza/estoque/compras/nova" class="form-compra" id="form-compra">
-      <label>Item<select name="item_id" id="compra-item" required><option value="">Selecione...</option>{% for i in itens %}<option value="{{ i.id }}">{{ i.categoria }} · {{ i.nome }}</option>{% endfor %}</select></label>
-      <label id="campo-cor-compra" hidden>Cor<input name="cor" id="compra-cor" placeholder="Ex.: AZUL"></label>
-      <label>Quantidade<input name="quantidade" id="compra-quantidade" inputmode="decimal" required placeholder="1"></label>
-      <label>Valor total<input name="valor_total" id="compra-valor" inputmode="decimal" required placeholder="0,00"></label>
-      <label>Chega em<input type="date" name="previsao_entrega" id="compra-data"></label>
-      <label class="obs-compra">Observação<input name="observacao" placeholder="Opcional"></label>
-      <button class="botao primario" type="submit">Registrar compra</button>
+  <section class="cartao compra-selecionada">
+    <div class="secao-cabecalho">
+      <div><h2>Compra selecionada</h2><p class="texto-suave">Marque os itens na planilha abaixo. Aqui você só informa a data prevista e salva o lote.</p></div>
+      <strong id="total-selecionado">R$ 0,00</strong>
+    </div>
+    <form method="post" action="/organiza/estoque/compras/lote" id="form-compra-lote">
+      <input type="hidden" name="linhas_json" id="linhas-json" value="[]">
+      <div id="lista-selecionados" class="selecionados-vazio">Nenhum item marcado para compra.</div>
+      <div class="compra-lote-rodape">
+        <label>Chega em<input type="date" name="previsao_entrega" required></label>
+        <label class="obs-compra">Observação<input name="observacao" placeholder="Opcional para todo o lote"></label>
+        <button class="botao primario" type="submit">Salvar compra selecionada</button>
+      </div>
     </form>
   </section>
 
@@ -42,30 +45,57 @@
   </section>
 
   <section class="cartao planilha-card">
-    <div class="planilha-titulo"><h2>Relatório de reposição</h2><p class="texto-suave">Somente itens cujo disponível está abaixo do estoque mínimo.</p></div>
-    <div class="planilha-scroll"><table class="planilha-compras">
-      <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th><th>CUSTO UNIT.</th><th>TOTAL</th><th></th></tr></thead>
-      <tbody>{% for l in compras %}<tr>
-        <td>{{ l.item.categoria }}</td><td><strong>{{ l.item.nome }}</strong></td><td>{{ l.cor or '—' }}</td><td class="num">{{ '%g'|format(l.disponivel) }}</td><td class="num">{{ '%g'|format(l.minimo) }}</td><td class="num comprar">{{ '%g'|format(l.comprar) }}</td><td class="num">R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}</td><td class="num comprar">R$ {{ '%.2f'|format(l.custo_total)|replace('.', ',') }}</td>
-        <td><button type="button" class="botao pequeno comprar-deste" data-item="{{ l.item.id }}" data-cor="{{ l.cor }}" data-qtd="{{ l.comprar }}" data-total="{{ '%.2f'|format(l.custo_total) }}">Comprar</button></td>
-      </tr>{% else %}<tr><td colspan="9" class="vazio">Nenhuma compra necessária. Todos os itens estão no mínimo ou acima.</td></tr>{% endfor %}</tbody>
-      <tfoot><tr><td colspan="7"><strong>TOTAL</strong></td><td class="num"><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></td><td></td></tr></tfoot>
+    <div class="planilha-titulo"><h2>Relatório de reposição</h2><p class="texto-suave">Marque o que vai comprar e altere a quantidade sugerida para mais ou para menos.</p></div>
+    <div class="planilha-scroll"><table class="planilha-compras reposicao" id="tabela-reposicao">
+      <thead><tr><th class="col-marcar">COMPRAR?</th><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>QTD. COMPRA</th><th>CUSTO UNIT.</th><th>TOTAL</th></tr></thead>
+      <tbody>{% for l in compras %}
+      <tr class="linha-reposicao" data-item="{{ l.item.id }}" data-categoria="{{ l.item.categoria }}" data-nome="{{ l.item.nome }}" data-cor="{{ l.cor or '' }}" data-custo="{{ '%.4f'|format(l.custo_unitario or 0) }}">
+        <td class="col-marcar"><input class="marcar-compra" type="checkbox" aria-label="Comprar {{ l.item.nome }}"></td>
+        <td>{{ l.item.categoria }}</td><td><strong>{{ l.item.nome }}</strong></td><td>{{ l.cor or '—' }}</td><td class="num">{{ '%g'|format(l.disponivel) }}</td><td class="num">{{ '%g'|format(l.minimo) }}</td>
+        <td class="num"><input class="qtd-compra" type="number" min="0.01" step="0.01" value="{{ '%g'|format(l.comprar) }}"></td>
+        <td class="num">R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}</td><td class="num total-linha">R$ {{ '%.2f'|format(l.custo_total)|replace('.', ',') }}</td>
+      </tr>
+      {% else %}<tr><td colspan="9" class="vazio">Nenhuma compra necessária. Todos os itens estão no mínimo ou acima.</td></tr>{% endfor %}</tbody>
+      <tfoot><tr><td colspan="8"><strong>TOTAL SUGERIDO</strong></td><td class="num"><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></td></tr></tfoot>
     </table></div>
   </section>
 </section>
 <style>
-.compras-topo{align-items:flex-end}.acoes{display:flex;gap:7px}.resumo-compra{display:flex;justify-content:space-between;align-items:center;padding:14px 18px}.resumo-compra span{color:#64748b}.resumo-compra strong{font-size:24px}.compra-registro{padding:16px 18px}.secao-cabecalho h2,.planilha-titulo h2{margin:0 0 3px}.form-compra{display:grid;grid-template-columns:minmax(240px,2fr) 120px 100px 130px 145px minmax(180px,1.3fr) auto;gap:8px;align-items:end}.form-compra label{margin:0}.form-compra input,.form-compra select{height:36px}.planilha-card{padding:0;overflow:hidden}.planilha-titulo{padding:13px 16px;border-bottom:1px solid #dbe3ee}.planilha-scroll{overflow:auto}.planilha-compras{width:100%;border-collapse:collapse;min-width:900px;font-size:12px}.planilha-compras th{background:#eaf0f7;padding:8px 10px;text-align:left;border:1px solid #d8e0ea;font-size:11px}.planilha-compras td{padding:7px 10px;border:1px solid #e3e8ef}.planilha-compras .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-compras .comprar{font-weight:900;color:#925600}.planilha-compras tfoot td{background:#f5f7fa}.planilha-compras tr.recebida td{color:#64748b;background:#f8fafc}.vazio{text-align:center!important;color:#64748b;padding:24px!important}@media(max-width:1150px){.form-compra{grid-template-columns:2fr 1fr 1fr 1fr}.obs-compra{grid-column:1/3}.form-compra button{grid-column:3/5}}@media(max-width:700px){.form-compra{grid-template-columns:1fr}.obs-compra,.form-compra button{grid-column:auto}}@media print{.sidebar,.topbar,.acoes,.compra-registro,.pedidos .botao{display:none!important}.cartao{box-shadow:none}.planilha-scroll{overflow:visible}.planilha-compras{min-width:0;font-size:9px}}
+.compras-topo{align-items:flex-end}.acoes{display:flex;gap:7px}.resumo-compra{display:flex;justify-content:space-between;align-items:center;padding:14px 18px}.resumo-compra span{color:#64748b}.resumo-compra strong{font-size:24px}.compra-selecionada{padding:16px 18px}.secao-cabecalho{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.secao-cabecalho h2,.planilha-titulo h2{margin:0 0 3px}.secao-cabecalho>strong{font-size:20px}.selecionados-vazio{padding:18px 12px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:9px;margin:10px 0}.selecionados-tabela{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}.selecionados-tabela th,.selecionados-tabela td{padding:7px 9px;border:1px solid #e2e8f0}.selecionados-tabela th{background:#eef3f9;text-align:left;font-size:11px}.selecionados-tabela .num{text-align:right}.compra-lote-rodape{display:grid;grid-template-columns:160px minmax(260px,1fr) auto;gap:9px;align-items:end;margin-top:10px}.compra-lote-rodape label{margin:0}.compra-lote-rodape input{height:36px}.planilha-card{padding:0;overflow:hidden}.planilha-titulo{padding:13px 16px;border-bottom:1px solid #dbe3ee}.planilha-scroll{overflow:auto}.planilha-compras{width:100%;border-collapse:collapse;min-width:900px;font-size:12px}.planilha-compras th{background:#eaf0f7;padding:8px 10px;text-align:left;border:1px solid #d8e0ea;font-size:11px}.planilha-compras td{padding:7px 10px;border:1px solid #e3e8ef}.planilha-compras .num{text-align:right;font-variant-numeric:tabular-nums}.planilha-compras tfoot td{background:#f5f7fa}.planilha-compras tr.recebida td{color:#64748b;background:#f8fafc}.col-marcar{text-align:center!important;width:72px}.marcar-compra{width:18px;height:18px;cursor:pointer}.qtd-compra{width:88px;height:30px;text-align:right;border:1px solid #cbd5e1;border-radius:6px;padding:3px 7px}.linha-reposicao.selecionada td{background:#f0f7ff}.total-linha{font-weight:900;color:#925600}.vazio{text-align:center!important;color:#64748b;padding:24px!important}@media(max-width:800px){.compra-lote-rodape{grid-template-columns:1fr}.secao-cabecalho{flex-direction:column}}@media print{.sidebar,.topbar,.acoes,.compra-selecionada,.pedidos .botao,.col-marcar{display:none!important}.cartao{box-shadow:none}.planilha-scroll{overflow:visible}.planilha-compras{min-width:0;font-size:9px}}
 </style>
 <script>
 (() => {
-  const comCor=new Set({{ itens_cor_ids|tojson }}.map(String));
-  const item=document.getElementById('compra-item'), campo=document.getElementById('campo-cor-compra'), cor=document.getElementById('compra-cor');
-  function atualizaCor(){const ativo=comCor.has(item.value); campo.hidden=!ativo; cor.required=ativo; if(!ativo)cor.value='';}
-  item.addEventListener('change',atualizaCor); atualizaCor();
-  document.querySelectorAll('.comprar-deste').forEach(btn=>btn.addEventListener('click',()=>{
-    item.value=btn.dataset.item||''; document.getElementById('compra-quantidade').value=btn.dataset.qtd||''; document.getElementById('compra-valor').value=(btn.dataset.total||'').replace('.',',');
-    atualizaCor(); if(btn.dataset.cor){cor.value=btn.dataset.cor;} document.getElementById('form-compra').scrollIntoView({behavior:'smooth',block:'center'});
-  }));
+  const linhas=[...document.querySelectorAll('.linha-reposicao')];
+  const lista=document.getElementById('lista-selecionados');
+  const hidden=document.getElementById('linhas-json');
+  const totalEl=document.getElementById('total-selecionado');
+  const form=document.getElementById('form-compra-lote');
+  const moeda=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v||0);
+  const numero=v=>{const n=Number(String(v??'').replace(',','.'));return Number.isFinite(n)?n:0;};
+
+  function atualizar(){
+    const selecionados=[];
+    linhas.forEach(tr=>{
+      const check=tr.querySelector('.marcar-compra');
+      const qtd=numero(tr.querySelector('.qtd-compra').value);
+      const custo=numero(tr.dataset.custo);
+      const total=qtd*custo;
+      tr.querySelector('.total-linha').textContent=moeda(total);
+      tr.classList.toggle('selecionada',check.checked);
+      if(check.checked){
+        selecionados.push({item_id:Number(tr.dataset.item),categoria:tr.dataset.categoria,nome:tr.dataset.nome,cor:tr.dataset.cor||'',quantidade:qtd,custo_unitario:custo,valor_total:total});
+      }
+    });
+    hidden.value=JSON.stringify(selecionados.map(x=>({item_id:x.item_id,cor:x.cor,quantidade:x.quantidade})));
+    const total=selecionados.reduce((s,x)=>s+x.valor_total,0); totalEl.textContent=moeda(total);
+    if(!selecionados.length){lista.className='selecionados-vazio';lista.innerHTML='Nenhum item marcado para compra.';return;}
+    lista.className='';
+    lista.innerHTML=`<table class="selecionados-tabela"><thead><tr><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th class="num">QTD.</th><th class="num">VALOR</th></tr></thead><tbody>${selecionados.map(x=>`<tr><td>${escapeHtml(x.categoria)}</td><td><strong>${escapeHtml(x.nome)}</strong></td><td>${escapeHtml(x.cor||'—')}</td><td class="num">${x.quantidade.toLocaleString('pt-BR')}</td><td class="num">${moeda(x.valor_total)}</td></tr>`).join('')}</tbody></table>`;
+  }
+  function escapeHtml(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+  linhas.forEach(tr=>{tr.querySelector('.marcar-compra').addEventListener('change',atualizar);tr.querySelector('.qtd-compra').addEventListener('input',atualizar);});
+  form.addEventListener('submit',e=>{const dados=JSON.parse(hidden.value||'[]');if(!dados.length){e.preventDefault();alert('Marque pelo menos um item para comprar.');return;}if(dados.some(x=>!(Number(x.quantidade)>0))){e.preventDefault();alert('A quantidade dos itens marcados deve ser maior que zero.');}});
+  atualizar();
 })();
 </script>
 {% endblock %}
