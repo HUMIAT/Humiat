@@ -21,7 +21,24 @@
       <thead><tr><th>TIPO</th><th>ORIGEM</th><th class="num">SALDO ATUAL</th><th>CONNECT</th></tr></thead>
       <tbody>
       {% for saldo in saldos %}
-        <tr><td><span class="pill {{ saldo.natureza }}">{{ 'A RECEBER' if saldo.natureza == 'receber' else 'A PAGAR' }}</span></td><td><strong>{{ saldo.titulo|replace('A receber · ','')|replace('A pagar · ','') }}</strong>{% if saldo.chave == 'estoque' %}<small>Mesmo total do Relatório de Compras do Estoque.</small>{% endif %}</td><td class="num forte">{{ saldo.valor|moeda }}</td><td>{% if saldo.status_sync == 'sincronizado' %}<span class="status ok">Sincronizado</span>{% elif saldo.status_sync == 'alterado' %}<span class="status alterado">Alterado · sincronizar</span>{% else %}<span class="status novo">Ainda não enviado</span>{% endif %}</td></tr>
+        <tr>
+          <td><span class="pill {{ saldo.natureza }}">{{ 'A RECEBER' if saldo.natureza == 'receber' else 'A PAGAR' }}</span></td>
+          <td><strong>{{ saldo.titulo|replace('A receber · ','')|replace('A pagar · ','') }}</strong>{% if saldo.chave == 'estoque' %}<small>Mesmo total do Relatório de Compras do Estoque.</small>{% endif %}<button class="ver-composicao" type="button" onclick="alternarComposicao('comp-{{ saldo.chave }}', this)">Ver composição ({{ saldo.qtd_detalhes }})</button></td>
+          <td class="num forte">{{ saldo.valor|moeda }}</td>
+          <td>{% if saldo.status_sync == 'sincronizado' %}<span class="status ok">Sincronizado</span>{% elif saldo.status_sync == 'alterado' %}<span class="status alterado">Alterado · sincronizar</span>{% else %}<span class="status novo">Ainda não enviado</span>{% endif %}</td>
+        </tr>
+        <tr id="comp-{{ saldo.chave }}" class="linha-composicao" style="display:none"><td colspan="4">
+          <div class="composicao-box">
+            <div class="composicao-titulo"><strong>Composição de {{ saldo.titulo }}</strong><span>{{ saldo.qtd_detalhes }} registro(s) com saldo</span></div>
+            {% if saldo.detalhes %}
+            <div class="planilha-scroll"><table class="tabela-composicao"><thead><tr><th>ID</th><th>CLIENTE / CATEGORIA</th><th>REFERÊNCIA</th><th>STATUS</th><th class="num">TOTAL</th><th class="num">RECEBIDO</th><th class="num">SALDO</th><th></th></tr></thead><tbody>
+            {% for d in saldo.detalhes %}
+              <tr class="{% if d.finalizado %}finalizado-com-saldo{% endif %}"><td>#{{ d.id }}</td><td>{{ d.cliente }}</td><td>{{ d.descricao }}</td><td>{{ d.status }}{% if d.finalizado %}<span class="aviso-saldo">Finalizado com saldo</span>{% endif %}</td><td class="num">{{ d.total|moeda }}</td><td class="num">{{ d.recebido|moeda }}</td><td class="num forte">{{ d.saldo|moeda }}</td><td>{% if d.url %}<a class="botao mini" href="{{ d.url }}">Abrir</a>{% endif %}</td></tr>
+            {% endfor %}
+            </tbody><tfoot><tr><th colspan="6">TOTAL DA COMPOSIÇÃO</th><th class="num">{{ saldo.valor|moeda }}</th><th></th></tr></tfoot></table></div>
+            {% else %}<p class="texto-suave">Nenhum registro com saldo em aberto.</p>{% endif %}
+          </div>
+        </td></tr>
       {% endfor %}
       </tbody>
     </table></div>
@@ -29,5 +46,9 @@
 </section>
 <style>
 .resumos-financeiros{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:10px;margin:14px 0}.resumo-fin{border:1px solid #dbe3ee;background:#fff;border-radius:12px;padding:14px 16px}.resumo-fin small{display:block;color:#64748b;margin-bottom:5px}.resumo-fin strong{font-size:22px}.resumo-fin strong.menor{font-size:15px}.resumo-fin.receber{border-left:4px solid #16a34a}.resumo-fin.pagar{border-left:4px solid #dc2626}.planilha-card{padding:0;overflow:hidden}.planilha-barra{padding:14px 16px;border-bottom:1px solid #dbe3ee}.planilha-barra h2{margin:0 0 3px}.planilha-scroll{overflow:auto}.planilha-saldos{width:100%;border-collapse:collapse;min-width:720px;font-size:12px}.planilha-saldos th,.planilha-saldos td{padding:9px 11px;border:1px solid #e2e8f0;text-align:left}.planilha-saldos th{background:#eaf0f7;font-size:11px}.planilha-saldos td.num,.planilha-saldos th.num{text-align:right;font-variant-numeric:tabular-nums}.planilha-saldos .forte{font-weight:900}.planilha-saldos small{display:block;color:#64748b;margin-top:2px}.pill.receber{background:#dcfce7;color:#166534}.pill.pagar{background:#fee2e2;color:#991b1b}.status{display:inline-flex;border-radius:999px;padding:4px 8px;font-weight:800;font-size:11px}.status.ok{background:#dcfce7;color:#166534}.status.alterado{background:#fff3cd;color:#7a4b00}.status.novo{background:#eaf1ff;color:#1d4ed8}@media(max-width:800px){.resumos-financeiros{grid-template-columns:1fr}}
+.ver-composicao{display:block;margin-top:5px;border:0;background:transparent;color:#2563eb;font-weight:800;padding:0;cursor:pointer;font-size:11px}.composicao-box{padding:12px;background:#f8fafc}.composicao-titulo{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px}.composicao-titulo span{color:#64748b;font-size:11px}.tabela-composicao{width:100%;border-collapse:collapse;min-width:900px;font-size:11px;background:#fff}.tabela-composicao th,.tabela-composicao td{border:1px solid #dbe3ee;padding:7px 8px;text-align:left}.tabela-composicao th{background:#eef3f8}.tabela-composicao .num{text-align:right}.finalizado-com-saldo{background:#fff7ed}.aviso-saldo{display:inline-flex;margin-left:6px;padding:2px 5px;border-radius:999px;background:#ffedd5;color:#9a3412;font-size:9px;font-weight:800}.botao.mini{padding:5px 8px;font-size:10px;min-height:auto}.linha-composicao>td{padding:0!important;background:#f8fafc}
 </style>
+<script>
+function alternarComposicao(id, botao){const linha=document.getElementById(id);if(!linha)return;const abrindo=linha.style.display==='none'||!linha.style.display;linha.style.display=abrindo?'table-row':'none';botao.textContent=(abrindo?'Ocultar composição':'Ver composição')+botao.textContent.substring(botao.textContent.indexOf(' ('));}
+</script>
 {% endblock %}

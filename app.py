@@ -13943,15 +13943,13 @@ def _payload_manutencao(p: Pagamento, db: Session):
 
 
 def _saldos_globais_connect(db: Session) -> list[dict]:
-    """Quatro saldos globais espelhados no Connect.
+    """Quatro saldos globais espelhados no Connect, com composição auditável.
 
     O Organiza é a fonte da verdade. O Connect apenas consulta o saldo atual.
-    Não há vínculo por cliente, item ou pagamento.
+    A tela do Organiza mostra quais registros formam cada total para facilitar
+    a conferência antes da sincronização.
     """
     # Vendas: valor total menos pagamentos registrados no Organiza.
-    # Antes de calcular, migra o campo legado `pago` para PagamentoVenda. Isso
-    # impede que vendas antigas já quitadas reapareçam como saldo em aberto na
-    # primeira sincronização global.
     equipamentos_venda = (
         db.query(Equipamento)
         .options(selectinload(Equipamento.cliente))
@@ -13981,48 +13979,116 @@ def _saldos_globais_connect(db: Session) -> list[dict]:
         }
 
     vendas_abertas = 0.0
+    detalhes_vendas = []
     for eq in equipamentos_venda:
         total = max(float(moeda_num(eq.valor)), 0.0)
-        # `eq.pago` permanece como fallback de segurança para bases legadas.
         recebido = max(
             float(totais_pag_venda.get(eq.id, 0.0)),
             float(moeda_num(eq.pago)),
             0.0,
         )
-        vendas_abertas += max(total - recebido, 0.0)
+        saldo = max(total - recebido, 0.0)
+        vendas_abertas += saldo
+        if saldo > 0.009:
+            cliente_nome = (eq.cliente.nome if eq.cliente else "") or "Sem cliente"
+            descricao = eq.produto_venda_nome_snapshot or eq.modelo or eq.tipo or f"Venda #{eq.id}"
+            detalhes_vendas.append({
+                "id": eq.id,
+                "cliente": cliente_nome,
+                "descricao": descricao,
+                "status": eq.status or "",
+                "total": round(total, 2),
+                "recebido": round(recebido, 2),
+                "saldo": round(saldo, 2),
+                "url": f"/organiza/vendas/{eq.id}/pagamentos",
+                "finalizado": (eq.status or "").strip().lower() == "entregue",
+            })
+    detalhes_vendas.sort(key=lambda x: (x["cliente"].lower(), x["id"]))
 
     # Manutenções: orçamento aprovado menos pagamentos registrados.
     manutencoes_abertas = 0.0
+    detalhes_manutencoes = []
     manutencoes = db.query(Manutencao).options(
+        selectinload(Manutencao.cliente),
+        selectinload(Manutencao.equipamento),
         selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens),
         selectinload(Manutencao.orcamentos).selectinload(Orcamento.pagamentos),
     ).filter(func.upper(func.coalesce(Manutencao.status, "")) != "CANCELADA").all()
     for manut in manutencoes:
-        _total, _recebido, saldo = _saldo_manutencao(manut)
-        manutencoes_abertas += max(float(saldo or 0), 0.0)
+        total, recebido, saldo = _saldo_manutencao(manut)
+        saldo = max(float(saldo or 0), 0.0)
+        manutencoes_abertas += saldo
+        if saldo > 0.009:
+            cliente_nome = (manut.cliente.nome if manut.cliente else "") or "Sem cliente"
+            equipamento_nome = rotulo_maquina(manut.equipamento) if manut.equipamento else f"Manutenção #{manut.id}"
+            detalhes_manutencoes.append({
+                "id": manut.id,
+                "cliente": cliente_nome,
+                "descricao": equipamento_nome,
+                "status": manut.status or "",
+                "total": round(float(total or 0), 2),
+                "recebido": round(float(recebido or 0), 2),
+                "saldo": round(saldo, 2),
+                "url": f"/organiza/manutencoes/{manut.id}",
+                "finalizado": bool(manut.entregue_em) or (manut.status or "").strip().lower() in {"encerrada", "entregue", "finalizada"},
+            })
+    detalhes_manutencoes.sort(key=lambda x: (x["cliente"].lower(), x["id"]))
 
     # Atualizações: valor real lançado (inclusive adicional/frete) menos o que já foi pago.
     atualizacoes_abertas = 0.0
+    detalhes_atualizacoes = []
     for compra in db.query(AtualizacaoCompra).all():
         if (compra.status or "").strip().upper() in {"CANCELADO", "CANCELADA"}:
             continue
         total_cent = int(compra.valor_a_pagar_centavos or 0) + int(compra.frete_centavos or 0)
         pago_cent = int(compra.valor_pago_centavos or 0)
-        atualizacoes_abertas += max((total_cent - pago_cent) / 100.0, 0.0)
+        saldo = max((total_cent - pago_cent) / 100.0, 0.0)
+        atualizacoes_abertas += saldo
+        if saldo > 0.009:
+            detalhes_atualizacoes.append({
+                "id": compra.id,
+                "cliente": getattr(getattr(compra, "cliente", None), "nome", "") or f"Atualização #{compra.id}",
+                "descricao": getattr(compra, "periodo", None) or getattr(compra, "pacote_ate", None) or "Atualização",
+                "status": compra.status or "",
+                "total": round(total_cent / 100.0, 2),
+                "recebido": round(pago_cent / 100.0, 2),
+                "saldo": round(saldo, 2),
+                "url": "",
+                "finalizado": False,
+            })
 
     # Estoque: exatamente o total exibido no relatório de compras.
-    estoque_a_pagar = round(sum(float(x.get("custo_total") or 0) for x in relatorio_compras_estoque(db)), 2)
+    relatorio_estoque = relatorio_compras_estoque(db)
+    estoque_a_pagar = round(sum(float(x.get("custo_total") or 0) for x in relatorio_estoque), 2)
+    detalhes_estoque = []
+    for x in relatorio_estoque:
+        valor = round(float(x.get("custo_total") or 0), 2)
+        if valor <= 0.009:
+            continue
+        item_estoque = x.get("item")
+        detalhes_estoque.append({
+            "id": getattr(item_estoque, "id", 0) or 0,
+            "cliente": getattr(item_estoque, "categoria", "") or "",
+            "descricao": getattr(item_estoque, "nome", "") or "Item",
+            "status": f"Comprar {x.get('comprar') or 0}" + (f" · {x.get('cor')}" if x.get("cor") else ""),
+            "total": valor,
+            "recebido": 0.0,
+            "saldo": valor,
+            "url": "/organiza/estoque/compras",
+            "finalizado": False,
+        })
 
     hoje = date.today().isoformat()
     saldos = [
-        {"chave": "vendas", "titulo": "A receber · Vendas", "natureza": "receber", "tipo": "venda", "valor": round(vendas_abertas, 2)},
-        {"chave": "manutencoes", "titulo": "A receber · Manutenções", "natureza": "receber", "tipo": "manutencao", "valor": round(manutencoes_abertas, 2)},
-        {"chave": "atualizacoes", "titulo": "A receber · Atualizações", "natureza": "receber", "tipo": "atualizacao", "valor": round(atualizacoes_abertas, 2)},
-        {"chave": "estoque", "titulo": "A pagar · Estoque / Compras", "natureza": "pagar", "tipo": "estoque", "valor": round(estoque_a_pagar, 2)},
+        {"chave": "vendas", "titulo": "A receber · Vendas", "natureza": "receber", "tipo": "venda", "valor": round(vendas_abertas, 2), "detalhes": detalhes_vendas},
+        {"chave": "manutencoes", "titulo": "A receber · Manutenções", "natureza": "receber", "tipo": "manutencao", "valor": round(manutencoes_abertas, 2), "detalhes": detalhes_manutencoes},
+        {"chave": "atualizacoes", "titulo": "A receber · Atualizações", "natureza": "receber", "tipo": "atualizacao", "valor": round(atualizacoes_abertas, 2), "detalhes": detalhes_atualizacoes},
+        {"chave": "estoque", "titulo": "A pagar · Estoque / Compras", "natureza": "pagar", "tipo": "estoque", "valor": round(estoque_a_pagar, 2), "detalhes": detalhes_estoque},
     ]
     for idx, saldo in enumerate(saldos, start=1):
         saldo["registro_id"] = idx
         saldo["id_externo"] = f"ORGANIZA-SALDO-{saldo['chave'].upper()}"
+        saldo["qtd_detalhes"] = len(saldo.get("detalhes") or [])
         saldo["payload"] = {
             "id_externo": saldo["id_externo"],
             "tipo": saldo["tipo"],
