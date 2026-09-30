@@ -376,6 +376,27 @@ def _garantir_usuario_central_organiza(db: Session, nome: str, email: str, senha
     return nome_local, True
 
 
+def _connect_slug_por_global(db: Session, slug_global: str | None) -> str:
+    """Resolve o alias legado do Connect a partir do slug global do SolVoz/Organiza.
+
+    O slug global nunca muda. Apenas empresas antigas podem ter um alias local
+    no Connect para preservar URLs já enviadas aos clientes.
+    """
+    slug_n = _slug(slug_global or "")
+    if not slug_n:
+        return ""
+    try:
+        linha = db.execute(
+            text("SELECT connect_slug FROM solvoz_empresas WHERE LOWER(slug) = :slug LIMIT 1"),
+            {"slug": slug_n},
+        ).first()
+        alias = _slug((linha[0] if linha else "") or "")
+        return alias or slug_n
+    except Exception:
+        # Compatibilidade durante primeiro deploy/migração.
+        return slug_n
+
+
 def _produto_por_codigo(db: Session, codigo: str) -> HumiatProduto | None:
     return db.query(HumiatProduto).filter(HumiatProduto.codigo == (codigo or "").strip().upper()).first()
 
@@ -1719,9 +1740,9 @@ def abrir_produto(
         if codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}:
             destino_slug = (empresa_sso.slug if empresa_sso else "karaokerj")
         elif codigo == "CONNECT" and empresa:
-            # O Connect recebe o slug mestre do Organiza/Humiat e exige o mesmo
-            # slug em sua empresa local. Não há criação automática de empresa.
-            destino_slug = empresa.slug
+            # O Humiat ID identifica a empresa pelo slug global do Organiza, mas
+            # o Connect pode manter um alias legado para não quebrar URLs antigas.
+            destino_slug = _connect_slug_por_global(db, empresa.slug)
         db.add(HumiatSSOTicket(
             token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id,
             produto_codigo=codigo, acesso_modo=modo,
@@ -1890,6 +1911,14 @@ async def importar_catalogo_solvoz(
     if empresa_id:
         params["empresa_id"]=empresa_id
     return RedirectResponse("/painel?"+urllib.parse.urlencode(params),status_code=303)
+
+
+@router.get("/admin-humiat/diagnostico-organiza")
+def diagnostico_organiza(
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+):
+    """Atalho protegido do Humiat ID para o diagnóstico de performance do Organiza."""
+    return RedirectResponse("/organiza/diagnostico-performance", status_code=303)
 
 
 @router.get("/admin-humiat/diagnosticos-solvoz")

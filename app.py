@@ -43,12 +43,19 @@ from humiat_id import (
     enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao, _enviar_resend_humiat,
 )
 
+from organiza_performance import (
+    PerformanceMiddleware, install_sql_monitor, perf_stage,
+    performance_summary, monitor_status, clear_records,
+)
+
 from services.comunicacao import (
     ComunicacaoService, PAISES, formatar_telefone as formatar_telefone_internacional,
     normalizar_contato, numero_internacional, telefone_valido as telefone_internacional_valido,
 )
 
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
+app.add_middleware(PerformanceMiddleware)
+install_sql_monitor(engine)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 ORGANIZA_VERSION = ORGANIZA_VERSAO
@@ -608,6 +615,10 @@ class SolVozEmpresa(Base):
     id = Column(Integer, primary_key=True)
     nome = Column(String(140), nullable=False)
     slug = Column(String(100), nullable=False, unique=True)
+    # Slug global: sempre vem do SolVoz e é a identidade mestre da empresa.
+    # connect_slug preserva somente exceções legadas de URL do Connect, como
+    # vivikaraoke (global/SolVoz) -> vivioke (Connect), sem quebrar links antigos.
+    connect_slug = Column(String(100), nullable=True, unique=True)
     dominio = Column(String(255), nullable=False)
     ativo = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
@@ -3386,6 +3397,15 @@ def iniciar_banco():
             if "local_atendimento" not in existentes_agenda_manual:
                 conn.execute(text("ALTER TABLE agenda_manual ADD COLUMN local_atendimento VARCHAR(20)"))
 
+    if "solvoz_empresas" in insp.get_table_names():
+        existentes_solvoz_empresas = {c["name"] for c in insp.get_columns("solvoz_empresas")}
+        with engine.begin() as conn:
+            if "connect_slug" not in existentes_solvoz_empresas:
+                conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN connect_slug VARCHAR(100)"))
+            # O slug do SolVoz é mestre. O Connect mantém apenas alias legado.
+            conn.execute(text("UPDATE solvoz_empresas SET connect_slug = slug WHERE connect_slug IS NULL OR TRIM(connect_slug) = ''"))
+            conn.execute(text("UPDATE solvoz_empresas SET connect_slug = 'vivioke' WHERE LOWER(slug) = 'vivikaraoke'"))
+
     if "atualizacao_compras" in insp.get_table_names():
         existentes_atualizacao_compras = {c["name"] for c in insp.get_columns("atualizacao_compras")}
         with engine.begin() as conn:
@@ -3686,6 +3706,7 @@ def iniciar_banco():
             db.add(SolVozEmpresa(
                 nome="Karaokê RJ",
                 slug="karaokerj",
+                connect_slug="karaokerj",
                 dominio=dominio_solvoz_por_slug("karaokerj"),
                 ativo=1,
             ))
@@ -3845,6 +3866,48 @@ def organiza_service_worker():
     resposta.headers["Service-Worker-Allowed"] = "/organiza"
     resposta.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resposta
+
+@app.get("/organiza/diagnostico-performance", response_class=HTMLResponse)
+def organiza_diagnostico_performance(
+        request: Request,
+        limit: int = 250,
+        usuario: Usuario = Depends(usuario_logado),
+):
+    exigir_admin(usuario)
+    limit = max(20, min(limit, 400))
+    resumo = performance_summary(limit)
+    return templates.TemplateResponse("organiza/diagnostico_performance.html", {
+        "request": request,
+        "usuario": usuario,
+        "monitor": monitor_status(),
+        "ranking": resumo["ranking"],
+        "tabelas": resumo["tables"],
+        "sugestoes": resumo["suggestions"],
+        "registros": resumo["records"],
+        "limite": limit,
+        "limpos": request.query_params.get("limpos"),
+    })
+
+
+@app.get("/organiza/diagnostico-performance/dados", response_class=JSONResponse)
+def organiza_diagnostico_performance_dados(
+        limit: int = 250,
+        usuario: Usuario = Depends(usuario_logado),
+):
+    exigir_admin(usuario)
+    limit = max(20, min(limit, 400))
+    resumo = performance_summary(limit)
+    return {"monitor": monitor_status(), **resumo}
+
+
+@app.post("/organiza/diagnostico-performance/limpar")
+def organiza_diagnostico_performance_limpar(
+        usuario: Usuario = Depends(usuario_logado),
+):
+    exigir_admin(usuario)
+    total = clear_records()
+    return RedirectResponse(f"/organiza/diagnostico-performance?limpos={total}", status_code=303)
+
 
 @app.get("/organiza", response_class=HTMLResponse)
 def painel(
@@ -8029,6 +8092,7 @@ async def solvoz_empresa_salvar(
     db.add(SolVozEmpresa(
         nome=nome,
         slug=slug,
+        connect_slug=("vivioke" if slug == "vivikaraoke" else slug),
         dominio=dominio_solvoz_por_slug(slug),
         ativo=1,
     ))
@@ -8050,16 +8114,18 @@ async def solvoz_empresa_editar(
         raise HTTPException(404)
     form = dict(await request.form())
     nome = (form.get("nome") or "").strip()
-    slug = normalizar_slug_solvoz(form.get("slug") or nome)
-    if not nome or not slug:
-        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Informe+nome+e+slug", status_code=303)
-    existente = db.query(SolVozEmpresa).filter(
-        SolVozEmpresa.slug == slug, SolVozEmpresa.id != empresa_id
+    # O slug global não é editado no Organiza: ele pertence ao SolVoz.
+    slug = normalizar_slug_solvoz(empresa.slug)
+    connect_slug = normalizar_slug_solvoz(form.get("connect_slug") or slug)
+    if not nome or not slug or not connect_slug:
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Informe+nome+e+slug+do+Connect", status_code=303)
+    existente_alias = db.query(SolVozEmpresa).filter(
+        SolVozEmpresa.connect_slug == connect_slug, SolVozEmpresa.id != empresa_id
     ).first()
-    if existente:
-        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Este+slug+já+está+cadastrado", status_code=303)
+    if existente_alias:
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Este+slug+do+Connect+já+está+vinculado+a+outra+empresa", status_code=303)
     empresa.nome = nome
-    empresa.slug = slug
+    empresa.connect_slug = connect_slug
     empresa.dominio = dominio_solvoz_por_slug(slug)
     db.commit()
     return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+atualizada", status_code=303)
@@ -9855,6 +9921,7 @@ def api_solvoz_empresa_criar(
         empresa = SolVozEmpresa(
             nome=nome_n,
             slug=slug_n,
+            connect_slug=("vivioke" if slug_n == "vivikaraoke" else slug_n),
             dominio=dominio_solvoz_por_slug(slug_n),
             ativo=1,
         )
@@ -9864,6 +9931,8 @@ def api_solvoz_empresa_criar(
     else:
         empresa.nome = nome_n
         empresa.dominio = dominio_solvoz_por_slug(slug_n)
+        if not (empresa.connect_slug or "").strip():
+            empresa.connect_slug = "vivioke" if slug_n == "vivikaraoke" else slug_n
         # Preserve o status existente; esta integração não reativa decisão manual.
     h_empresa = garantir_empresa_solvoz_humiat(db, nome_n, slug_n, ativo=1)
     db.commit()
@@ -9874,6 +9943,7 @@ def api_solvoz_empresa_criar(
         "humiat_empresa_id": h_empresa.id,
         "nome": empresa.nome,
         "slug": empresa.slug,
+        "connect_slug": empresa.connect_slug or empresa.slug,
         "dominio": empresa.dominio,
     }
 

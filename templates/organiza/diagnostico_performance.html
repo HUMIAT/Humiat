@@ -1,0 +1,66 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<style>
+.perf-page{max-width:1500px;margin:0 auto;padding:4px 0 40px}.perf-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.perf-actions{display:flex;gap:8px;flex-wrap:wrap}.perf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.perf-card,.perf-section{background:#fff;border:1px solid #dbe4f0;border-radius:16px;box-shadow:0 8px 24px rgba(15,23,42,.04)}.perf-card{padding:14px}.perf-card small{display:block;color:#64748b;font-size:.78rem}.perf-card strong{display:block;font-size:1.55rem;margin:5px 0}.perf-section{padding:16px;margin-top:12px}.perf-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.perf-toolbar h2{margin:0 0 4px}.perf-note{font-size:.83rem;color:#64748b;margin:0}.perf-table-wrap{overflow:auto;border:1px solid #e2e8f0;border-radius:12px;margin-top:12px}.perf-table{width:100%;border-collapse:collapse;min-width:900px}.perf-table th,.perf-table td{padding:9px 10px;border-bottom:1px solid #edf2f7;text-align:left;vertical-align:top;font-size:.86rem}.perf-table th{background:#eff5ff;font-size:.77rem;text-transform:uppercase;letter-spacing:.02em;position:sticky;top:0;z-index:1}.perf-table tr:last-child td{border-bottom:0}.perf-badge{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-weight:800;font-size:.74rem;white-space:nowrap}.perf-ok{background:#dcfce7;color:#166534}.perf-warn{background:#fef3c7;color:#92400e}.perf-bad{background:#fee2e2;color:#991b1b}.perf-off{background:#e5e7eb;color:#475569}.perf-suggestions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px}.perf-suggestion{border-radius:12px;padding:11px 12px;border:1px solid #e2e8f0}.perf-suggestion strong{display:block;margin-bottom:3px}.perf-suggestion.bad{border-color:#fecaca;background:#fff7f7}.perf-suggestion.warn{border-color:#fde68a;background:#fffdf3}.perf-suggestion.ok{border-color:#bbf7d0;background:#f6fff9}.perf-details{max-width:560px}.perf-details summary{cursor:pointer;font-weight:800}.perf-details pre{white-space:pre-wrap;word-break:break-word;font-size:.72rem;background:#0f172a;color:#e2e8f0;padding:9px;border-radius:8px;max-height:250px;overflow:auto}.perf-alert{padding:9px 12px;border-radius:10px;background:#dcfce7;color:#166534;margin:10px 0;font-weight:700}.perf-empty{text-align:center;padding:22px;color:#64748b}.perf-route{max-width:430px;word-break:break-word}.perf-actions .botao,.perf-actions button{min-height:34px;padding:7px 11px;font-size:.8rem}.perf-kpi-sub{font-size:.75rem;color:#64748b}@media(max-width:900px){.perf-grid{grid-template-columns:repeat(2,1fr)}.perf-suggestions{grid-template-columns:1fr}.perf-head{display:block}.perf-actions{margin-top:10px}}@media(max-width:520px){.perf-grid{grid-template-columns:1fr}}
+</style>
+<div class="perf-page">
+  <div class="perf-head">
+    <div>
+      <p class="tag">Administração</p>
+      <h1>Diagnóstico de performance</h1>
+      <p class="perf-note">Mesmo padrão de análise do Connect: rotas lentas, volume SQL, tabelas mais consumidas, consultas repetidas e possíveis gargalos. Não grava parâmetros SQL nem dados pessoais.</p>
+    </div>
+    <div class="perf-actions">
+      <a class="botao" href="/organiza/diagnostico-performance">Atualizar</a>
+      <a class="botao" href="/organiza/diagnostico-performance/dados?limit={{ limite }}" target="_blank">Ver JSON</a>
+      <form method="post" action="/organiza/diagnostico-performance/limpar" onsubmit="return confirm('Limpar os registros de diagnóstico desta instância?')"><button type="submit" class="botao">Limpar</button></form>
+    </div>
+  </div>
+
+  {% if limpos is not none %}<div class="perf-alert">{{ limpos }} registro(s) removido(s).</div>{% endif %}
+
+  <div class="perf-grid">
+    <div class="perf-card"><small>Monitor</small><strong>{% if monitor.enabled %}Ativo{% else %}Desativado{% endif %}</strong><span class="perf-badge {% if monitor.enabled %}perf-ok{% else %}perf-off{% endif %}">{{ monitor.detail }}</span></div>
+    <div class="perf-card"><small>Registros atuais</small><strong>{{ monitor.records_in_memory }}</strong><span class="perf-kpi-sub">máximo {{ monitor.max_records }}</span></div>
+    <div class="perf-card"><small>Alerta de rota lenta</small><strong>{{ monitor.slow_request_ms|int }} ms</strong><span class="perf-kpi-sub">acima disso entra no diagnóstico</span></div>
+    <div class="perf-card"><small>Alerta de SQL lento</small><strong>{{ monitor.slow_sql_ms|int }} ms</strong><span class="perf-kpi-sub">consulta individual</span></div>
+  </div>
+
+  <section class="perf-section">
+    <div class="perf-toolbar"><div><h2>Sugestões de otimização</h2><p class="perf-note">Alertas automáticos. O painel não altera código nem banco sozinho.</p></div><span class="perf-badge perf-warn">Monitorando: {{ monitor.routes|join(', ') }}</span></div>
+    <div class="perf-suggestions">
+      {% for s in sugestoes %}<div class="perf-suggestion {{ s.level }}"><strong>{{ s.title }}</strong><span>{{ s.detail }}</span></div>
+      {% else %}<div class="perf-empty">Use o Organiza normalmente e volte aqui para gerar o diagnóstico.</div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="perf-section">
+    <div class="perf-toolbar"><div><h2>Ranking das telas/rotas</h2><p class="perf-note">Ordenado pelo maior tempo médio entre os registros capturados.</p></div></div>
+    <div class="perf-table-wrap"><table class="perf-table"><thead><tr><th>Rota</th><th>Chamadas</th><th>Média</th><th>Pior</th><th>SQL médio</th><th>Queries</th><th>Banco</th><th>Erros</th></tr></thead><tbody>
+      {% for item in ranking %}<tr><td class="perf-route"><strong>{{ item.route }}</strong></td><td>{{ item.calls }}</td><td><span class="perf-badge {% if item.avg_ms >= 3000 %}perf-bad{% elif item.avg_ms >= 1200 %}perf-warn{% else %}perf-ok{% endif %}">{{ '%.2f'|format(item.avg_ms/1000) }} s</span></td><td>{{ '%.2f'|format(item.max_ms/1000) }} s</td><td>{{ '%.2f'|format(item.avg_sql_ms/1000) }} s</td><td>{{ item.avg_sql_count }}</td><td>{{ item.db_pct }}%</td><td>{{ item.errors }}</td></tr>
+      {% else %}<tr><td colspan="8" class="perf-empty">Nenhuma rota lenta registrada ainda.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="perf-section">
+    <div class="perf-toolbar"><div><h2>Tabelas que mais consomem banco</h2><p class="perf-note">Soma das consultas agrupadas dentro dos registros monitorados.</p></div></div>
+    <div class="perf-table-wrap"><table class="perf-table"><thead><tr><th>Tabela</th><th>Queries</th><th>Tempo acumulado</th><th>Maior SQL</th><th>Rotas que mais usam</th></tr></thead><tbody>
+      {% for t in tabelas %}<tr><td><strong>{{ t.table }}</strong></td><td>{{ t.queries }}</td><td>{{ '%.2f'|format(t.total_ms/1000) }} s</td><td>{{ '%.0f'|format(t.max_ms) }} ms</td><td>{% for rota in t.top_routes %}<div>{{ rota }}</div>{% endfor %}</td></tr>
+      {% else %}<tr><td colspan="5" class="perf-empty">Ainda não há consultas suficientes para formar o ranking.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="perf-section">
+    <div class="perf-toolbar"><div><h2>Requisições recentes</h2><p class="perf-note">Até {{ limite }} registros. Abra os detalhes para localizar consulta repetida ou lenta.</p></div></div>
+    <div class="perf-table-wrap"><table class="perf-table"><thead><tr><th>Horário UTC</th><th>Rota</th><th>Total</th><th>SQL</th><th>Queries</th><th>Status</th><th>Detalhes</th></tr></thead><tbody>
+      {% for r in registros %}<tr><td>{{ (r.created_at or '')[:19]|replace('T',' ') }}</td><td class="perf-route"><strong>{{ r.method }} {{ r.path }}</strong><br><small>{{ r.request_id }}</small></td><td><span class="perf-badge {% if r.total_ms >= 3000 %}perf-bad{% elif r.total_ms >= 1200 %}perf-warn{% else %}perf-ok{% endif %}">{{ '%.2f'|format((r.total_ms or 0)/1000) }} s</span></td><td>{{ '%.2f'|format((r.sql_ms or 0)/1000) }} s<br><small>máx. {{ '%.0f'|format(r.sql_max_ms or 0) }} ms</small></td><td>{{ r.sql_count or 0 }}</td><td>{{ r.status }}</td><td class="perf-details"><details><summary>Ver SQL agrupado</summary>
+        {% if r.stages %}<h4>Etapas</h4><ul>{% for etapa in r.stages %}<li>{{ etapa.name }}: <strong>{{ etapa.ms }} ms</strong></li>{% endfor %}</ul>{% endif %}
+        {% if r.sql_groups %}<h4>Consultas agrupadas</h4>{% for sql in r.sql_groups %}<pre>{{ sql.verb }} — {{ sql.count }}x — total {{ sql.total_ms }} ms — média {{ sql.avg_ms }} ms — máx. {{ sql.max_ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>{% endfor %}{% endif %}
+        {% if r.slow_sql %}<h4>SQL lento</h4>{% for sql in r.slow_sql %}<pre>{{ sql.verb }} — {{ sql.ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>{% endfor %}{% endif %}
+        {% if not r.stages and not r.sql_groups and not r.slow_sql %}<p class="perf-note">Sem detalhes adicionais.</p>{% endif %}
+      </details></td></tr>
+      {% else %}<tr><td colspan="7" class="perf-empty">Nenhum registro disponível. Navegue pelo Organiza e volte para atualizar.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+{% endblock %}
