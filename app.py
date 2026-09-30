@@ -683,7 +683,9 @@ class Equipamento(Base):
     teclado_bluetooth = Column(String(10), nullable=False, default="NA")
     microfone = Column(String(20), nullable=False, default="Com fio")
     sistema_credito = Column(String(20), nullable=False, default="NA")
-    catalogo_impresso = Column(String(10), nullable=False, default="NA")
+    catalogo_impresso = Column(String(20), nullable=False, default="NA")
+    # Opcionais dinâmicos criados no cadastro de Opcionais. Mantém os campos legados acima por compatibilidade.
+    opcionais_json = Column(Text, nullable=True)
     # 1.1.62: vínculo comercial/custo de produção. O cadastro mestre fica separado
     # da máquina física do cliente para permitir composição e custos por modelo.
     produto_venda_id = Column(Integer, ForeignKey("venda_modelos_equipamento.id"), nullable=True, index=True)
@@ -906,7 +908,18 @@ class VendaOpcionalConfig(Base):
     quantidade = Column(Float, nullable=False, default=1)
     ordem = Column(Integer, nullable=False, default=0)
     ativo = Column(Integer, nullable=False, default=1)
+    padrao = Column(Integer, nullable=False, default=0)
     item = relationship("Item")
+
+
+class VendaOpcionalModelo(Base):
+    """Define se uma categoria de Opcional pode ser usada em cada modelo comercial."""
+    __tablename__ = "venda_opcionais_modelos"
+    id = Column(Integer, primary_key=True)
+    campo = Column(String(50), nullable=False, index=True)
+    modelo_id = Column(Integer, ForeignKey("venda_modelos_equipamento.id"), nullable=False, index=True)
+    habilitado = Column(Integer, nullable=False, default=1)
+    modelo = relationship("VendaModeloEquipamento")
 
 
 class AgendaManual(Base):
@@ -1656,10 +1669,23 @@ def _consumo_venda_itens_base(eq: Equipamento, db: Session) -> dict[int, float]:
         VendaOpcionalConfig.item_id.isnot(None),
     ).all()
     for cfg in configs:
-        if str(getattr(eq, cfg.campo, "") or "") == str(cfg.valor or ""):
-            qtd = float(cfg.quantidade or 0)
-            if qtd > 0:
-                desejado[cfg.item_id] = desejado.get(cfg.item_id, 0.0) + qtd
+        if not _opcional_habilitado_modelo(db, eq.produto_venda_id, cfg.campo):
+            continue
+        valor_atual = _valor_opcional_equipamento(eq, cfg.campo, db)
+        if str(valor_atual) != str(cfg.valor or ""):
+            continue
+        # Microfone com fio já vem da composição e nunca soma de novo.
+        if cfg.campo == "microfone" and cfg.valor == "Com fio":
+            continue
+        if cfg.campo == "microfone" and cfg.valor == "Sem fio":
+            padrao = _opcional_config_por_escolha(db, "microfone", "Com fio")
+            if padrao and padrao.item_id:
+                desejado[padrao.item_id] = max(desejado.get(padrao.item_id, 0.0) - float(padrao.quantidade or 0), 0.0)
+                if desejado.get(padrao.item_id, 0) <= 0:
+                    desejado.pop(padrao.item_id, None)
+        qtd = float(cfg.quantidade or 0)
+        if qtd > 0:
+            desejado[cfg.item_id] = desejado.get(cfg.item_id, 0.0) + qtd
     return {k: round(v, 4) for k, v in desejado.items() if v > 0}
 
 
@@ -2847,32 +2873,88 @@ def _seed_modelos_e_opcionais_venda(db: Session):
                     db.add(VendaModeloComposicao(modelo_id=modelo.id, item_id=item.id, quantidade=qtd))
 
     opcionais = [
-        ("hdmi_tela_2", "HDMI Tela 2", "NA", "NA", None, 0, 10),
-        ("hdmi_tela_2", "HDMI Tela 2", "Sim", "Com HDMI Tela 2", "HDMI TELA 2", 1, 20),
-        ("teclado_bluetooth", "Teclado Bluetooth", "NA", "NA", None, 0, 30),
-        ("teclado_bluetooth", "Teclado Bluetooth", "Sim", "Com Teclado Bluetooth", "TECLADO BLUETOOTH", 1, 40),
-        ("microfone", "Microfone", "NA", "NA", None, 0, 50),
-        # A composição histórica traz 2 microfones com fio; agora eles entram pelo Opcional.
-        ("microfone", "Microfone", "Com fio", "Com fio", "MICROFONE", 2, 60),
-        ("microfone", "Microfone", "Sem fio", "Sem fio", "MICROFONE SEM FIO", 1, 70),
-        ("sistema_credito", "Sistema de Crédito", "NA", "NA", None, 0, 80),
-        ("sistema_credito", "Sistema de Crédito", "Moedeiro", "Moedeiro", "MOEDEIRO", 1, 90),
-        ("sistema_credito", "Sistema de Crédito", "Ficheiro", "Ficheiro", "FICHEIRO", 1, 100),
-        ("sistema_credito", "Sistema de Crédito", "Teclado", "Teclado", "TECLADO SISTEMA DE CREDITO", 1, 110),
-        ("catalogo_impresso", "Catálogo Impresso", "NA", "NA", None, 0, 120),
-        ("catalogo_impresso", "Catálogo Impresso", "Sim", "Impresso", "CATALOGO ENCARDENADO", 1, 130),
+        ("hdmi_tela_2", "HDMI", "NA", "NA", None, 0, 10, 1),
+        ("hdmi_tela_2", "HDMI", "Extensor", "Extensor", "EXTENSOR HDMI", 1, 20, 0),
+        ("hdmi_tela_2", "HDMI", "Divisor", "Divisor", "DIVISOR HDMI", 1, 30, 0),
+        ("teclado_bluetooth", "Teclado Bluetooth", "NA", "NA", None, 0, 40, 1),
+        ("teclado_bluetooth", "Teclado Bluetooth", "Sim", "Com Teclado Bluetooth", "TECLADO BLUETOOTH", 1, 50, 0),
+        # Com fio é padrão e já está na composição do equipamento. A quantidade 2 serve como referência para a troca.
+        ("microfone", "Microfone", "Com fio", "Com fio", "MICROFONE", 2, 60, 1),
+        ("microfone", "Microfone", "Sem fio", "Sem fio", "MICROFONE SEM FIO", 1, 70, 0),
+        ("sistema_credito", "Sistema de Crédito", "NA", "NA", None, 0, 80, 1),
+        ("sistema_credito", "Sistema de Crédito", "Moedeiro", "Moedeiro", "MOEDEIRO", 1, 90, 0),
+        ("sistema_credito", "Sistema de Crédito", "Ficheiro", "Ficheiro", "FICHEIRO", 1, 100, 0),
+        ("sistema_credito", "Sistema de Crédito", "Teclado", "Teclado", "TECLADO SISTEMA DE CREDITO", 1, 110, 0),
+        ("catalogo_impresso", "Encadernado / Pasta Plástica", "NA", "NA", None, 0, 120, 1),
+        ("catalogo_impresso", "Encadernado / Pasta Plástica", "Encadernado", "Encadernado", "CATALOGO ENCARDENADO", 1, 130, 0),
+        ("catalogo_impresso", "Encadernado / Pasta Plástica", "Pasta", "Pasta Plástica", "PASTA PLASTICA", 1, 140, 0),
+        ("pilhas", "Pilhas", "NA", "NA", None, 0, 150, 1),
+        ("pilhas", "Pilhas", "Recarregaveis", "Recarregáveis", "PILHAS RECARREGAVEIS", 1, 160, 0),
+        ("estabilizador", "Estabilizador", "NA", "NA", None, 0, 170, 1),
+        ("estabilizador", "Estabilizador", "TS Shara 9101", "TS Shara 9101", "TS SHARA 9101", 1, 180, 0),
+        ("estabilizador", "Estabilizador", "TS Shara 9116", "TS Shara 9116", "TS SHARA 9116", 1, 190, 0),
     ]
-    for campo, grupo, valor, rotulo, item_nome, quantidade, ordem in opcionais:
+    for campo, grupo, valor, rotulo, item_nome, quantidade, ordem, padrao in opcionais:
         existente = db.query(VendaOpcionalConfig).filter(
             VendaOpcionalConfig.campo == campo, VendaOpcionalConfig.valor == valor
         ).first()
-        if existente:
-            continue
         item = _garantir_item_venda(db, item_nome, "Opcionais de venda") if item_nome else None
+        if existente:
+            # Atualiza nomenclaturas/regras desta versão sem apagar custo cadastrado no Item.
+            existente.grupo = grupo
+            existente.rotulo = rotulo
+            existente.quantidade = float(quantidade or 0)
+            existente.ordem = ordem
+            existente.padrao = padrao
+            if item and not existente.item_id:
+                existente.item_id = item.id
+            continue
         db.add(VendaOpcionalConfig(
             campo=campo, grupo=grupo, valor=valor, rotulo=rotulo,
-            item_id=item.id if item else None, quantidade=float(quantidade or 0), ordem=ordem, ativo=1,
+            item_id=item.id if item else None, quantidade=float(quantidade or 0), ordem=ordem, ativo=1, padrao=padrao,
         ))
+
+    # Migração dos nomes antigos para as novas escolhas.
+    antigo_microfone_na = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == "microfone", VendaOpcionalConfig.valor == "NA").first()
+    if antigo_microfone_na:
+        antigo_microfone_na.ativo = 0
+    antigo_hdmi = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == "hdmi_tela_2", VendaOpcionalConfig.valor == "Sim").first()
+    if antigo_hdmi:
+        antigo_hdmi.ativo = 0
+    antigo_catalogo = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == "catalogo_impresso", VendaOpcionalConfig.valor == "Sim").first()
+    if antigo_catalogo:
+        antigo_catalogo.ativo = 0
+    db.query(Equipamento).filter(Equipamento.hdmi_tela_2 == "Sim").update({Equipamento.hdmi_tela_2: "Extensor"}, synchronize_session=False)
+    db.query(Equipamento).filter(Equipamento.catalogo_impresso == "Sim").update({Equipamento.catalogo_impresso: "Encadernado"}, synchronize_session=False)
+
+    # A composição oficial de todos os equipamentos comerciais inclui 2 microfones com fio.
+    # O opcional Microfone apenas mantém essa composição ou a substitui pelo kit sem fio.
+    mic_item = _garantir_item_venda(db, "MICROFONE", "Som")
+    campos = sorted({x[0] for x in opcionais})
+    modelos = db.query(VendaModeloEquipamento).all()
+    for modelo in modelos:
+        comp_mic = db.query(VendaModeloComposicao).filter(VendaModeloComposicao.modelo_id == modelo.id, VendaModeloComposicao.item_id == mic_item.id).first()
+        if comp_mic:
+            comp_mic.quantidade = 2
+        else:
+            db.add(VendaModeloComposicao(modelo_id=modelo.id, item_id=mic_item.id, quantidade=2))
+        for campo in campos:
+            regra = db.query(VendaOpcionalModelo).filter(VendaOpcionalModelo.modelo_id == modelo.id, VendaOpcionalModelo.campo == campo).first()
+            nome_normalizado = unicodedata.normalize("NFKD", f"{modelo.nome or ''} {modelo.tipo or ''}").encode("ascii", "ignore").decode("ascii").upper()
+            portatil_sem_hdmi = campo == "hdmi_tela_2" and "PORTAT" in nome_normalizado
+            if not regra:
+                db.add(VendaOpcionalModelo(modelo_id=modelo.id, campo=campo, habilitado=0 if portatil_sem_hdmi else 1))
+    # Aplicação única da regra inicial do Portátil; depois disso a matriz fica totalmente editável pelo usuário.
+    chave_portatil = "opcionais_portatil_hdmi_1_1_81"
+    marcador_portatil = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave_portatil).first()
+    if not marcador_portatil:
+        for modelo in modelos:
+            nome_normalizado = unicodedata.normalize("NFKD", f"{modelo.nome or ''} {modelo.tipo or ''}").encode("ascii", "ignore").decode("ascii").upper()
+            if "PORTAT" in nome_normalizado:
+                regra = db.query(VendaOpcionalModelo).filter(VendaOpcionalModelo.modelo_id == modelo.id, VendaOpcionalModelo.campo == "hdmi_tela_2").first()
+                if regra:
+                    regra.habilitado = 0
+        db.add(ConfiguracaoSistema(chave=chave_portatil, valor="ok"))
     db.commit()
 
 
@@ -3002,14 +3084,56 @@ def _opcional_config_por_escolha(db: Session, campo: str, valor: str | None):
     ).first()
 
 
+def _opcionais_dinamicos(eq: Equipamento | None) -> dict[str, str]:
+    if not eq or not (getattr(eq, "opcionais_json", None) or "").strip():
+        return {}
+    try:
+        dados = json.loads(eq.opcionais_json or "{}")
+        return {str(k): str(v) for k, v in (dados or {}).items()}
+    except Exception:
+        return {}
+
+
+def _valor_opcional_equipamento(eq: Equipamento, campo: str, db: Session) -> str:
+    if hasattr(eq, campo):
+        valor = str(getattr(eq, campo, "") or "").strip()
+        if valor:
+            return valor
+    dados = _opcionais_dinamicos(eq)
+    if campo in dados:
+        return dados[campo]
+    padrao = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == campo, VendaOpcionalConfig.ativo == 1, VendaOpcionalConfig.padrao == 1).order_by(VendaOpcionalConfig.ordem).first()
+    return padrao.valor if padrao else "NA"
+
+
+def _opcional_habilitado_modelo(db: Session, modelo_id: int | None, campo: str) -> bool:
+    if not modelo_id:
+        return True
+    regra = db.query(VendaOpcionalModelo).filter(VendaOpcionalModelo.modelo_id == modelo_id, VendaOpcionalModelo.campo == campo).first()
+    return True if regra is None else bool(regra.habilitado)
+
+
+def _custo_config(config: VendaOpcionalConfig | None) -> float:
+    return float(config.quantidade or 0) * float(config.item.preco_custo or 0) if config and config.item else 0.0
+
+
 def custo_opcionais_equipamento(eq: Equipamento, db: Session) -> float:
     if not eq.produto_venda_id:
         return 0.0
     total = 0.0
-    for campo in ("hdmi_tela_2", "teclado_bluetooth", "microfone", "sistema_credito", "catalogo_impresso"):
-        config = _opcional_config_por_escolha(db, campo, getattr(eq, campo, "NA"))
-        if config and config.item:
-            total += float(config.quantidade or 0) * float(config.item.preco_custo or 0)
+    campos = [x[0] for x in db.query(VendaOpcionalConfig.campo).filter(VendaOpcionalConfig.ativo == 1).distinct().all()]
+    for campo in campos:
+        if not _opcional_habilitado_modelo(db, eq.produto_venda_id, campo):
+            continue
+        valor = _valor_opcional_equipamento(eq, campo, db)
+        config = _opcional_config_por_escolha(db, campo, valor)
+        if campo == "microfone":
+            # Com fio já está no custo-base. Sem fio substitui 2 com fio: cobra apenas a diferença.
+            if valor == "Sem fio":
+                padrao = _opcional_config_por_escolha(db, "microfone", "Com fio")
+                total += _custo_config(config) - _custo_config(padrao)
+            continue
+        total += _custo_config(config)
     return round(total, 2)
 
 
@@ -3067,10 +3191,30 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
     configs = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).filter(VendaOpcionalConfig.ativo == 1).order_by(VendaOpcionalConfig.ordem).all()
     custos_opcionais = {}
     opcoes_por_campo = {}
+    grupos_opcionais = []
+    padroes_opcionais = {}
     for c in configs:
-        custo = float(c.quantidade or 0) * float(c.item.preco_custo or 0) if c.item else 0.0
+        custo = _custo_config(c)
         custos_opcionais.setdefault(c.campo, {})[c.valor] = round(custo, 2)
         opcoes_por_campo.setdefault(c.campo, []).append(c)
+        if c.campo not in [g[0] for g in grupos_opcionais]:
+            grupos_opcionais.append((c.campo, c.grupo))
+        if c.padrao:
+            padroes_opcionais[c.campo] = c.valor
+    # No microfone o custo exibido do Sem fio é a diferença para os 2 com fio já presentes no equipamento.
+    mic_padrao = _opcional_config_por_escolha(db, "microfone", "Com fio")
+    mic_sem_fio = _opcional_config_por_escolha(db, "microfone", "Sem fio")
+    if mic_padrao and mic_sem_fio:
+        custos_opcionais.setdefault("microfone", {})["Com fio"] = 0.0
+        custos_opcionais["microfone"]["Sem fio"] = round(_custo_config(mic_sem_fio) - _custo_config(mic_padrao), 2)
+    opcionais_atuais = {}
+    for campo, _grupo in grupos_opcionais:
+        opcionais_atuais[campo] = _valor_opcional_equipamento(equipamento, campo, db) if equipamento else padroes_opcionais.get(campo, "NA")
+    habilitados_modelo = {}
+    regras = db.query(VendaOpcionalModelo).all()
+    for r in regras:
+        if r.habilitado:
+            habilitados_modelo.setdefault(r.campo, []).append(r.modelo_id)
     resumo = resumo_custo_venda(equipamento, db) if equipamento else {"base":0,"opcionais":0,"custo":0,"preco":0,"bruto":0,"desconto":0,"frete":0,"total":0,"lucro":0,"margem":0,"snapshot":False}
     cupons = db.query(VendaCupom).filter(VendaCupom.ativo == 1).order_by(VendaCupom.codigo.asc()).all()
     if equipamento and equipamento.cupom_id and not any(c.id == equipamento.cupom_id for c in cupons):
@@ -3081,7 +3225,9 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
     return {
         "modelos_venda": modelos, "custos_modelos": custos_modelos, "precos_modelos": precos_modelos,
         "tipos_modelos": tipos_modelos, "nomes_modelos": nomes_modelos, "custos_opcionais": custos_opcionais,
-        "opcoes_por_campo": opcoes_por_campo, "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
+        "opcoes_por_campo": opcoes_por_campo, "grupos_opcionais": grupos_opcionais, "padroes_opcionais": padroes_opcionais,
+        "opcionais_atuais": opcionais_atuais, "opcionais_modelos_habilitados": habilitados_modelo,
+        "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
         "cupons_venda": sorted(cupons, key=lambda c: (c.codigo or "")), "cupons_dados": cupons_dados,
         "estoque_cores_venda": contexto_cores_venda(db, equipamento),
         "estoque_utilizado_venda": contexto_estoque_utilizado_venda(db, equipamento),
@@ -3325,6 +3471,12 @@ def iniciar_banco():
             if "controla_estoque" not in existentes_itens:
                 conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN controla_estoque INTEGER NOT NULL DEFAULT 1"))
 
+    if "venda_opcionais_config" in insp.get_table_names():
+        existentes_opcionais = {c["name"] for c in insp.get_columns("venda_opcionais_config")}
+        with engine.begin() as conn:
+            if "padrao" not in existentes_opcionais:
+                conn.execute(text("ALTER TABLE venda_opcionais_config ADD COLUMN padrao INTEGER NOT NULL DEFAULT 0"))
+
     if "equipamentos" in insp.get_table_names():
         existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
         with engine.begin() as conn:
@@ -3359,7 +3511,9 @@ def iniciar_banco():
             if "sistema_credito" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN sistema_credito VARCHAR(20) NOT NULL DEFAULT 'NA'"))
             if "catalogo_impresso" not in existentes_equipamentos:
-                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_impresso VARCHAR(10) NOT NULL DEFAULT 'NA'"))
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_impresso VARCHAR(20) NOT NULL DEFAULT 'NA'"))
+            if "opcionais_json" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN opcionais_json TEXT"))
             if "produto_venda_id" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN produto_venda_id INTEGER"))
             if "catalogo_venda" not in existentes_equipamentos:
@@ -7218,11 +7372,28 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
     # Som deixou de ser Opcional: Premium/JBL pertence ao próprio modelo comercial.
     if modelo_venda:
         eq.som = "NA"
-    eq.hdmi_tela_2 = opcao(form.get("hdmi_tela_2"), {"Sim", "Não", "NA"}, getattr(eq, "hdmi_tela_2", None) or "NA")
-    eq.teclado_bluetooth = opcao(form.get("teclado_bluetooth"), {"Sim", "Não", "NA"}, getattr(eq, "teclado_bluetooth", None) or "NA")
-    eq.microfone = opcao(form.get("microfone"), {"Com fio", "Sem fio", "NA"}, getattr(eq, "microfone", None) or "Com fio")
-    eq.sistema_credito = opcao(form.get("sistema_credito"), {"Moedeiro", "Ficheiro", "Teclado", "NA"}, getattr(eq, "sistema_credito", None) or "NA")
-    eq.catalogo_impresso = opcao(form.get("catalogo_impresso"), {"Sim", "Não", "NA"}, getattr(eq, "catalogo_impresso", None) or "NA")
+    # Salva qualquer categoria criada em Opcionais. Categorias desabilitadas para o modelo voltam ao padrão e não movimentam estoque.
+    dinamicos = _opcionais_dinamicos(eq)
+    configs_ativos = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.ativo == 1).order_by(VendaOpcionalConfig.ordem).all()
+    por_campo = {}
+    for cfg in configs_ativos:
+        por_campo.setdefault(cfg.campo, []).append(cfg)
+    for campo, opcoes_cfg in por_campo.items():
+        padrao_cfg = next((c for c in opcoes_cfg if c.padrao), opcoes_cfg[0] if opcoes_cfg else None)
+        padrao_valor = padrao_cfg.valor if padrao_cfg else "NA"
+        permitidos = {c.valor for c in opcoes_cfg}
+        valor_form = (form.get(f"opcional__{campo}") if f"opcional__{campo}" in form else form.get(campo))
+        valor_atual = _valor_opcional_equipamento(eq, campo, db)
+        valor = (valor_form or valor_atual or padrao_valor).strip()
+        if valor not in permitidos:
+            valor = padrao_valor
+        if modelo_venda and not _opcional_habilitado_modelo(db, modelo_venda.id, campo):
+            valor = padrao_valor
+        if hasattr(eq, campo):
+            setattr(eq, campo, valor)
+        else:
+            dinamicos[campo] = valor
+    eq.opcionais_json = json.dumps(dinamicos, ensure_ascii=False, sort_keys=True) if dinamicos else None
 
     # Preço bruto, cupom e desconto manual. `valor` passa a ser sempre o total final.
     # Em vendas já finalizadas, o preço histórico permanece congelado junto com o snapshot.
@@ -11209,11 +11380,61 @@ async def modelo_venda_salvar(modelo_id: int, request: Request, usuario: Usuario
 def opcionais_venda_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     configs = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).order_by(VendaOpcionalConfig.ordem, VendaOpcionalConfig.grupo, VendaOpcionalConfig.valor).all()
     itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome.asc()).all()
+    modelos = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.ativo == 1).order_by(VendaModeloEquipamento.ordem, VendaModeloEquipamento.nome).all()
     for config in configs:
         config.custo_calculado = round(float(config.quantidade or 0) * float(config.item.preco_custo or 0), 2) if config.item else 0.0
+    categorias = []
+    vistos = set()
+    for c in configs:
+        if c.campo not in vistos:
+            categorias.append((c.campo, c.grupo)); vistos.add(c.campo)
+    habilitacao = {(r.campo, r.modelo_id): bool(r.habilitado) for r in db.query(VendaOpcionalModelo).all()}
     return templates.TemplateResponse("organiza/opcionais_venda.html", {
-        "request": request, "usuario": usuario, "configs": configs, "itens": itens,
+        "request": request, "usuario": usuario, "configs": configs, "itens": itens, "modelos": modelos,
+        "categorias": categorias, "habilitacao": habilitacao,
     })
+
+
+@app.post("/organiza/opcionais-venda/categoria/nova")
+async def opcional_categoria_nova(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    grupo = (form.get("grupo") or "").strip()
+    if not grupo:
+        return RedirectResponse("/organiza/opcionais-venda?erro=Informe+a+categoria", status_code=303)
+    base = unicodedata.normalize("NFKD", grupo).encode("ascii", "ignore").decode("ascii").lower()
+    campo = re.sub(r"[^a-z0-9]+", "_", base).strip("_")[:50] or f"opcional_{secrets.token_hex(3)}"
+    if db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == campo).first():
+        return RedirectResponse("/organiza/opcionais-venda?erro=Categoria+ja+existe", status_code=303)
+    ordem = (db.query(func.max(VendaOpcionalConfig.ordem)).scalar() or 0) + 10
+    db.add(VendaOpcionalConfig(campo=campo, grupo=grupo, valor="NA", rotulo="NA", quantidade=0, ordem=ordem, ativo=1, padrao=1))
+    db.flush()
+    for modelo in db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.ativo == 1).all():
+        db.add(VendaOpcionalModelo(campo=campo, modelo_id=modelo.id, habilitado=1))
+    db.commit()
+    return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
+
+
+@app.post("/organiza/opcionais-venda/item/novo")
+async def opcional_item_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    campo = (form.get("campo") or "").strip()
+    categoria = db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == campo).order_by(VendaOpcionalConfig.ordem).first()
+    rotulo = (form.get("rotulo") or "").strip()
+    if not categoria or not rotulo:
+        return RedirectResponse("/organiza/opcionais-venda?erro=Informe+categoria+e+item", status_code=303)
+    valor = (form.get("valor") or rotulo).strip()[:80]
+    if db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == campo, VendaOpcionalConfig.valor == valor).first():
+        return RedirectResponse("/organiza/opcionais-venda?erro=Item+ja+existe+nesta+categoria", status_code=303)
+    item_id = int(form.get("item_id") or 0) if str(form.get("item_id") or "").isdigit() else 0
+    item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first() if item_id else None
+    qtd = max(moeda_num(form.get("quantidade")), 0)
+    ordem = (db.query(func.max(VendaOpcionalConfig.ordem)).filter(VendaOpcionalConfig.campo == campo).scalar() or categoria.ordem) + 1
+    padrao = 1 if form.get("padrao") else 0
+    if padrao:
+        db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == campo).update({VendaOpcionalConfig.padrao: 0}, synchronize_session=False)
+    db.add(VendaOpcionalConfig(campo=campo, grupo=categoria.grupo, valor=valor, rotulo=rotulo, item_id=item.id if item else None, quantidade=qtd, ordem=ordem, ativo=1, padrao=padrao))
+    db.commit()
+    return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
 
 
 @app.post("/organiza/opcionais-venda/{config_id}/editar")
@@ -11228,22 +11449,42 @@ async def opcional_venda_salvar(config_id: int, request: Request, usuario: Usuar
         item_id = 0
     item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first() if item_id else None
     config.item_id = item.id if item else None
+    config.rotulo = (form.get("rotulo") or config.rotulo or config.valor).strip()[:100]
     try:
         config.quantidade = max(float(str(form.get("quantidade") or "0").replace(",", ".")), 0)
     except ValueError:
         config.quantidade = 0
     config.ativo = 1 if str(form.get("ativo") or "").lower() in {"1", "on", "true", "sim"} else 0
+    if form.get("padrao"):
+        db.query(VendaOpcionalConfig).filter(VendaOpcionalConfig.campo == config.campo).update({VendaOpcionalConfig.padrao: 0}, synchronize_session=False)
+        config.padrao = 1
+    elif config.padrao:
+        config.padrao = 0
     db.flush()
-    # Equipamentos abertos sem correção manual acompanham imediatamente o novo vínculo do Opcional.
-    campo_coluna = getattr(Equipamento, config.campo, None)
-    if campo_coluna is not None:
-        vendas_abertas = db.query(Equipamento).filter(
-            campo_coluna == config.valor,
-            Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER)),
-        ).all()
-        for eq in vendas_abertas:
-            if not bool(eq.estoque_uso_manual):
-                sincronizar_estoque_venda(eq, db)
+    for eq in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
+        if eq.produto_venda_id and _valor_opcional_equipamento(eq, config.campo, db) == config.valor and not bool(eq.estoque_uso_manual):
+            sincronizar_estoque_venda(eq, db)
+    db.commit()
+    return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
+
+
+@app.post("/organiza/opcionais-venda/habilitacao")
+async def opcional_habilitacao_salvar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    campos = [x[0] for x in db.query(VendaOpcionalConfig.campo).distinct().all()]
+    modelos = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.ativo == 1).all()
+    for campo in campos:
+        for modelo in modelos:
+            habilitado = 1 if form.get(f"hab__{campo}__{modelo.id}") else 0
+            regra = db.query(VendaOpcionalModelo).filter(VendaOpcionalModelo.campo == campo, VendaOpcionalModelo.modelo_id == modelo.id).first()
+            if regra:
+                regra.habilitado = habilitado
+            else:
+                db.add(VendaOpcionalModelo(campo=campo, modelo_id=modelo.id, habilitado=habilitado))
+    db.flush()
+    for eq in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
+        if not bool(eq.estoque_uso_manual):
+            sincronizar_estoque_venda(eq, db)
     db.commit()
     return RedirectResponse("/organiza/opcionais-venda?salvo=1", status_code=303)
 

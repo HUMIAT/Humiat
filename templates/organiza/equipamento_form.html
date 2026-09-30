@@ -70,11 +70,10 @@
         <h3>Opcionais da venda</h3>
         <p class="texto-suave">Cada escolha está ligada diretamente a um Item do Organiza. Som não é Opcional: Premium/JBL pertence ao equipamento.</p>
         <div class="form-grid-organizada tres-colunas">
-          {% set campos_opcionais = [('hdmi_tela_2','HDMI Tela 2','NA'),('teclado_bluetooth','Teclado Bluetooth','NA'),('microfone','Microfone','Com fio'),('sistema_credito','Sistema de Crédito','NA'),('catalogo_impresso','Catálogo Impresso','NA')] %}
-          {% for campo, titulo, padrao in campos_opcionais %}
-          {% set atual = (equipamento|attr(campo)) if equipamento else padrao %}
-          <label>{{ titulo }}
-            <select name="{{ campo }}" data-opcional="{{ campo }}">
+          {% for campo, titulo in grupos_opcionais %}
+          {% set atual = opcionais_atuais.get(campo, padroes_opcionais.get(campo, 'NA')) %}
+          <label class="grupo-opcional" data-opcional-grupo="{{ campo }}">{{ titulo }}
+            <select name="opcional__{{ campo }}" data-opcional="{{ campo }}">
               {% for config in opcoes_por_campo.get(campo, []) %}<option value="{{ config.valor }}" {% if atual == config.valor %}selected{% endif %}>{{ config.rotulo }}</option>{% endfor %}
             </select>
           </label>
@@ -380,14 +379,31 @@
   const tiposModelos={{ tipos_modelos|tojson }};
   const nomesModelos={{ nomes_modelos|tojson }};
   const custosOpcionais={{ custos_opcionais|tojson }};
+  const opcionaisHabilitados={{ opcionais_modelos_habilitados|tojson }};
+  const padroesOpcionais={{ padroes_opcionais|tojson }};
   const cupons={{ cupons_dados|tojson }};
   const plus={{ plus_acrescimo }};
   const snapshotAtivo={{ 'true' if resumo_custo.snapshot else 'false' }};
   const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0};
   const br=v=>(Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  function atualizarOpcionaisPorModelo(){
+    const id=Number(produto.value||0);
+    document.querySelectorAll('[data-opcional-grupo]').forEach(label=>{
+      const campo=label.dataset.opcionalGrupo;
+      const lista=opcionaisHabilitados[campo]||[];
+      const habilitado=!id || lista.includes(id);
+      label.style.display=habilitado?'':'none';
+      const sel=label.querySelector('select');
+      if(sel){
+        sel.disabled=!habilitado;
+        if(!habilitado && padroesOpcionais[campo]!==undefined) sel.value=padroesOpcionais[campo];
+      }
+    });
+  }
   function custoOpcional(){
     let total=0;
     document.querySelectorAll('[data-opcional]').forEach(select=>{
+      if(select.disabled) return;
       const mapa=custosOpcionais[select.dataset.opcional]||{};
       total += Number(mapa[select.value]||0);
     });
@@ -436,6 +452,7 @@
       if(precoVenda) precoVenda.value=sugerido.toFixed(2);
       tipo && tipo.dispatchEvent(new Event('input'));
     }
+    atualizarOpcionaisPorModelo();
     recalcular();
   }
   produto.addEventListener('change',aplicarProduto);
@@ -448,6 +465,7 @@
     recalcular();
   });
   document.querySelectorAll('[data-opcional]').forEach(el=>el.addEventListener('change',recalcular));
+  atualizarOpcionaisPorModelo();
   [precoVenda,descontoManual,cupom,freteVenda].forEach(el=>el&&el.addEventListener(el.tagName==='SELECT'?'change':'input',recalcular));
   recalcular();
 })();
