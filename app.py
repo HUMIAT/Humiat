@@ -10569,6 +10569,26 @@ def nfse_excluir(nota_id: int, usuario: Usuario = Depends(usuario_logado), db: S
     return RedirectResponse("/organiza/nfse?excluida=1", status_code=303)
 
 
+@app.post("/organiza/nfse/{nota_id}/emitida")
+async def nfse_marcar_emitida(nota_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    nota = db.query(NFSERascunho).filter(NFSERascunho.id == nota_id).first()
+    if not nota:
+        raise HTTPException(404)
+    if nota.status == "EMITIDA":
+        return RedirectResponse("/organiza/nfse?ja_emitida=1", status_code=303)
+
+    form = dict(await request.form())
+    numero_nfse = (form.get("numero_nfse") or "").strip()
+    if not numero_nfse:
+        return RedirectResponse("/organiza/nfse?numero_nfse_obrigatorio=1", status_code=303)
+
+    nota.numero_nfse = numero_nfse[:40]
+    nota.status = "EMITIDA"
+    nota.emitido_em = datetime.now()
+    db.commit()
+    return RedirectResponse(f"/organiza/nfse?marcada_emitida={nota.id}", status_code=303)
+
+
 def nfse_cadastro_cnpj_pendente(cliente: Cliente | None) -> bool:
     if not cliente:
         return True
