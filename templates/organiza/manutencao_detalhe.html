@@ -242,12 +242,16 @@
       {% endfor %}
     </div>
 
-    <form class="formulario manutencao-subcard etapa-form-unico" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-2/salvar">
-      <h3>Fechamento do orçamento</h3>
-      <p class="texto-suave">Preencha os dados obrigatórios e salve tudo de uma vez.</p>
-      <div class="manutencao-grid dois">
+    <form class="formulario manutencao-subcard etapa-form-unico fechamento-orcamento" method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-2/salvar" data-itens-total="{{ '%.2f'|format((totais.itens_obrigatorios or 0) + (totais.opcionais or 0)) }}">
+      <div class="fechamento-cabecalho">
+        <div>
+          <h3>Fechamento do orçamento</h3>
+          <p class="texto-suave">Defina valor, pagamento, prazo e desconto. O total é atualizado na hora.</p>
+        </div>
+      </div>
+      <div class="fechamento-grid">
         <label>Valor da manutenção
-          <input name="valor_manutencao" required value="{{ '%.2f'|format(orcamento.valor_manutencao or 0) }}" placeholder="0,00">
+          <input inputmode="decimal" name="valor_manutencao" required value="{{ '%.2f'|format(orcamento.valor_manutencao or 0) }}" placeholder="0,00">
         </label>
         <label>Forma de pagamento
           <select name="forma_pagamento_orcamento" required>
@@ -260,23 +264,23 @@
           <span class="campo-com-sufixo"><input type="number" min="1" name="prazo_dias_uteis" required value="{{ orcamento.prazo_dias_uteis or '' }}" placeholder="5"><small>dias úteis</small></span>
         </label>
         <label>Desconto
-          <input name="desconto" value="{{ '%.2f'|format(orcamento.desconto or 0) }}" placeholder="0,00">
+          <input inputmode="decimal" name="desconto" value="{{ '%.2f'|format(orcamento.desconto or 0) }}" placeholder="0,00">
         </label>
       </div>
-      <label class="desconto-opcional">
+      <label class="desconto-opcional fechamento-desconto-opcional">
         <input type="checkbox" name="desconto_somente_com_opcionais" value="1" {% if orcamento.desconto_somente_com_opcionais %}checked{% endif %}>
         <span>
-          <strong>Aplicar desconto somente com todos os opcionais</strong>
-          <small>O desconto só será concedido quando todos os opcionais forem aprovados.</small>
+          <strong>Desconto condicionado aos opcionais</strong>
+          <small>Marque somente se o desconto valer quando todos os opcionais forem aprovados.</small>
         </span>
       </label>
-      <div class="resumo-financeiro">
-        <div><small>Subtotal completo</small><strong>{{ totais.geral_bruto|moeda }}</strong></div>
-        <div><small>Desconto</small><strong>- {{ totais.desconto_informado|moeda }}</strong></div>
-        <div><small>Total com todos os itens</small><strong>{{ totais.geral|moeda }}</strong></div>
+      <div class="resumo-financeiro fechamento-resumo">
+        <div><small>Subtotal completo</small><strong id="fechamento-subtotal">{{ totais.geral_bruto|moeda }}</strong></div>
+        <div><small>Desconto</small><strong id="fechamento-desconto">- {{ totais.desconto_informado|moeda }}</strong></div>
+        <div class="fechamento-total"><small>Total com todos os itens</small><strong id="fechamento-total">{{ totais.geral|moeda }}</strong></div>
       </div>
-      <div class="barra-acoes-etapa">
-        <button class="botao primario" type="submit">Salvar</button>
+      <div class="barra-acoes-etapa fechamento-acoes">
+        <button class="botao primario" type="submit">Salvar orçamento</button>
       </div>
     </form>
     <form method="post" action="/organiza/manutencoes/{{ m.id }}/etapa-2/avancar" class="barra-acoes-etapa avancar-etapa">
@@ -668,5 +672,61 @@ async function copiarInfinitePay(url, botao){
   try{await navigator.clipboard.writeText(url);const antigo=botao.textContent;botao.textContent='Link copiado';setTimeout(()=>botao.textContent=antigo,1600)}
   catch(e){window.prompt('Copie o link da cobrança:', url)}
 }
+</script>
+
+<style>
+/* 1.1.92 - fechamento de manutenção compacto e previsível */
+.fechamento-orcamento{padding:16px!important;gap:12px!important;background:#fff!important;border-color:#d9e2ef!important}
+.fechamento-cabecalho{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.fechamento-cabecalho h3{margin:0 0 3px}.fechamento-cabecalho p{margin:0}
+.fechamento-grid{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:12px;align-items:end}
+.fechamento-grid label{display:grid;gap:6px;min-width:0;font-size:.82rem;font-weight:700}
+.fechamento-grid input,.fechamento-grid select{width:100%;min-width:0;height:42px;padding:8px 11px;border-radius:10px}
+.fechamento-grid .campo-com-sufixo{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
+.fechamento-grid .campo-com-sufixo small{white-space:nowrap;color:#64748b;font-weight:600}
+.fechamento-desconto-opcional{margin:0!important;padding:10px 12px!important;min-height:auto!important;border-radius:10px!important;display:flex!important;align-items:center!important;gap:10px!important}
+.fechamento-desconto-opcional input{width:18px!important;height:18px!important;flex:0 0 18px}
+.fechamento-desconto-opcional span{display:grid!important;gap:2px!important}.fechamento-desconto-opcional strong{font-size:.82rem!important}.fechamento-desconto-opcional small{font-size:.75rem!important}
+.fechamento-resumo{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important}
+.fechamento-resumo>div{padding:10px 12px!important;min-height:64px!important;background:#f8fafc!important;border:1px solid #e2e8f0}
+.fechamento-resumo small{font-size:.72rem!important}.fechamento-resumo strong{font-size:1.08rem!important}
+.fechamento-total{border-color:#bfdbfe!important;background:#eff6ff!important}.fechamento-total strong{color:#1d4ed8!important}
+.fechamento-acoes{display:flex;justify-content:flex-end;margin-top:0!important}.fechamento-acoes .botao{min-width:150px}
+@media(max-width:1100px){.fechamento-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.fechamento-grid,.fechamento-resumo{grid-template-columns:1fr!important}.fechamento-acoes .botao{width:100%}.fechamento-grid .campo-com-sufixo{grid-template-columns:1fr}.fechamento-grid .campo-com-sufixo small{padding-left:2px}}
+</style>
+<script>
+(() => {
+  const form = document.querySelector('.fechamento-orcamento');
+  if (!form) return;
+  const campoManutencao = form.querySelector('[name="valor_manutencao"]');
+  const campoDesconto = form.querySelector('[name="desconto"]');
+  const subtotalEl = form.querySelector('#fechamento-subtotal');
+  const descontoEl = form.querySelector('#fechamento-desconto');
+  const totalEl = form.querySelector('#fechamento-total');
+  const itensTotal = Number(String(form.dataset.itensTotal || '0').replace(',', '.')) || 0;
+  const numero = (valor) => {
+    let texto = String(valor ?? '').trim().replace(/\s/g, '');
+    if (!texto) return 0;
+    if (texto.includes(',') && texto.includes('.')) texto = texto.replace(/\./g, '').replace(',', '.');
+    else texto = texto.replace(',', '.');
+    const n = Number(texto);
+    return Number.isFinite(n) ? Math.max(n, 0) : 0;
+  };
+  const moeda = (valor) => Number(valor || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+  const recalcular = () => {
+    const manutencao = numero(campoManutencao?.value);
+    const subtotal = Math.max(itensTotal + manutencao, 0);
+    const descontoDigitado = numero(campoDesconto?.value);
+    const desconto = Math.min(descontoDigitado, subtotal);
+    const total = Math.max(subtotal - desconto, 0);
+    if (subtotalEl) subtotalEl.textContent = moeda(subtotal);
+    if (descontoEl) descontoEl.textContent = '- ' + moeda(desconto);
+    if (totalEl) totalEl.textContent = moeda(total);
+  };
+  campoManutencao?.addEventListener('input', recalcular);
+  campoDesconto?.addEventListener('input', recalcular);
+  recalcular();
+})();
 </script>
 {% endblock %}
