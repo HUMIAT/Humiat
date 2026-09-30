@@ -11221,15 +11221,13 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
             return templates.TemplateResponse("organiza/cadastro_publico.html", {
                 "request": request, "cliente": cliente, "erro": "Informe um CNPJ válido.", "salvo": False, "aviso": ""
             }, status_code=400)
-        try:
-            recente = cliente.cnpj_consultado_em and documento_original == doc and (datetime.now() - cliente.cnpj_consultado_em) < timedelta(minutes=10)
-            if not recente:
-                aplicar_dados_cnpj(cliente, consultar_cnpj_publico(doc), atualizar_endereco=True)
-        except (RuntimeError, ValueError):
-            aviso = "SINTEGRA não disponível. Tente mais tarde."
 
-        # Se a consulta automática não trouxe a situação fiscal, o cliente pode
-        # informar os dados no próprio cadastro público.
+        # A consulta de CNPJ não é mais executada automaticamente ao salvar o cadastro.
+        # Ela só deve acontecer por ação manual do usuário nos botões/rotas específicos
+        # de consulta. Assim, endereço e demais dados editados manualmente permanecem
+        # intactos até que o usuário escolha atualizar o cadastro pelo CNPJ.
+
+        # Os dados fiscais podem ser informados/ajustados manualmente no próprio cadastro.
         razao_manual = (form.get("razao_social") or "").strip()
         fantasia_manual = (form.get("empresa") or "").strip()
         if razao_manual:
