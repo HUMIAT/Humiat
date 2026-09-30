@@ -91,7 +91,7 @@
       <a class="botao" href="{{ NFSE_PORTAL_URL }}" target="_blank" rel="noopener">Abrir Emissor Nacional</a>
       {% if nota.origem == 'manutencao' and nota.manutencao_id %}<a class="botao" href="/organiza/manutencoes/{{ nota.manutencao_id }}">Abrir manutenção</a>{% endif %}
     </div>
-    <p class="texto-suave" style="margin-top:10px">Status: <strong>{{ 'Rascunho no portal' if nota.status == 'PORTAL_RASCUNHO' else ('Emitida' if nota.status == 'EMITIDA' else 'Rascunho no Organiza') }}</strong>. Nesta fase a extensão nunca clica no botão final de emissão.</p>
+    <p class="texto-suave" style="margin-top:10px">Status: <strong>{{ 'Rascunho no portal' if nota.status == 'PORTAL_RASCUNHO' else ('Emitida' if nota.status == 'EMITIDA' else 'Rascunho no Organiza') }}</strong>{% if nota.status == 'EMITIDA' and nota.numero_nfse %} · NFS-e nº <strong>{{ nota.numero_nfse }}</strong>{% endif %}. Nesta fase a extensão nunca clica no botão final de emissão.</p>
   </section>
 </section>
 <script>

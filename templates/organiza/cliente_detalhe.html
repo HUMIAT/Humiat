@@ -373,6 +373,21 @@
           {% for tipo in ['JUKEBOX','MALETA','IPHONE','FLIPERAMA'] %}<option value="{{ tipo }}" {% if tipo_filtro==tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}
         </select>
       </form>
+      <details class="cliente-acoes-menu">
+        <summary class="botao">Atualizar pacote cliente</summary>
+        <div class="cliente-acoes-popover">
+          <form method="post" action="/organiza/clientes/{{ cliente.id }}/equipamentos/atualizar-pacote" onsubmit="return confirm('Atualizar o pacote de todos os equipamentos deste cliente? O Fliperama continuará como NA.')">
+            <label>Pacote
+              <select name="pacote" required>
+                <option value="">Selecione</option>
+                {% for p in atualizacoes_ctx.pacotes %}<option value="{{ p.pacote }}">{{ p.pacote }}</option>{% endfor %}
+              </select>
+            </label>
+            <small class="texto-suave">Aplica de uma vez em todos os equipamentos do cliente. Fliperama permanece como NA.</small>
+            <button class="botao primario" type="submit">Atualizar todos</button>
+          </form>
+        </div>
+      </details>
       <a class="botao primario" href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">+ Adicionar</a>
       {% endif %}
     </div>

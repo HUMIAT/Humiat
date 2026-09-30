@@ -13,6 +13,8 @@
   {% if request.query_params.get('excluida') %}<div class="alerta sucesso">Rascunho excluído do Organiza.</div>{% endif %}
   {% if request.query_params.get('limpos') %}<div class="alerta sucesso">{{ request.query_params.get('limpos') }} rascunho(s) não emitido(s) removido(s) do Organiza.</div>{% endif %}
   {% if request.query_params.get('emitida_bloqueada') %}<div class="alerta erro">NFS-e emitida não pode ser excluída.</div>{% endif %}
+  {% if request.query_params.get('numero_nfse_obrigatorio') %}<div class="alerta erro">Informe o número da NFS-e para marcar como emitida.</div>{% endif %}
+  {% if request.query_params.get('marcada_emitida') %}<div class="alerta sucesso">NFS-e marcada como emitida.</div>{% endif %}
   <div class="alerta" style="margin-bottom:16px"><strong>Primeira fase:</strong> o Organiza prepara os dados e a extensão preenche o Emissor Nacional até o rascunho. A emissão final continua manual.</div>
   <section class="cartao">
     <div class="tabela-responsiva">
@@ -27,10 +29,16 @@
             <td>{{ nfse_rotulo_tipo(nfse_tipo_por_codigo(n.codigo_servico)) }}</td>
             <td>{% if n.origem == 'manutencao' %}Manutenção #{{ n.manutencao_id }}{% elif n.origem == 'connect' %}Connect{% else %}Manual{% endif %}</td>
             <td>R$ {{ '%.2f'|format(n.valor_total or 0)|replace('.', ',') }}</td>
-            <td><span class="pill {% if n.status == 'EMITIDA' %}verde{% elif n.status == 'PORTAL_RASCUNHO' %}azul{% else %}cinza{% endif %}">{{ 'Rascunho no portal' if n.status == 'PORTAL_RASCUNHO' else ('Emitida' if n.status == 'EMITIDA' else 'Rascunho') }}</span></td>
+            <td><span class="pill {% if n.status == 'EMITIDA' %}verde{% elif n.status == 'PORTAL_RASCUNHO' %}azul{% else %}cinza{% endif %}">{{ 'Rascunho no portal' if n.status == 'PORTAL_RASCUNHO' else ('Emitida' if n.status == 'EMITIDA' else 'Rascunho') }}</span>{% if n.status == 'EMITIDA' and n.numero_nfse %}<br><small>NFS-e nº {{ n.numero_nfse }}</small>{% endif %}</td>
             <td>
               <div style="display:flex;gap:6px;align-items:center">
                 <a class="botao pequeno" href="/organiza/nfse/{{ n.id }}">Abrir</a>
+                {% if n.status == 'PORTAL_RASCUNHO' %}
+                <form method="post" action="/organiza/nfse/{{ n.id }}/emitida" onsubmit="return nfseConfirmarEmitida(this);">
+                  <input type="hidden" name="numero_nfse" value="">
+                  <button class="botao pequeno" type="submit">Emitida</button>
+                </form>
+                {% endif %}
                 {% if n.status != 'EMITIDA' %}
                 <form method="post" action="/organiza/nfse/{{ n.id }}/excluir" onsubmit="return confirm('Excluir este rascunho do Organiza? Isso não exclui eventual rascunho existente no Portal Nacional.');">
                   <button class="botao pequeno" type="submit">Excluir</button>
@@ -47,4 +55,14 @@
     </div>
   </section>
 </section>
+<script>
+function nfseConfirmarEmitida(form){
+  const numero = window.prompt('Qual o número da NFS-e emitida?');
+  if (numero === null) return false;
+  const valor = numero.trim();
+  if (!valor) { alert('Informe o número da NFS-e.'); return false; }
+  form.querySelector('input[name="numero_nfse"]').value = valor;
+  return true;
+}
+</script>
 {% endblock %}

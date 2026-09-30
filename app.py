@@ -7734,6 +7734,57 @@ def opcoes_equipamentos(db: Session):
     return tipos, pacotes_validos + sorted(especiais)
 
 
+@app.post("/organiza/clientes/{cliente_id}/equipamentos/atualizar-pacote")
+async def cliente_atualizar_pacote_equipamentos(
+    cliente_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    form = await request.form()
+    pacote = _normalizar_pacote_cadastrado(form.get("pacote"))
+    if not pacote:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?atualizacao_erro={quote_plus('Selecione um pacote válido.')}#equipamentos-cliente",
+            status_code=303,
+        )
+
+    equipamentos = db.query(Equipamento).filter(Equipamento.cliente_id == cliente_id).all()
+    if not equipamentos:
+        return RedirectResponse(
+            f"/organiza/clientes/{cliente_id}?atualizacao_erro={quote_plus('Este cliente não possui equipamentos cadastrados.')}#equipamentos-cliente",
+            status_code=303,
+        )
+
+    pacote_atual = obter_pacote_atual(db)
+    atualizados = 0
+    fliperamas = 0
+    for eq in equipamentos:
+        if tipo_equipamento_padrao(eq.tipo or "") == "FLIPERAMA":
+            eq.pacote = "NA"
+            eq.falta_pacote = 0
+            fliperamas += 1
+            continue
+        eq.pacote = pacote
+        eq.falta_pacote = calcular_falta_pacote(pacote, pacote_atual)
+        atualizados += 1
+
+    cliente.pacote = pacote if atualizados else "NA"
+    cliente.falta_pacote = calcular_falta_pacote(pacote, pacote_atual) if atualizados else 0
+    db.commit()
+
+    msg = f"Pacote do cliente atualizado para {pacote} em {atualizados} equipamento(s)."
+    if fliperamas:
+        msg += f" {fliperamas} Fliperama(s) permaneceram como NA."
+    return RedirectResponse(
+        f"/organiza/clientes/{cliente_id}?atualizacao_sucesso={quote_plus(msg)}#equipamentos-cliente",
+        status_code=303,
+    )
+
+
 @app.get("/organiza/clientes/{cliente_id}/equipamentos/novo", response_class=HTMLResponse)
 def equipamento_novo(cliente_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
@@ -10743,6 +10794,128 @@ def nfse_portal_preparado(nota_id: int, usuario: Usuario = Depends(usuario_logad
         nota.enviado_portal_em = datetime.now()
         db.commit()
     return {"ok": True}
+
+
+
+
+def _venda_pode_excluir(db: Session, eq: Equipamento) -> tuple[bool, str]:
+    if not eq or not equipamento_eh_venda(eq):
+        return False, "Venda inválida."
+    if db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == eq.id).first():
+        return False, "Esta venda possui pagamento registrado. Use cancelamento/estorno antes de excluir."
+    cobranca_paga = db.query(InfinitePayCobrancaOrganiza).filter(
+        InfinitePayCobrancaOrganiza.origem_tipo == "VENDA",
+        InfinitePayCobrancaOrganiza.origem_id == eq.id,
+        or_(
+            InfinitePayCobrancaOrganiza.pago_em.isnot(None),
+            InfinitePayCobrancaOrganiza.status.in_(("PAGO", "PAID", "CONFIRMADO", "CONCLUIDO")),
+        ),
+    ).first()
+    if cobranca_paga:
+        return False, "Esta venda possui cobrança InfinitePay paga/confirmada. Não é permitido apagar o histórico."
+    if db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.origem_tipo == "VENDA",
+        EstoqueMovimento.origem_id == eq.id,
+        EstoqueMovimento.tipo == "SAIDA",
+    ).first():
+        return False, "Esta venda já possui saída definitiva de estoque. Cancele/estorne antes de excluir."
+    if db.query(Manutencao).filter(Manutencao.equipamento_id == eq.id).first():
+        return False, "Este equipamento já possui manutenção vinculada e não pode ser apagado como venda desistida."
+    if db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == eq.id).first():
+        return False, "Este equipamento já possui histórico de transferência e não pode ser apagado."
+    return True, ""
+
+
+def _excluir_venda_desistida(db: Session, eq: Equipamento) -> None:
+    # Somente registros ainda operacionais/pendentes da venda.
+    db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo == "VENDA", EstoqueReserva.origem_id == eq.id
+    ).delete(synchronize_session=False)
+    db.query(EstoqueCorUso).filter(
+        EstoqueCorUso.origem_tipo == "VENDA", EstoqueCorUso.origem_id == eq.id
+    ).delete(synchronize_session=False)
+    db.query(InfinitePayCobrancaOrganiza).filter(
+        InfinitePayCobrancaOrganiza.origem_tipo == "VENDA", InfinitePayCobrancaOrganiza.origem_id == eq.id
+    ).delete(synchronize_session=False)
+    db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == eq.id).delete(synchronize_session=False)
+    cliente_id = eq.cliente_id
+    db.delete(eq)
+    db.flush()
+    if cliente_id:
+        reordenar_series_cliente(db, cliente_id)
+        _sincronizar_pacote_cliente(db, cliente_id)
+
+
+def _cliente_pode_ser_excluido_apos_venda(db: Session, cliente_id: int) -> tuple[bool, str]:
+    if db.query(Equipamento).filter(Equipamento.cliente_id == cliente_id).first():
+        return False, "O cliente ainda possui outro equipamento cadastrado."
+    verificacoes = (
+        (Manutencao, Manutencao.cliente_id, "manutenção"),
+        (AtualizacaoCompra, AtualizacaoCompra.cliente_id, "compra de atualização"),
+        (AtualizacaoAgendamento, AtualizacaoAgendamento.cliente_id, "agendamento de atualização"),
+        (AtualizacaoPreReserva, AtualizacaoPreReserva.cliente_id, "pré-reserva de atualização"),
+        (NFSERascunho, NFSERascunho.cliente_id, "NFS-e"),
+        (HistoricoComunicacao, HistoricoComunicacao.cliente_id, "histórico de comunicação"),
+        (AgendaManual, AgendaManual.cliente_id, "agendamento"),
+    )
+    for modelo, campo, nome in verificacoes:
+        if db.query(modelo).filter(campo == cliente_id).first():
+            return False, f"O cadastro possui {nome} vinculada e será mantido."
+    if db.query(TransferenciaEquipamento).filter(or_(
+        TransferenciaEquipamento.cliente_origem_id == cliente_id,
+        TransferenciaEquipamento.cliente_destino_id == cliente_id,
+    )).first():
+        return False, "O cadastro possui histórico de transferência e será mantido."
+    return True, ""
+
+
+@app.post("/organiza/vendas/{equipamento_id}/excluir")
+async def venda_excluir(
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    pode, motivo = _venda_pode_excluir(db, eq)
+    if not pode:
+        return RedirectResponse(f"/organiza/vendas?erro={quote_plus(motivo)}", status_code=303)
+    _excluir_venda_desistida(db, eq)
+    db.commit()
+    return RedirectResponse("/organiza/vendas?excluida=1", status_code=303)
+
+
+@app.post("/organiza/vendas/{equipamento_id}/excluir-com-cliente")
+async def venda_excluir_com_cliente(
+    equipamento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    eq = db.query(Equipamento).filter(Equipamento.id == equipamento_id).first()
+    if not eq:
+        raise HTTPException(404)
+    pode, motivo = _venda_pode_excluir(db, eq)
+    if not pode:
+        return RedirectResponse(f"/organiza/vendas?erro={quote_plus(motivo)}", status_code=303)
+    cliente_id = eq.cliente_id
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    _excluir_venda_desistida(db, eq)
+    pode_cliente, motivo_cliente = _cliente_pode_ser_excluido_apos_venda(db, cliente_id)
+    if pode_cliente and cliente:
+        # Vínculos auxiliares sem valor fiscal/financeiro não devem impedir a limpeza
+        # de um cadastro criado apenas para uma venda desistida.
+        db.query(CampanhaDestinatario).filter(CampanhaDestinatario.cliente_id == cliente_id).delete(synchronize_session=False)
+        db.query(SolVozAcessoCliente).filter(SolVozAcessoCliente.cliente_id == cliente_id).delete(synchronize_session=False)
+        db.delete(cliente)
+        db.commit()
+        return RedirectResponse("/organiza/vendas?excluida_cliente=1", status_code=303)
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/vendas?excluida=1&aviso={quote_plus(motivo_cliente)}", status_code=303
+    )
 
 
 @app.get("/organiza/vendas", response_class=HTMLResponse)

@@ -13,6 +13,11 @@
     </div>
   </div>
 
+  {% if request.query_params.get('excluida_cliente') %}<div class="alerta sucesso">Venda, equipamento e cadastro do cliente excluídos.</div>{% endif %}
+  {% if request.query_params.get('excluida') %}<div class="alerta sucesso">Venda e equipamento excluídos.</div>{% endif %}
+  {% if request.query_params.get('aviso') %}<div class="alerta">{{ request.query_params.get('aviso') }}</div>{% endif %}
+  {% if request.query_params.get('erro') %}<div class="alerta erro">{{ request.query_params.get('erro') }}</div>{% endif %}
+
   <div class="vendas-visao-rapida">
     <a class="{% if visao_vendas == 'operacional' and status_filtros|length > 1 %}ativo{% endif %}" href="/organiza/vendas?visao=operacional">Em produção</a>
     <a class="{% if status_filtros == ['Solicitar gabinete'] %}ativo{% endif %}" href="/organiza/vendas?visao=todos&status={{ 'Solicitar gabinete'|urlencode }}">Solicitar gabinete</a>
@@ -127,6 +132,12 @@
           <a class="botao pequeno" href="/organiza/vendas/{{ venda.id }}/pagamentos">Registrar pagamento</a>
           <a class="botao pequeno" href="/organiza/vendas/{{ venda.id }}/cadastro">Links do cliente</a>
           <a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}?consulta=1&venda_id={{ venda.id }}{% if campanha_selecionada %}&campanha_id={{ campanha_selecionada.id }}{% endif %}&retorno={{ ('/organiza/vendas?' ~ filtro_query)|urlencode }}">Consultar</a>
+          <form method="post" action="/organiza/vendas/{{ venda.id }}/excluir" style="display:inline" onsubmit="return confirm('Excluir esta venda e o equipamento gerado por ela? O cadastro do cliente será mantido.');">
+            <button class="botao pequeno perigo" type="submit">Excluir venda</button>
+          </form>
+          <form method="post" action="/organiza/vendas/{{ venda.id }}/excluir-com-cliente" style="display:inline" onsubmit="return confirm('Excluir a venda, o equipamento e também o cadastro deste cliente? Esta ação só concluirá a exclusão do cliente se não houver outros vínculos.');">
+            <button class="botao pequeno perigo" type="submit">Excluir venda + cliente</button>
+          </form>
         </div>
       </div>
       {% if campanha_selecionada %}
