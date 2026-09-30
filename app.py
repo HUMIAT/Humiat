@@ -4692,8 +4692,14 @@ def cliente_atualizar_cnpj(
         aplicar_dados_cnpj(cliente, dados, atualizar_endereco=True)
         db.commit()
         msg = "Dados empresariais e endereço cadastral atualizados pelo CNPJ. Confira número e complemento."
+        voltar_nfse = (request.query_params.get("voltar_nfse") or "").strip()
+        if voltar_nfse.isdigit():
+            return RedirectResponse(f"/organiza/nfse/{voltar_nfse}?cnpj_atualizado=1", status_code=303)
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_sucesso={quote_plus(msg)}", status_code=303)
     except (ValueError, RuntimeError) as exc:
+        voltar_nfse = (request.query_params.get("voltar_nfse") or "").strip()
+        if voltar_nfse.isdigit():
+            return RedirectResponse(f"/organiza/nfse/{voltar_nfse}?cnpj_erro={quote_plus(str(exc))}", status_code=303)
         return RedirectResponse(f"/organiza/clientes/{cliente_id}?cnpj_erro={quote_plus(str(exc))}", status_code=303)
 
 
@@ -10278,8 +10284,33 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
 
 
 
+def nfse_normalizar_uf(valor: str | None) -> str:
+    texto = (valor or "").strip()
+    if not texto:
+        return ""
+    sigla = texto.upper()
+    if len(sigla) == 2:
+        return sigla
+    mapa = {
+        "ACRE":"AC", "ALAGOAS":"AL", "AMAPA":"AP", "AMAZONAS":"AM", "BAHIA":"BA",
+        "CEARA":"CE", "DISTRITO FEDERAL":"DF", "ESPIRITO SANTO":"ES", "GOIAS":"GO",
+        "MARANHAO":"MA", "MATO GROSSO":"MT", "MATO GROSSO DO SUL":"MS",
+        "MINAS GERAIS":"MG", "PARA":"PA", "PARAIBA":"PB", "PARANA":"PR",
+        "PERNAMBUCO":"PE", "PIAUI":"PI", "RIO DE JANEIRO":"RJ", "RIO GRANDE DO NORTE":"RN",
+        "RIO GRANDE DO SUL":"RS", "RONDONIA":"RO", "RORAIMA":"RR", "SANTA CATARINA":"SC",
+        "SAO PAULO":"SP", "SERGIPE":"SE", "TOCANTINS":"TO",
+    }
+    chave = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").upper()
+    return mapa.get(chave, sigla[:2])
+
+
 @app.get("/organiza/nfse/importar-connect")
 def nfse_importar_connect(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Cria o rascunho de NFS-e a partir do Connect com o mínimo de dados.
+
+    O Connect informa apenas qual CNPJ será o tomador e os dados operacionais do
+    evento/contrato. O cadastro fiscal continua sendo responsabilidade do Organiza.
+    """
     q = request.query_params
     empresa_id = (q.get("connect_empresa_id") or "").strip()
     contrato_id = (q.get("connect_contrato_id") or "").strip()
@@ -10292,52 +10323,58 @@ def nfse_importar_connect(request: Request, usuario: Usuario = Depends(usuario_l
         if existente:
             return RedirectResponse(f"/organiza/nfse/{existente.id}?duplicada=1", status_code=303)
 
-    documento = re.sub(r"\D", "", q.get("cliente_documento") or "")
-    if len(documento) not in (11, 14):
-        raise HTTPException(400, "CPF/CNPJ do contrato inválido")
+    # Novo contrato: o Connect manda somente o CNPJ do tomador. Mantemos o nome
+    # antigo do parâmetro como fallback temporário para não quebrar links já gerados.
+    documento = re.sub(r"\D", "", q.get("cliente_cnpj") or q.get("cliente_documento") or "")
+    if len(documento) != 14:
+        raise HTTPException(400, "Informe um CNPJ válido para o tomador da NFS-e")
+
     cliente = db.query(Cliente).filter(Cliente.documento == documento).order_by(Cliente.id.desc()).first()
     if not cliente:
-        nome = (q.get("cliente_nome") or "Cliente Connect").strip() or "Cliente Connect"
-        telefone = re.sub(r"\D", "", q.get("cliente_telefone") or "")[-11:] or "00000000000"
-        cliente = Cliente(nome=nome, telefone=telefone, documento=documento, pais="BR", ddi="55")
+        cliente = Cliente(
+            nome=f"CNPJ {documento}",
+            telefone="00000000000",
+            documento=documento,
+            pais="BR",
+            ddi="55",
+        )
         db.add(cliente)
         db.flush()
-    # O contrato é a origem operacional. Atualiza somente dados enviados pelo Connect.
-    mapa = {
-        "nome": "cliente_nome", "razao_social": "cliente_nome", "email": "cliente_email",
-        "cep": "cliente_cep", "endereco": "cliente_logradouro", "endereco_numero": "cliente_numero",
-        "complemento": "cliente_complemento", "bairro": "cliente_bairro",
-        "municipio": "cliente_municipio", "cidade": "cliente_municipio", "estado": "cliente_uf",
-    }
-    for campo, parametro in mapa.items():
-        valor = (q.get(parametro) or "").strip()
-        if valor:
-            setattr(cliente, campo, valor)
-    telefone = re.sub(r"\D", "", q.get("cliente_telefone") or "")
-    if telefone:
-        cliente.telefone = telefone[-11:]
-    cliente.documento = documento
 
     data_inicio = data_form(q.get("evento_data_inicio")) or date.today()
     data_fim = data_form(q.get("evento_data_fim")) or data_inicio
     valor_total = max(moeda_num(q.get("valor_total")), 0)
-    igual = (q.get("evento_endereco_igual_cliente") or "0") == "1"
     descricao_evento = (q.get("evento_descricao") or "Aluguel de Karaokê").strip() or "Aluguel de Karaokê"
-    municipio_evento = (q.get("evento_municipio") or cliente.municipio or cliente.cidade or NFSE_MUNICIPIO_PADRAO).strip()
-    uf_evento = (q.get("evento_uf") or cliente.estado or NFSE_UF_PADRAO).strip().upper()[:2]
+    municipio_evento = (q.get("evento_municipio") or NFSE_MUNICIPIO_PADRAO).strip()
+    uf_evento = nfse_normalizar_uf(q.get("evento_uf") or NFSE_UF_PADRAO)
+
+    # O endereço do evento é responsabilidade do Connect e nunca é substituído
+    # pelo endereço fiscal do CNPJ. Mesmo quando coincidir, gravamos o endereço do
+    # contrato no rascunho para preservar o local real daquele evento.
     nota = NFSERascunho(
-        cliente_id=cliente.id, origem="connect", referencia_externa=referencia or None,
-        origem_url=str(request.url), competencia=data_inicio, codigo_servico=nfse_codigo_por_tipo(NFSE_TIPO_ALUGUEL),
-        municipio_prestacao=municipio_evento, uf_prestacao=uf_evento,
-        descricao=nfse_descricao_padrao(NFSE_TIPO_ALUGUEL), valor_total=valor_total,
-        evento_data_inicio=data_inicio, evento_data_fim=data_fim, evento_descricao=descricao_evento[:255],
-        evento_endereco_igual_cliente=1 if igual else 0, evento_local_tipo="brasil",
+        cliente_id=cliente.id,
+        origem="connect",
+        referencia_externa=referencia or None,
+        origem_url=str(request.url),
+        competencia=data_inicio,
+        codigo_servico=nfse_codigo_por_tipo(NFSE_TIPO_ALUGUEL),
+        municipio_prestacao=municipio_evento,
+        uf_prestacao=uf_evento,
+        descricao=nfse_descricao_padrao(NFSE_TIPO_ALUGUEL),
+        valor_total=valor_total,
+        evento_data_inicio=data_inicio,
+        evento_data_fim=data_fim,
+        evento_descricao=descricao_evento[:255],
+        evento_endereco_igual_cliente=0,
+        evento_local_tipo="brasil",
         evento_cep=(q.get("evento_cep") or "").strip(),
         evento_logradouro=(q.get("evento_logradouro") or "").strip(),
         evento_numero=(q.get("evento_numero") or "").strip(),
         evento_complemento=(q.get("evento_complemento") or "").strip(),
         evento_bairro=(q.get("evento_bairro") or "").strip(),
-        evento_municipio=municipio_evento, evento_uf=uf_evento, status="RASCUNHO"
+        evento_municipio=municipio_evento,
+        evento_uf=uf_evento,
+        status="RASCUNHO",
     )
     db.add(nota)
     db.commit()
@@ -10348,6 +10385,42 @@ def nfse_importar_connect(request: Request, usuario: Usuario = Depends(usuario_l
 def nfse_lista(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     notas = db.query(NFSERascunho).options(selectinload(NFSERascunho.cliente)).order_by(NFSERascunho.id.desc()).limit(300).all()
     return templates.TemplateResponse("organiza/nfse_lista.html", {"request": request, "usuario": usuario, "notas": notas})
+
+
+@app.post("/organiza/nfse/limpar-rascunhos")
+def nfse_limpar_rascunhos(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    notas = db.query(NFSERascunho).filter(NFSERascunho.status != "EMITIDA").all()
+    total = len(notas)
+    for nota in notas:
+        db.delete(nota)
+    db.commit()
+    return RedirectResponse(f"/organiza/nfse?limpos={total}", status_code=303)
+
+
+@app.post("/organiza/nfse/{nota_id}/excluir")
+def nfse_excluir(nota_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    nota = db.query(NFSERascunho).filter(NFSERascunho.id == nota_id).first()
+    if not nota:
+        raise HTTPException(404)
+    if nota.status == "EMITIDA":
+        return RedirectResponse("/organiza/nfse?emitida_bloqueada=1", status_code=303)
+    db.delete(nota)
+    db.commit()
+    return RedirectResponse("/organiza/nfse?excluida=1", status_code=303)
+
+
+def nfse_cadastro_cnpj_pendente(cliente: Cliente | None) -> bool:
+    if not cliente:
+        return True
+    documento = re.sub(r"\D", "", cliente.documento or "")
+    if len(documento) != 14:
+        return True
+    campos = [
+        cliente.razao_social or cliente.empresa,
+        cliente.cep, cliente.endereco, cliente.endereco_numero, cliente.bairro,
+        cliente.municipio or cliente.cidade, cliente.estado,
+    ]
+    return not getattr(cliente, "cnpj_consultado_em", None) or any(not str(v or "").strip() for v in campos)
 
 
 @app.get("/organiza/nfse/nova", response_class=HTMLResponse)
@@ -10431,7 +10504,11 @@ def nfse_detalhe(nota_id: int, request: Request, usuario: Usuario = Depends(usua
     nota = db.query(NFSERascunho).options(selectinload(NFSERascunho.cliente), selectinload(NFSERascunho.manutencao)).filter(NFSERascunho.id == nota_id).first()
     if not nota: raise HTTPException(404)
     payload = nfse_payload(nota)
-    return templates.TemplateResponse("organiza/nfse_detalhe.html", {"request": request, "usuario": usuario, "nota": nota, "payload": payload, "faltantes": nfse_campos_faltantes(payload)})
+    return templates.TemplateResponse("organiza/nfse_detalhe.html", {
+        "request": request, "usuario": usuario, "nota": nota, "payload": payload,
+        "faltantes": nfse_campos_faltantes(payload),
+        "cadastro_cnpj_pendente": nfse_cadastro_cnpj_pendente(nota.cliente) if nota.origem == "connect" else False,
+    })
 
 
 @app.post("/organiza/nfse/{nota_id}/salvar")

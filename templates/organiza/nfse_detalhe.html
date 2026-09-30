@@ -2,6 +2,8 @@
 {% block conteudo %}
 {% if request.query_params.get("connect") %}<div class="aviso sucesso">Rascunho criado a partir do Connect. Confira os dados antes de preparar no portal.</div>{% endif %}
 {% if request.query_params.get("duplicada") %}<div class="aviso">Já existia um rascunho para este contrato do Connect; nenhum duplicado foi criado.</div>{% endif %}
+{% if request.query_params.get("cnpj_atualizado") %}<div class="aviso sucesso">Cadastro do CNPJ atualizado. Confira os dados do tomador e continue a emissão.</div>{% endif %}
+{% if request.query_params.get("cnpj_erro") %}<div class="aviso erro">Não foi possível atualizar o CNPJ: {{ request.query_params.get("cnpj_erro") }}</div>{% endif %}
 <section class="pagina-clean">
   <div class="titulo-linha">
     <div><p class="tag">NFS-e #{{ nota.id }}</p><h1>{{ nota.cliente.razao_social or nota.cliente.nome }}</h1><p class="texto-suave">{% if nota.origem == 'manutencao' %}Origem: Manutenção #{{ nota.manutencao_id }}{% elif nota.origem == 'connect' %}Origem: Connect{% if nota.referencia_externa %} · {{ nota.referencia_externa|replace('connect:', 'Contrato ') }}{% endif %}{% else %}Origem: Manual{% endif %}</p></div>
@@ -10,6 +12,17 @@
   {% if request.query_params.get('salva') %}<div class="alerta sucesso">Rascunho salvo.</div>{% endif %}
   {% if request.query_params.get('bloqueada') %}<div class="alerta erro">NFS-e emitida é somente para consulta. Para outro serviço, crie uma nova NFS-e.</div>{% endif %}
   {% if faltantes %}<div class="alerta erro"><strong>Antes de enviar ao portal:</strong> {{ faltantes|join(', ') }}.</div>{% endif %}
+  {% if nota.origem == 'connect' and cadastro_cnpj_pendente %}
+  <div class="alerta erro">
+    <strong>Cadastro do CNPJ precisa ser atualizado no Organiza.</strong> O Connect enviou o CNPJ e os dados do evento; confirme os dados fiscais do tomador antes de preparar a NFS-e.
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <form method="post" action="/organiza/clientes/{{ nota.cliente.id }}/atualizar-cnpj?voltar_nfse={{ nota.id }}">
+        <button class="botao pequeno primario" type="submit">Atualizar dados pelo CNPJ</button>
+      </form>
+      <a class="botao pequeno" href="/organiza/clientes/{{ nota.cliente.id }}">Abrir cadastro</a>
+    </div>
+  </div>
+  {% endif %}
 
   <section class="cartao secao-form">
     <div class="secao-form-titulo"><span>1</span><div><h2>Tomador</h2><p>Dados usados no Emissor Nacional.</p></div></div>
@@ -42,7 +55,7 @@
       <label class="campo-duplo">Descrição<textarea id="nfse-descricao" name="descricao" rows="11" required>{{ nota.descricao }}</textarea><small>Texto inicial sugerido pelo Organiza. Você pode alterar livremente antes de preparar o rascunho.</small></label>
       <div id="nfse-evento-campos" class="campo-duplo cartao" style="padding:14px;margin:4px 0 2px;display:none">
         <h3 style="margin:0 0 6px">Dados da atividade de evento</h3>
-        <p class="texto-suave" style="margin:0 0 12px">Usados apenas no tipo Aluguel. Depois o Connect poderá preencher automaticamente datas e local do evento.</p>
+        <p class="texto-suave" style="margin:0 0 12px">Usados apenas no tipo Aluguel. Quando a origem é Connect, datas e endereço do evento vêm do próprio contrato.</p>
         <div class="form-grid-organizada duas-colunas">
           <label>Data inicial<input class="evento-obrigatorio" type="date" name="evento_data_inicio" value="{{ nota.evento_data_inicio.isoformat() if nota.evento_data_inicio else nota.competencia.isoformat() }}"></label>
           <label>Data final<input class="evento-obrigatorio" type="date" name="evento_data_fim" value="{{ nota.evento_data_fim.isoformat() if nota.evento_data_fim else nota.competencia.isoformat() }}"></label>
@@ -74,7 +87,7 @@
     <div class="secao-form-titulo"><span>3</span><div><h2>Preparar rascunho no Emissor Nacional</h2><p>A extensão preencherá o portal e <strong>parará antes de Emitir NFS-e</strong>.</p></div></div>
     <div id="nfse-ext-status" class="alerta" style="display:none"></div>
     <div class="acoes-titulo" style="margin-top:12px;flex-wrap:wrap">
-      {% if nota.status != 'EMITIDA' %}<button id="nfse-auto-btn" class="botao primario" type="button" {% if faltantes %}disabled{% endif %}>Preparar rascunho automaticamente</button>{% endif %}
+      {% if nota.status != 'EMITIDA' %}<button id="nfse-auto-btn" class="botao primario" type="button" {% if faltantes or cadastro_cnpj_pendente %}disabled{% endif %}>Preparar rascunho automaticamente</button>{% endif %}
       <a class="botao" href="{{ NFSE_PORTAL_URL }}" target="_blank" rel="noopener">Abrir Emissor Nacional</a>
       {% if nota.origem == 'manutencao' and nota.manutencao_id %}<a class="botao" href="/organiza/manutencoes/{{ nota.manutencao_id }}">Abrir manutenção</a>{% endif %}
     </div>

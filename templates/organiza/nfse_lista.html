@@ -3,8 +3,16 @@
 <section class="pagina-clean">
   <div class="titulo-linha">
     <div><p class="tag">Central fiscal</p><h1>NFS-e de Serviço</h1><p class="texto-suave">Rascunhos e notas de serviço da Karaokê RJ.</p></div>
-    <a class="botao primario" href="/organiza/nfse/nova">+ Nova NFS-e</a>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <form method="post" action="/organiza/nfse/limpar-rascunhos" onsubmit="return confirm('Excluir todos os rascunhos não emitidos do Organiza? Isso não exclui eventual rascunho existente no Portal Nacional.');">
+        <button class="botao" type="submit">Limpar rascunhos</button>
+      </form>
+      <a class="botao primario" href="/organiza/nfse/nova">+ Nova NFS-e</a>
+    </div>
   </div>
+  {% if request.query_params.get('excluida') %}<div class="alerta sucesso">Rascunho excluído do Organiza.</div>{% endif %}
+  {% if request.query_params.get('limpos') %}<div class="alerta sucesso">{{ request.query_params.get('limpos') }} rascunho(s) não emitido(s) removido(s) do Organiza.</div>{% endif %}
+  {% if request.query_params.get('emitida_bloqueada') %}<div class="alerta erro">NFS-e emitida não pode ser excluída.</div>{% endif %}
   <div class="alerta" style="margin-bottom:16px"><strong>Primeira fase:</strong> o Organiza prepara os dados e a extensão preenche o Emissor Nacional até o rascunho. A emissão final continua manual.</div>
   <section class="cartao">
     <div class="tabela-responsiva">
@@ -17,10 +25,19 @@
             <td>{{ n.competencia|data_br }}</td>
             <td><strong>{{ n.cliente.razao_social or n.cliente.nome }}</strong><br><small>{{ n.cliente.documento or '-' }}</small></td>
             <td>{{ nfse_rotulo_tipo(nfse_tipo_por_codigo(n.codigo_servico)) }}</td>
-            <td>{% if n.origem == 'manutencao' %}Manutenção #{{ n.manutencao_id }}{% elif n.origem == 'conect' %}Connect{% else %}Manual{% endif %}</td>
+            <td>{% if n.origem == 'manutencao' %}Manutenção #{{ n.manutencao_id }}{% elif n.origem == 'connect' %}Connect{% else %}Manual{% endif %}</td>
             <td>R$ {{ '%.2f'|format(n.valor_total or 0)|replace('.', ',') }}</td>
             <td><span class="pill {% if n.status == 'EMITIDA' %}verde{% elif n.status == 'PORTAL_RASCUNHO' %}azul{% else %}cinza{% endif %}">{{ 'Rascunho no portal' if n.status == 'PORTAL_RASCUNHO' else ('Emitida' if n.status == 'EMITIDA' else 'Rascunho') }}</span></td>
-            <td><a class="botao pequeno" href="/organiza/nfse/{{ n.id }}">Abrir</a></td>
+            <td>
+              <div style="display:flex;gap:6px;align-items:center">
+                <a class="botao pequeno" href="/organiza/nfse/{{ n.id }}">Abrir</a>
+                {% if n.status != 'EMITIDA' %}
+                <form method="post" action="/organiza/nfse/{{ n.id }}/excluir" onsubmit="return confirm('Excluir este rascunho do Organiza? Isso não exclui eventual rascunho existente no Portal Nacional.');">
+                  <button class="botao pequeno" type="submit">Excluir</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
           </tr>
         {% else %}
           <tr><td colspan="8" class="texto-suave">Nenhuma NFS-e criada ainda.</td></tr>
