@@ -14,6 +14,7 @@
       <label>Slug SolVoz<input name="solvoz_slug" placeholder="novo-modelo-jbl"></label>
       <label>Tipo<select name="tipo"><option>JUKEBOX</option><option>MALETA</option><option>IPHONE</option><option>FLIPERAMA</option></select></label>
       <label>Preço Básico<input name="preco_basico" inputmode="decimal" value="0,00"></label>
+      <label>Prazo de produção (dias corridos)<input type="number" min="0" name="prazo_producao_dias" value="20"></label>
       <div style="display:flex;align-items:end"><button class="botao primario" type="submit">Criar e montar composição</button></div>
     </form>
   </details>
@@ -32,6 +33,7 @@
         <div><small>Itens</small><strong>{{ modelo.qtd_itens_composicao }}</strong></div>
         <div><small>Custo-base atual</small><strong>{{ modelo.custo_base_calculado|moeda }}</strong></div>
         <div><small>Preço Básico</small><strong>{{ modelo.preco_basico|moeda }}</strong></div>
+        <div><small>Produção</small><strong>{{ modelo.prazo_producao_dias or 20 }} dias</strong></div>
         <div><small>Lucro Básico</small><strong>{{ modelo.lucro_basico_calculado|moeda }}</strong></div>
         <div><small>Margem Básico</small><strong>{{ '%.2f'|format(modelo.margem_basico_calculada) }}%</strong></div>
         <div><small>Preço Plus</small><strong>{{ modelo.preco_plus_calculado|moeda }}</strong></div>

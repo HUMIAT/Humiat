@@ -2,20 +2,36 @@
 {% block conteudo %}
 <section class="pagina-clean">
   <div class="titulo-linha">
-    <div><p class="tag">Venda criada</p><h1>Enviar cadastro ao cliente</h1><p class="texto-suave">A venda foi criada. Agora envie o link para o cliente preencher os dados.</p></div>
+    <div><p class="tag">Venda criada</p><h1>Links do cliente</h1><p class="texto-suave">Cadastro simples e venda são fluxos diferentes. Use o link adequado para cada situação.</p></div>
     <a class="botao" href="/organiza/vendas">Voltar às vendas</a>
   </div>
 
   <section class="cartao secao-form">
     <div class="form-grid-organizada duas-colunas">
-      <label>WhatsApp<input value="{{ cliente.telefone }}" readonly></label>
-      <label>Equipamento<input value="{{ equipamento.tipo or '' }}" readonly></label>
-      <label class="campo-largo">Link público de cadastro<input value="{{ cadastro_url }}" readonly onclick="this.select()"></label>
+      <label>Cliente<input value="{{ cliente.nome }}" readonly></label>
+      <label>WhatsApp<input value="{{ cliente.telefone or '' }}" readonly></label>
+      <label>Equipamento<input value="{{ equipamento.modelo or equipamento.tipo or '' }}" readonly></label>
+      <label>Status<input value="{{ equipamento.status or '' }}" readonly></label>
     </div>
+  </section>
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>1</span><div><h2>Somente cadastro</h2><p>Use quando você quer apenas que o cliente complete ou atualize os dados cadastrais.</p></div></div>
+    <label class="campo-largo">Link público de cadastro<input value="{{ cadastro_url }}" readonly onclick="this.select()"></label>
     <div class="acoes-titulo" style="margin-top:18px;flex-wrap:wrap">
-      <a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ mensagem|urlencode }}">Enviar cadastro pelo WhatsApp</a>
-      <a class="botao" target="_blank" href="{{ cadastro_url }}">Abrir página pública</a>
-      <a class="botao" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/editar">Abrir venda/equipamento</a>
+      <a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ mensagem_cadastro|urlencode }}">Enviar cadastro pelo WhatsApp</a>
+      <a class="botao" target="_blank" href="{{ cadastro_url }}">Abrir cadastro</a>
+    </div>
+  </section>
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>2</span><div><h2>Revisar venda e pagar</h2><p>O cliente completa os dados, confere o equipamento, escolhe opcionais permitidos, vê prazo/entrega e só depois segue para a InfinitePay.</p></div></div>
+    <label class="campo-largo">Link público da venda<input value="{{ venda_url }}" readonly onclick="this.select()"></label>
+    <div class="acoes-titulo" style="margin-top:18px;flex-wrap:wrap">
+      <a class="botao whatsapp" target="_blank" href="{{ whatsapp_url(cliente) }}?text={{ mensagem_venda|urlencode }}">Enviar venda pelo WhatsApp</a>
+      <a class="botao primario" target="_blank" href="{{ venda_url }}">Abrir venda</a>
+      <a class="botao" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ equipamento.id }}/editar?retorno=/organiza/vendas">Editar venda</a>
+      <a class="botao" href="/organiza/vendas/{{ equipamento.id }}/pagamentos">Pagamentos</a>
     </div>
   </section>
 </section>

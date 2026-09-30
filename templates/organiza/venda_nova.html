@@ -5,7 +5,7 @@
     <div>
       <p class="tag">Venda</p>
       <h1>Nova venda</h1>
-      <p class="texto-suave">Informe o WhatsApp, o equipamento comercial e o catálogo. O restante do cadastro será preenchido no fluxo da venda.</p>
+      <p class="texto-suave">Selecione o cliente e o equipamento. Se a venda foi aberta pela ficha do cliente, ele já vem definido.</p>
     </div>
     <a class="botao" href="/organiza/vendas">Voltar</a>
   </div>
@@ -15,9 +15,24 @@
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Dados iniciais</h2><p>Premium/JBL já faz parte do equipamento. Básico/Plus é a variante de catálogo.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
-        <label>WhatsApp do cliente *
-          <input name="telefone" required inputmode="numeric" maxlength="15" placeholder="21999999999" value="{{ dados.get('telefone','') }}">
+        {% if cliente_selecionado %}
+        <label>Cliente
+          <input value="{{ cliente_selecionado.nome }} · {{ cliente_selecionado.telefone or '' }}" readonly>
+          <input type="hidden" name="cliente_id" value="{{ cliente_selecionado.id }}">
+          <small>Venda vinculada diretamente a este cliente.</small>
         </label>
+        {% else %}
+        <label>Cliente existente
+          <select name="cliente_id">
+            <option value="">Novo cliente / localizar pelo WhatsApp</option>
+            {% for c in clientes %}<option value="{{ c.id }}" {% if dados.get('cliente_id')|string == c.id|string %}selected{% endif %}>{{ c.nome }} · {{ c.telefone or '-' }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>WhatsApp do cliente
+          <input name="telefone" inputmode="numeric" maxlength="15" placeholder="21999999999" value="{{ dados.get('telefone','') }}">
+          <small>Necessário apenas para cliente novo.</small>
+        </label>
+        {% endif %}
         <label>Equipamento *
           <select name="produto_venda_id" id="produto-venda" required>
             <option value="">Selecione</option>
@@ -37,19 +52,35 @@
           </select>
         </label>
         <label>Desconto manual (R$)<input name="desconto_manual" id="desconto-manual" inputmode="decimal" value="{{ dados.get('desconto_manual','0,00') }}"></label>
+        <label>Frete / entrega (R$)<input name="frete_venda" id="frete-venda" inputmode="decimal" value="{{ dados.get('frete_venda','0,00') }}"><small>Somado depois dos descontos.</small></label>
+      </div>
+      <div class="venda-opcionais" style="margin-top:18px">
+        <h3>Opcionais da proposta</h3>
+        <p class="texto-suave">Monte a configuração inicial antes de enviar o link. O cliente poderá alterar apenas o que estiver habilitado para este equipamento.</p>
+        <div class="form-grid-organizada tres-colunas">
+          {% for campo, titulo in grupos_opcionais %}
+          {% set atual = dados.get('opcional__' ~ campo, padroes_opcionais.get(campo, 'NA')) %}
+          <label class="grupo-opcional" data-opcional-grupo="{{ campo }}">{{ titulo }}
+            <select name="opcional__{{ campo }}" data-opcional="{{ campo }}">
+              {% for config in opcoes_por_campo.get(campo, []) %}<option value="{{ config.valor }}" {% if atual == config.valor %}selected{% endif %}>{{ config.rotulo }}{% set pv = precos_opcionais.get(campo, {}).get(config.valor, 0) %}{% if pv > 0 %} (+ {{ pv|moeda }}){% endif %}</option>{% endfor %}
+            </select>
+          </label>
+          {% endfor %}
+        </div>
       </div>
       <div class="venda-card-dados" style="margin-top:16px">
         <div><small>Preço bruto sugerido</small><strong id="preco-sugerido">R$ 0,00</strong></div>
         <div><small>Desconto</small><strong id="desconto-sugerido">R$ 0,00</strong></div>
         <div><small>Preço final</small><strong id="preco-final">R$ 0,00</strong></div>
         <div><small>Custo-base atual</small><strong id="custo-base">R$ 0,00</strong></div>
-        <div><small>Observação</small><strong>Opcionais serão somados ao custo conforme a configuração escolhida.</strong></div>
+        <div><small>Prazo de produção</small><strong id="prazo-producao">20 dias corridos</strong></div>
+        <div><small>Observação</small><strong>O cliente verá a previsão de entrega depois que a compra tiver pagamento registrado.</strong></div>
       </div>
       <div class="alerta informacao" style="margin-top:16px">
-        Ao salvar, o Organiza criará a venda já vinculada ao produto correto e preparará o link de cadastro para o WhatsApp do cliente.
+        Ao salvar, o Organiza criará a venda vinculada ao cliente e preparará dois links separados: cadastro simples e revisão da venda.
       </div>
     </section>
-    <button class="botao primario botao-cheio salvar-venda" type="submit">Criar venda e gerar link de cadastro</button>
+    <button class="botao primario botao-cheio salvar-venda" type="submit">Criar venda e gerar links</button>
   </form>
 </section>
 <script>
@@ -58,30 +89,40 @@
   const catalogo=document.getElementById('catalogo-venda');
   const cupom=document.getElementById('cupom-venda');
   const descontoManual=document.getElementById('desconto-manual');
+  const frete=document.getElementById('frete-venda');
   const preco=document.getElementById('preco-sugerido');
   const desconto=document.getElementById('desconto-sugerido');
   const final=document.getElementById('preco-final');
   const custo=document.getElementById('custo-base');
+  const prazo=document.getElementById('prazo-producao');
   const precos={{ precos_modelos|tojson }};
   const custos={{ custos_modelos|tojson }};
+  const prazos={{ prazos_modelos|tojson }};
+  const precosOpcionais={{ precos_opcionais|tojson }};
+  const habilitados={{ opcionais_modelos_habilitados|tojson }};
+  const padroes={{ padroes_opcionais|tojson }};
   const cupons={{ cupons_dados|tojson }};
   const plus={{ plus_acrescimo }};
   const n=v=>{v=(v||'').toString().replace(/R\$/g,'').trim();if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v)||0};
   const br=v=>(Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-  function descontoCupom(bruto){
-    const dados=cupons[cupom.value]; if(!dados) return 0;
-    const v=Number(dados.valor||0);
-    return dados.tipo==='PERCENTUAL' ? bruto*Math.min(v,100)/100 : Math.min(v,bruto);
+  function opcionais(){let t=0;document.querySelectorAll('[data-opcional]').forEach(sel=>{if(sel.disabled)return;t+=Number((precosOpcionais[sel.dataset.opcional]||{})[sel.value]||0)});return t}
+  function descontoCupom(bruto){const dados=cupons[cupom.value];if(!dados)return 0;const v=Number(dados.valor||0);return dados.tipo==='PERCENTUAL'?bruto*Math.min(v,100)/100:Math.min(v,bruto)}
+  function atualizarHabilitados(){
+    const id=Number(produto.value||0);
+    document.querySelectorAll('[data-opcional-grupo]').forEach(label=>{const campo=label.dataset.opcionalGrupo;const lista=habilitados[campo]||[];const ok=!id||lista.includes(id);label.style.display=ok?'':'none';const sel=label.querySelector('select');if(sel){sel.disabled=!ok;if(!ok&&padroes[campo]!==undefined)sel.value=padroes[campo]}});
   }
   function atualizar(){
+    atualizarHabilitados();
     const id=produto.value;
-    const bruto=(precos[id]||0)+(catalogo.value==='PLUS'?plus:0);
-    const desc=Math.min(bruto, Math.max(n(descontoManual.value),0)+descontoCupom(bruto));
-    preco.textContent=br(bruto); desconto.textContent=br(desc); final.textContent=br(Math.max(bruto-desc,0));
-    custo.textContent=br(custos[id]||0);
+    const brutoBase=(precos[id]||0)+(catalogo.value==='PLUS'?plus:0);
+    const bruto=brutoBase+opcionais();
+    const desc=Math.min(bruto,Math.max(n(descontoManual.value),0)+descontoCupom(bruto));
+    const total=Math.max(bruto-desc,0)+Math.max(n(frete.value),0);
+    preco.textContent=br(bruto);desconto.textContent=br(desc);final.textContent=br(total);custo.textContent=br(custos[id]||0);prazo.textContent=(prazos[id]||20)+' dias corridos';
   }
   [produto,catalogo,cupom].forEach(el=>el.addEventListener('change',atualizar));
-  descontoManual.addEventListener('input',atualizar);
+  document.querySelectorAll('[data-opcional]').forEach(el=>el.addEventListener('change',atualizar));
+  [descontoManual,frete].forEach(el=>el.addEventListener('input',atualizar));
   atualizar();
 })();
 </script>

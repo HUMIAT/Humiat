@@ -705,6 +705,8 @@ class Equipamento(Base):
     desconto_manual = Column(Float, nullable=False, default=0)
     # 1.1.79: frete da venda é separado do preço do equipamento e não recebe desconto/cupom.
     frete_venda = Column(Float, nullable=False, default=0)
+    # Link público da venda é separado do link simples de cadastro do cliente.
+    venda_token = Column(String(64), nullable=True, unique=True, index=True)
     # 1.1.74: correção manual do material efetivamente usado nesta máquina.
     # Quando manual=0, o consumo continua acompanhando composição + Opcionais.
     estoque_uso_override = Column(Text, nullable=True)
@@ -878,6 +880,7 @@ class VendaModeloEquipamento(Base):
     tipo = Column(String(80), nullable=False, default="JUKEBOX")
     solvoz_slug = Column(String(120), nullable=True, unique=True, index=True)
     preco_basico = Column(Float, nullable=False, default=0)
+    prazo_producao_dias = Column(Integer, nullable=False, default=20)
     ativo = Column(Integer, nullable=False, default=1)
     ordem = Column(Integer, nullable=False, default=0)
     observacao = Column(Text, nullable=True)
@@ -1393,6 +1396,7 @@ def _infinitepay_registrar_pagamento_organiza(
         )
         db.add(pagamento)
         db.flush()
+        atualizar_datas_producao_venda(eq, pagamento.data)
         cobranca.pagamento_id = pagamento.id
     elif cobranca.origem_tipo == "MANUTENCAO":
         m = db.query(Manutencao).filter(Manutencao.id == cobranca.origem_id).first()
@@ -2804,6 +2808,120 @@ PLUS_ACRESCIMO = 400.0
 VENDA_STATUS_FINALIZADO = {"ENTREGUE", "VENDIDO"}
 
 
+def _pascoa(ano: int) -> date:
+    """Data da Páscoa pelo algoritmo gregoriano, sem dependência externa."""
+    a = ano % 19; b = ano // 100; c = ano % 100; d = b // 4; e = b % 4
+    f = (b + 8) // 25; g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4; k = c % 4; l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes = (h + l - 7 * m + 114) // 31
+    dia = ((h + l - 7 * m + 114) % 31) + 1
+    return date(ano, mes, dia)
+
+
+def feriados_producao(ano: int) -> set[date]:
+    """Calendário usado para impedir entrega final em feriado.
+
+    A contagem continua corrida; somente a data final é empurrada ao próximo
+    dia útil. Inclui feriados nacionais e os feriados usuais do Rio de Janeiro.
+    """
+    fixos = {
+        (1, 1),   # Confraternização Universal
+        (1, 20),  # São Sebastião - Rio de Janeiro
+        (4, 21),  # Tiradentes
+        (4, 23),  # São Jorge - RJ
+        (5, 1),   # Trabalho
+        (9, 7),   # Independência
+        (10, 12), # N. Sra. Aparecida
+        (11, 2),  # Finados
+        (11, 15), # República
+        (11, 20), # Consciência Negra
+        (12, 25), # Natal
+    }
+    feriados = {date(ano, m, d) for m, d in fixos}
+    pascoa = _pascoa(ano)
+    # Dias em que a operação normalmente não faz entrega no RJ.
+    feriados.update({
+        pascoa - timedelta(days=48), # segunda de Carnaval
+        pascoa - timedelta(days=47), # terça de Carnaval
+        pascoa - timedelta(days=2),  # Sexta-feira Santa
+        pascoa + timedelta(days=60), # Corpus Christi
+    })
+    return feriados
+
+
+def ajustar_entrega_para_dia_util(data_prevista: date | None) -> date | None:
+    if not data_prevista:
+        return None
+    data_final = data_prevista
+    while data_final.weekday() >= 5 or data_final in feriados_producao(data_final.year):
+        data_final += timedelta(days=1)
+    return data_final
+
+
+def calcular_previsao_venda(data_compra: date | None, prazo_dias: int | None) -> date | None:
+    if not data_compra:
+        return None
+    try:
+        prazo = max(int(prazo_dias or 0), 0)
+    except (TypeError, ValueError):
+        prazo = 0
+    # Compra no dia X: o primeiro dia contado é X+1. Em dias corridos, X+prazo
+    # representa exatamente o último dia da contagem.
+    prevista = data_compra + timedelta(days=prazo)
+    return ajustar_entrega_para_dia_util(prevista)
+
+
+def _prazo_venda_equipamento(eq: Equipamento | None) -> int:
+    if not eq or not eq.produto_venda:
+        return 20
+    try:
+        return max(int(eq.produto_venda.prazo_producao_dias or 20), 0)
+    except (TypeError, ValueError):
+        return 20
+
+
+def atualizar_datas_producao_venda(eq: Equipamento, data_compra: date | None = None) -> None:
+    if data_compra and not eq.data_compra:
+        eq.data_compra = data_compra
+    if eq.data_compra:
+        eq.previsao_entrega = calcular_previsao_venda(eq.data_compra, _prazo_venda_equipamento(eq))
+
+
+def _valor_venda_opcional_config(config: VendaOpcionalConfig | None) -> float:
+    if not config or not config.item:
+        return 0.0
+    return max(float(config.item.preco_venda or 0), 0) * max(float(config.quantidade or 0), 0)
+
+
+def valor_opcionais_venda_equipamento(eq: Equipamento, db: Session) -> float:
+    """Valor comercial extra dos opcionais em relação ao padrão de cada categoria."""
+    if not eq or not eq.produto_venda_id:
+        return 0.0
+    total = 0.0
+    campos = [x[0] for x in db.query(VendaOpcionalConfig.campo).filter(VendaOpcionalConfig.ativo == 1).distinct().all()]
+    for campo in campos:
+        if not _opcional_habilitado_modelo(db, eq.produto_venda_id, campo):
+            continue
+        atual = _opcional_config_por_escolha(db, campo, _valor_opcional_equipamento(eq, campo, db))
+        padrao = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).filter(
+            VendaOpcionalConfig.campo == campo, VendaOpcionalConfig.ativo == 1, VendaOpcionalConfig.padrao == 1
+        ).order_by(VendaOpcionalConfig.ordem).first()
+        atual_v = _valor_venda_opcional_config(atual)
+        padrao_v = _valor_venda_opcional_config(padrao)
+        total += max(atual_v - padrao_v, 0.0)
+    return round(total, 2)
+
+
+def _pagamentos_venda_totais(db: Session, equipamento_id: int) -> tuple[float, float, float]:
+    eq = db.query(Equipamento).filter(Equipamento.id == int(equipamento_id)).first()
+    total = max(float(moeda_num(eq.valor)) if eq else 0.0, 0.0)
+    recebido = round(sum(float(p.valor or 0) for p in db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == int(equipamento_id)).all()), 2)
+    saldo = max(round(total - recebido, 2), 0.0)
+    return round(total, 2), recebido, saldo
+
+
 def normalizar_nome_item(nome: str | None) -> str:
     return re.sub(r"\s+", " ", (nome or "").strip()).upper()
 
@@ -3188,8 +3306,10 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
     precos_modelos = {str(m.id): float(m.preco_basico or 0) for m in modelos}
     tipos_modelos = {str(m.id): m.tipo for m in modelos}
     nomes_modelos = {str(m.id): m.nome for m in modelos}
+    prazos_modelos = {str(m.id): int(m.prazo_producao_dias or 20) for m in modelos}
     configs = db.query(VendaOpcionalConfig).options(selectinload(VendaOpcionalConfig.item)).filter(VendaOpcionalConfig.ativo == 1).order_by(VendaOpcionalConfig.ordem).all()
     custos_opcionais = {}
+    precos_opcionais = {}
     opcoes_por_campo = {}
     grupos_opcionais = []
     padroes_opcionais = {}
@@ -3201,6 +3321,11 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
             grupos_opcionais.append((c.campo, c.grupo))
         if c.padrao:
             padroes_opcionais[c.campo] = c.valor
+    for campo, opcoes in opcoes_por_campo.items():
+        padrao_cfg = next((x for x in opcoes if x.padrao), opcoes[0] if opcoes else None)
+        padrao_preco = _valor_venda_opcional_config(padrao_cfg)
+        for cfg in opcoes:
+            precos_opcionais.setdefault(campo, {})[cfg.valor] = round(max(_valor_venda_opcional_config(cfg) - padrao_preco, 0), 2)
     # No microfone o custo exibido do Sem fio é a diferença para os 2 com fio já presentes no equipamento.
     mic_padrao = _opcional_config_por_escolha(db, "microfone", "Com fio")
     mic_sem_fio = _opcional_config_por_escolha(db, "microfone", "Sem fio")
@@ -3224,7 +3349,8 @@ def contexto_configuracao_venda(db: Session, equipamento: Equipamento | None = N
     cupons_dados = {str(c.id): {"codigo": c.codigo, "tipo": c.tipo, "valor": float(c.valor or 0)} for c in cupons}
     return {
         "modelos_venda": modelos, "custos_modelos": custos_modelos, "precos_modelos": precos_modelos,
-        "tipos_modelos": tipos_modelos, "nomes_modelos": nomes_modelos, "custos_opcionais": custos_opcionais,
+        "tipos_modelos": tipos_modelos, "nomes_modelos": nomes_modelos, "prazos_modelos": prazos_modelos, "custos_opcionais": custos_opcionais,
+        "precos_opcionais": precos_opcionais,
         "opcoes_por_campo": opcoes_por_campo, "grupos_opcionais": grupos_opcionais, "padroes_opcionais": padroes_opcionais,
         "opcionais_atuais": opcionais_atuais, "opcionais_modelos_habilitados": habilitados_modelo,
         "resumo_custo": resumo, "plus_acrescimo": PLUS_ACRESCIMO,
@@ -3477,6 +3603,12 @@ def iniciar_banco():
             if "padrao" not in existentes_opcionais:
                 conn.execute(text("ALTER TABLE venda_opcionais_config ADD COLUMN padrao INTEGER NOT NULL DEFAULT 0"))
 
+    if "venda_modelos_equipamento" in insp.get_table_names():
+        existentes_modelos_venda = {c["name"] for c in insp.get_columns("venda_modelos_equipamento")}
+        with engine.begin() as conn:
+            if "prazo_producao_dias" not in existentes_modelos_venda:
+                conn.execute(text("ALTER TABLE venda_modelos_equipamento ADD COLUMN prazo_producao_dias INTEGER NOT NULL DEFAULT 20"))
+
     if "equipamentos" in insp.get_table_names():
         existentes_equipamentos = {c["name"] for c in insp.get_columns("equipamentos")}
         with engine.begin() as conn:
@@ -3536,6 +3668,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN desconto_manual FLOAT NOT NULL DEFAULT 0"))
             if "frete_venda" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN frete_venda FLOAT NOT NULL DEFAULT 0"))
+            if "venda_token" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN venda_token VARCHAR(64)"))
             if "estoque_uso_override" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN estoque_uso_override TEXT"))
             if "estoque_uso_manual" not in existentes_equipamentos:
@@ -10647,10 +10781,12 @@ def vendas_relatorio(
 @app.get("/organiza/vendas/nova", response_class=HTMLResponse)
 def venda_nova(request: Request, cliente_id: int = 0, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
+    cliente_selecionado = db.query(Cliente).filter(Cliente.id == int(cliente_id)).first() if cliente_id else None
     contexto = contexto_configuracao_venda(db)
     return templates.TemplateResponse("organiza/venda_nova.html", {
         "request": request, "usuario": usuario, "clientes": clientes,
-        "cliente_id": cliente_id, "erro": "", "dados": {}, "status_venda": STATUS_VENDA,
+        "cliente_id": cliente_id, "cliente_selecionado": cliente_selecionado,
+        "erro": "", "dados": {}, "status_venda": STATUS_VENDA,
         **contexto,
     })
 
@@ -10661,26 +10797,35 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     contexto = contexto_configuracao_venda(db)
     telefone = limpar_telefone(form.get("telefone") or "")
     try:
+        cliente_id_form = int(form.get("cliente_id") or 0)
+    except (TypeError, ValueError):
+        cliente_id_form = 0
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id_form).first() if cliente_id_form else None
+    try:
         produto_venda_id = int(form.get("produto_venda_id") or 0)
     except (TypeError, ValueError):
         produto_venda_id = 0
     produto = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == produto_venda_id, VendaModeloEquipamento.ativo == 1).first() if produto_venda_id else None
     catalogo_venda = "PLUS" if (form.get("catalogo_venda") or "").strip().upper() == "PLUS" else "BASICO"
 
-    if not telefone_valido(telefone):
+    if not cliente and not telefone_valido(telefone):
+        clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
         return templates.TemplateResponse("organiza/venda_nova.html", {
-            "request": request, "usuario": usuario, "clientes": [], "cliente_id": 0,
-            "erro": "Informe um WhatsApp válido com DDD.", "dados": form,
+            "request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id_form,
+            "cliente_selecionado": None,
+            "erro": "Selecione um cliente ou informe um WhatsApp válido com DDD.", "dados": form,
             "status_venda": STATUS_VENDA, **contexto,
         }, status_code=400)
     if not produto:
         return templates.TemplateResponse("organiza/venda_nova.html", {
-            "request": request, "usuario": usuario, "clientes": [], "cliente_id": 0,
+            "request": request, "usuario": usuario, "clientes": db.query(Cliente).order_by(Cliente.nome.asc()).all(), "cliente_id": cliente_id_form,
+            "cliente_selecionado": cliente,
             "erro": "Informe o equipamento vendido.", "dados": form,
             "status_venda": STATUS_VENDA, **contexto,
         }, status_code=400)
 
-    cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
+    if not cliente:
+        cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
     if not cliente:
         cliente = Cliente(
             nome=f"Cadastro pendente {telefone[-4:]}",
@@ -10697,15 +10842,16 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
 
     # Na abertura da venda o atendente informa somente WhatsApp + equipamento.
     # Os demais dados pertencem ao cliente e são preenchidos no link público.
-    eq = Equipamento(cliente_id=cliente.id)
+    eq = Equipamento(cliente_id=cliente.id, venda_token=secrets.token_urlsafe(32))
     preco_padrao = float(produto.preco_basico or 0) + (PLUS_ACRESCIMO if catalogo_venda == "PLUS" else 0)
-    preencher_equipamento(eq, {
+    dados_venda = {
         "produto_venda_id": str(produto.id),
         "catalogo_venda": catalogo_venda,
         "valor": f"{preco_padrao:.2f}",
         "preco_venda": f"{preco_padrao:.2f}",
         "cupom_id": str(form.get("cupom_id") or ""),
         "desconto_manual": str(form.get("desconto_manual") or "0"),
+        "frete_venda": str(form.get("frete_venda") or "0"),
         "status": "Solicitar gabinete",
         "fabricante": "KARAOKERJ",
         "garantia_meses": "3",
@@ -10714,7 +10860,15 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
         "teclado_bluetooth": "NA",
         "sistema_credito": "NA",
         "catalogo_impresso": "NA",
-    }, db)
+    }
+    for campo, _grupo in contexto.get("grupos_opcionais", []):
+        if f"opcional__{campo}" in form:
+            dados_venda[f"opcional__{campo}"] = form.get(f"opcional__{campo}")
+    preencher_equipamento(eq, dados_venda, db)
+    extra_opcionais = valor_opcionais_venda_equipamento(eq, db)
+    if extra_opcionais > 0:
+        dados_venda["preco_venda"] = f"{preco_padrao + extra_opcionais:.2f}"
+        preencher_equipamento(eq, dados_venda, db)
     garantir_identificacao_equipamento(db, eq)
     db.add(eq)
     db.flush()
@@ -10735,16 +10889,178 @@ def venda_link_cadastro(equipamento_id: int, request: Request, usuario: Usuario 
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
         db.commit()
+    if not eq.venda_token:
+        eq.venda_token = secrets.token_urlsafe(32)
+        db.commit()
     cadastro_url = f"{PUBLIC_BASE_URL}/cadastro/{cliente.token_ficha}"
-    mensagem = (
-        "Olá! Para concluir o cadastro da sua compra na Karaokê RJ, preencha seus dados no link abaixo:\n\n"
-        f"{cadastro_url}\n\n"
-        "O cadastro será usado para entrega, garantia e emissão da nota fiscal."
+    venda_url = f"{PUBLIC_BASE_URL}/venda/{eq.venda_token}"
+    mensagem_cadastro = (
+        "Olá! Para atualizar seu cadastro na Karaokê RJ, use o link abaixo:\n\n"
+        f"{cadastro_url}"
+    )
+    mensagem_venda = (
+        "Olá! Preparamos sua venda na Karaokê RJ. Confira seus dados, equipamento, opcionais, prazo e depois siga para o pagamento:\n\n"
+        f"{venda_url}"
     )
     return templates.TemplateResponse("organiza/venda_cadastro_link.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "equipamento": eq,
-        "cadastro_url": cadastro_url, "mensagem": mensagem,
+        "cadastro_url": cadastro_url, "venda_url": venda_url,
+        "mensagem_cadastro": mensagem_cadastro, "mensagem_venda": mensagem_venda,
     })
+
+
+def _venda_publica_por_token(db: Session, token: str) -> Equipamento | None:
+    return db.query(Equipamento).options(
+        selectinload(Equipamento.cliente), selectinload(Equipamento.produto_venda)
+    ).filter(Equipamento.venda_token == str(token or "").strip()).first()
+
+
+def _contexto_venda_publica(eq: Equipamento, db: Session, erro: str = "", salvo: str = "") -> dict:
+    total, recebido, saldo = _pagamentos_venda_totais(db, eq.id)
+    contexto = contexto_configuracao_venda(db, eq)
+    prazo = _prazo_venda_equipamento(eq)
+    if recebido > 0.009 and not eq.data_compra:
+        primeiro = db.query(PagamentoVenda).filter(PagamentoVenda.equipamento_id == eq.id).order_by(PagamentoVenda.data.asc(), PagamentoVenda.id.asc()).first()
+        if primeiro:
+            atualizar_datas_producao_venda(eq, primeiro.data)
+            db.commit()
+    if eq.data_compra and not eq.previsao_entrega:
+        eq.previsao_entrega = calcular_previsao_venda(eq.data_compra, prazo)
+    return {
+        "equipamento": eq, "cliente": eq.cliente, "erro": erro, "salvo": salvo,
+        "total": total, "recebido": recebido, "saldo": saldo,
+        "prazo_producao_dias": prazo, "previsao_entrega": eq.previsao_entrega,
+        "infinitepay_habilitada": bool(INFINITEPAY_HANDLE),
+        **contexto,
+    }
+
+
+@app.get("/venda/{token}", response_class=HTMLResponse)
+def venda_publica(token: str, request: Request, db: Session = Depends(get_db)):
+    eq = _venda_publica_por_token(db, token)
+    if not eq or not equipamento_eh_venda(eq):
+        raise HTTPException(404)
+    return templates.TemplateResponse("organiza/venda_publica.html", {
+        "request": request,
+        "erro_pagamento": request.query_params.get("erro_pagamento", ""),
+        **_contexto_venda_publica(eq, db, salvo=request.query_params.get("salvo", ""))
+    }, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/venda/{token}")
+async def venda_publica_salvar(token: str, request: Request, db: Session = Depends(get_db)):
+    eq = _venda_publica_por_token(db, token)
+    if not eq or not equipamento_eh_venda(eq) or not eq.cliente:
+        raise HTTPException(404)
+    form = dict(await request.form())
+    cliente = eq.cliente
+    # Cadastro dentro do link da venda. O link simples /cadastro continua separado.
+    nome = (form.get("nome") or "").strip()
+    telefone = limpar_telefone(form.get("telefone") or "")
+    email = (form.get("email") or "").strip()
+    documento = re.sub(r"\D", "", form.get("documento") or "")
+    if not nome:
+        return templates.TemplateResponse("organiza/venda_publica.html", {
+            "request": request, **_contexto_venda_publica(eq, db, erro="Informe seu nome.")
+        }, status_code=400)
+    if telefone and not telefone_valido(telefone):
+        return templates.TemplateResponse("organiza/venda_publica.html", {
+            "request": request, **_contexto_venda_publica(eq, db, erro="Informe um telefone válido com DDD.")
+        }, status_code=400)
+    if documento and len(documento) not in (11, 14):
+        return templates.TemplateResponse("organiza/venda_publica.html", {
+            "request": request, **_contexto_venda_publica(eq, db, erro="CPF/CNPJ inválido.")
+        }, status_code=400)
+    cliente.nome = nome
+    if telefone: cliente.telefone = telefone
+    cliente.email = email or None
+    cliente.documento = documento or None
+    cliente.cep = (form.get("cep") or "").strip() or None
+    cliente.endereco = (form.get("endereco") or "").strip() or None
+    cliente.endereco_numero = (form.get("endereco_numero") or "").strip() or None
+    cliente.complemento = (form.get("complemento") or "").strip() or None
+    cliente.bairro = (form.get("bairro") or "").strip() or None
+    cliente.municipio = (form.get("municipio") or "").strip() or None
+    cliente.cidade = cliente.municipio
+    cliente.estado = (form.get("estado") or "").strip() or None
+
+    _total_atual, recebido_atual, _saldo_atual = _pagamentos_venda_totais(db, eq.id)
+    # Depois que existe qualquer pagamento, a proposta comercial fica congelada
+    # para o cliente. Cadastro ainda pode ser atualizado; opcionais ficam somente leitura.
+    if recebido_atual > 0.009:
+        db.commit()
+        return RedirectResponse(f"/venda/{token}?salvo=1", status_code=303)
+
+    # Cliente só altera opcionais habilitados para o equipamento principal.
+    valor_opcionais_antes = valor_opcionais_venda_equipamento(eq, db)
+    bruto_atual = max(float(moeda_num(eq.preco_venda)), 0.0)
+    preservar_operacional = {
+        "solvoz_empresa_id": eq.solvoz_empresa_id, "catalogo_online": eq.catalogo_online,
+        "nota_codigo": eq.nota_codigo, "nota_descricao": eq.nota_descricao,
+        "numero_hd": eq.numero_hd, "maquina": eq.maquina,
+        "numero_maquina_cliente": eq.numero_maquina_cliente, "pago": eq.pago,
+        "fabricante": eq.fabricante, "observacao": eq.observacao,
+    }
+    dados_eq = {
+        "produto_venda_id": str(eq.produto_venda_id or ""),
+        "catalogo_venda": eq.catalogo_venda or "BASICO",
+        "preco_venda": f"{bruto_atual:.2f}",
+        "cupom_id": str(eq.cupom_id or ""),
+        "desconto_manual": str(eq.desconto_manual or 0),
+        "frete_venda": str(eq.frete_venda or 0),
+        "data_compra": eq.data_compra.isoformat() if eq.data_compra else "",
+        "previsao_entrega": eq.previsao_entrega.isoformat() if eq.previsao_entrega else "",
+        "status": eq.status or "Solicitar gabinete",
+        "garantia_meses": str(eq.garantia_meses or 3),
+        "pacote": eq.pacote or "",
+    }
+    for campo, _grupo in contexto_configuracao_venda(db, eq).get("grupos_opcionais", []):
+        if _opcional_habilitado_modelo(db, eq.produto_venda_id, campo):
+            dados_eq[f"opcional__{campo}"] = form.get(f"opcional__{campo}") or _valor_opcional_equipamento(eq, campo, db)
+    preencher_equipamento(eq, dados_eq, db)
+    valor_opcionais_depois = valor_opcionais_venda_equipamento(eq, db)
+    delta = round(valor_opcionais_depois - valor_opcionais_antes, 2)
+    if abs(delta) > 0.009 and eq.custo_final_snapshot is None:
+        # Aplica somente a diferença comercial dos opcionais; preserva preço manual da proposta.
+        dados_eq["preco_venda"] = f"{max(bruto_atual + delta, 0):.2f}"
+        preencher_equipamento(eq, dados_eq, db)
+    for campo_preservado, valor_preservado in preservar_operacional.items():
+        setattr(eq, campo_preservado, valor_preservado)
+    sincronizar_estoque_venda(eq, db)
+    db.commit()
+    return RedirectResponse(f"/venda/{token}?salvo=1", status_code=303)
+
+
+@app.post("/venda/{token}/pagar")
+def venda_publica_pagar(token: str, request: Request, db: Session = Depends(get_db)):
+    eq = _venda_publica_por_token(db, token)
+    if not eq or not equipamento_eh_venda(eq):
+        raise HTTPException(404)
+    total, recebido, saldo = _pagamentos_venda_totais(db, eq.id)
+    if total <= 0:
+        return RedirectResponse(f"/venda/{token}?erro_pagamento=Venda+sem+valor+válido", status_code=303)
+    if saldo <= 0.009:
+        return RedirectResponse(f"/venda/{token}?salvo=pago", status_code=303)
+    # Nunca reutiliza automaticamente uma cobrança de valor diferente do saldo atual.
+    pendente = _infinitepay_cobranca_pendente(db, "VENDA", eq.id)
+    if pendente and int(pendente.valor_centavos or 0) != int(round(saldo * 100)):
+        pendente.status = "SUBSTITUIDA_SALDO_ATUAL"
+        db.commit()
+    produto_nome = eq.produto_venda_nome_snapshot or eq.modelo or eq.tipo or "Equipamento"
+    catalogo_rotulo = "Plus" if (eq.catalogo_venda or "").upper() == "PLUS" else "Básico"
+    descricao = f"Venda #{eq.id} - {eq.cliente.nome if eq.cliente else 'Cliente'} - {produto_nome} - Catálogo {catalogo_rotulo}"
+    try:
+        cobranca = _infinitepay_criar_cobranca_organiza(
+            db, origem_tipo="VENDA", origem_id=eq.id, valor=saldo,
+            cliente=eq.cliente, descricao=descricao,
+            itens_checkout=[{"quantity": 1, "price": int(round(saldo * 100)), "description": descricao}],
+        )
+    except Exception as exc:
+        return RedirectResponse(f"/venda/{token}?erro_pagamento={quote_plus(str(exc))}", status_code=303)
+    # A URL da InfinitePay só é entregue depois de consultar o saldo real nesta requisição.
+    return RedirectResponse(cobranca.checkout_url, status_code=303)
+
+
 
 
 def _humiat_acesso_organiza_rapido(db: Session, usuario_id: int) -> bool:
@@ -11355,7 +11671,8 @@ async def modelo_venda_novo(request: Request, usuario: Usuario = Depends(usuario
     modelo = VendaModeloEquipamento(
         nome=nome, sku=sku, solvoz_slug=(form.get("solvoz_slug") or "").strip() or None,
         tipo=tipo_equipamento_padrao((form.get("tipo") or "JUKEBOX").strip()) or "JUKEBOX",
-        preco_basico=moeda_num(form.get("preco_basico")), ativo=1,
+        preco_basico=moeda_num(form.get("preco_basico")),
+        prazo_producao_dias=max(int(form.get("prazo_producao_dias") or 20), 0), ativo=1,
         ordem=(db.query(func.max(VendaModeloEquipamento.ordem)).scalar() or 0) + 10,
     )
     db.add(modelo); db.flush()
@@ -11407,6 +11724,10 @@ async def modelo_venda_salvar(modelo_id: int, request: Request, usuario: Usuario
     modelo.solvoz_slug = slug
     modelo.tipo = tipo_equipamento_padrao((form.get("tipo") or modelo.tipo or "JUKEBOX").strip()) or "JUKEBOX"
     modelo.preco_basico = moeda_num(form.get("preco_basico"))
+    try:
+        modelo.prazo_producao_dias = max(int(form.get("prazo_producao_dias") or 20), 0)
+    except (TypeError, ValueError):
+        modelo.prazo_producao_dias = 20
     modelo.ativo = 1 if str(form.get("ativo") or "").lower() in {"1", "on", "true", "sim"} else 0
     modelo.observacao = (form.get("observacao") or "").strip() or None
 
@@ -15042,6 +15363,7 @@ async def venda_pagamento_registrar(
         banco=banco, forma=forma, observacao=observacao or None,
     )
     db.add(pagamento)
+    atualizar_datas_producao_venda(eq, data_pag)
     db.commit()
     return RedirectResponse(f"/organiza/vendas/{equipamento_id}/pagamentos", status_code=303)
 

@@ -125,6 +125,7 @@
         <div class="venda-card-acoes">
           <a class="botao pequeno primario" href="/organiza/clientes/{{ venda.cliente_id }}/equipamentos/{{ venda.id }}/editar?retorno={{ ('/organiza/vendas?' ~ filtro_query)|urlencode }}">Editar equipamento</a>
           <a class="botao pequeno" href="/organiza/vendas/{{ venda.id }}/pagamentos">Registrar pagamento</a>
+          <a class="botao pequeno" href="/organiza/vendas/{{ venda.id }}/cadastro">Links do cliente</a>
           <a class="botao pequeno" href="/organiza/clientes/{{ venda.cliente_id }}?consulta=1&venda_id={{ venda.id }}{% if campanha_selecionada %}&campanha_id={{ campanha_selecionada.id }}{% endif %}&retorno={{ ('/organiza/vendas?' ~ filtro_query)|urlencode }}">Consultar</a>
         </div>
       </div>

@@ -1,0 +1,135 @@
+{% extends "organiza/base.html" %}
+{% block conteudo_publico %}
+<section class="pagina-clean venda-publica-pagina">
+  <div class="titulo-linha">
+    <div>
+      <p class="tag">Sua compra</p>
+      <h1>Revise sua venda</h1>
+      <p class="texto-suave">Confirme seus dados, confira o equipamento e ajuste os opcionais disponíveis antes do pagamento.</p>
+    </div>
+  </div>
+
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if erro_pagamento %}<div class="alerta erro">{{ erro_pagamento }}</div>{% endif %}
+  {% if salvo == '1' %}<div class="alerta sucesso">Dados e configuração da venda atualizados.</div>{% endif %}
+  {% if saldo <= 0.009 and total > 0 %}<div class="alerta sucesso"><strong>Pagamento concluído.</strong> Esta venda já está quitada e não permite novo pagamento.</div>{% endif %}
+
+  <form method="post" id="venda-publica-form">
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>1</span><div><h2>Seus dados</h2><p>Esses dados são usados para entrega, garantia e documentação da compra.</p></div></div>
+      <div class="form-grid-organizada tres-colunas">
+        <label>Nome *<input name="nome" required value="{{ cliente.nome or '' }}"></label>
+        <label>WhatsApp<input name="telefone" inputmode="numeric" value="{{ cliente.telefone or '' }}"></label>
+        <label>E-mail<input type="email" name="email" value="{{ cliente.email or '' }}"></label>
+        <label>CPF/CNPJ<input name="documento" inputmode="numeric" value="{{ cliente.documento or '' }}"></label>
+        <label>CEP<input name="cep" value="{{ cliente.cep or '' }}"></label>
+        <label>Endereço<input name="endereco" value="{{ cliente.endereco or '' }}"></label>
+        <label>Número<input name="endereco_numero" value="{{ cliente.endereco_numero or '' }}"></label>
+        <label>Complemento<input name="complemento" value="{{ cliente.complemento or '' }}"></label>
+        <label>Bairro<input name="bairro" value="{{ cliente.bairro or '' }}"></label>
+        <label>Município<input name="municipio" value="{{ cliente.municipio or cliente.cidade or '' }}"></label>
+        <label>UF<input name="estado" maxlength="2" value="{{ cliente.estado or '' }}"></label>
+      </div>
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>2</span><div><h2>Equipamento</h2><p>O equipamento principal foi definido pela Karaokê RJ e não pode ser trocado por este link.</p></div></div>
+      <div class="venda-card-dados">
+        <div><small>Equipamento</small><strong>{{ equipamento.modelo or equipamento.tipo or '-' }}</strong></div>
+        <div><small>Catálogo</small><strong>{{ 'Plus' if equipamento.catalogo_venda == 'PLUS' else 'Básico' }}</strong></div>
+        <div><small>Prazo de produção</small><strong>{{ prazo_producao_dias }} dias corridos</strong></div>
+        <div><small>Previsão de entrega</small><strong>{% if previsao_entrega %}{{ previsao_entrega.strftime('%d/%m/%Y') }}{% elif recebido > 0 %}Será calculada automaticamente{% else %}Após a confirmação da compra{% endif %}</strong></div>
+      </div>
+      <div class="alerta informacao" style="margin-top:14px">
+        A contagem começa no dia seguinte à compra. Se a data final cair em fim de semana ou feriado, a previsão é ajustada para o próximo dia útil.
+      </div>
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>3</span><div><h2>Opcionais</h2><p>{% if recebido > 0.009 %}A configuração comercial foi congelada porque já existe pagamento registrado.{% else %}Você pode alterar somente os opcionais liberados para este equipamento.{% endif %}</p></div></div>
+      {% if recebido > 0.009 %}<div class="alerta informacao" style="margin-bottom:14px">Já existe pagamento nesta venda. Para evitar divergência de valor, os opcionais ficam somente para consulta; qualquer mudança deve ser feita pelo atendimento.</div>{% endif %}
+      <div class="form-grid-organizada tres-colunas">
+        {% for campo, titulo in grupos_opcionais %}
+          {% set habilitados = opcionais_modelos_habilitados.get(campo, []) %}
+          {% if not equipamento.produto_venda_id or equipamento.produto_venda_id in habilitados %}
+            {% set atual = opcionais_atuais.get(campo, padroes_opcionais.get(campo, 'NA')) %}
+            <label>{{ titulo }}
+              <select name="opcional__{{ campo }}" data-opcional="{{ campo }}" {% if recebido > 0.009 %}disabled{% endif %}>
+                {% for config in opcoes_por_campo.get(campo, []) %}
+                  <option value="{{ config.valor }}" {% if atual == config.valor %}selected{% endif %}>{{ config.rotulo }}{% set pv = precos_opcionais.get(campo, {}).get(config.valor, 0) %}{% if pv > 0 %} (+ {{ pv|moeda }}){% endif %}</option>
+                {% endfor %}
+              </select>
+            </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="cartao secao-form">
+      <div class="secao-form-titulo"><span>4</span><div><h2>Resumo</h2><p>Confira os valores antes de continuar.</p></div></div>
+      <div class="venda-card-dados">
+        <div><small>Total da venda</small><strong id="total-venda">{{ total|moeda }}</strong></div>
+        <div><small>Já pago</small><strong>{{ recebido|moeda }}</strong></div>
+        <div><small>Saldo atual</small><strong id="saldo-venda">{{ saldo|moeda }}</strong></div>
+        <div><small>Frete</small><strong>{{ (equipamento.frete_venda or 0)|moeda }}</strong></div>
+      </div>
+      <p class="texto-suave" id="aviso-opcionais" style="margin-top:12px">Ao alterar opcionais, salve a revisão para atualizar o total antes do pagamento.</p>
+      <button class="botao primario botao-cheio" type="submit">{% if recebido > 0.009 %}Salvar dados cadastrais{% else %}Salvar revisão da venda{% endif %}</button>
+    </section>
+  </form>
+
+  <section class="cartao secao-form">
+    <div class="secao-form-titulo"><span>5</span><div><h2>Pagamento</h2><p>O pagamento é liberado somente para o saldo real da venda.</p></div></div>
+    {% if saldo <= 0.009 and total > 0 %}
+      <div class="alerta sucesso"><strong>Venda quitada.</strong> Não há valor pendente para pagamento.</div>
+    {% elif not infinitepay_habilitada %}
+      <div class="alerta erro">Pagamento online indisponível no momento.</div>
+    {% else %}
+      <div class="venda-card-dados" style="margin-bottom:14px">
+        <div><small>Valor que será enviado à InfinitePay</small><strong>{{ saldo|moeda }}</strong></div>
+      </div>
+      <form method="post" action="/venda/{{ equipamento.venda_token }}/pagar">
+        <button class="botao primario botao-cheio" type="submit">Ir para pagamento</button>
+      </form>
+      <p class="texto-suave" style="margin-top:10px">Antes de abrir a InfinitePay, o Organiza verifica novamente todos os pagamentos registrados. Se a venda já estiver quitada, uma nova cobrança não será aberta.</p>
+    {% endif %}
+  </section>
+</section>
+
+<style>
+.venda-publica-pagina{max-width:1100px;margin:0 auto}.venda-publica-pagina .cartao{margin-bottom:18px}.venda-publica-pagina input[readonly]{background:#f5f7fa}.venda-publica-pagina .venda-card-dados{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.venda-publica-pagina .venda-card-dados>div{padding:14px;border:1px solid #e3e8ef;border-radius:10px;background:#fff}.venda-publica-pagina .venda-card-dados small{display:block;color:#64748b;margin-bottom:5px}.venda-publica-pagina .venda-card-dados strong{font-size:1.02rem}
+</style>
+<script>
+(() => {
+  const selects=[...document.querySelectorAll('[data-opcional]')];
+  if(!selects.length) return;
+  const precos={{ precos_opcionais|tojson }};
+  const cupons={{ cupons_dados|tojson }};
+  const cupomId={{ (equipamento.cupom_id or 0)|int }};
+  const brutoAtual={{ (equipamento.preco_venda or 0)|float }};
+  const receb={{ recebido|float }};
+  const atuais={{ opcionais_atuais|tojson }};
+  const n=v=>Number(v||0);
+  const br=v=>n(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  let inicial=0;
+  selects.forEach(sel=>{ inicial += n((precos[sel.dataset.opcional]||{})[atuais[sel.dataset.opcional]]||0); });
+  function atualizar(){
+    let atual=0;
+    selects.forEach(sel=>{ atual += n((precos[sel.dataset.opcional]||{})[sel.value]||0); });
+    const novoBruto=Math.max(brutoAtual+(atual-inicial),0);
+    const manual=Math.max(n({{ (equipamento.desconto_manual or 0)|float }}),0);
+    const c=cupons[String(cupomId)]||null;
+    let descCupom=0;
+    if(c){const v=n(c.valor);descCupom=c.tipo==='PERCENTUAL'?novoBruto*Math.min(v,100)/100:Math.min(v,novoBruto)}
+    const desconto=Math.min(novoBruto,manual+descCupom);
+    const frete=n({{ (equipamento.frete_venda or 0)|float }});
+    const total=Math.max(novoBruto-desconto,0)+frete;
+    const saldo=Math.max(total-receb,0);
+    const te=document.getElementById('total-venda'); if(te)te.textContent=br(total);
+    const se=document.getElementById('saldo-venda'); if(se)se.textContent=br(saldo);
+  }
+  selects.forEach(s=>s.addEventListener('change',atualizar));
+  atualizar();
+})();
+</script>
+{% endblock %}
