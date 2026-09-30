@@ -3644,6 +3644,10 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN sistema_credito VARCHAR(20) NOT NULL DEFAULT 'NA'"))
             if "catalogo_impresso" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN catalogo_impresso VARCHAR(20) NOT NULL DEFAULT 'NA'"))
+            elif engine.dialect.name == "postgresql":
+                # Versões antigas criaram esta coluna como VARCHAR(10).
+                # Antes de migrar o valor "Sim" para "Encadernado", aumenta o campo.
+                conn.execute(text("ALTER TABLE equipamentos ALTER COLUMN catalogo_impresso TYPE VARCHAR(20)"))
             if "opcionais_json" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN opcionais_json TEXT"))
             if "produto_venda_id" not in existentes_equipamentos:
