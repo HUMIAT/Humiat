@@ -721,11 +721,19 @@ def provisionar_acesso_solvoz_cliente(
         usuario.documento = (cliente_documento or usuario.documento or "").strip()[:30] or None
         usuario.telefone = (cliente_telefone or usuario.telefone or "").strip()[:40] or None
 
-    vinculo = db.query(HumiatUsuarioEmpresa).filter(
-        HumiatUsuarioEmpresa.usuario_id == usuario.id,
-        HumiatUsuarioEmpresa.empresa_id == empresa.id,
-    ).first()
-    if not vinculo:
+    # APP 1.1.96: cliente externo possui uma única empresa no Humiat ID.
+    # Ao provisionar/atualizar pelo SolVoz, substitui qualquer vínculo legado
+    # (por exemplo Karaokê RJ usado como fallback antes da empresa real existir).
+    vinculos = db.query(HumiatUsuarioEmpresa).filter(
+        HumiatUsuarioEmpresa.usuario_id == usuario.id
+    ).all()
+    manteve = False
+    for vinculo_existente in vinculos:
+        if int(vinculo_existente.empresa_id) == int(empresa.id) and not manteve:
+            manteve = True
+            continue
+        db.delete(vinculo_existente)
+    if not manteve:
         db.add(HumiatUsuarioEmpresa(usuario_id=usuario.id, empresa_id=empresa.id))
 
     token = _novo_token_reset(db, usuario, request=request)

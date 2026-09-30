@@ -29,17 +29,6 @@
   <div class="id-alert" style="margin-bottom:16px">{{ request.query_params.get('erro') }}</div>
   {% endif %}
 
-  {% if empresas|length > 1 %}
-  <section class="company-switch">
-    <strong>Empresa atual</strong>
-    <div>
-      {% for e in empresas %}
-      <a class="company-pill {% if empresa and empresa.id==e.id %}active{% endif %}" href="/painel?empresa_id={{ e.id }}">{{ e.nome }}</a>
-      {% endfor %}
-    </div>
-  </section>
-  {% endif %}
-
   {% if empresa %}
   <section class="client-company-head">
     <div>
@@ -56,7 +45,7 @@
         <small>Use este código para abrir o catálogo da sua empresa.</small>
         <div class="client-qr-actions">
           <a href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar QR</a>
-          <a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Abrir Cliente Catálogo</a>
+          <a href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Abrir Cliente Catálogo</a>
         </div>
       </div>
     </article>
@@ -98,15 +87,15 @@
               <a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça este produto</a>
             {% endif %}
           {% elif p.codigo == 'SOLVOZ' %}
-            {% if acc.get('solvoz_comprado', false) and empresa and empresa.slug == 'karaokerj' %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_site">Cliente Site</a>{% endif %}
-            {% if acc.get('solvoz_catalogo', false) and empresa %}<a href="/painel/produto/SOLVOZ?empresa_id={{ empresa.id }}&modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
+            {% if acc.get('solvoz_comprado', false) and empresa and empresa.slug == 'karaokerj' %}<a href="/painel/produto/SOLVOZ?modo=cliente_site">Cliente Site</a>{% endif %}
+            {% if acc.get('solvoz_catalogo', false) and empresa %}<a href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
             {% if not liberado %}
               <span class="disabled-action">Acesso não liberado</span>
               <a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça este produto</a>
             {% endif %}
           {% else %}
             {% if liberado and empresa %}
-              <a href="/painel/produto/{{ p.codigo }}?empresa_id={{ empresa.id }}&modo=sistema">Abrir {{ p.nome }}</a>
+              <a href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir {{ p.nome }}</a>
             {% elif liberado %}
               <span class="disabled-action">Empresa não vinculada</span>
             {% else %}

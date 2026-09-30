@@ -2586,20 +2586,42 @@ def _humiat_usuario_do_cliente(cliente: Cliente, db: Session) -> HumiatUsuario |
 def _humiat_empresas_alvo_cliente(
     cliente: Cliente, db: Session, *, incluir_karaokerj: bool = False
 ) -> list[HumiatEmpresa]:
-    """Empresas Humiat que dão contexto aos acessos do cliente.
+    """Retorna a única empresa Humiat do cliente.
 
-    O cadastro do Organiza continua sendo a fonte da pessoa. Equipamentos/assinaturas
-    SolVoz definem a empresa usada pelo Cliente Catálogo. A Karaokê RJ só entra como
-    contexto adicional quando o Cliente Site estiver liberado (ou quando não houver
-    outra empresa identificável), evitando que uma renovação de catálogo abra na
-    empresa errada.
+    APP 1.1.96: cliente externo não troca de empresa no Humiat ID. A empresa é
+    inferida pelos equipamentos já vinculados no Organiza. Se ainda não houver
+    empresa identificável, Karaokê RJ é usada somente como padrão inicial.
+
+    ``incluir_karaokerj`` é mantido na assinatura por compatibilidade com chamadas
+    antigas, mas não cria mais uma segunda empresa para o mesmo usuário.
     """
-    empresas: dict[int, HumiatEmpresa] = {}
+    encontradas: list[tuple[object, str]] = []
+    vistos: set[str] = set()
     for grupo in _solvoz_grupos_cliente(cliente):
         origem = grupo.get("empresa")
         slug = str(getattr(origem, "slug", "") or "").strip().lower()
-        if not slug:
+        if not slug or slug in vistos:
             continue
+        vistos.add(slug)
+        encontradas.append((origem, slug))
+
+    # Em dados legados pode existir Karaokê RJ junto com uma única empresa real
+    # por causa do fallback antigo. Nesse caso a empresa específica prevalece.
+    if len(encontradas) > 1:
+        nao_padrao = [item for item in encontradas if item[1] != "karaokerj"]
+        if len(nao_padrao) == 1:
+            encontradas = nao_padrao
+        else:
+            # Regra de segurança: o Humiat ID aceita apenas uma empresa por cliente.
+            # Mantemos uma escolha determinística e registramos a inconsistência.
+            encontradas = sorted(encontradas, key=lambda item: item[1])[:1]
+            print(
+                f"[HUMIAT ID] 1.1.96: cliente {getattr(cliente, 'id', '?')} possui "
+                f"equipamentos em mais de uma empresa; usando {encontradas[0][1]}."
+            )
+
+    if encontradas:
+        origem, slug = encontradas[0]
         try:
             empresa = garantir_empresa_solvoz_humiat(
                 db,
@@ -2607,17 +2629,72 @@ def _humiat_empresas_alvo_cliente(
                 slug,
                 ativo=int(getattr(origem, "ativo", 1) or 0),
             )
-            empresas[int(empresa.id)] = empresa
-        except Exception:
-            continue
-
-    if incluir_karaokerj or not empresas:
-        try:
-            padrao = garantir_empresa_solvoz_humiat(db, "Karaokê RJ", "karaokerj", ativo=1)
-            empresas[int(padrao.id)] = padrao
+            return [empresa]
         except Exception:
             pass
-    return list(empresas.values())
+
+    try:
+        return [garantir_empresa_solvoz_humiat(db, "Karaokê RJ", "karaokerj", ativo=1)]
+    except Exception:
+        return []
+
+
+def _humiat_sincronizar_empresa_unica_cliente(cliente: Cliente, db: Session) -> int:
+    """Sincroniza o usuário externo para exatamente uma empresa.
+
+    Remove vínculos antigos (inclusive o fallback Karaokê RJ) e habilita, na
+    empresa correta, todos os produtos que já estão liberados para o usuário.
+    """
+    usuario = _humiat_usuario_do_cliente(cliente, db)
+    if not usuario:
+        return 0
+    # Não confundir cliente externo recém-criado (ainda sem empresa) com equipe
+    # interna: a regra antiga de "sem empresa = interno" não pode bloquear o
+    # primeiro vínculo do cliente.
+    interno_real = bool(usuario_humiat_equipe_prioritaria(usuario) or (
+        (usuario.organiza_usuario or "").strip() and usuario_humiat_interno(db, usuario)
+    ))
+    if interno_real:
+        return 0
+    alvos = _humiat_empresas_alvo_cliente(cliente, db)
+    if not alvos:
+        return 0
+    empresa = alvos[0]
+    alteracoes = 0
+
+    vinculos = db.query(HumiatUsuarioEmpresa).filter(
+        HumiatUsuarioEmpresa.usuario_id == int(usuario.id)
+    ).all()
+    manteve = False
+    for vinculo in vinculos:
+        if int(vinculo.empresa_id) == int(empresa.id) and not manteve:
+            manteve = True
+            continue
+        db.delete(vinculo)
+        alteracoes += 1
+    if not manteve:
+        db.add(HumiatUsuarioEmpresa(usuario_id=int(usuario.id), empresa_id=int(empresa.id)))
+        alteracoes += 1
+
+    produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).all()
+    for produto in produtos:
+        perm = permissoes_usuario_humiat(db, int(usuario.id), produto.codigo)
+        if not any(bool(v) for v in perm.values()):
+            continue
+        item = db.query(HumiatEmpresaProduto).filter(
+            HumiatEmpresaProduto.empresa_id == int(empresa.id),
+            HumiatEmpresaProduto.produto_id == int(produto.id),
+        ).first()
+        if item:
+            if not int(item.ativo or 0):
+                item.ativo = 1
+                alteracoes += 1
+        else:
+            db.add(HumiatEmpresaProduto(
+                empresa_id=int(empresa.id), produto_id=int(produto.id), ativo=1
+            ))
+            alteracoes += 1
+    return alteracoes
 
 
 def _humiat_garantir_usuario_cliente(cliente: Cliente, db: Session) -> tuple[HumiatUsuario, bool, bool]:
@@ -2664,16 +2741,12 @@ def _humiat_garantir_usuario_cliente(cliente: Cliente, db: Session) -> tuple[Hum
     if not interno:
         usuario.tipo = TIPO_CLIENTE_EMPRESA
         usuario.organiza_usuario = None
-        for empresa in _humiat_empresas_alvo_cliente(cliente, db):
-            vinculo = db.query(HumiatUsuarioEmpresa).filter(
-                HumiatUsuarioEmpresa.usuario_id == int(usuario.id),
-                HumiatUsuarioEmpresa.empresa_id == int(empresa.id),
-            ).first()
-            if not vinculo:
-                db.add(HumiatUsuarioEmpresa(usuario_id=int(usuario.id), empresa_id=int(empresa.id)))
 
     cliente.humiat_usuario_id = int(usuario.id)
     db.flush()
+    if not interno:
+        _humiat_sincronizar_empresa_unica_cliente(cliente, db)
+        db.flush()
     return usuario, criado, interno
 
 
@@ -2727,35 +2800,10 @@ def _humiat_salvar_acessos_cliente(cliente: Cliente, form: dict, db: Session, re
             )
 
     if not interno:
-        empresas_alvo = _humiat_empresas_alvo_cliente(
-            cliente, db, incluir_karaokerj=precisa_cliente_site
-        )
-        # Garante os vínculos do usuário com exatamente os contextos necessários.
-        for empresa in empresas_alvo:
-            vinculo = db.query(HumiatUsuarioEmpresa).filter(
-                HumiatUsuarioEmpresa.usuario_id == int(usuario.id),
-                HumiatUsuarioEmpresa.empresa_id == int(empresa.id),
-            ).first()
-            if not vinculo:
-                db.add(HumiatUsuarioEmpresa(
-                    usuario_id=int(usuario.id), empresa_id=int(empresa.id)
-                ))
-        for produto in produtos:
-            perm = permissoes_usuario_humiat(db, int(usuario.id), produto.codigo)
-            habilitado = any(bool(v) for v in perm.values())
-            if not habilitado:
-                continue
-            for empresa in empresas_alvo:
-                item = db.query(HumiatEmpresaProduto).filter(
-                    HumiatEmpresaProduto.empresa_id == int(empresa.id),
-                    HumiatEmpresaProduto.produto_id == int(produto.id),
-                ).first()
-                if item:
-                    item.ativo = 1
-                else:
-                    db.add(HumiatEmpresaProduto(
-                        empresa_id=int(empresa.id), produto_id=int(produto.id), ativo=1
-                    ))
+        # APP 1.1.96: um cliente externo possui uma única empresa no Humiat ID.
+        # A sincronização também remove vínculos legados e habilita os produtos
+        # já liberados no cadastro para essa empresa.
+        _humiat_sincronizar_empresa_unica_cliente(cliente, db)
 
     db.commit()
     mensagem_email = ""
@@ -3745,6 +3793,17 @@ def iniciar_banco():
         vinculados_piloto = _vincular_equipe_interna_ao_cadastro_clientes(db)
         if vinculados_piloto:
             print(f"[HUMIAT ID] 1.1.33: {vinculados_piloto} ficha(s) da equipe interna vinculada(s) ao cadastro de Clientes.")
+
+        # 1.1.96: clientes externos possuem uma única empresa no Humiat ID.
+        # Corrige vínculos antigos criados pelo fallback Karaokê RJ e garante que
+        # os produtos já liberados (ex.: Connect) estejam ativos na empresa correta.
+        humiat_empresa_corrigidos = 0
+        for cliente_humiat in db.query(Cliente).options(
+            selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
+        ).all():
+            humiat_empresa_corrigidos += _humiat_sincronizar_empresa_unica_cliente(cliente_humiat, db)
+        if humiat_empresa_corrigidos:
+            print(f"[HUMIAT ID] 1.1.96: {humiat_empresa_corrigidos} vínculo(s)/produto(s) de empresa corrigido(s).")
 
         # Migra o antigo item "Manutenção" para o campo fixo do orçamento.
         for orcamento_existente in db.query(Orcamento).options(selectinload(Orcamento.itens)).all():
