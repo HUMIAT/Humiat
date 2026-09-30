@@ -10444,40 +10444,62 @@ def nfse_normalizar_uf(valor: str | None) -> str:
 
 @app.get("/organiza/nfse/importar-connect")
 def nfse_importar_connect(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    """Cria o rascunho de NFS-e a partir do Connect com o mínimo de dados.
+    """Cria o rascunho de NFS-e a partir do Connect.
 
-    O Connect informa apenas qual CNPJ será o tomador e os dados operacionais do
-    evento/contrato. O cadastro fiscal continua sendo responsabilidade do Organiza.
+    O Connect informa o CNPJ escolhido como tomador, o nome/WhatsApp do contato
+    do contrato e os dados operacionais do evento. O cadastro fiscal do CNPJ
+    continua sendo responsabilidade do Organiza.
     """
     q = request.query_params
     empresa_id = (q.get("connect_empresa_id") or "").strip()
     contrato_id = (q.get("connect_contrato_id") or "").strip()
     referencia = f"connect:{empresa_id}:{contrato_id}" if empresa_id and contrato_id else ""
-    if referencia:
-        existente = db.query(NFSERascunho).filter(
-            NFSERascunho.origem == "connect",
-            NFSERascunho.referencia_externa == referencia,
-        ).order_by(NFSERascunho.id.desc()).first()
-        if existente:
-            return RedirectResponse(f"/organiza/nfse/{existente.id}?duplicada=1", status_code=303)
 
-    # Novo contrato: o Connect manda somente o CNPJ do tomador. Mantemos o nome
-    # antigo do parâmetro como fallback temporário para não quebrar links já gerados.
     documento = re.sub(r"\D", "", q.get("cliente_cnpj") or q.get("cliente_documento") or "")
     if len(documento) != 14:
         raise HTTPException(400, "Informe um CNPJ válido para o tomador da NFS-e")
 
+    nome_connect = (q.get("cliente_nome") or "").strip()
+    telefone_connect = re.sub(r"\D", "", q.get("cliente_telefone") or "")
+    if telefone_connect.startswith("55") and len(telefone_connect) > 11:
+        telefone_connect = telefone_connect[2:]
+    if len(telefone_connect) > 20:
+        telefone_connect = telefone_connect[-20:]
+
     cliente = db.query(Cliente).filter(Cliente.documento == documento).order_by(Cliente.id.desc()).first()
     if not cliente:
         cliente = Cliente(
-            nome=f"CNPJ {documento}",
-            telefone="00000000000",
+            nome=nome_connect or f"CNPJ {documento}",
+            telefone=telefone_connect or "00000000000",
             documento=documento,
             pais="BR",
             ddi="55",
         )
         db.add(cliente)
         db.flush()
+    else:
+        alterado = False
+        nome_atual = (cliente.nome or "").strip()
+        telefone_atual = re.sub(r"\D", "", cliente.telefone or "")
+        # Corrige somente cadastros provisórios criados pela integração anterior.
+        # Dados reais já existentes no Organiza continuam sendo preservados.
+        if nome_connect and (not nome_atual or nome_atual.upper().startswith("CNPJ ")):
+            cliente.nome = nome_connect[:140]
+            alterado = True
+        if telefone_connect and (not telefone_atual or set(telefone_atual) <= {"0"}):
+            cliente.telefone = telefone_connect[:20]
+            alterado = True
+        if alterado:
+            db.flush()
+
+    if referencia:
+        existente = db.query(NFSERascunho).filter(
+            NFSERascunho.origem == "connect",
+            NFSERascunho.referencia_externa == referencia,
+        ).order_by(NFSERascunho.id.desc()).first()
+        if existente:
+            db.commit()
+            return RedirectResponse(f"/organiza/nfse/{existente.id}?duplicada=1", status_code=303)
 
     data_inicio = data_form(q.get("evento_data_inicio")) or date.today()
     data_fim = data_form(q.get("evento_data_fim")) or data_inicio
