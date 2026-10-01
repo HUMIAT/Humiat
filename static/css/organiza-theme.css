@@ -592,3 +592,10 @@ body.organiza-corpo .carregar-estoque-equip{display:inline-block;margin-top:8px;
   body.organiza-corpo .equip-resumo-essencial{grid-template-columns:1fr 1fr}
   body.organiza-corpo .cliente-secao-nav-compacta{overflow-x:auto}
 }
+
+
+/* 1.2.05 · padrão de ações compactas por ícone */
+body.organiza-corpo .acao-icone{display:inline-grid!important;place-items:center!important;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;border:1px solid var(--ui-line)!important;border-radius:8px!important;background:#fff!important;color:var(--ui-text-2)!important;text-decoration:none!important;font-size:.95rem!important;font-weight:900!important;line-height:1!important;cursor:pointer!important;box-shadow:none!important}
+body.organiza-corpo .acao-icone:hover{background:var(--ui-primary-soft)!important;border-color:#bfdbfe!important;color:var(--ui-primary)!important}
+body.organiza-corpo .acao-icone.perigo:hover{background:#fef2f2!important;border-color:#fecaca!important;color:#b91c1c!important}
+body.organiza-corpo .acoes-compactas{display:flex;align-items:center;gap:5px;flex-wrap:wrap}

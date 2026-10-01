@@ -3,7 +3,7 @@
 {% block conteudo %}
 <section class="pagina-clean atualizacoes-painel">
   <div class="titulo-linha">
-    <div><p class="tag">KARAOKÊ RJ</p><h1>Atualizações</h1><p class="texto-suave">Pacotes do Google Drive, compras e agenda de atualização.</p></div>
+    <div><p class="tag">KARAOKÊ RJ</p><h1>Atualizações</h1><p class="texto-suave">Compras, atendimentos e acompanhamento das atualizações.</p></div>
   </div>
   {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
@@ -12,7 +12,7 @@
   <section class="cartao campanha-resultado-card">
     <div class="titulo-linha compacto">
       <div><p class="tag">RESULTADO DA CAMPANHA ATÉ O MOMENTO</p><h2>{{ campanha_resultado.campanha.nome }}</h2><p class="texto-suave">Pacote alvo: {{ campanha_resultado.campanha.pacote_alvo or '-' }} · status {{ campanha_resultado.campanha.status }}</p></div>
-      <a class="botao pequeno" href="/organiza/campanhas/{{ campanha_resultado.campanha.id }}">Abrir campanha</a>
+      <a class="acao-icone" href="/organiza/campanhas/{{ campanha_resultado.campanha.id }}" title="Abrir campanha" aria-label="Abrir campanha">↗</a>
     </div>
     <div class="campanha-resultado-grid">
       <div><small>Enviados</small><strong>{{ campanha_resultado.enviados }}</strong><span>de {{ campanha_resultado.total }}</span></div>
@@ -25,61 +25,71 @@
   </section>
   {% endif %}
 
-  <section class="cartao google-atualizacao-card">
-    <div>
-      <p class="tag">GOOGLE</p><h2>Drive + Agenda</h2>
-      {% if google and google.account_email %}<p>Conectado como <strong>{{ google.account_email }}</strong></p>{% else %}<p class="texto-suave">Conecte uma conta Google para liberar arquivos no Drive e criar compromissos no Google Agenda.</p>{% endif %}
-      {% if not google_configurado %}<div class="alerta informacao">Configure as credenciais OAuth do Organiza no Render antes de conectar.</div>{% endif %}
-    </div>
-    <div class="acoes-titulo">
-      {% if usuario.is_admin %}
-        {% if google and google.refresh_token %}<a class="botao primario" href="/organiza/google/conectar">Reconectar Google</a><form method="post" action="/organiza/google/desconectar"><button class="botao" type="submit">Desconectar</button></form>
-        {% else %}<a class="botao primario" href="/organiza/google/conectar">Conectar Google</a>{% endif %}
-      {% endif %}
-    </div>
-  </section>
+  <section class="config-atualizacao-shell" id="config-tecnica">
+    {% if config_aberta %}
+    <details class="cartao config-atualizacao" open>
+      <summary><span aria-hidden="true">⚙</span><strong>Configurações técnicas</strong><small>Google e links de atualização · abra somente quando precisar alterar</small><a href="/organiza/atualizacoes" class="config-fechar" title="Fechar configurações" aria-label="Fechar configurações">×</a></summary>
+      <div class="config-atualizacao-corpo">
+        <div class="config-google-linha">
+          <div><strong>Google</strong><small>{% if google and google.account_email %}{{ google.account_email }}{% else %}Não conectado{% endif %}</small></div>
+          {% if usuario.is_admin %}
+          <div class="acoes-compactas">
+            {% if google and google.refresh_token %}
+              <a class="acao-icone" href="/organiza/google/conectar" title="Reconectar Google" aria-label="Reconectar Google">↻</a>
+              <form method="post" action="/organiza/google/desconectar"><button class="acao-icone perigo" type="submit" title="Desconectar Google" aria-label="Desconectar Google">×</button></form>
+            {% else %}
+              <a class="acao-icone" href="/organiza/google/conectar" title="Conectar Google" aria-label="Conectar Google">+</a>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
 
-  <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Links padrão da atualização</h2><p class="texto-suave">Estes arquivos acompanham qualquer atualização. Deixe <strong>Ativo</strong> somente o que deve ser enviado ao cliente. Você pode incluir outro link padrão quando precisar.</p></div></div>
-    <div class="atualizacao-links-padrao-admin">
-      {% for link in links_padrao %}
-      <form method="post" action="/organiza/atualizacoes/links-padrao/{{ link.id }}" class="atualizacao-link-padrao-linha">
-        <input class="link-padrao-nome" type="text" name="nome" value="{{ link.nome }}" {% if link.chave in ['banco_dados','atualiza_pendrive','pendrive_cliente'] %}readonly{% endif %} {% if not usuario.is_admin %}disabled{% endif %}>
-        <input type="url" name="drive_url" placeholder="https://drive.google.com/..." value="{{ link.drive_url or '' }}" {% if not usuario.is_admin %}disabled{% endif %}>
-        <label class="check-inline"><input type="checkbox" name="ativo" value="1" {% if link.ativo %}checked{% endif %} {% if not usuario.is_admin %}disabled{% endif %}> Ativo</label>
-        {% if usuario.is_admin %}<button class="botao pequeno" type="submit">Salvar</button>{% endif %}
-        <small>{% if link.drive_file_id %}Drive configurado{% elif link.ativo %}Ativo, aguardando link{% else %}Inativo{% endif %}</small>
-      </form>
-      {% endfor %}
-    </div>
-    {% if usuario.is_admin %}
-    <form method="post" action="/organiza/atualizacoes/links-padrao/novo" class="atualizacao-link-novo">
-      <div><strong>Incluir outro link padrão</strong><small>Use somente se surgir outro arquivo que precise acompanhar todas as atualizações.</small></div>
-      <input type="text" name="nome" placeholder="Nome do arquivo/link" required>
-      <input type="url" name="drive_url" placeholder="https://drive.google.com/...">
-      <label class="check-inline"><input type="checkbox" name="ativo" value="1" checked> Ativo</label>
-      <button class="botao pequeno" type="submit">Incluir</button>
-    </form>
+        <details class="config-subbloco">
+          <summary><strong>Links padrão</strong><small>{{ links_padrao|length }} configurados</small></summary>
+          <div class="atualizacao-links-padrao-admin">
+            {% for link in links_padrao %}
+            <form method="post" action="/organiza/atualizacoes/links-padrao/{{ link.id }}" class="atualizacao-link-padrao-linha">
+              <input class="link-padrao-nome" type="text" name="nome" value="{{ link.nome }}" {% if link.chave in ['banco_dados','atualiza_pendrive','pendrive_cliente'] %}readonly{% endif %} {% if not usuario.is_admin %}disabled{% endif %}>
+              <input type="url" name="drive_url" placeholder="https://drive.google.com/..." value="{{ link.drive_url or '' }}" {% if not usuario.is_admin %}disabled{% endif %}>
+              <label class="check-inline"><input type="checkbox" name="ativo" value="1" {% if link.ativo %}checked{% endif %} {% if not usuario.is_admin %}disabled{% endif %}> Ativo</label>
+              {% if usuario.is_admin %}<button class="acao-icone" type="submit" title="Salvar" aria-label="Salvar">💾</button>{% endif %}
+            </form>
+            {% endfor %}
+          </div>
+          {% if usuario.is_admin %}
+          <form method="post" action="/organiza/atualizacoes/links-padrao/novo" class="atualizacao-link-novo">
+            <input type="text" name="nome" placeholder="Novo link padrão" required>
+            <input type="url" name="drive_url" placeholder="https://drive.google.com/...">
+            <label class="check-inline"><input type="checkbox" name="ativo" value="1" checked> Ativo</label>
+            <button class="acao-icone" type="submit" title="Adicionar link" aria-label="Adicionar link">＋</button>
+          </form>
+          {% endif %}
+        </details>
+
+        <details class="config-subbloco">
+          <summary><strong>Links dos pacotes</strong><small>{{ pacotes|length }} pacotes</small></summary>
+          <div class="atualizacao-pacotes-admin">
+            {% for p in pacotes %}
+            <form method="post" action="/organiza/atualizacoes/pacotes/{{ p.id }}" class="atualizacao-pacote-linha">
+              <strong>{{ p.pacote }}</strong>
+              <input type="url" name="drive_url" placeholder="https://drive.google.com/..." value="{{ p.drive_url or '' }}" {% if not usuario.is_admin %}disabled{% endif %}>
+              <label class="check-inline"><input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %} {% if not usuario.is_admin %}disabled{% endif %}> Ativo</label>
+              {% if usuario.is_admin %}<button class="acao-icone" type="submit" title="Salvar" aria-label="Salvar">💾</button>{% endif %}
+            </form>
+            {% else %}<p class="texto-suave">Nenhum pacote localizado.</p>{% endfor %}
+          </div>
+        </details>
+      </div>
+    </details>
+    {% else %}
+    <a class="config-atualizacao-atalho" href="/organiza/atualizacoes?config=1#config-tecnica" title="Abrir configurações técnicas">
+      <span aria-hidden="true">⚙</span><strong>Configurações técnicas</strong><small>Google e links dos pacotes</small><span aria-hidden="true">›</span>
+    </a>
     {% endif %}
   </section>
 
   <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Links dos pacotes</h2><p class="texto-suave"><strong>2021.0 é somente a versão-base e não precisa de link.</strong> Os links começam em 2021.1. Cole o arquivo ou pasta correspondente no Google Drive.</p></div></div>
-    <div class="atualizacao-pacotes-admin">
-      {% for p in pacotes %}
-      <form method="post" action="/organiza/atualizacoes/pacotes/{{ p.id }}" class="atualizacao-pacote-linha">
-        <strong>{{ p.pacote }}</strong>
-        <input type="url" name="drive_url" placeholder="https://drive.google.com/..." value="{{ p.drive_url or '' }}" {% if not usuario.is_admin %}disabled{% endif %}>
-        <label class="check-inline"><input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %} {% if not usuario.is_admin %}disabled{% endif %}> Ativo</label>
-        {% if usuario.is_admin %}<button class="botao pequeno" type="submit">Salvar</button>{% endif %}
-        <small>{% if p.drive_file_id %}Drive configurado{% else %}Sem arquivo/pasta{% endif %}</small>
-      </form>
-      {% else %}<p class="texto-suave">Nenhum pacote localizado no SolVoz.</p>{% endfor %}
-    </div>
-  </section>
-
-  <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Online/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Casa do cliente: horário combinado conforme disponibilidade do técnico.</p></div><a class="botao" href="/organiza/agenda">Abrir agenda completa</a></div>
+    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Online/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Casa do cliente: horário combinado conforme disponibilidade do técnico.</p></div><a class="acao-icone" href="/organiza/agenda" title="Abrir agenda completa" aria-label="Abrir agenda completa">▣</a></div>
     <div class="lista-cards-mobile">
       {% for a in agendamentos %}
         <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Atualização · Online' if a.tipo == 'CASA' else ('Atualização · Casa do cliente' if a.tipo == 'CLIENTE' else 'Atualização · Loja') }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
@@ -139,7 +149,7 @@
           </div>
           <div class="compra-campanha-acoes">
             <span class="pill {% if c.status == 'PAGO' %}atualizacao-ok{% else %}atualizacao-pendente{% endif %}">{{ 'PAGO' if c.status == 'PAGO' else 'A PAGAR' }}</span>
-            <a class="botao pequeno" href="/organiza/clientes/{{ c.cliente_id }}?editar_compra={{ c.id }}#compra-{{ c.id }}">Editar</a>
+            <a class="acao-icone" href="/organiza/clientes/{{ c.cliente_id }}?editar_compra={{ c.id }}#compra-{{ c.id }}" title="Editar" aria-label="Editar">✎</a>
             {% if not meta.get('concluido') %}
             <form method="post" action="/organiza/atualizacoes/{{ c.id }}/concluir" onsubmit="return confirm('Confirmar que a atualização foi concluída? O cliente e as máquinas ativas serão atualizados para {{ c.pacote_fim }}.');">
               <button class="botao pequeno primario" type="submit">Atualizado</button>
@@ -160,6 +170,9 @@
 .campanha-resultado-grid .resultado-card-link{display:grid;gap:3px;padding:12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc;text-decoration:none;color:inherit;transition:.16s ease}.campanha-resultado-grid .resultado-card-link:hover,.campanha-resultado-grid .resultado-card-link.ativo{border-color:#2563eb;box-shadow:0 5px 14px rgba(37,99,235,.10);transform:translateY(-1px)}.campanha-resultado-grid .resultado-card-link small{font-size:11px;font-weight:800;text-transform:uppercase;color:#64748b}.campanha-resultado-grid .resultado-card-link strong{font-size:16px;color:#0f172a}.campanha-resultado-grid .resultado-card-link span{font-size:11px;color:#64748b}.compras-campanha-lista{display:grid;gap:9px}.compra-campanha-row{display:grid;grid-template-columns:minmax(220px,1.3fr) minmax(380px,2fr) auto;gap:14px;align-items:center;padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:#fff}.compra-campanha-row.compra-alerta{border-color:#f59e0b;background:#fffbeb}.compra-campanha-identidade{display:grid;gap:4px}.compra-campanha-identidade small{color:#64748b}.compra-aviso{font-size:11px;font-weight:800;color:#b45309}.compra-campanha-valores{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.compra-campanha-valores span{display:grid;gap:2px;padding:8px 9px;border-radius:8px;background:#f8fafc}.compra-campanha-valores small{font-size:10px;color:#64748b}.compra-campanha-valores strong{font-size:13px}.compra-campanha-acoes{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}@media(max-width:1000px){.compra-campanha-row{grid-template-columns:1fr}.compra-campanha-acoes{justify-content:flex-start}}@media(max-width:650px){.compra-campanha-valores{grid-template-columns:1fr 1fr}}
 /* Organiza 1.1.61 — compras compactas, etapa como informação principal */
 .filtros-compras-atualizacao{display:grid;grid-template-columns:minmax(180px,1.4fr) auto auto auto auto auto;gap:10px;align-items:end;margin:12px 0 16px;padding:10px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc}.filtros-compras-atualizacao fieldset{display:flex;gap:8px;align-items:center;border:0;margin:0;padding:0}.filtros-compras-atualizacao legend{font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:4px}.filtros-compras-atualizacao fieldset label,.filtro-concluidos{font-size:12px;white-space:nowrap}.filtro-busca{display:grid;gap:4px;font-size:11px;font-weight:700}.filtro-busca input{min-width:0}.filtro-acoes{display:flex;gap:6px}.compra-campanha-row{grid-template-columns:minmax(0,1fr) auto}.compra-status-linha{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.etapa-status{font-size:11px}.compra-valores-discretos{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;color:#64748b;font-size:11px}.compra-valores-discretos b{color:#334155;font-size:11px}.compra-concluida{opacity:.78;background:#f8fafc}.compra-campanha-acoes form{margin:0}.campanha-resultado-grid .resultado-card-link strong,.campanha-resultado-grid>div strong{font-size:16px!important}.campanha-resultado-grid .resultado-arrecadado strong,.campanha-resultado-grid .resultado-recebido strong,.campanha-resultado-grid .resultado-aberto strong{font-size:15px!important}@media(max-width:1100px){.filtros-compras-atualizacao{grid-template-columns:1fr 1fr 1fr}.filtro-busca{grid-column:1/-1}}@media(max-width:700px){.filtros-compras-atualizacao{grid-template-columns:1fr}.filtros-compras-atualizacao fieldset{flex-wrap:wrap}.filtro-busca{grid-column:auto}.compra-campanha-row{grid-template-columns:1fr}.compra-campanha-acoes{justify-content:flex-start}.compra-valores-discretos{gap:8px}}
+
+/* 1.2.05 · configurações raras fora do caminho principal */
+.config-atualizacao-shell{margin:0}.config-atualizacao-atalho{display:grid;grid-template-columns:24px auto 1fr 18px;align-items:center;gap:7px;min-height:38px;padding:7px 10px;border:1px solid #dbe3ee;border-radius:9px;background:#f8fafc;color:#334155;text-decoration:none}.config-atualizacao-atalho strong{font-size:.78rem}.config-atualizacao-atalho small{font-size:.68rem;color:#64748b}.config-atualizacao{padding:0!important;overflow:hidden}.config-atualizacao>summary{display:grid;grid-template-columns:24px auto 1fr 28px;align-items:center;gap:7px;padding:9px 11px;cursor:pointer;list-style:none}.config-atualizacao>summary::-webkit-details-marker,.config-subbloco>summary::-webkit-details-marker{display:none}.config-atualizacao>summary small{font-size:.68rem;color:#64748b}.config-fechar{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;text-decoration:none;color:#64748b;background:#f1f5f9}.config-atualizacao-corpo{display:grid;gap:7px;padding:0 10px 10px}.config-google-linha,.config-subbloco{border:1px solid #e2e8f0;border-radius:8px;background:#fff}.config-google-linha{display:flex;justify-content:space-between;align-items:center;padding:8px 10px}.config-google-linha>div:first-child{display:flex;gap:8px;align-items:baseline}.config-google-linha small{color:#64748b}.config-subbloco>summary{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer}.config-subbloco>summary small{margin-left:auto;color:#64748b;font-size:.68rem}.config-subbloco[open]>summary{border-bottom:1px solid #e2e8f0}.config-subbloco .atualizacao-links-padrao-admin,.config-subbloco .atualizacao-pacotes-admin{padding:7px}.acoes-compactas{display:flex;gap:5px;align-items:center}.acoes-compactas form{margin:0}.config-subbloco .atualizacao-link-novo{margin:0 7px 7px;padding:7px;grid-template-columns:minmax(160px,.8fr) minmax(240px,1.4fr) auto auto}.config-subbloco .atualizacao-link-padrao-linha{grid-template-columns:170px minmax(260px,1fr) auto 34px;padding:6px 7px}.config-subbloco .atualizacao-pacote-linha{grid-template-columns:72px minmax(260px,1fr) auto 34px;padding:6px 7px}.config-subbloco .atualizacao-link-padrao-linha small,.config-subbloco .atualizacao-pacote-linha small{display:none}@media(max-width:760px){.config-atualizacao-atalho{grid-template-columns:22px 1fr 16px}.config-atualizacao-atalho small{display:none}.config-atualizacao>summary{grid-template-columns:22px 1fr 28px}.config-atualizacao>summary small{display:none}.config-subbloco .atualizacao-link-padrao-linha,.config-subbloco .atualizacao-pacote-linha,.config-subbloco .atualizacao-link-novo{grid-template-columns:1fr}}
 
 </style>
 {% endblock %}

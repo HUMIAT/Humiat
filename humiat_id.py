@@ -1402,11 +1402,8 @@ def humiat_usuario_da_requisicao(request: Request, db: Session) -> HumiatUsuario
     sessao, usuario = row
     if sessao.expira_em < agora:
         return None
-    # Persistir atividade uma vez a cada 10 minutos é suficiente para auditoria
-    # e elimina uma gravação/commit em cada abertura de tela.
-    if not sessao.ultimo_acesso or (agora - sessao.ultimo_acesso) >= timedelta(minutes=10):
-        sessao.ultimo_acesso = agora
-        db.commit()
+    # A navegação não grava atividade. A sessão já possui criado_em/expira_em;
+    # evitar UPDATE de ultimo_acesso deixa cada abertura de tela somente leitura.
     return usuario
 
 

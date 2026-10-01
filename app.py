@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import ClientDisconnect
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Float, LargeBinary, func, or_, inspect, text
-from sqlalchemy.orm import Session, relationship, selectinload
+from sqlalchemy.orm import Session, relationship, selectinload, load_only
 
 from config import (
     ADMIN_NOME, ADMIN_SENHA, CHAVE_SESSAO, ORGANIZA_VERSAO, PUBLIC_BASE_URL, LOKAFEST_API_TOKEN,
@@ -3341,6 +3341,113 @@ def custo_opcionais_equipamento(eq: Equipamento, db: Session) -> float:
             continue
         total += _custo_config(config)
     return round(total, 2)
+
+
+def _contexto_custos_vendas_em_lote(db: Session, equipamentos: list[Equipamento]) -> dict:
+    """Pré-carrega custos/opcionais de todas as vendas em poucas consultas.
+
+    Evita o N+1 histórico da tela de Vendas, onde cada equipamento consultava
+    novamente composição, opcionais e regras por modelo.
+    """
+    pendentes = [eq for eq in equipamentos if eq.custo_final_snapshot is None and eq.produto_venda_id]
+    modelo_ids = sorted({int(eq.produto_venda_id) for eq in pendentes if eq.produto_venda_id})
+
+    bases = {mid: 0.0 for mid in modelo_ids}
+    if modelo_ids:
+        linhas = (
+            db.query(VendaModeloComposicao)
+            .options(selectinload(VendaModeloComposicao.item))
+            .filter(VendaModeloComposicao.modelo_id.in_(modelo_ids))
+            .all()
+        )
+        for linha in linhas:
+            if linha.item:
+                bases[int(linha.modelo_id)] = bases.get(int(linha.modelo_id), 0.0) + (
+                    float(linha.quantidade or 0) * float(linha.item.preco_custo or 0)
+                )
+
+    configs = (
+        db.query(VendaOpcionalConfig)
+        .options(selectinload(VendaOpcionalConfig.item))
+        .filter(VendaOpcionalConfig.ativo == 1)
+        .order_by(VendaOpcionalConfig.ordem)
+        .all()
+    )
+    por_escolha = {(c.campo, c.valor): c for c in configs}
+    padroes = {}
+    campos = []
+    for c in configs:
+        if c.campo not in campos:
+            campos.append(c.campo)
+        if c.padrao and c.campo not in padroes:
+            padroes[c.campo] = c.valor
+
+    regras = {}
+    if modelo_ids:
+        for r in db.query(VendaOpcionalModelo).filter(VendaOpcionalModelo.modelo_id.in_(modelo_ids)).all():
+            regras[(int(r.modelo_id), r.campo)] = bool(r.habilitado)
+
+    return {
+        "bases": {k: round(v, 2) for k, v in bases.items()},
+        "configs": por_escolha,
+        "padroes": padroes,
+        "campos": campos,
+        "regras": regras,
+    }
+
+
+def _resumo_custo_venda_em_lote(eq: Equipamento, contexto: dict) -> dict:
+    """Mesmo cálculo de resumo_custo_venda, usando somente dados pré-carregados."""
+    if eq.custo_final_snapshot is not None:
+        base = float(eq.custo_base_snapshot or 0)
+        opcionais = float(eq.custo_opcionais_snapshot or 0)
+        custo = float(eq.custo_final_snapshot or 0)
+        preco = float(eq.preco_venda_snapshot if eq.preco_venda_snapshot is not None else max(moeda_num(eq.valor) - float(eq.frete_venda or 0), 0))
+        lucro = float(eq.lucro_snapshot if eq.lucro_snapshot is not None else preco - custo)
+        margem = float(eq.margem_snapshot if eq.margem_snapshot is not None else ((lucro / preco * 100) if preco else 0))
+        bruto = moeda_num(eq.preco_venda) or preco
+        frete = max(float(eq.frete_venda or 0), 0)
+        desconto = max(round(bruto - preco, 2), 0)
+        return {"base": round(base,2), "opcionais": round(opcionais,2), "custo": round(custo,2), "preco": round(preco,2), "bruto": round(bruto,2), "desconto": desconto, "frete": round(frete,2), "total": round(preco+frete,2), "lucro": round(lucro,2), "margem": round(margem,2), "snapshot": True}
+
+    if eq.produto_venda_id:
+        modelo_id = int(eq.produto_venda_id)
+        base = float(contexto.get("bases", {}).get(modelo_id, 0.0))
+        dinamicos = _opcionais_dinamicos(eq)
+        opcionais = 0.0
+        configs = contexto.get("configs", {})
+        padroes = contexto.get("padroes", {})
+        regras = contexto.get("regras", {})
+        for campo in contexto.get("campos", []):
+            if regras.get((modelo_id, campo), True) is False:
+                continue
+            valor = ""
+            if hasattr(eq, campo):
+                valor = str(getattr(eq, campo, "") or "").strip()
+            if not valor:
+                valor = dinamicos.get(campo) or padroes.get(campo) or "NA"
+            cfg = configs.get((campo, valor))
+            if campo == "microfone":
+                if valor == "Sem fio":
+                    padrao_cfg = configs.get(("microfone", "Com fio"))
+                    opcionais += _custo_config(cfg) - _custo_config(padrao_cfg)
+                continue
+            opcionais += _custo_config(cfg)
+        opcionais = round(opcionais, 2)
+        custo = round(base + opcionais, 2)
+    else:
+        base = moeda_num(eq.preco_custo)
+        opcionais = 0.0
+        custo = round(base, 2)
+
+    bruto = moeda_num(eq.preco_venda or eq.valor)
+    frete = max(float(eq.frete_venda or 0), 0)
+    total = moeda_num(eq.valor or eq.preco_venda)
+    preco = max(round(total - frete, 2), 0)
+    desconto = max(round(bruto - preco, 2), 0)
+    lucro = round(preco - custo, 2)
+    margem = round((lucro / preco * 100) if preco else 0, 2)
+    return {"base": round(base,2), "opcionais": opcionais, "custo": custo, "preco": preco, "bruto": bruto, "desconto": desconto, "frete": round(frete,2), "total": round(total,2), "lucro": lucro, "margem": margem, "snapshot": False}
 
 
 def resumo_custo_venda(eq: Equipamento, db: Session, usar_snapshot: bool = True) -> dict:
@@ -9367,9 +9474,9 @@ def _google_oauth_state_valido(state: str, usuario: Usuario) -> bool:
         return False
 
 
-def _atualizacao_meta_compra(db: Session, compra: AtualizacaoCompra) -> dict:
+def _atualizacao_meta_compra(db: Session, compra: AtualizacaoCompra, agendamento: AtualizacaoAgendamento | None = None) -> dict:
     cliente = compra.cliente or db.get(Cliente, compra.cliente_id)
-    ag = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id == compra.id).first()
+    ag = agendamento
     cadastro_ok = bool(cliente and _gmail_valido(cliente.email) and telefone_valido(cliente.telefone, cliente.pais, cliente.ddi))
     if compra.concluido_em:
         etapa = 3
@@ -9410,8 +9517,11 @@ def _atualizacao_meta_compra(db: Session, compra: AtualizacaoCompra) -> dict:
 
 @app.get("/organiza/atualizacoes", response_class=HTMLResponse)
 def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    links_padrao = _atualizacao_links_padrao_sync(db)
-    pacotes = _atualizacao_pacotes_sync_solvoz(db)
+    # Configurações de Drive/Google quase nunca mudam. Só carregamos/sincronizamos
+    # quando o administrador abre explicitamente a área técnica.
+    config_aberta = (request.query_params.get("config") or "") == "1"
+    links_padrao = _atualizacao_links_padrao_sync(db) if config_aberta else []
+    pacotes = _atualizacao_pacotes_sync_solvoz(db) if config_aberta else []
     filtro = (request.query_params.get("filtro") or "").strip().lower()
     busca_compras = (request.query_params.get("busca_compras") or "").strip()
     etapas_filtro = {x for x in request.query_params.getlist("etapa") if x in {'1','2','3'}}
@@ -9427,7 +9537,13 @@ def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_loga
         .all()
     )
     agendamentos = db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all()
-    campanha_atual = db.query(Campanha).filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO").order_by(func.coalesce(Campanha.iniciado_em, Campanha.criado_em).desc(), Campanha.id.desc()).first()
+    campanha_atual = (
+        db.query(Campanha)
+        .options(load_only(Campanha.id, Campanha.nome, Campanha.lista_tipo, Campanha.pacote_alvo, Campanha.status, Campanha.criado_em, Campanha.iniciado_em))
+        .filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO")
+        .order_by(func.coalesce(Campanha.iniciado_em, Campanha.criado_em).desc(), Campanha.id.desc())
+        .first()
+    )
     campanha_resultado = None
     campanha_valores = {}
     compras_campanha = []
@@ -9481,7 +9597,15 @@ def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_loga
     else:
         compras = list(compras_base)
 
-    compra_meta = {int(c.id): _atualizacao_meta_compra(db, c) for c in compras}
+    compra_ids = [int(c.id) for c in compras]
+    ag_por_compra = {}
+    if compra_ids:
+        for ag in db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.compra_id.in_(compra_ids)).all():
+            # O fluxo trabalha com um agendamento corrente por compra; em legado, prioriza o mais recente.
+            atual = ag_por_compra.get(int(ag.compra_id))
+            if atual is None or int(ag.id) > int(atual.id):
+                ag_por_compra[int(ag.compra_id)] = ag
+    compra_meta = {int(c.id): _atualizacao_meta_compra(db, c, ag_por_compra.get(int(c.id))) for c in compras}
     if busca_compras:
         termo = busca_compras.casefold()
         compras = [c for c in compras if termo in ((c.cliente.nome if c.cliente else '') or '').casefold()]
@@ -9494,13 +9618,13 @@ def atualizacoes_admin(request: Request, usuario: Usuario = Depends(usuario_loga
     if not mostrar_concluidos:
         compras = [c for c in compras if not compra_meta.get(int(c.id), {}).get('concluido')]
 
-    google = _google_integracao(db)
+    google = _google_integracao(db) if config_aberta else None
     return templates.TemplateResponse("organiza/atualizacoes.html", {
         "request": request, "usuario": usuario, "links_padrao": links_padrao, "pacotes": pacotes, "compras": compras,
         "agendamentos": agendamentos, "campanha_resultado": campanha_resultado, "campanha_valores": campanha_valores,
         "compra_meta": compra_meta, "filtro": filtro, "busca_compras": busca_compras, "etapas_filtro": etapas_filtro,
         "status_filtro": status_filtro, "locais_filtro": locais_filtro, "mostrar_concluidos": mostrar_concluidos,
-        "google": google, "google_configurado": _google_configurado(),
+        "google": google, "google_configurado": _google_configurado() if config_aberta else False, "config_aberta": config_aberta,
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 
@@ -10447,9 +10571,13 @@ CAMPANHA_ENVIO_CONFIRMADO = {"PROCESSADO", "ENVIADO"}
 
 
 def _campanhas_atualizacao_para_vendas(db: Session) -> list[Campanha]:
-    """Campanhas de atualização disponíveis para conferência na tela de Vendas."""
+    """Campanhas de atualização sem carregar imagem/BLOB na tela de Vendas."""
     return (
         db.query(Campanha)
+        .options(load_only(
+            Campanha.id, Campanha.nome, Campanha.lista_tipo, Campanha.pacote_alvo,
+            Campanha.status, Campanha.criado_em, Campanha.iniciado_em, Campanha.finalizado_em,
+        ))
         .filter(func.upper(Campanha.lista_tipo) == "ATUALIZACAO")
         .order_by(Campanha.criado_em.desc(), Campanha.id.desc())
         .all()
@@ -10511,6 +10639,7 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
             pagamentos_por_equipamento.setdefault(p.equipamento_id, 0.0)
             pagamentos_por_equipamento[p.equipamento_id] += float(p.valor or 0)
 
+    contexto_custos = _contexto_custos_vendas_em_lote(db, equipamentos)
     for eq in equipamentos:
         total = moeda_num(eq.valor)
         recebido = round(pagamentos_por_equipamento.get(eq.id, 0.0), 2)
@@ -10518,7 +10647,7 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         eq.recebido_calculado = recebido
         eq.falta_calculada = max(round(total - recebido, 2), 0)
         eq.excesso_calculado = max(round(recebido - total, 2), 0)
-        resumo_venda = resumo_custo_venda(eq, db)
+        resumo_venda = _resumo_custo_venda_em_lote(eq, contexto_custos)
         eq.custo_base_calculado = resumo_venda["base"]
         eq.custo_opcionais_calculado = resumo_venda["opcionais"]
         eq.custo_final_calculado = resumo_venda["custo"]
@@ -16062,7 +16191,7 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     google = _google_integracao(db)
     return templates.TemplateResponse("organiza/agenda.html", {
         "request": request, "usuario": usuario, "eventos": eventos,
-        "google": google, "google_configurado": _google_configurado(),
+        "google": google, "google_configurado": _google_configurado() if config_aberta else False, "config_aberta": config_aberta,
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 
