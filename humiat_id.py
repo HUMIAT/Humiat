@@ -1807,20 +1807,24 @@ def _cliente_organiza_humiat(db: Session, *, email: str = "", documento: str = "
             """)).mappings().all()
     except Exception:
         return None
-    if email_n:
-        for row in rows:
-            if str(row.get("email") or "").strip().lower() == email_n:
-                return dict(row)
-    if doc_n:
-        for row in rows:
-            if _so_digitos_humiat(row.get("documento")) == doc_n:
-                return dict(row)
+    # WhatsApp é a chave principal de conciliação LokaFest -> Organiza.
+    # Isso cobre o caso comum de CPF no LokaFest e CNPJ no Organiza.
     if tel_n:
         candidatos = {tel_n, tel_n[-11:] if len(tel_n) >= 11 else tel_n}
         for row in rows:
             bruto = _so_digitos_humiat(f"{row.get('ddi') or ''}{row.get('telefone') or ''}")
             local = _so_digitos_humiat(row.get("telefone"))
-            if bruto in candidatos or local in candidatos or (len(local) >= 10 and local[-11:] in candidatos):
+            comparaveis = {bruto, local}
+            comparaveis |= {x[-11:] for x in list(comparaveis) if len(x) >= 11}
+            if candidatos & comparaveis:
+                return dict(row)
+    if doc_n:
+        for row in rows:
+            if _so_digitos_humiat(row.get("documento")) == doc_n:
+                return dict(row)
+    if email_n:
+        for row in rows:
+            if str(row.get("email") or "").strip().lower() == email_n:
                 return dict(row)
     return None
 
@@ -1888,7 +1892,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Humiat-ID-LokaFest/1.2.10",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.11",
         })
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -1919,41 +1923,15 @@ def _email_valido_humiat(valor: str | None) -> str:
 
 
 def _email_migracao_lokafest_humiat(db: Session, cliente: dict | None, item_lokafest: dict | None = None) -> tuple[str, str]:
-    """Escolhe o e-mail mais confiável para o primeiro acesso.
+    """Usa exclusivamente o e-mail do cadastro do Organiza.
 
-    Prioridade: cadastro do Organiza, e-mail retornado pelo LokaFest (quando a
-    API/versionamento passar a disponibilizá-lo) e, por último, o cache do
-    acesso SolVoz já associado ao mesmo cliente.
+    O LokaFest é conciliado pelo WhatsApp; ele não precisa armazenar e-mail.
+    Se o Organiza ainda não tiver um e-mail válido, a pendência deve oferecer
+    "Enviar cadastro" para o próprio cliente atualizar a ficha pública antes
+    de qualquer vínculo Humiat ser criado.
     """
-    item_lokafest = item_lokafest or {}
     email = _email_valido_humiat((cliente or {}).get("email"))
-    if email:
-        return email, "Organiza"
-
-    email = _email_valido_humiat(item_lokafest.get("email"))
-    if email:
-        return email, "LokaFest"
-
-    cliente_id = int((cliente or {}).get("id") or 0)
-    if cliente_id:
-        try:
-            # Não use COALESCE(timestamp, '') no PostgreSQL: a string vazia
-            # pode gerar erro de conversão e abortar toda a transação.
-            # O SAVEPOINT mantém esta consulta opcional isolada.
-            with db.begin_nested():
-                row = db.execute(text("""
-                    SELECT email
-                    FROM solvoz_acessos_clientes
-                    WHERE cliente_id=:cid AND TRIM(COALESCE(email,''))<>''
-                    ORDER BY CASE WHEN atualizado_em IS NULL THEN 1 ELSE 0 END, atualizado_em DESC, id DESC
-                    LIMIT 1
-                """), {"cid": cliente_id}).first()
-            email = _email_valido_humiat(row[0] if row else "")
-            if email:
-                return email, "SolVoz"
-        except Exception:
-            pass
-    return "", ""
+    return (email, "Organiza") if email else ("", "")
 
 
 def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
@@ -1993,7 +1971,7 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.10")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.11")
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
@@ -2137,6 +2115,7 @@ def _pendencias_lokafest_humiat(db: Session) -> tuple[list[dict], str]:
             "organiza_encontrado": bool(cliente),
             "humiat_existente": bool(humiat),
             "pode_aprovar": bool(cliente and email),
+            "cadastro_whatsapp_url": (f"/admin-humiat/migracao-lokafest/{lid}/enviar-cadastro" if cliente and not email else ""),
             "solvoz": _empresa_solvoz_do_cliente_humiat(db, int((cliente or {}).get("id") or 0)) if cliente else None,
         })
     return pendencias, ""
@@ -2951,6 +2930,61 @@ def alternar_status_empresa(
     return RedirectResponse(f"/painel?empresa_id={empresa.id}&ok=status_atualizado", status_code=303)
 
 
+@router.get("/admin-humiat/migracao-lokafest/{lokafest_usuario_id}/enviar-cadastro")
+def enviar_cadastro_migracao_lokafest(
+    lokafest_usuario_id: int,
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
+    """Envia ao WhatsApp do LokaFest a ficha pública do Organiza.
+
+    O vínculo Humiat só acontece depois que o cliente informa um e-mail válido
+    no Organiza, evitando retirar o acesso antigo antes de existir um caminho de
+    primeiro acesso ao Humiat ID.
+    """
+    try:
+        remoto = _lokafest_humiat_request(f"/_lokafest/api/humiat/usuarios?usuario_id={int(lokafest_usuario_id)}")
+        itens = remoto.get("usuarios") or []
+        if not itens:
+            raise ValueError("Usuário não encontrado no LokaFest")
+        item = itens[0]
+        cliente = _cliente_organiza_humiat(db, documento=item.get("cpf") or "", telefone=item.get("whatsapp") or "")
+        if not cliente:
+            raise ValueError("Cliente não localizado no Organiza pelo WhatsApp")
+
+        cid = int(cliente.get("id") or 0)
+        row = db.execute(text("SELECT id,nome,telefone,ddi,token_ficha FROM clientes WHERE id=:id LIMIT 1"), {"id": cid}).mappings().first()
+        if not row:
+            raise ValueError("Cliente não localizado no Organiza")
+        token = str(row.get("token_ficha") or "").strip()
+        if not token:
+            token = secrets.token_urlsafe(24)
+            db.execute(text("UPDATE clientes SET token_ficha=:token WHERE id=:id"), {"token": token, "id": cid})
+            db.commit()
+
+        local = _so_digitos_humiat(row.get("telefone") or item.get("whatsapp") or "")
+        ddi = _so_digitos_humiat(row.get("ddi") or "55") or "55"
+        numero = local
+        if numero and not numero.startswith(ddi):
+            numero = ddi + numero
+        if len(numero) < 12:
+            raise ValueError("Cliente sem WhatsApp válido no Organiza")
+
+        cadastro_url = f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{token}"
+        nome = str(row.get("nome") or item.get("nome") or "cliente").strip()
+        mensagem = (
+            f"Olá, {nome}!\n\n"
+            "Para liberar seu novo acesso ao Humiat ID/LokaFest, precisamos que seu cadastro no Organiza tenha um e-mail válido. "
+            "Acesse o link abaixo, confira seus dados e informe seu e-mail:\n\n"
+            f"{cadastro_url}\n\n"
+            "Depois disso, seu acesso poderá ser liberado.\n\nKaraokê RJ"
+        )
+        return RedirectResponse(f"https://wa.me/{numero}?text={urllib.parse.quote(mensagem)}", status_code=303)
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc)[:180])}", status_code=303)
+
+
 @router.post("/admin-humiat/migracao-lokafest/{lokafest_usuario_id}/aprovar")
 def aprovar_migracao_lokafest(
     lokafest_usuario_id: int,
@@ -2969,7 +3003,7 @@ def aprovar_migracao_lokafest(
             raise ValueError("Cliente não localizado no Organiza por CPF ou WhatsApp")
         email, email_fonte = _email_migracao_lokafest_humiat(db, cliente, item)
         if not email:
-            raise ValueError("Cliente localizado, mas não há e-mail válido no Organiza, LokaFest ou vínculo SolVoz para enviar o primeiro acesso")
+            raise ValueError("Cliente localizado, mas não há e-mail válido no Organiza. Use Enviar cadastro antes de aprovar")
 
         alvo = None
         if cliente.get("humiat_usuario_id"):
@@ -3010,7 +3044,7 @@ def aprovar_migracao_lokafest(
             alvo.telefone = str(cliente.get("telefone") or alvo.telefone or item.get("whatsapp") or "").strip()[:40] or None
 
         db.execute(text("UPDATE clientes SET humiat_usuario_id=:uid WHERE id=:cid"), {"uid": int(alvo.id), "cid": int(cliente.get("id"))})
-        aplicar_rotinas_cliente_humiat(db, alvo, int(cliente.get("id")), garantir_lokafest=True)
+        aplicar_rotinas_cliente_humiat(db, alvo, int(cliente.get("id")), garantir_lokafest=False)
 
         mig = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.lokafest_usuario_id == int(lokafest_usuario_id)).first()
         if not mig:

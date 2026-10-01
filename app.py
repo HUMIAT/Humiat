@@ -4216,11 +4216,9 @@ def _lokafest_cliente_por_identificador(db: Session, cpf: str = "", whatsapp: st
 
     candidatos = db.query(Cliente).options(selectinload(Cliente.equipamentos)).all()
 
-    if cpf_limpo:
-        for cliente in candidatos:
-            if _lokafest_digitos(cliente.documento) == cpf_limpo:
-                return cliente
-
+    # WhatsApp é a chave principal entre LokaFest e Organiza. O LokaFest pode
+    # ter CPF da pessoa enquanto o Organiza guarda o CNPJ da empresa; nesses
+    # casos o telefone continua identificando corretamente o mesmo cadastro.
     if whats_limpo:
         # Aceita número com/sem DDI 55, mas exige os últimos 10/11 dígitos iguais.
         alvo = whats_limpo[-11:] if len(whats_limpo) >= 11 else whats_limpo
@@ -4230,6 +4228,12 @@ def _lokafest_cliente_por_identificador(db: Session, cpf: str = "", whatsapp: st
             comparaveis = {telefone, completo}
             comparaveis |= {x[-11:] for x in list(comparaveis) if len(x) >= 11}
             if alvo in comparaveis or whats_limpo in comparaveis:
+                return cliente
+
+    # CPF/CNPJ fica como fallback para cadastros sem telefone utilizável.
+    if cpf_limpo:
+        for cliente in candidatos:
+            if _lokafest_digitos(cliente.documento) == cpf_limpo:
                 return cliente
 
     return None
