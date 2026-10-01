@@ -1882,7 +1882,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Humiat-ID-LokaFest/1.2.08",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.09",
         })
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -1905,6 +1905,45 @@ def _garantir_usuario_lokafest_humiat(cliente: dict, nome: str) -> dict:
         "telefone": cliente.get("telefone") or "",
         "zona": _zona_lokafest_por_cliente(cliente),
     })
+
+
+def _email_valido_humiat(valor: str | None) -> str:
+    email = str(valor or "").strip().lower()
+    return email if email and "@" in email and "." in email.split("@", 1)[-1] else ""
+
+
+def _email_migracao_lokafest_humiat(db: Session, cliente: dict | None, item_lokafest: dict | None = None) -> tuple[str, str]:
+    """Escolhe o e-mail mais confiável para o primeiro acesso.
+
+    Prioridade: cadastro do Organiza, e-mail retornado pelo LokaFest (quando a
+    API/versionamento passar a disponibilizá-lo) e, por último, o cache do
+    acesso SolVoz já associado ao mesmo cliente.
+    """
+    item_lokafest = item_lokafest or {}
+    email = _email_valido_humiat((cliente or {}).get("email"))
+    if email:
+        return email, "Organiza"
+
+    email = _email_valido_humiat(item_lokafest.get("email"))
+    if email:
+        return email, "LokaFest"
+
+    cliente_id = int((cliente or {}).get("id") or 0)
+    if cliente_id:
+        try:
+            row = db.execute(text("""
+                SELECT email
+                FROM solvoz_acessos_clientes
+                WHERE cliente_id=:cid AND TRIM(COALESCE(email,''))<>''
+                ORDER BY COALESCE(atualizado_em,'') DESC,id DESC
+                LIMIT 1
+            """), {"cid": cliente_id}).first()
+            email = _email_valido_humiat(row[0] if row else "")
+            if email:
+                return email, "SolVoz"
+        except Exception:
+            pass
+    return "", ""
 
 
 def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
@@ -1944,7 +1983,7 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.08")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.09")
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
@@ -1978,9 +2017,12 @@ def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, clien
     if liberar_lokafest:
         garantir(por_codigo.get("LOKAFEST"), sistema=True)
 
+    # Cliente Catálogo é o perfil padrão do SolVoz para clientes Humiat. O
+    # vínculo de empresa é acrescentado quando conseguimos inferi-lo pelos
+    # equipamentos, mas a permissão de catálogo não depende dessa associação.
+    garantir(por_codigo.get("SOLVOZ"), sistema=True, catalogo=True)
     empresa_sv = _empresa_solvoz_do_cliente_humiat(db, int(cliente.get("id") or 0))
     if empresa_sv:
-        garantir(por_codigo.get("SOLVOZ"), sistema=True, catalogo=True)
         slug = str(empresa_sv.get("slug") or "").lower()
         empresa_h = db.query(HumiatEmpresa).filter(func.lower(HumiatEmpresa.slug) == slug).first()
         if empresa_h:
@@ -2017,7 +2059,35 @@ def _pendencias_lokafest_humiat(db: Session) -> tuple[list[dict], str]:
             _cache_integracao_put(db, chave, dados)
         except Exception as exc:
             return [], str(exc)
+
     migrados = {int(x.lokafest_usuario_id): x for x in db.query(HumiatMigracaoLokaFest).all()}
+
+    # Mapa local em lote: evita consultar Humiat usuário por usuário e,
+    # principalmente, impede que um cadastro já regular (inclusive equipe
+    # interna) volte para a fila de migração só porque existe no LokaFest.
+    usuarios_h = db.query(HumiatUsuario).all()
+    h_por_id = {int(u.id): u for u in usuarios_h}
+    h_por_email = {_email_valido_humiat(u.email): u for u in usuarios_h if _email_valido_humiat(u.email)}
+    h_por_doc = {_so_digitos_humiat(u.documento): u for u in usuarios_h if _so_digitos_humiat(u.documento)}
+    h_por_tel = {}
+    for u in usuarios_h:
+        tel = _so_digitos_humiat(u.telefone)
+        if tel:
+            h_por_tel[tel] = u
+            if len(tel) >= 10:
+                h_por_tel[tel[-11:]] = u
+
+    produto_lf = _produto_por_codigo(db, "LOKAFEST")
+    usuarios_com_lokafest: set[int] = set()
+    if produto_lf:
+        rows_acesso = db.query(HumiatUsuarioProduto).filter(
+            HumiatUsuarioProduto.produto_id == int(produto_lf.id)
+        ).all()
+        usuarios_com_lokafest = {
+            int(a.usuario_id) for a in rows_acesso
+            if bool(a.acesso_sistema) or bool(a.acesso_adm)
+        }
+
     pendencias = []
     for item in dados.get("usuarios") or []:
         try:
@@ -2026,20 +2096,37 @@ def _pendencias_lokafest_humiat(db: Session) -> tuple[list[dict], str]:
             continue
         if not lid or (lid in migrados and migrados[lid].status in {"APROVADO", "EMAIL_ENVIADO", "EMAIL_ERRO"}):
             continue
+
         cliente = _cliente_organiza_humiat(db, documento=item.get("cpf") or "", telefone=item.get("whatsapp") or "")
-        email = str((cliente or {}).get("email") or "").strip().lower()
+        email, email_fonte = _email_migracao_lokafest_humiat(db, cliente, item)
+
         humiat = None
         if cliente and cliente.get("humiat_usuario_id"):
-            humiat = db.query(HumiatUsuario).filter(HumiatUsuario.id == int(cliente.get("humiat_usuario_id"))).first()
+            humiat = h_por_id.get(int(cliente.get("humiat_usuario_id")))
         if not humiat and email:
-            humiat = db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first()
+            humiat = h_por_email.get(email)
+        if not humiat:
+            doc = _so_digitos_humiat((cliente or {}).get("documento") or item.get("cpf"))
+            if doc:
+                humiat = h_por_doc.get(doc)
+        if not humiat:
+            tel = _so_digitos_humiat((cliente or {}).get("telefone") or item.get("whatsapp"))
+            if tel:
+                humiat = h_por_tel.get(tel) or h_por_tel.get(tel[-11:] if len(tel) >= 10 else tel)
+
+        # Já possui Humiat ID e LokaFest liberado: cadastro está correto, não
+        # é pendência. Isso cobre também os perfis administrativos internos.
+        if humiat and int(humiat.id) in usuarios_com_lokafest:
+            continue
+
         pendencias.append({
             **item,
             "cliente": cliente,
             "email": email,
+            "email_fonte": email_fonte,
             "organiza_encontrado": bool(cliente),
             "humiat_existente": bool(humiat),
-            "pode_aprovar": bool(cliente and email and "@" in email),
+            "pode_aprovar": bool(cliente and email),
             "solvoz": _empresa_solvoz_do_cliente_humiat(db, int((cliente or {}).get("id") or 0)) if cliente else None,
         })
     return pendencias, ""
@@ -2866,15 +2953,31 @@ def aprovar_migracao_lokafest(
         cliente = _cliente_organiza_humiat(db, documento=item.get("cpf") or "", telefone=item.get("whatsapp") or "")
         if not cliente:
             raise ValueError("Cliente não localizado no Organiza por CPF ou WhatsApp")
-        email = str(cliente.get("email") or "").strip().lower()
-        if not email or "@" not in email:
-            raise ValueError("O cliente foi localizado no Organiza, mas precisa ter um e-mail válido antes da aprovação")
+        email, email_fonte = _email_migracao_lokafest_humiat(db, cliente, item)
+        if not email:
+            raise ValueError("Cliente localizado, mas não há e-mail válido no Organiza, LokaFest ou vínculo SolVoz para enviar o primeiro acesso")
 
         alvo = None
         if cliente.get("humiat_usuario_id"):
             alvo = db.query(HumiatUsuario).filter(HumiatUsuario.id == int(cliente.get("humiat_usuario_id"))).first()
         if not alvo:
             alvo = db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first()
+        if alvo:
+            acesso_lf = _usuario_produto_permissoes(db, int(alvo.id), "LOKAFEST")
+            if acesso_lf.get("sistema") or acesso_lf.get("adm"):
+                mig = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.lokafest_usuario_id == int(lokafest_usuario_id)).first()
+                if not mig:
+                    mig = HumiatMigracaoLokaFest(lokafest_usuario_id=int(lokafest_usuario_id))
+                    db.add(mig)
+                mig.humiat_usuario_id = int(alvo.id)
+                mig.status = "APROVADO"
+                mig.email = email
+                mig.ultimo_erro = None
+                _auditar(db, request, "MIGRACAO_LOKAFEST_JA_REGULAR", usuario.id, detalhe=f"lokafest_id={lokafest_usuario_id}; humiat_id={alvo.id}; email_fonte={email_fonte}")
+                _cache_integracao_apagar(db, "migracao:lokafest:usuarios")
+                db.commit()
+                return RedirectResponse("/painel?ok=Cadastro já estava regular no Humiat e foi retirado das pendências", status_code=303)
+
         if not alvo:
             alvo = HumiatUsuario(
                 nome=str(cliente.get("nome") or item.get("nome") or email).strip()[:120],
@@ -2906,7 +3009,7 @@ def aprovar_migracao_lokafest(
 
         token = _novo_token_reset(db, alvo, request=request)
         link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
-        _auditar(db, request, "MIGRACAO_LOKAFEST_APROVADA", usuario.id, detalhe=f"lokafest_id={lokafest_usuario_id}; humiat_id={alvo.id}")
+        _auditar(db, request, "MIGRACAO_LOKAFEST_APROVADA", usuario.id, detalhe=f"lokafest_id={lokafest_usuario_id}; humiat_id={alvo.id}; email_fonte={email_fonte}")
         db.commit()
         try:
             _enviar_email_migracao_humiat(email, alvo.nome, link)
