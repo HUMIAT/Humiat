@@ -1489,7 +1489,7 @@ def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
     """Resumo do Organiza mostrado no portal sem liberar o sistema completo."""
     try:
         row = db.execute(text("""
-            SELECT id, token_ficha, telefone, email
+            SELECT id, token_ficha, telefone, email, pacote, falta_pacote
             FROM clientes
             WHERE humiat_usuario_id=:uid
             ORDER BY id
@@ -1516,9 +1516,50 @@ def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
         "chamado_url": "/humiat/organiza/chamado",
         "tem_token": bool(token),
         "equipamentos": equipamentos,
+        "pacote": str(row.get("pacote") or "").strip(),
+        "falta_pacote": int(row.get("falta_pacote") or 0) if row.get("falta_pacote") is not None else None,
         "pendencia": pendencia,
         "pendencia_fmt": _painel_moeda(pendencia) if pendencia > 0.009 else "",
     }
+
+
+def _solvoz_resumo_humiat(empresa: HumiatEmpresa | None) -> dict:
+    """Consulta o resumo comercial do SolVoz independentemente da permissao de abertura.
+
+    A permissao do cliente continua servindo somente para abrir a area autenticada.
+    """
+    if not empresa or not SSO_SECRET:
+        return {"ok": False, "catalogo_existe": False}
+    url = f"{SOLVOZ_BASE_URL}/_sv/api/humiat/painel?{urlencode({'slug': empresa.slug})}"
+    req = urllib.request.Request(url, headers={
+        "X-Humiat-SSO-Secret": SSO_SECRET,
+        "Accept": "application/json",
+        "User-Agent": "Humiat-ID-Painel/1.1.99",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+        catalogo = dados.get("catalogo") or {}
+        dias = catalogo.get("dias_restantes")
+        try:
+            dias = int(dias) if dias is not None else None
+        except (TypeError, ValueError):
+            dias = None
+        return {
+            "ok": bool(dados.get("ok")),
+            "catalogo_existe": bool(dados.get("catalogo_existe")),
+            "url_catalogo": str(catalogo.get("url") or ""),
+            "status": str(catalogo.get("status") or ""),
+            "valido_ate": str(catalogo.get("valido_ate_br") or catalogo.get("valido_ate") or ""),
+            "dias_restantes": dias,
+            "pacote_mais_recente": str((dados.get("pacote_mais_recente") or {}).get("label") or ""),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {"ok": True, "catalogo_existe": False}
+        return {"ok": False, "catalogo_existe": False}
+    except Exception:
+        return {"ok": False, "catalogo_existe": False}
 
 
 def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
@@ -1532,7 +1573,7 @@ def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
     req = urllib.request.Request(url, headers={
         "X-Humiat-SSO-Secret": SSO_SECRET,
         "Accept": "application/json",
-        "User-Agent": "Humiat-ID-Painel/1.1.97",
+        "User-Agent": "Humiat-ID-Painel/1.1.99",
     })
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -1784,14 +1825,17 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
     produtos = produtos_todos
     connect_liberado = bool(meus_acessos.get("CONNECT", {}).get("sistema", False))
     connect_resumo = _connect_resumo_humiat(db, empresa) if connect_liberado else {"ok": False, "gratis_limite": 4}
+    organiza_rapido = _cliente_rapido_humiat(db, usuario.id)
+    solvoz_resumo = _solvoz_resumo_humiat(empresa)
     return templates.TemplateResponse(
         "humiat/painel.html",
         {
             "request": request, "usuario": usuario, "empresas": empresas, "empresa": empresa,
             "produtos": produtos, "meus_acessos": meus_acessos, "admin_humiat": False,
             "conheca_urls": {p.codigo: _produto_conheca_url(p) for p in produtos},
-            "organiza_rapido": _cliente_rapido_humiat(db, usuario.id),
+            "organiza_rapido": organiza_rapido,
             "connect_resumo": connect_resumo,
+            "solvoz_resumo": solvoz_resumo,
         },
     )
 
