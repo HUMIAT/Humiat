@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import html
 import json
+import base64
 import os
 import secrets
 import urllib.error
@@ -233,6 +234,46 @@ class HumiatSSOTicket(Base):
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _b64url_encode(bruto: bytes) -> str:
+    return base64.urlsafe_b64encode(bruto).decode("ascii").rstrip("=")
+
+
+def _ticket_sso_v2_assinado(usuario, empresa, produto_codigo: str, modo: str, destino_slug: str | None = None) -> str:
+    """Ticket curto auto-validável pelos produtos Humiat que compartilham SSO_SECRET.
+
+    Usado inicialmente pelo Connect para eliminar a chamada HTTP de retorno ao
+    Humiat durante cada abertura do produto.
+    """
+    if not SSO_SECRET:
+        raise HTTPException(status_code=503, detail="HUMIAT_SSO_SECRET não configurado")
+    agora = int(datetime.now(timezone.utc).timestamp())
+    ttl = max(30, min(int(SSO_MINUTES * 60), 120))
+    payload = {
+        "ok": True,
+        "v": 2,
+        "iat": agora,
+        "exp": agora + ttl,
+        "jti": secrets.token_urlsafe(18),
+        "usuario": {
+            "id": int(usuario.id),
+            "nome": usuario.nome or "",
+            "email": usuario.email or "",
+            "tipo": usuario.tipo or "",
+            "documento": usuario.documento or "",
+            "telefone": usuario.telefone or "",
+        },
+        "empresa": ({"id": int(empresa.id), "nome": empresa.nome or "", "slug": empresa.slug or ""} if empresa else None),
+        "produto": (produto_codigo or "").strip().upper(),
+        "modo": (modo or "sistema").strip().lower(),
+        "destino_slug": (destino_slug or (empresa.slug if empresa else "") or "").strip().lower(),
+        "acesso": "EMPRESA" if empresa else "INTERNO",
+    }
+    payload_b64 = _b64url_encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    base = f"v2.{payload_b64}"
+    assinatura = hmac.new(SSO_SECRET.encode("utf-8"), base.encode("ascii"), hashlib.sha256).digest()
+    return f"{base}.{_b64url_encode(assinatura)}"
 
 
 def gerar_hash_senha_id(senha: str, salt: Optional[str] = None) -> str:
@@ -2331,7 +2372,6 @@ def abrir_produto(
         raise HTTPException(status_code=503, detail=f"ADM {produto.nome} ainda não integrado ao hub Humiat")
 
     if produto.url_sso:
-        token = secrets.token_urlsafe(40)
         if codigo == "LOKAFEST":
             ticket_empresa_id = None
         else:
@@ -2343,13 +2383,25 @@ def abrir_produto(
             # O Humiat ID identifica a empresa pelo slug global do Organiza, mas
             # o Connect pode manter um alias legado para não quebrar URLs antigas.
             destino_slug = _connect_slug_por_global(db, empresa.slug)
-        db.add(HumiatSSOTicket(
-            token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id,
-            produto_codigo=codigo, acesso_modo=modo,
-            destino_slug=destino_slug,
-            expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)
-        ))
-        db.commit()
+        if codigo == "CONNECT":
+            # Connect 1.0.85+ valida este ticket localmente por HMAC; não há
+            # round-trip HTTP para o Humiat ao abrir o sistema.
+            token = _ticket_sso_v2_assinado(
+                usuario,
+                None if acesso_interno else empresa,
+                codigo,
+                modo,
+                destino_slug=destino_slug,
+            )
+        else:
+            token = secrets.token_urlsafe(40)
+            db.add(HumiatSSOTicket(
+                token_hash=_hash_token(token), usuario_id=usuario.id, empresa_id=ticket_empresa_id,
+                produto_codigo=codigo, acesso_modo=modo,
+                destino_slug=destino_slug,
+                expira_em=datetime.utcnow() + timedelta(minutes=SSO_MINUTES)
+            ))
+            db.commit()
         sep = "&" if "?" in produto.url_sso else "?"
         params_sso = {"humiat_ticket": token}
         if codigo == "CONNECT" and destino.startswith("/") and not destino.startswith("//"):
