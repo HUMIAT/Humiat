@@ -95,7 +95,7 @@
       </article>
 
       <article class="admin-app-card app-identidade{% if novos_usuarios_lokafest|length == 0 and not novos_usuarios_lokafest_erro %} is-disabled{% endif %}">
-        <div class="admin-card-head"><div class="admin-app-icon">N</div><div class="admin-card-copy"><span class="card-kicker">Cadastro automático</span><h3>Usuários novos</h3><p>Clientes com empresa, sem Humiat ID e fora das pendências antigas do LokaFest.</p></div></div>
+        <div class="admin-card-head"><div class="admin-app-icon">N</div><div class="admin-card-copy"><span class="card-kicker">Cadastro automático</span><h3>Usuários novos</h3><p>Um responsável por empresa SolVoz, sem Humiat ID e fora das pendências antigas do LokaFest.</p></div></div>
         <div class="admin-badges"><span class="status-badge {% if novos_usuarios_lokafest|length > 0 %}active{% endif %}">{{ novos_usuarios_lokafest|length }} novo(s)</span></div>
         {% if novos_usuarios_lokafest_erro %}<small class="error-inline">{{ novos_usuarios_lokafest_erro }}</small>{% endif %}
         <div class="admin-actions one"><button type="button" class="btn-primary" data-dialog-open="novos-usuarios-lokafest">Revisar novos usuários</button></div>
@@ -115,7 +115,7 @@
 <dialog class="admin-dialog" id="novos-usuarios-lokafest">
   <div class="dialog-card dialog-wide">
     <div class="dialog-head"><div><span class="card-kicker">Cadastro automático</span><h2>Usuários novos</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    <p class="muted-copy">Ao criar, o Humiat usa o cadastro do Organiza como fonte, vincula a empresa, libera Organiza/Tarefas rápidas + LokaFest + SolVoz Cliente Catálogo, cria o perfil LokaFest já ativo e envia o primeiro acesso.</p>
+    <p class="muted-copy">Ao criar, o Humiat usa o responsável já definido no acesso SolVoz. Existe somente um responsável por empresa. Karaokê RJ é administrada pela equipe interna e não entra nesta fila.</p>
     <div style="display:grid;gap:10px;max-height:62vh;overflow:auto;margin-top:14px">
       {% for p in novos_usuarios_lokafest %}
       <div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(170px,1.1fr) minmax(170px,1.1fr) auto;gap:12px;align-items:center">
@@ -125,8 +125,10 @@
         <div>
           {% if p.pode_criar %}
           <form method="post" action="/admin-humiat/usuarios-novos/{{ p.id }}/criar"><button class="btn-primary" type="submit">Criar acesso</button></form>
+          {% elif p.cadastro_whatsapp_url %}
+          <a class="btn-secondary" href="{{ p.cadastro_whatsapp_url }}" target="_blank" rel="noopener">Enviar cadastro</a>
           {% else %}
-          <span class="status-badge">Completar {{ p.faltas|join(', ') }}</span>
+          <span class="status-badge">Sem WhatsApp válido</span>
           {% endif %}
         </div>
       </div>
@@ -134,7 +136,7 @@
       <div class="id-success">Nenhum usuário novo aguardando criação.</div>
       {% endfor %}
     </div>
-    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
+    <div class="dialog-actions"><form method="post" action="/admin-humiat/migracao-lokafest/atualizar"><button class="btn-secondary" type="submit">Atualizar lista</button></form><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
   </div>
 </dialog>
 
@@ -173,7 +175,7 @@
       {% endfor %}
     </div>
     {% endif %}
-    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
+    <div class="dialog-actions"><form method="post" action="/admin-humiat/migracao-lokafest/atualizar"><button class="btn-secondary" type="submit">Atualizar lista</button></form><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
   </div>
 </dialog>
 

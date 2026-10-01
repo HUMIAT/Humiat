@@ -11699,6 +11699,14 @@ async def cadastro_publico_salvar(token: str, request: Request, db: Session = De
     cliente.email = (form.get("email") or "").strip() or None
     proximo_fluxo = (request.query_params.get("next") or "").strip()
 
+    email_publico = str(cliente.email or "").strip().lower()
+    if not email_publico or "@" not in email_publico or "." not in email_publico.split("@", 1)[-1]:
+        return templates.TemplateResponse("organiza/cadastro_publico.html", {
+            "request": request, "cliente": cliente,
+            "erro": "Informe um e-mail válido. O e-mail é obrigatório para concluir a atualização do cadastro e receber seu primeiro acesso.",
+            "salvo": False, "aviso": ""
+        }, status_code=400)
+
     if proximo_fluxo and "/atualizacao/" in proximo_fluxo and not _gmail_valido(cliente.email):
         return templates.TemplateResponse("organiza/cadastro_publico.html", {
             "request": request, "cliente": cliente, "erro": "Para receber a atualização, informe um endereço Gmail válido.", "salvo": False, "aviso": ""
