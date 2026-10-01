@@ -32,6 +32,7 @@ SOLVOZ_BASE_URL = os.getenv("HUMIAT_SOLVOZ_URL", "https://www.solvoz.com.br").st
 SOLVOZ_API_TIMEOUT = float(os.getenv("HUMIAT_SOLVOZ_API_TIMEOUT", "8") or "8")
 SOLVOZ_DIAGNOSTICS_PATH = os.getenv("HUMIAT_SOLVOZ_DIAGNOSTICS_PATH", "/_sv/uso/7f29c4b8").strip() or "/_sv/uso/7f29c4b8"
 CONNECT_BASE_URL = os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br").strip().rstrip("/")
+LOKAFEST_BASE_URL = os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br").strip().rstrip("/")
 CONNECT_LOGOUT_URL = os.getenv("HUMIAT_CONNECT_LOGOUT_URL", f"{CONNECT_BASE_URL}/_connect/logout-humiat").strip()
 SOLVOZ_LOGOUT_URL = os.getenv("HUMIAT_SOLVOZ_LOGOUT_URL", f"{SOLVOZ_BASE_URL}/_sv/logout-humiat").strip()
 
@@ -1255,7 +1256,7 @@ def seed_humiat_id():
             print(f"[HUMIAT ID] 1.1.29: {admins_importados} administrador(es) do Organiza vinculados ao Humiat ID.")
         produtos = [
             ("CONNECT", "Connect", "Contratos, agenda, operação, rotas e financeiro.", os.getenv("HUMIAT_CONNECT_URL", "https://conect.humiat.com.br"), os.getenv("HUMIAT_CONNECT_SSO_URL", "https://conect.humiat.com.br/_connect/sso/humiat"), "connect"),
-            ("LOKAFEST", "LokaFest", "Indicações e oportunidades para festas.", os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br"), os.getenv("HUMIAT_LOKAFEST_SSO_URL", ""), "lokafest"),
+            ("LOKAFEST", "LokaFest", "Indicações e oportunidades para festas.", os.getenv("HUMIAT_LOKAFEST_URL", "https://lokafest.com.br"), os.getenv("HUMIAT_LOKAFEST_SSO_URL", "https://lokafest.com.br/_lokafest/sso/humiat"), "lokafest"),
             ("SOLVOZ", "SolVoz", "Catálogo musical, identidade e site para locadores.", os.getenv("HUMIAT_SOLVOZ_URL", "https://www.solvoz.com.br"), os.getenv("HUMIAT_SOLVOZ_SSO_URL", "https://www.solvoz.com.br/_sv/sso/humiat"), "solvoz"),
             ("ORGANIZA", "Organiza", "Chamados, manutenção, clientes e operação técnica.", f"{PUBLIC_BASE_URL}/organiza", "", "organiza"),
         ]
@@ -1534,7 +1535,7 @@ def _solvoz_resumo_humiat(empresa: HumiatEmpresa | None) -> dict:
     req = urllib.request.Request(url, headers={
         "X-Humiat-SSO-Secret": SSO_SECRET,
         "Accept": "application/json",
-        "User-Agent": "Humiat-ID-Painel/1.1.99",
+        "User-Agent": "Humiat-ID-Painel/1.2.00",
     })
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -1573,7 +1574,7 @@ def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
     req = urllib.request.Request(url, headers={
         "X-Humiat-SSO-Secret": SSO_SECRET,
         "Accept": "application/json",
-        "User-Agent": "Humiat-ID-Painel/1.1.99",
+        "User-Agent": "Humiat-ID-Painel/1.2.00",
     })
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -1591,6 +1592,60 @@ def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
     except Exception:
         return {"ok": False, "slug": slug_connect, "gratis_limite": 4}
 
+
+
+def _lokafest_resumo_humiat(usuario: HumiatUsuario) -> dict:
+    """Consulta o LokaFest pela identidade pessoal do Humiat.
+
+    LokaFest nao usa empresa/tenant. O cadastro local e localizado por CPF e,
+    como contingencia, pelo telefone. A permissao Humiat continua decidindo
+    apenas se o botao de abertura do sistema fica disponivel.
+    """
+    if not usuario or not SSO_SECRET:
+        return {"ok": False, "usuario_existe": False}
+
+    payload = urlencode({
+        "documento": (usuario.documento or "").strip(),
+        "telefone": (usuario.telefone or "").strip(),
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{LOKAFEST_BASE_URL}/_lokafest/api/humiat/painel",
+        data=payload,
+        method="POST",
+        headers={
+            "X-Humiat-SSO-Secret": SSO_SECRET,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "Humiat-ID-Painel/1.2.00",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+        return {
+            "ok": bool(dados.get("ok")),
+            "usuario_existe": bool(dados.get("usuario_existe")),
+            "cadastro_ativo": bool(dados.get("cadastro_ativo")),
+            "cadastro_aprovado": bool(dados.get("cadastro_aprovado")),
+            "apto_indicacoes": bool(dados.get("apto_indicacoes")),
+            "total_global": int(dados.get("total_global") or 0),
+            "recebidas": int(dados.get("recebidas") or 0),
+            "repassadas": int(dados.get("repassadas") or 0),
+            "prioridades": int(dados.get("prioridades") or 0),
+            "grupo_whatsapp": bool(dados.get("grupo_whatsapp")),
+            "grupo_url": str(dados.get("grupo_url") or ""),
+            "pacote": str(dados.get("pacote") or ""),
+            "pacote_mais_recente": str(dados.get("pacote_mais_recente") or ""),
+            "status_pacote": str(dados.get("status_pacote") or ""),
+            "mensagem": str(dados.get("mensagem") or ""),
+            "cadastro_url": str(dados.get("cadastro_url") or f"{LOKAFEST_BASE_URL}/cadastro"),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {"ok": True, "usuario_existe": False, "cadastro_url": f"{LOKAFEST_BASE_URL}/cadastro"}
+        return {"ok": False, "usuario_existe": False}
+    except Exception:
+        return {"ok": False, "usuario_existe": False}
 
 def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session, empresa_id: int | None = None) -> dict:
     """Contexto do hub Humiat.
@@ -1827,6 +1882,7 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
     connect_resumo = _connect_resumo_humiat(db, empresa) if connect_liberado else {"ok": False, "gratis_limite": 4}
     organiza_rapido = _cliente_rapido_humiat(db, usuario.id)
     solvoz_resumo = _solvoz_resumo_humiat(empresa)
+    lokafest_resumo = _lokafest_resumo_humiat(usuario)
     return templates.TemplateResponse(
         "humiat/painel.html",
         {
@@ -1836,6 +1892,7 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
             "organiza_rapido": organiza_rapido,
             "connect_resumo": connect_resumo,
             "solvoz_resumo": solvoz_resumo,
+            "lokafest_resumo": lokafest_resumo,
         },
     )
 
@@ -1878,7 +1935,7 @@ def abrir_produto(
 
     empresas = empresas_do_usuario(db, usuario)
     empresa = next((e for e in empresas if e.id == empresa_id), None) if empresa_id else (empresas[0] if len(empresas) == 1 else None)
-    if not acesso_interno:
+    if not acesso_interno and codigo != "LOKAFEST":
         if not empresa:
             raise HTTPException(status_code=400, detail="Selecione a empresa")
         permitidos = {p.codigo for p in produtos_da_empresa(db, empresa.id)}
@@ -1926,7 +1983,10 @@ def abrir_produto(
 
     if produto.url_sso:
         token = secrets.token_urlsafe(40)
-        ticket_empresa_id = (empresa_sso.id if empresa_sso else None) if (codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}) else (None if acesso_interno else (empresa.id if empresa else None))
+        if codigo == "LOKAFEST":
+            ticket_empresa_id = None
+        else:
+            ticket_empresa_id = (empresa_sso.id if empresa_sso else None) if (codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}) else (None if acesso_interno else (empresa.id if empresa else None))
         destino_slug = None
         if codigo == "SOLVOZ" and modo in {"cliente_site", "cliente_catalogo"}:
             destino_slug = (empresa_sso.slug if empresa_sso else "karaokerj")

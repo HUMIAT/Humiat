@@ -8,44 +8,31 @@
   <link rel="stylesheet" href="/static/css/humiat-id.css">
   <style>
     :root{
-      --brand:#0d6efd;
-      --brand-dark:#0a58ca;
-      --brand-soft:#eef5ff;
-      --ok:#198754;
-      --ok-soft:#ecf8f1;
-      --warn:#b7791f;
-      --warn-soft:#fff8e7;
-      --danger:#b42318;
-      --danger-soft:#fff1f0;
+      --brand:#0b74ff;--brand-2:#00c8e8;--ink:#122033;--muted:#64748b;
+      --panel:#ffffff;--panel-soft:#f6f8fb;--line:#e5eaf1;--ok:#14875a;
+      --ok-soft:#ebf8f1;--warn:#9a6700;--warn-soft:#fff7df;--danger:#b42318;
+      --danger-soft:#fff0ee;--bg:#050c18;--bg-2:#0b1324;
     }
-    .portal-main{max-width:1180px}
-    .portal-hello{padding:22px 0 8px}.portal-hello h1{font-size:34px;letter-spacing:-.03em;margin-bottom:6px}.portal-hello>p:last-child{max-width:720px;font-size:15px;line-height:1.55}
-    .client-company-head{margin-top:18px;border:1px solid var(--line);border-radius:22px;padding:20px 22px;background:linear-gradient(135deg,#fff 0%,#f7faff 100%);box-shadow:0 10px 30px rgba(16,24,40,.05)}
-    .section-title{margin-top:30px;margin-bottom:14px}.section-title h2{font-size:22px;letter-spacing:-.02em}
-    .app-grid{align-items:stretch;gap:18px}
-    .app-card{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:16px;min-height:330px;border:1px solid #e6ebf2;border-radius:22px;padding:22px;background:#fff;box-shadow:0 10px 30px rgba(16,24,40,.06);transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
-    .app-card:hover{transform:translateY(-2px);box-shadow:0 16px 38px rgba(16,24,40,.09);border-color:#d8e2ef}
-    .app-card:before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:#d9e5f4}
-    .app-connect:before{background:linear-gradient(90deg,#0d6efd,#56a0ff)}.app-organiza:before{background:linear-gradient(90deg,#198754,#55b98a)}.app-solvoz:before{background:linear-gradient(90deg,#7c3aed,#b28cff)}.app-lokafest:before{background:linear-gradient(90deg,#f59e0b,#f9c74f)}
-    .app-card.is-disabled{opacity:1}.app-card.is-disabled .app-icon{filter:none}
-    .app-card-head{display:flex;gap:14px;align-items:flex-start}.app-card-copy{flex:1;min-width:0}.app-card-copy h3{margin:4px 0 5px;font-size:22px;letter-spacing:-.02em}.app-card-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
-    .app-icon{width:46px;height:46px;border-radius:14px;font-size:18px;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
-    .status-dot{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:#f3f6f9;color:#506176;font-size:10px;font-weight:900;letter-spacing:.05em;text-transform:uppercase}
-    .status-dot:before{content:"";width:7px;height:7px;border-radius:999px;background:#91a0b2}
-    .app-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
-    .app-metric{border:1px solid #e8edf3;border-radius:16px;padding:14px;background:#fbfcfe}
-    .app-metric small{display:block;color:#7b8797;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.07em}.app-metric strong{display:block;margin-top:6px;font-size:20px;letter-spacing:-.02em;color:#172033}
-    .app-message{border:1px solid #e3e9f1;border-radius:16px;padding:14px 15px;font-size:13px;line-height:1.5;background:#f8fafc;color:#334155}
-    .app-message strong{color:#172033}.app-message.warning{border-color:#f4d38a;background:var(--warn-soft);color:#7a5a15}.app-message.ok{border-color:#cfe8da;background:var(--ok-soft);color:#256445}
-    .client-access-actions{margin-top:auto;display:flex;gap:10px;flex-wrap:wrap;padding-top:2px}
-    .client-access-actions a,.quick-actions a{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:10px 16px;border-radius:12px;font-weight:900;text-decoration:none;border:1px solid #d8e2ee;background:#fff;color:#24334a;transition:.16s ease;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-    .client-access-actions a:first-child{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 6px 14px rgba(13,110,253,.18)}
-    .client-access-actions a:hover,.quick-actions a:hover{transform:translateY(-1px);border-color:#b9c9dd}.client-access-actions a:first-child:hover{background:var(--brand-dark);border-color:var(--brand-dark)}
-    .quick-actions{display:flex;gap:9px;flex-wrap:wrap}.quick-note{font-size:12px;color:var(--muted);margin-top:8px}
-    .disabled-action{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;border:1px solid var(--line);color:var(--muted);background:#f4f6f8;font-weight:800}
-    .product-note{font-size:12px;color:#667085;line-height:1.5}.product-highlight{font-weight:900;color:#172033}
-    .panel-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:30px 0 14px}.panel-intro p{margin:3px 0 0;color:var(--muted);font-size:13px}.panel-intro h2{margin:0;font-size:23px;letter-spacing:-.02em}
-    @media(max-width:700px){.app-metrics{grid-template-columns:1fr}.app-card{min-height:auto;padding:18px}.portal-hello h1{font-size:29px}.client-company-head{padding:17px}.client-access-actions a{flex:1 1 100%}}
+    *{box-sizing:border-box}.portal-body{background:radial-gradient(circle at 8% 0%,#0a2238 0,#071321 24%,var(--bg) 55%,#06091a 100%);color:#eef7ff;min-height:100vh}
+    .portal-main{max-width:1240px;margin:0 auto;padding:0 28px 54px}.portal-top{border-bottom:1px solid rgba(148,163,184,.16);background:rgba(4,10,20,.78);backdrop-filter:blur(14px)}
+    .portal-hello{padding:34px 0 20px}.portal-hello .eyebrow,.section-kicker{color:#29d9f0;font-weight:900;letter-spacing:.18em;text-transform:uppercase;font-size:11px}.portal-hello h1{font-size:38px;letter-spacing:-.04em;margin:6px 0 8px}.portal-hello>p:last-child{max-width:760px;color:#aebdd0;font-size:15px;line-height:1.6;margin:0}
+    .company-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:center;padding:26px 28px;border-radius:26px;border:1px solid rgba(120,160,210,.22);background:linear-gradient(135deg,rgba(15,29,48,.96),rgba(11,18,33,.94));box-shadow:0 24px 60px rgba(0,0,0,.22);overflow:hidden;position:relative}
+    .company-hero:after{content:"";position:absolute;width:300px;height:300px;border-radius:50%;right:-150px;top:-170px;background:radial-gradient(circle,rgba(0,200,232,.20),transparent 68%);pointer-events:none}
+    .company-hero h2{font-size:30px;margin:5px 0 8px;letter-spacing:-.035em}.company-hero p{margin:0;color:#aebdd0;line-height:1.55;max-width:640px}.company-label{display:inline-flex;align-items:center;gap:8px;color:#2de1ef;font-size:11px;font-weight:900;letter-spacing:.14em;text-transform:uppercase}
+    .qr-panel{position:relative;z-index:1;display:flex;align-items:center;gap:15px;padding:14px 16px;border-radius:19px;background:#fff;color:var(--ink);min-width:360px;box-shadow:0 14px 34px rgba(0,0,0,.16)}.qr-panel img{width:92px;height:92px;border:8px solid #fff;border-radius:14px;background:#fff}.qr-copy{display:flex;flex-direction:column;gap:5px}.qr-copy strong{font-size:17px}.qr-copy small{color:var(--muted);line-height:1.4}.qr-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px}
+    .section-head{display:flex;align-items:end;justify-content:space-between;gap:24px;margin:34px 0 16px}.section-head h2{font-size:26px;margin:4px 0 5px;letter-spacing:-.03em}.section-head p{margin:0;color:#9fb0c6;font-size:13px}
+    .app-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;align-items:stretch}
+    .app-card{--accent:#0b74ff;position:relative;display:flex;flex-direction:column;min-height:430px;padding:22px;border-radius:23px;background:var(--panel);color:var(--ink);border:1px solid rgba(226,232,240,.95);box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden;transition:transform .18s ease,box-shadow .18s ease}.app-card:hover{transform:translateY(-3px);box-shadow:0 24px 60px rgba(0,0,0,.24)}.app-card:before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--accent)}
+    .app-connect{--accent:#1578ff}.app-lokafest{--accent:#f59e0b}.app-organiza{--accent:#18a66a}.app-solvoz{--accent:#7c4dff}
+    .card-head{display:flex;gap:13px;align-items:flex-start;margin-bottom:17px}.app-icon{flex:0 0 48px;width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:950;background:linear-gradient(145deg,#29d9f0,#725cff);color:#07111d;box-shadow:0 8px 20px rgba(40,153,240,.18)}.card-copy{min-width:0}.card-copy h3{font-size:22px;margin:6px 0 5px;letter-spacing:-.025em}.card-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+    .status{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:999px;background:#f0f4f8;color:#526174;font-size:10px;font-weight:950;letter-spacing:.055em;text-transform:uppercase}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#94a3b8}.status.on{background:#eaf8f1;color:#18714f}.status.on:before{background:#22a66d}.status.attn{background:#fff5db;color:#8b6200}.status.attn:before{background:#f5a623}
+    .metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:13px}.metric{padding:14px;border-radius:15px;background:var(--panel-soft);border:1px solid var(--line);min-height:88px}.metric small{display:block;color:#778498;font-size:9px;font-weight:950;letter-spacing:.08em;text-transform:uppercase;line-height:1.3}.metric strong{display:block;margin-top:8px;font-size:20px;line-height:1.15;letter-spacing:-.025em;color:#111827}.metric strong.compact{font-size:17px}
+    .message{padding:13px 14px;border-radius:15px;border:1px solid var(--line);background:#f8fafc;color:#475569;font-size:12px;line-height:1.48;margin-bottom:12px}.message strong{color:#1f2937}.message.ok{background:var(--ok-soft);border-color:#caeadb;color:#277153}.message.warn{background:var(--warn-soft);border-color:#f2dc9b;color:#785a12}.message.danger{background:var(--danger-soft);border-color:#f1c7c2;color:#8f2e25}
+    .group-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border-radius:14px;background:#f7f9fc;border:1px solid var(--line);font-size:12px;margin-bottom:12px}.group-row strong{display:block;font-size:12px}.group-row span{display:block;color:var(--muted);margin-top:2px}.group-row a{white-space:nowrap}
+    .note{font-size:12px;color:#667085;line-height:1.5;margin-bottom:12px}.actions{margin-top:auto;display:grid;gap:9px}.btn-primary,.btn-secondary,.btn-small{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;font-weight:900;border-radius:12px;transition:.16s ease}.btn-primary{min-height:44px;padding:10px 16px;background:var(--brand);border:1px solid var(--brand);color:#fff;box-shadow:0 8px 18px rgba(11,116,255,.22)}.btn-primary:hover{background:#075fda;transform:translateY(-1px)}.btn-secondary{min-height:42px;padding:9px 15px;background:#fff;border:1px solid #d5dfeb;color:#203047}.btn-secondary:hover{border-color:#9fb6cf;background:#f8fbff}.btn-small{padding:8px 11px;border:1px solid #d5dfeb;background:#fff;color:#203047;font-size:11px}.actions.two{grid-template-columns:1fr 1fr}
+    .micro-value{color:#42526a;font-size:12px;line-height:1.5}.micro-value b{color:#172033}.empty-space{flex:1}.footer-note{margin-top:34px;text-align:center;color:#6f8097;font-size:11px}
+    @media(max-width:1050px){.app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.company-hero{grid-template-columns:1fr}.qr-panel{min-width:0;width:100%;max-width:520px}}
+    @media(max-width:680px){.portal-main{padding:0 16px 38px}.portal-hello h1{font-size:31px}.company-hero{padding:20px}.company-hero h2{font-size:25px}.qr-panel{align-items:flex-start}.qr-panel img{width:78px;height:78px}.app-grid{grid-template-columns:1fr}.app-card{min-height:auto}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.actions.two{grid-template-columns:1fr}.section-head{align-items:flex-start}.group-row{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
 <body class="portal-body">
@@ -56,32 +43,30 @@
 
 <main class="portal-main">
   <section class="portal-hello">
-    <p class="eyebrow">Humiat ID</p>
+    <p class="eyebrow">HUMIAT ID</p>
     <h1>Olá, {{ usuario.nome }}.</h1>
-    <p>Acompanhe seus serviços, pendências e oportunidades em um só lugar.</p>
+    <p>Seu ponto de entrada para acompanhar serviços, oportunidades, atualizações e tudo o que precisa da sua atenção.</p>
   </section>
 
-  {% if request.query_params.get('erro') %}
-  <div class="id-alert" style="margin-bottom:16px">{{ request.query_params.get('erro') }}</div>
-  {% endif %}
+  {% if request.query_params.get('erro') %}<div class="id-alert" style="margin-bottom:16px">{{ request.query_params.get('erro') }}</div>{% endif %}
 
   {% if empresa %}
-  <section class="client-company-head">
+  <section class="company-hero">
     <div>
-      <p class="eyebrow">{{ empresa.nome }}</p>
-      <h2>Empresa vinculada</h2>
-      <p>Os botões ativos refletem exatamente os acessos liberados no seu cadastro.</p>
+      <span class="company-label">{{ empresa.nome }}</span>
+      <h2>Seu ecossistema Humiat</h2>
+      <p>Acompanhe o que está ativo, veja alertas importantes e acesse seus produtos sem precisar procurar informação em vários lugares.</p>
     </div>
     {% if meus_acessos.get('SOLVOZ', {}).get('solvoz_catalogo', false) %}
-    <article class="client-qr-card">
+    <article class="qr-panel">
       <img src="/painel/empresa/{{ empresa.id }}/qr.png" alt="QR Code {{ empresa.nome }}">
-      <div>
-        <span class="status-dot">Seu QR Code</span>
-        <strong>Catálogo SolVoz</strong>
-        <small>Use este código para abrir o catálogo da sua empresa.</small>
-        <div class="client-qr-actions">
-          <a href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar QR</a>
-          <a href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Abrir Cliente Catálogo</a>
+      <div class="qr-copy">
+        <span class="status on">Catálogo ativo</span>
+        <strong>Seu Catálogo SolVoz</strong>
+        <small>Use o QR Code para divulgar seu catálogo e fortalecer sua marca.</small>
+        <div class="qr-actions">
+          <a class="btn-small" href="/painel/empresa/{{ empresa.id }}/qr.png?download=1">Baixar QR</a>
+          <a class="btn-small" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Gerenciar catálogo</a>
         </div>
       </div>
     </article>
@@ -90,130 +75,120 @@
   {% endif %}
 
   <section>
-    <div class="panel-intro">
-      <div><p class="eyebrow">Ecossistema Humiat</p><h2>Seus produtos e serviços</h2><p>Veja rapidamente o que está ativo, o que precisa de atenção e o que você ainda pode aproveitar.</p></div>
+    <div class="section-head">
+      <div><span class="section-kicker">ECOSSISTEMA HUMIAT</span><h2>Seus produtos e serviços</h2><p>Informação essencial primeiro. A ação certa, logo abaixo.</p></div>
     </div>
+
     <div class="app-grid">
       {% for p in produtos %}
       {% set acc = meus_acessos.get(p.codigo, {}) %}
-      {% if p.codigo == 'SOLVOZ' %}
-        {% set liberado = acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) %}
-      {% else %}
-        {% set liberado = acc.get('sistema', false) %}
-      {% endif %}
-      <article class="app-card app-{{ p.codigo|lower }} {% if not liberado %}is-disabled{% endif %}">
-        <div class="app-card-head">
+      {% if p.codigo == 'SOLVOZ' %}{% set liberado = acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) %}{% else %}{% set liberado = acc.get('sistema', false) %}{% endif %}
+
+      <article class="app-card app-{{ p.codigo|lower }}">
+        <div class="card-head">
           <div class="app-icon">{{ p.nome[0] }}</div>
-          <div class="app-card-copy">
-            <span class="status-dot">{% if p.codigo == 'SOLVOZ' and solvoz_resumo.ok and solvoz_resumo.catalogo_existe %}Catálogo ativo{% else %}{{ 'Disponível' if liberado else 'Conheça' }}{% endif %}</span>
+          <div class="card-copy">
+            {% if p.codigo == 'LOKAFEST' and lokafest_resumo.ok and lokafest_resumo.usuario_existe %}
+              <span class="status {{ 'on' if lokafest_resumo.apto_indicacoes else 'attn' }}">{{ 'Apto para indicações' if lokafest_resumo.apto_indicacoes else 'Atenção necessária' }}</span>
+            {% elif p.codigo == 'SOLVOZ' and solvoz_resumo.ok and solvoz_resumo.catalogo_existe %}
+              <span class="status on">Catálogo ativo</span>
+            {% else %}
+              <span class="status {{ 'on' if liberado else '' }}">{{ 'Acesso liberado' if liberado else 'Conheça' }}</span>
+            {% endif %}
             <h3>{{ p.nome }}</h3>
             <p>{{ p.descricao }}</p>
           </div>
         </div>
 
-        {% if p.codigo == 'ORGANIZA' %}
-          {% if organiza_rapido.vinculado %}
-            <div class="app-metrics">
-              <div class="app-metric"><small>Equipamentos</small><strong>{{ organiza_rapido.equipamentos }}</strong></div>
-              <div class="app-metric"><small>Situação financeira</small><strong>{{ organiza_rapido.pendencia_fmt if organiza_rapido.pendencia > 0 else 'Tudo em dia' }}</strong></div>
+        {% if p.codigo == 'CONNECT' %}
+          {% if liberado and connect_resumo.ok %}
+            <div class="metrics">
+              <div class="metric"><small>Contratos grátis</small><strong>{{ connect_resumo.gratis_restantes }} / {{ connect_resumo.gratis_limite }}</strong></div>
+              <div class="metric"><small>Faturado em contratos</small><strong class="compact">{{ connect_resumo.faturado_fmt }}</strong></div>
             </div>
-            {% if organiza_rapido.pendencia > 0 %}
-              <div class="app-message warning"><strong>Pendência financeira identificada.</strong><br>Entre em contato para regularizar e evitar o bloqueio do seu acesso.</div>
-            {% endif %}
-            <div class="client-access-actions">
-              <a href="{{ organiza_rapido.chamado_url }}">Abrir chamado</a>
-              <a href="{{ organiza_rapido.cadastro_url }}">Atualizar cadastro</a>
-            </div>
+            <div class="note">Sua franquia gratuita renova todo mês. Contratos adicionais podem ser comprados quando precisar.</div>
+            <div class="actions two"><a class="btn-primary" href="/painel/produto/CONNECT?modo=sistema">Abrir Connect</a><a class="btn-secondary" href="/painel/produto/CONNECT?modo=sistema&destino=/painel/humiats/comprar">Comprar contratos</a></div>
+          {% elif liberado %}
+            <div class="message"><strong>4 contratos grátis por mês.</strong><br>O resumo do Connect será atualizado assim que a integração responder.</div>
+            <div class="actions"><a class="btn-primary" href="/painel/produto/CONNECT?modo=sistema">Abrir Connect</a></div>
           {% else %}
-            <div class="app-message">Seu cadastro ainda não está vinculado ao Humiat ID.</div>
-            <div class="client-access-actions"><a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o produto</a></div>
+            <div class="message ok"><strong>Comece com 4 contratos grátis por mês.</strong><br>Contratos, agenda, operação, rotas e financeiro em um único sistema.</div>
+            <div class="empty-space"></div><div class="actions"><a class="btn-primary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o Connect</a></div>
           {% endif %}
 
-        {% elif p.codigo == 'CONNECT' %}
-          {% if liberado %}
-            {% if connect_resumo.ok %}
-              <div class="app-metrics">
-                <div class="app-metric"><small>Contratos grátis</small><strong>{{ connect_resumo.gratis_restantes }} / {{ connect_resumo.gratis_limite }}</strong></div>
-                <div class="app-metric"><small>Faturado em contratos</small><strong>{{ connect_resumo.faturado_fmt }}</strong></div>
-              </div>
-              <div class="product-note">Você recebe 4 contratos grátis por mês. Se precisar de mais, compre contratos adicionais quando quiser.</div>
-            {% else %}
-              <div class="app-message"><strong>4 contratos grátis por mês.</strong><br>O resumo financeiro será exibido assim que a integração do Connect responder.</div>
-            {% endif %}
-            <div class="client-access-actions">
-              {% if empresa %}<a href="/painel/produto/CONNECT?modo=sistema">Abrir Connect</a>{% endif %}
-              {% if empresa %}<a href="/painel/produto/CONNECT?modo=sistema&destino=/painel/humiats/comprar">Comprar contratos</a>{% endif %}
+        {% elif p.codigo == 'LOKAFEST' %}
+          {% if lokafest_resumo.ok and lokafest_resumo.usuario_existe %}
+            <div class="metrics">
+              <div class="metric"><small>Indicações na rede</small><strong>{{ lokafest_resumo.total_global }}</strong></div>
+              <div class="metric"><small>Recebidas</small><strong>{{ lokafest_resumo.recebidas }}</strong></div>
+              <div class="metric"><small>Repassadas</small><strong>{{ lokafest_resumo.repassadas }}</strong></div>
+              <div class="metric"><small>Prioridades</small><strong>{{ lokafest_resumo.prioridades }}</strong></div>
             </div>
+
+            {% if not lokafest_resumo.cadastro_ativo or not lokafest_resumo.cadastro_aprovado %}
+              <div class="message danger"><strong>Cadastro de usuário pendente.</strong><br>Seu cadastro precisa estar ativo e aprovado para receber indicações.</div>
+            {% elif lokafest_resumo.status_pacote == 'falta_1' %}
+              <div class="message warn"><strong>Cuidado: você está a 1 pacote de ficar de fora das indicações.</strong></div>
+            {% elif lokafest_resumo.status_pacote == 'bloqueado' %}
+              <div class="message danger"><strong>Indicações suspensas.</strong><br>Regularize sua situação para voltar a ter acesso às indicações.</div>
+            {% elif lokafest_resumo.apto_indicacoes %}
+              <div class="message ok"><strong>Você está apto a receber indicações.</strong>{% if lokafest_resumo.pacote %}<br>Pacote musical {{ lokafest_resumo.pacote }}.{% endif %}</div>
+            {% endif %}
+
+            <div class="group-row">
+              <div><strong>Grupo de locadores</strong><span>{{ 'Você já participa do grupo.' if lokafest_resumo.grupo_whatsapp else 'Você ainda não participa do grupo.' }}</span></div>
+              {% if lokafest_resumo.grupo_url %}<a class="btn-small" href="{{ lokafest_resumo.grupo_url }}" target="_blank" rel="noopener">{{ 'Abrir grupo' if lokafest_resumo.grupo_whatsapp else 'Entrar no grupo' }}</a>{% endif %}
+            </div>
+
+            <div class="actions">
+              {% if liberado and lokafest_resumo.cadastro_ativo and lokafest_resumo.cadastro_aprovado %}<a class="btn-primary" href="/painel/produto/LOKAFEST?modo=sistema">Abrir LokaFest</a>{% else %}<a class="btn-secondary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o LokaFest</a>{% endif %}
+            </div>
+          {% elif lokafest_resumo.ok %}
+            <div class="message warn"><strong>Cadastro de usuário necessário.</strong><br>Para receber indicações, primeiro conclua seu cadastro no LokaFest.</div>
+            {% if lokafest_resumo.total_global %}<div class="metric"><small>Indicações na rede</small><strong>{{ lokafest_resumo.total_global }}</strong></div>{% endif %}
+            <div class="empty-space"></div><div class="actions"><a class="btn-primary" href="{{ lokafest_resumo.cadastro_url or conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Completar cadastro</a></div>
           {% else %}
-            <div class="app-message ok"><span class="product-highlight">4 contratos grátis por mês.</span><br>Crie contratos, organize sua agenda, operação, rotas e financeiro em um só lugar.</div>
-            <div class="client-access-actions"><a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o produto</a></div>
+            <div class="message"><strong>LokaFest</strong><br>Indicações e oportunidades para empresas de festas e eventos.</div>
+            <div class="empty-space"></div><div class="actions"><a class="btn-primary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o LokaFest</a></div>
+          {% endif %}
+
+        {% elif p.codigo == 'ORGANIZA' %}
+          {% if organiza_rapido.vinculado %}
+            <div class="metrics">
+              <div class="metric"><small>Equipamentos</small><strong>{{ organiza_rapido.equipamentos }}</strong></div>
+              <div class="metric"><small>Situação financeira</small><strong class="compact">{{ organiza_rapido.pendencia_fmt if organiza_rapido.pendencia > 0 else 'Tudo em dia' }}</strong></div>
+            </div>
+            {% if organiza_rapido.pendencia > 0 %}<div class="message warn"><strong>Pendência financeira identificada.</strong><br>Entre em contato para regularizar e evitar bloqueios.</div>{% else %}<div class="message ok"><strong>Seu cadastro financeiro está em dia.</strong></div>{% endif %}
+            <div class="actions two"><a class="btn-primary" href="{{ organiza_rapido.chamado_url }}">Abrir chamado</a><a class="btn-secondary" href="{{ organiza_rapido.cadastro_url }}">Atualizar cadastro</a></div>
+          {% else %}
+            <div class="message warn"><strong>Cadastro ainda não vinculado.</strong><br>Atualize seus dados para conectar sua ficha ao Humiat ID.</div>
+            <div class="empty-space"></div><div class="actions"><a class="btn-primary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o Organiza</a></div>
           {% endif %}
 
         {% elif p.codigo == 'SOLVOZ' %}
           {% if solvoz_resumo.ok and solvoz_resumo.catalogo_existe %}
-            <div class="app-metrics">
-              <div class="app-metric">
-                <small>Pacote musical</small>
-                <strong>{{ organiza_rapido.pacote or solvoz_resumo.pacote_mais_recente or '-' }}</strong>
-              </div>
-              <div class="app-metric">
-                <small>Assinatura do catálogo</small>
-                <strong>
-                  {% if solvoz_resumo.dias_restantes is not none %}
-                    {{ solvoz_resumo.dias_restantes if solvoz_resumo.dias_restantes >= 0 else 0 }} dias
-                  {% else %}
-                    {{ solvoz_resumo.status or 'Ativa' }}
-                  {% endif %}
-                </strong>
-              </div>
+            <div class="metrics">
+              <div class="metric"><small>Pacote musical</small><strong>{{ organiza_rapido.pacote or solvoz_resumo.pacote_mais_recente or '-' }}</strong></div>
+              <div class="metric"><small>Assinatura do catálogo</small><strong class="compact">{% if solvoz_resumo.dias_restantes is not none %}{{ solvoz_resumo.dias_restantes if solvoz_resumo.dias_restantes >= 0 else 0 }} dias{% else %}{{ solvoz_resumo.status or 'Ativa' }}{% endif %}</strong></div>
             </div>
-
-            {% if organiza_rapido.falta_pacote is not none %}
-              {% if organiza_rapido.falta_pacote == 0 %}
-                <div class="app-message ok"><strong>Pacote {{ organiza_rapido.pacote or solvoz_resumo.pacote_mais_recente }} atualizado.</strong></div>
-              {% elif organiza_rapido.falta_pacote == 1 %}
-                <div class="app-message warning"><strong>Falta 1 pacote.</strong><br>Existe uma atualização disponível para o seu catálogo musical.</div>
-              {% elif organiza_rapido.falta_pacote > 1 %}
-                <div class="app-message warning"><strong>Faltam {{ organiza_rapido.falta_pacote }} pacotes.</strong><br>Atualize seu catálogo musical para ficar em dia.</div>
-              {% endif %}
-            {% endif %}
-
-            {% if solvoz_resumo.dias_restantes is not none and solvoz_resumo.dias_restantes < 0 %}
-              <div class="app-message warning"><strong>Assinatura vencida.</strong><br>Renove seu catálogo para manter os serviços ativos.</div>
-            {% elif solvoz_resumo.dias_restantes is not none and solvoz_resumo.dias_restantes <= 30 %}
-              <div class="app-message warning"><strong>Assinatura próxima do vencimento.</strong><br>Restam {{ solvoz_resumo.dias_restantes }} dias.</div>
-            {% endif %}
-
-            <div class="client-access-actions">
-              {% if solvoz_resumo.url_catalogo %}<a href="{{ solvoz_resumo.url_catalogo }}" target="_blank" rel="noopener">Abrir catálogo</a>{% endif %}
-              {% if acc.get('solvoz_catalogo', false) and empresa %}<a href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Renovar</a>{% endif %}
-              {% if acc.get('solvoz_comprado', false) and empresa and empresa.slug == 'karaokerj' %}<a href="/painel/produto/SOLVOZ?modo=cliente_site">Cliente Site</a>{% endif %}
-            </div>
-          {% elif solvoz_resumo.ok and not solvoz_resumo.catalogo_existe %}
-            <div class="app-message ok"><strong>Tenha seu próprio catálogo e valorize sua marca.</strong><br>Apresente seus equipamentos, serviços e identidade em um espaço profissional.</div>
-            <div class="client-access-actions"><a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o produto</a></div>
+            {% if organiza_rapido.falta_pacote == 0 %}<div class="message ok"><strong>Seu catálogo musical está atualizado.</strong></div>{% elif organiza_rapido.falta_pacote == 1 %}<div class="message warn"><strong>Existe 1 pacote disponível para atualização.</strong></div>{% elif organiza_rapido.falta_pacote is not none and organiza_rapido.falta_pacote > 1 %}<div class="message warn"><strong>Seu catálogo está {{ organiza_rapido.falta_pacote }} pacotes atrás.</strong><br>Atualize para manter seu conteúdo em dia.</div>{% endif %}
+            {% if solvoz_resumo.dias_restantes is not none and solvoz_resumo.dias_restantes < 0 %}<div class="message danger"><strong>Assinatura vencida.</strong><br>Renove para manter o catálogo ativo.</div>{% elif solvoz_resumo.dias_restantes is not none and solvoz_resumo.dias_restantes <= 30 %}<div class="message warn"><strong>Renovação próxima.</strong><br>Restam {{ solvoz_resumo.dias_restantes }} dias.</div>{% endif %}
+            <div class="actions two">{% if solvoz_resumo.url_catalogo %}<a class="btn-primary" href="{{ solvoz_resumo.url_catalogo }}" target="_blank" rel="noopener">Abrir catálogo</a>{% endif %}{% if acc.get('solvoz_catalogo', false) and empresa %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Gerenciar / renovar</a>{% endif %}</div>
+          {% elif solvoz_resumo.ok %}
+            <div class="message ok"><strong>Tenha seu próprio catálogo e valorize sua marca.</strong><br>Apresente seus equipamentos, serviços e identidade em um espaço profissional.</div>
+            <div class="empty-space"></div><div class="actions"><a class="btn-primary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o SolVoz</a></div>
           {% else %}
-            <div class="app-message">Não foi possível atualizar agora o resumo do SolVoz.</div>
-            <div class="client-access-actions">
-              {% if acc.get('solvoz_catalogo', false) and empresa %}<a href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Abrir SolVoz</a>{% endif %}
-              {% if not liberado %}<a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o produto</a>{% endif %}
-            </div>
+            <div class="message">Não foi possível atualizar agora o resumo do SolVoz.</div><div class="empty-space"></div><div class="actions">{% if liberado and empresa %}<a class="btn-primary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Abrir SolVoz</a>{% else %}<a class="btn-primary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o SolVoz</a>{% endif %}</div>
           {% endif %}
 
         {% else %}
-          {% if liberado and empresa %}
-            <div class="client-access-actions"><a href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir {{ p.nome }}</a></div>
-          {% elif liberado %}
-            <span class="disabled-action">Empresa não vinculada</span>
-          {% else %}
-            <div class="client-access-actions"><a href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o produto</a></div>
-          {% endif %}
+          <div class="empty-space"></div><div class="actions">{% if liberado and empresa %}<a class="btn-primary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir {{ p.nome }}</a>{% else %}<a class="btn-primary" href="{{ conheca_urls.get(p.codigo, p.url_publica or '/') }}" target="_blank" rel="noopener">Conheça o produto</a>{% endif %}</div>
         {% endif %}
       </article>
       {% endfor %}
     </div>
   </section>
+  <div class="footer-note">Humiat • Tecnologia que conecta. Inovação que transforma.</div>
 </main>
-<footer class="portal-footer">Humiat • Tecnologia que conecta. Inovação que transforma.</footer>
 </body>
 </html>
