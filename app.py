@@ -613,6 +613,8 @@ class SolVozEmpresa(Base):
     """
     __tablename__ = "solvoz_empresas"
     id = Column(Integer, primary_key=True)
+    # ID estável da empresa no SolVoz. O slug pode mudar; este ID mantém o vínculo.
+    solvoz_id = Column(Integer, nullable=True, unique=True, index=True)
     nome = Column(String(140), nullable=False)
     slug = Column(String(100), nullable=False, unique=True)
     # Slug global: sempre vem do SolVoz e é a identidade mestre da empresa.
@@ -621,7 +623,14 @@ class SolVozEmpresa(Base):
     connect_slug = Column(String(100), nullable=True, unique=True)
     dominio = Column(String(255), nullable=False)
     ativo = Column(Integer, nullable=False, default=1)
+    # Toda Empresa SolVoz deve ter um responsável no Organiza. Para empresas de
+    # clientes guardamos também o cliente de origem; Karaokê RJ pode apontar
+    # diretamente para um Humiat ID interno (Junior/Débora/Luiz).
+    responsavel_cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=True, index=True)
+    responsavel_humiat_usuario_id = Column(Integer, ForeignKey("humiat_usuarios.id"), nullable=True, index=True)
     criado_em = Column(DateTime, server_default=func.now())
+    responsavel_cliente = relationship("Cliente", foreign_keys=[responsavel_cliente_id])
+    responsavel_humiat_usuario = relationship("HumiatUsuario", foreign_keys=[responsavel_humiat_usuario_id])
 
 
 class SolVozAcessoCliente(Base):
@@ -3586,6 +3595,15 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "connect_slug" not in existentes_solvoz_empresas:
                 conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN connect_slug VARCHAR(100)"))
+            if "solvoz_id" not in existentes_solvoz_empresas:
+                conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN solvoz_id INTEGER"))
+            if "responsavel_cliente_id" not in existentes_solvoz_empresas:
+                conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN responsavel_cliente_id INTEGER"))
+            if "responsavel_humiat_usuario_id" not in existentes_solvoz_empresas:
+                conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN responsavel_humiat_usuario_id INTEGER"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_solvoz_empresas_solvoz_id ON solvoz_empresas (solvoz_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solvoz_empresas_responsavel_cliente ON solvoz_empresas (responsavel_cliente_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solvoz_empresas_responsavel_humiat ON solvoz_empresas (responsavel_humiat_usuario_id)"))
             # O slug do SolVoz é mestre. O Connect mantém apenas alias legado.
             conn.execute(text("UPDATE solvoz_empresas SET connect_slug = slug WHERE connect_slug IS NULL OR TRIM(connect_slug) = ''"))
             conn.execute(text("UPDATE solvoz_empresas SET connect_slug = 'vivioke' WHERE LOWER(slug) = 'vivikaraoke'"))
@@ -7784,7 +7802,16 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         solvoz_empresa_id = int(form.get("solvoz_empresa_id") or 0)
     except (TypeError, ValueError):
         solvoz_empresa_id = 0
-    eq.solvoz_empresa_id = solvoz_empresa_id or None
+    # Regra de integridade: se o cliente é o responsável de uma Empresa SolVoz,
+    # todos os equipamentos ativos dele pertencem à mesma empresa. O formulário
+    # não pode gravar outra empresa por engano.
+    empresa_responsavel = None
+    if int(getattr(eq, "cliente_id", 0) or 0):
+        empresa_responsavel = db.query(SolVozEmpresa).filter(
+            SolVozEmpresa.responsavel_cliente_id == int(eq.cliente_id),
+            SolVozEmpresa.ativo == 1,
+        ).order_by(SolVozEmpresa.id).first()
+    eq.solvoz_empresa_id = int(empresa_responsavel.id) if empresa_responsavel else (solvoz_empresa_id or None)
     eq.catalogo_online = 1 if str(form.get("catalogo_online") or "").strip().lower() in ("1", "true", "on", "sim") else 0
 
     # Opcionais operacionais da venda. São salvos no próprio equipamento para
@@ -8215,44 +8242,206 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
 
 # ---------------------------------------------------------
 # EMPRESAS SOLVOZ
-# Cadastro operacional no Organiza. Não replica usuários do SolVoz.
+# SolVoz é a fonte mestre de empresa/nome/slug/status. O Organiza mantém o
+# vínculo operacional com responsável, Humiat ID e equipamentos.
 # ---------------------------------------------------------
 
-def _clientes_vinculados_empresa_solvoz(db: Session, empresa_id: int):
-    return (
-        db.query(Cliente)
-        .join(Equipamento, Equipamento.cliente_id == Cliente.id)
-        .filter(Equipamento.solvoz_empresa_id == empresa_id)
-        .distinct()
+def _sincronizar_humiat_empresa_solvoz(db: Session, empresa: SolVozEmpresa, old_slug: str = "") -> HumiatEmpresa:
+    """Mantém a mesma empresa Humiat quando nome/slug mudam no SolVoz."""
+    slug_n = normalizar_slug_solvoz(empresa.slug)
+    old_n = normalizar_slug_solvoz(old_slug)
+    atual = db.query(HumiatEmpresa).filter(func.lower(HumiatEmpresa.slug) == slug_n).first()
+    antiga = None
+    if old_n and old_n != slug_n:
+        antiga = db.query(HumiatEmpresa).filter(func.lower(HumiatEmpresa.slug) == old_n).first()
+    if antiga and atual and int(antiga.id) != int(atual.id):
+        # Mescla vínculos/produtos antigos para evitar empresa Humiat duplicada.
+        for v in db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.empresa_id == antiga.id).all():
+            existe = db.query(HumiatUsuarioEmpresa).filter(
+                HumiatUsuarioEmpresa.usuario_id == v.usuario_id,
+                HumiatUsuarioEmpresa.empresa_id == atual.id,
+            ).first()
+            if not existe:
+                db.add(HumiatUsuarioEmpresa(usuario_id=v.usuario_id, empresa_id=atual.id))
+            db.delete(v)
+        for ep in db.query(HumiatEmpresaProduto).filter(HumiatEmpresaProduto.empresa_id == antiga.id).all():
+            existe = db.query(HumiatEmpresaProduto).filter(
+                HumiatEmpresaProduto.empresa_id == atual.id,
+                HumiatEmpresaProduto.produto_id == ep.produto_id,
+            ).first()
+            if existe:
+                existe.ativo = max(int(existe.ativo or 0), int(ep.ativo or 0))
+            else:
+                db.add(HumiatEmpresaProduto(empresa_id=atual.id, produto_id=ep.produto_id, ativo=ep.ativo))
+            db.delete(ep)
+        db.delete(antiga)
+    elif antiga and not atual:
+        antiga.slug = slug_n
+        antiga.nome = empresa.nome
+        antiga.ativo = int(empresa.ativo or 0)
+        atual = antiga
+    if not atual:
+        atual = garantir_empresa_solvoz_humiat(db, empresa.nome, slug_n, ativo=int(empresa.ativo or 0))
+    else:
+        atual.nome = empresa.nome
+        atual.ativo = int(empresa.ativo or 0)
+    return atual
+
+
+def _solvoz_empresa_upsert_origem(
+    db: Session, *, solvoz_id: int | None, nome: str, slug: str, ativo: int | bool = 1
+) -> tuple[SolVozEmpresa, bool, bool]:
+    """Upsert idempotente vindo do SolVoz usando ID estável e slug como fallback."""
+    nome_n = (nome or "").strip()
+    slug_n = normalizar_slug_solvoz(slug or nome_n)
+    sid = int(solvoz_id or 0) or None
+    ativo_i = 1 if bool(int(ativo)) else 0
+    if not nome_n or not slug_n:
+        raise ValueError("Nome e slug da empresa SolVoz são obrigatórios.")
+
+    empresa = None
+    if sid:
+        empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.solvoz_id == sid).first()
+    por_slug = db.query(SolVozEmpresa).filter(func.lower(SolVozEmpresa.slug) == slug_n).first()
+    if empresa and por_slug and int(empresa.id) != int(por_slug.id):
+        # Registro legado duplicado: preserva o registro do ID estável e move os vínculos.
+        db.query(Equipamento).filter(Equipamento.solvoz_empresa_id == por_slug.id).update(
+            {Equipamento.solvoz_empresa_id: empresa.id}, synchronize_session=False
+        )
+        if not empresa.responsavel_cliente_id and por_slug.responsavel_cliente_id:
+            empresa.responsavel_cliente_id = por_slug.responsavel_cliente_id
+        if not empresa.responsavel_humiat_usuario_id and por_slug.responsavel_humiat_usuario_id:
+            empresa.responsavel_humiat_usuario_id = por_slug.responsavel_humiat_usuario_id
+        db.delete(por_slug)
+        por_slug = None
+    if not empresa:
+        empresa = por_slug
+
+    criada = empresa is None
+    alterada = False
+    if criada:
+        empresa = SolVozEmpresa(
+            solvoz_id=sid,
+            nome=nome_n,
+            slug=slug_n,
+            connect_slug=("vivioke" if slug_n == "vivikaraoke" else slug_n),
+            dominio=dominio_solvoz_por_slug(slug_n),
+            ativo=ativo_i,
+        )
+        db.add(empresa)
+        db.flush()
+        old_slug = ""
+        alterada = True
+    else:
+        old_slug = str(empresa.slug or "")
+        old_connect = normalizar_slug_solvoz(empresa.connect_slug or old_slug)
+        if sid and int(empresa.solvoz_id or 0) != sid:
+            empresa.solvoz_id = sid
+            alterada = True
+        if empresa.nome != nome_n:
+            empresa.nome = nome_n
+            alterada = True
+        if normalizar_slug_solvoz(empresa.slug) != slug_n:
+            empresa.slug = slug_n
+            # Se o Connect seguia o slug global, acompanha a alteração. Alias legado é preservado.
+            if not old_connect or old_connect == normalizar_slug_solvoz(old_slug):
+                empresa.connect_slug = "vivioke" if slug_n == "vivikaraoke" else slug_n
+            alterada = True
+        novo_dominio = dominio_solvoz_por_slug(slug_n)
+        if empresa.dominio != novo_dominio:
+            empresa.dominio = novo_dominio
+            alterada = True
+        if int(empresa.ativo or 0) != ativo_i:
+            empresa.ativo = ativo_i
+            alterada = True
+        if not (empresa.connect_slug or "").strip():
+            empresa.connect_slug = "vivioke" if slug_n == "vivikaraoke" else slug_n
+            alterada = True
+    _sincronizar_humiat_empresa_solvoz(db, empresa, old_slug=old_slug)
+    return empresa, criada, alterada
+
+
+def _humiat_vincular_responsavel_solvoz(db: Session, empresa: SolVozEmpresa, cliente: Cliente) -> tuple[HumiatUsuario, bool]:
+    """Garante Humiat ID somente para o responsável real da empresa SolVoz."""
+    usuario_h, criado, interno = _humiat_garantir_usuario_cliente(cliente, db)
+    if interno:
+        raise ValueError("Cliente externo não pode reutilizar um Humiat ID da equipe interna.")
+
+    outra = db.query(SolVozEmpresa).filter(
+        SolVozEmpresa.responsavel_humiat_usuario_id == int(usuario_h.id),
+        SolVozEmpresa.id != int(empresa.id),
+    ).first()
+    if outra:
+        raise ValueError(f"Este Humiat ID já é responsável pela empresa {outra.nome}.")
+
+    empresa_h = garantir_empresa_solvoz_humiat(db, empresa.nome, empresa.slug, ativo=int(empresa.ativo or 0))
+    # Cliente empresa trabalha em uma única empresa no Humiat ID.
+    db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == int(usuario_h.id)).delete(synchronize_session=False)
+    db.add(HumiatUsuarioEmpresa(usuario_id=int(usuario_h.id), empresa_id=int(empresa_h.id)))
+
+    produto = db.query(HumiatProduto).filter(HumiatProduto.codigo == "SOLVOZ").first()
+    if produto:
+        atual = permissoes_usuario_humiat(db, int(usuario_h.id), "SOLVOZ")
+        salvar_permissoes_usuario_humiat(
+            db, int(usuario_h.id), produto,
+            sistema=bool(atual.get("sistema")), adm=bool(atual.get("adm")),
+            cliente_site=bool(atual.get("solvoz_comprado")), cliente_catalogo=True,
+        )
+    empresa.responsavel_humiat_usuario_id = int(usuario_h.id)
+    return usuario_h, criado
+
+
+def _solvoz_empresas_contexto_batched(db: Session, empresas: list[SolVozEmpresa]) -> list[dict]:
+    """Monta a tela em lote; elimina o N+1 que fazia a rota chegar a ~13s."""
+    if not empresas:
+        return []
+    ids = [int(e.id) for e in empresas]
+    clientes_por_empresa: dict[int, list[Cliente]] = {i: [] for i in ids}
+    vistos: dict[int, set[int]] = {i: set() for i in ids}
+    rows = (
+        db.query(Equipamento.solvoz_empresa_id, Cliente)
+        .join(Cliente, Cliente.id == Equipamento.cliente_id)
+        .filter(Equipamento.solvoz_empresa_id.in_(ids))
         .order_by(Cliente.nome.asc())
         .all()
     )
+    for empresa_id, cliente in rows:
+        eid, cid = int(empresa_id or 0), int(cliente.id)
+        if eid in vistos and cid not in vistos[eid]:
+            vistos[eid].add(cid)
+            clientes_por_empresa[eid].append(cliente)
 
+    resp_client_ids = {int(e.responsavel_cliente_id) for e in empresas if e.responsavel_cliente_id}
+    resp_h_ids = {int(e.responsavel_humiat_usuario_id) for e in empresas if e.responsavel_humiat_usuario_id}
+    clientes_resp = {int(c.id): c for c in db.query(Cliente).filter(Cliente.id.in_(resp_client_ids)).all()} if resp_client_ids else {}
+    humiat_resp = {int(u.id): u for u in db.query(HumiatUsuario).filter(HumiatUsuario.id.in_(resp_h_ids)).all()} if resp_h_ids else {}
 
-def _emails_com_acesso_solvoz(db: Session, slug: str) -> set[str]:
-    """Une acessos Humiat legados e novos acessos diretos SolVoz."""
-    slug_n = normalizar_slug_solvoz(slug)
-    emails: set[str] = set()
-    h_empresa = db.query(HumiatEmpresa).filter(HumiatEmpresa.slug == slug_n).first()
-    if h_empresa:
-        linhas = (
-            db.query(HumiatUsuario.email)
-            .join(HumiatUsuarioEmpresa, HumiatUsuarioEmpresa.usuario_id == HumiatUsuario.id)
-            .filter(HumiatUsuarioEmpresa.empresa_id == h_empresa.id, HumiatUsuario.ativo == 1)
-            .all()
-        )
-        emails.update({(x[0] or "").strip().lower() for x in linhas if x[0]})
-    diretos = (
-        db.query(SolVozAcessoCliente.email)
-        .join(Cliente, Cliente.id == SolVozAcessoCliente.cliente_id)
-        .join(Equipamento, Equipamento.cliente_id == Cliente.id)
-        .join(SolVozEmpresa, SolVozEmpresa.id == Equipamento.solvoz_empresa_id)
-        .filter(SolVozEmpresa.slug == slug_n, SolVozAcessoCliente.status == "ATIVO")
-        .distinct()
-        .all()
-    )
-    emails.update({(x[0] or "").strip().lower() for x in diretos if x[0]})
-    return emails
+    equipamentos_por_cliente: dict[int, list[tuple[int, int | None]]] = {cid: [] for cid in resp_client_ids}
+    if resp_client_ids:
+        eq_rows = db.query(Equipamento.id, Equipamento.cliente_id, Equipamento.solvoz_empresa_id, Equipamento.status).filter(
+            Equipamento.cliente_id.in_(resp_client_ids)
+        ).all()
+        for eqid, cid, seid, status in eq_rows:
+            if str(status or "").strip().upper() == "INATIVO":
+                continue
+            equipamentos_por_cliente.setdefault(int(cid), []).append((int(eqid), int(seid) if seid else None))
+
+    linhas = []
+    for empresa in empresas:
+        cliente_resp = clientes_resp.get(int(empresa.responsavel_cliente_id or 0))
+        usuario_resp = humiat_resp.get(int(empresa.responsavel_humiat_usuario_id or 0))
+        eqs = equipamentos_por_cliente.get(int(empresa.responsavel_cliente_id or 0), []) if cliente_resp else []
+        divergentes = [eqid for eqid, seid in eqs if seid != int(empresa.id)]
+        linhas.append({
+            "empresa": empresa,
+            "clientes": clientes_por_empresa.get(int(empresa.id), []),
+            "responsavel_cliente": cliente_resp,
+            "responsavel_humiat": usuario_resp,
+            "equipamentos_divergentes": divergentes,
+            "equipamentos_responsavel": len(eqs),
+            "responsavel_ok": bool(usuario_resp),
+        })
+    return linhas
 
 
 @app.get("/organiza/configuracoes/solvoz-empresas", response_class=HTMLResponse)
@@ -8264,57 +8453,41 @@ def solvoz_empresas_lista(
     if not usuario.is_admin:
         raise HTTPException(403)
     empresas = db.query(SolVozEmpresa).order_by(SolVozEmpresa.nome.asc()).all()
-    linhas_empresas = []
-    for empresa in empresas:
-        clientes = _clientes_vinculados_empresa_solvoz(db, empresa.id)
-        linhas_empresas.append({
-            "empresa": empresa,
-            "clientes": clientes,
-            "emails_acesso": _emails_com_acesso_solvoz(db, empresa.slug),
-        })
+    linhas_empresas = _solvoz_empresas_contexto_batched(db, empresas)
     editar = None
+    responsavel_editar = None
     try:
         editar_id = int(request.query_params.get("editar") or 0)
     except (TypeError, ValueError):
         editar_id = 0
+    try:
+        responsavel_id = int(request.query_params.get("responsavel") or 0)
+    except (TypeError, ValueError):
+        responsavel_id = 0
     if editar_id:
         editar = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == editar_id).first()
+    candidatos_clientes = []
+    candidatos_internos = []
+    if responsavel_id:
+        responsavel_editar = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == responsavel_id).first()
+        if responsavel_editar:
+            if normalizar_slug_solvoz(responsavel_editar.slug) == "karaokerj":
+                todos = db.query(HumiatUsuario).filter(HumiatUsuario.ativo == 1).order_by(HumiatUsuario.nome.asc()).all()
+                candidatos_internos = [u for u in todos if usuario_humiat_equipe_prioritaria(u)]
+            else:
+                candidatos_clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
     return templates.TemplateResponse("organiza/solvoz_empresas.html", {
         "request": request,
         "usuario": usuario,
         "empresas": empresas,
         "linhas_empresas": linhas_empresas,
         "editar": editar,
+        "responsavel_editar": responsavel_editar,
+        "candidatos_clientes": candidatos_clientes,
+        "candidatos_internos": candidatos_internos,
         "erro": request.query_params.get("erro", ""),
         "sucesso": request.query_params.get("sucesso", ""),
     })
-
-
-@app.post("/organiza/configuracoes/solvoz-empresas")
-async def solvoz_empresa_salvar(
-    request: Request,
-    usuario: Usuario = Depends(usuario_logado),
-    db: Session = Depends(get_db),
-):
-    if not usuario.is_admin:
-        raise HTTPException(403)
-    form = dict(await request.form())
-    nome = (form.get("nome") or "").strip()
-    slug = normalizar_slug_solvoz(form.get("slug") or nome)
-    if not nome or not slug:
-        return RedirectResponse("/organiza/configuracoes/solvoz-empresas?erro=Informe+nome+e+slug", status_code=303)
-    existente = db.query(SolVozEmpresa).filter(SolVozEmpresa.slug == slug).first()
-    if existente:
-        return RedirectResponse("/organiza/configuracoes/solvoz-empresas?erro=Este+slug+já+está+cadastrado", status_code=303)
-    db.add(SolVozEmpresa(
-        nome=nome,
-        slug=slug,
-        connect_slug=("vivioke" if slug == "vivikaraoke" else slug),
-        dominio=dominio_solvoz_por_slug(slug),
-        ativo=1,
-    ))
-    db.commit()
-    return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+cadastrada", status_code=303)
 
 
 @app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/editar")
@@ -8324,32 +8497,75 @@ async def solvoz_empresa_editar(
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
+    """No Organiza só o alias legado do Connect é editável; o resto vem do SolVoz."""
     if not usuario.is_admin:
         raise HTTPException(403)
     empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(404)
     form = dict(await request.form())
-    nome = (form.get("nome") or "").strip()
-    # O slug global não é editado no Organiza: ele pertence ao SolVoz.
     slug = normalizar_slug_solvoz(empresa.slug)
     connect_slug = normalizar_slug_solvoz(form.get("connect_slug") or slug)
-    if not nome or not slug or not connect_slug:
-        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Informe+nome+e+slug+do+Connect", status_code=303)
+    if not connect_slug:
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Informe+o+slug+do+Connect", status_code=303)
     existente_alias = db.query(SolVozEmpresa).filter(
         SolVozEmpresa.connect_slug == connect_slug, SolVozEmpresa.id != empresa_id
     ).first()
     if existente_alias:
         return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?editar={empresa_id}&erro=Este+slug+do+Connect+já+está+vinculado+a+outra+empresa", status_code=303)
-    empresa.nome = nome
     empresa.connect_slug = connect_slug
-    empresa.dominio = dominio_solvoz_por_slug(slug)
     db.commit()
-    return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Empresa+SolVoz+atualizada", status_code=303)
+    return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Alias+do+Connect+atualizado", status_code=303)
 
 
-@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/criar-acesso")
-async def solvoz_empresa_criar_acesso(
+@app.post("/organiza/configuracoes/solvoz-empresas/sincronizar")
+def solvoz_empresas_sincronizar_manual(
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Reconciliação manual: só consulta o SolVoz quando o administrador clicar."""
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    try:
+        dados = _solvoz_api_request("/_sv/api/organiza/empresas")
+        itens = dados.get("empresas") or []
+        criadas = atualizadas = inativadas_ausentes = 0
+        ids_origem: set[int] = set()
+        slugs_origem: set[str] = set()
+        for item in itens:
+            sid = int(item.get("id") or 0) or None
+            slug_item = normalizar_slug_solvoz(str(item.get("slug") or ""))
+            if sid:
+                ids_origem.add(int(sid))
+            if slug_item:
+                slugs_origem.add(slug_item)
+            _, criada, alterada = _solvoz_empresa_upsert_origem(
+                db,
+                solvoz_id=sid,
+                nome=str(item.get("nome") or "").strip(),
+                slug=slug_item,
+                ativo=int(item.get("ativo") or 0),
+            )
+            criadas += int(criada)
+            atualizadas += int(alterada and not criada)
+        # Não apaga histórico local. Registros que não existem mais na lista mestre
+        # ficam inativos até revisão manual.
+        for local in db.query(SolVozEmpresa).all():
+            existe_origem = (int(local.solvoz_id or 0) in ids_origem) if local.solvoz_id else (normalizar_slug_solvoz(local.slug) in slugs_origem)
+            if not existe_origem and int(local.ativo or 0):
+                local.ativo = 0
+                _sincronizar_humiat_empresa_solvoz(db, local, old_slug=local.slug)
+                inativadas_ausentes += 1
+        db.commit()
+        msg = quote_plus(f"Sincronização concluída: {len(itens)} empresa(s), {criadas} nova(s), {atualizadas} atualizada(s), {inativadas_ausentes} ausente(s) inativada(s).")
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?sucesso={msg}", status_code=303)
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={quote_plus(str(exc)[:300])}", status_code=303)
+
+
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/responsavel")
+async def solvoz_empresa_definir_responsavel(
     empresa_id: int,
     request: Request,
     usuario: Usuario = Depends(usuario_logado),
@@ -8360,66 +8576,132 @@ async def solvoz_empresa_criar_acesso(
     empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(404)
-    clientes = _clientes_vinculados_empresa_solvoz(db, empresa.id)
-    if not clientes:
-        msg = quote_plus("Vincule primeiro pelo menos um equipamento desta empresa a um cliente.")
-        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={msg}", status_code=303)
     form = dict(await request.form())
-    cliente = None
-    informado = str(form.get("cliente_id") or "").strip()
-    if informado.isdigit():
-        cid = int(informado)
-        cliente = next((c for c in clientes if c.id == cid), None)
-    elif len(clientes) == 1:
-        cliente = clientes[0]
-    if not cliente:
-        msg = quote_plus("Selecione o cliente que receberá o acesso ao SolVoz.")
-        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={msg}", status_code=303)
-    # O Organiza mantém o cadastro e o transporte de e-mail. O SolVoz cria a
-    # credencial/senha provisória e devolve a senha somente pela API privada.
-    cliente = db.query(Cliente).options(
-        selectinload(Cliente.equipamentos).selectinload(Equipamento.solvoz_empresa)
-    ).filter(Cliente.id == cliente.id).first()
-    grupos = [g for g in _solvoz_grupos_cliente(cliente) if int(g["empresa"].id) == int(empresa.id)]
+    ref = str(form.get("responsavel_ref") or "").strip()
+    if ":" not in ref:
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?responsavel={empresa_id}&erro=Selecione+o+responsável", status_code=303)
+    tipo, raw_id = ref.split(":", 1)
+    if not raw_id.isdigit():
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?responsavel={empresa_id}&erro=Responsável+inválido", status_code=303)
+
+    slug = normalizar_slug_solvoz(empresa.slug)
     try:
-        resultados = _solvoz_provisionar_cliente(cliente, grupos)
-        _solvoz_cache_salvar(db, cliente, resultados)
-    except (ValueError, RuntimeError) as exc:
-        return RedirectResponse(
-            f"/organiza/configuracoes/solvoz-empresas?erro={quote_plus(str(exc))}", status_code=303
-        )
-    resultado = resultados[0] if resultados else {}
-    if resultado.get("email_enviado"):
-        msg = f"Acesso SolVoz criado para {cliente.nome}. A senha provisória foi enviada por e-mail."
-        chave = "sucesso"
-    elif resultado.get("criado"):
-        msg = f"Acesso criado para {cliente.nome}, mas o e-mail não foi enviado: {resultado.get('email_erro') or 'verifique a configuração do Resend no Organiza.'}"
-        chave = "erro"
-    else:
-        msg = f"Acesso SolVoz de {cliente.nome} atualizado e equipamentos vinculados."
-        chave = "sucesso"
+        if tipo == "h":
+            if slug != "karaokerj":
+                raise ValueError("Responsável interno direto é permitido somente para Karaokê RJ.")
+            usuario_h = db.query(HumiatUsuario).filter(HumiatUsuario.id == int(raw_id), HumiatUsuario.ativo == 1).first()
+            if not usuario_h or not usuario_humiat_equipe_prioritaria(usuario_h):
+                raise ValueError("Selecione Junior, Débora ou Luiz para a Karaokê RJ.")
+            empresa.responsavel_cliente_id = None
+            empresa.responsavel_humiat_usuario_id = int(usuario_h.id)
+            db.commit()
+            return RedirectResponse("/organiza/configuracoes/solvoz-empresas?sucesso=Responsável+da+Karaokê+RJ+atualizado", status_code=303)
+
+        if tipo != "c" or slug == "karaokerj":
+            raise ValueError("Clientes comuns da Karaokê RJ não podem receber Humiat ID por este vínculo.")
+        cliente = db.query(Cliente).filter(Cliente.id == int(raw_id)).first()
+        if not cliente:
+            raise ValueError("Cliente não encontrado.")
+        outra_cliente = db.query(SolVozEmpresa).filter(
+            SolVozEmpresa.responsavel_cliente_id == int(cliente.id),
+            SolVozEmpresa.id != int(empresa.id),
+        ).first()
+        if outra_cliente:
+            raise ValueError(f"Este cliente já é responsável pela empresa {outra_cliente.nome}.")
+        empresa.responsavel_cliente_id = int(cliente.id)
+        empresa.responsavel_humiat_usuario_id = None
+        db.flush()
+        try:
+            usuario_h, criado = _humiat_vincular_responsavel_solvoz(db, empresa, cliente)
+        except ValueError as exc:
+            # O responsável fica registrado mesmo se faltar e-mail; a tela oferece o link público de cadastro.
+            db.commit()
+            return RedirectResponse(
+                f"/organiza/configuracoes/solvoz-empresas?erro={quote_plus('Responsável vinculado. ' + str(exc))}", status_code=303
+            )
+        db.commit()
+        aviso = f"Responsável {cliente.nome} vinculado"
+        if criado:
+            try:
+                enviar_link_acesso_humiat(db, usuario_h, request=request, primeiro_acesso=True)
+                aviso += " e Humiat ID criado; link de primeiro acesso enviado"
+            except Exception as exc:
+                aviso += f"; Humiat ID criado, mas o e-mail falhou: {str(exc)[:120]}"
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?sucesso={quote_plus(aviso)}", status_code=303)
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?responsavel={empresa_id}&erro={quote_plus(str(exc)[:260])}", status_code=303)
+
+
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/corrigir-vinculo")
+def solvoz_empresa_corrigir_vinculo_equipamentos(
+    empresa_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
+    if not empresa or not empresa.responsavel_cliente_id:
+        return RedirectResponse("/organiza/configuracoes/solvoz-empresas?erro=Defina+primeiro+o+responsável+da+empresa", status_code=303)
+    equipamentos = db.query(Equipamento).filter(Equipamento.cliente_id == int(empresa.responsavel_cliente_id)).all()
+    alterados = 0
+    for eq in equipamentos:
+        if str(eq.status or "").strip().upper() == "INATIVO":
+            continue
+        if int(eq.solvoz_empresa_id or 0) != int(empresa.id):
+            eq.solvoz_empresa_id = int(empresa.id)
+            alterados += 1
+    db.commit()
     return RedirectResponse(
-        f"/organiza/configuracoes/solvoz-empresas?{chave}={quote_plus(msg)}", status_code=303
+        f"/organiza/configuracoes/solvoz-empresas?sucesso={quote_plus(f'{alterados} equipamento(s) corrigido(s) para {empresa.nome}.')}",
+        status_code=303,
     )
 
 
-@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/status")
-async def solvoz_empresa_status(
-    empresa_id: int,
-    request: Request,
+@app.get("/organiza/clientes/{cliente_id}/cadastro-publico")
+def cliente_cadastro_publico(
+    cliente_id: int,
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404)
+    if not cliente.token_ficha:
+        cliente.token_ficha = secrets.token_urlsafe(24)
+        db.commit()
+    return RedirectResponse(f"{PUBLIC_BASE_URL.rstrip('/')}/cadastro/{cliente.token_ficha}", status_code=303)
+
+
+# Compatibilidade: o botão antigo não cria mais usuário/acesso SolVoz a partir de
+# qualquer cliente vinculado por equipamento. A responsabilidade é explícita.
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/criar-acesso")
+def solvoz_empresa_criar_acesso_legado(
+    empresa_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+):
     if not usuario.is_admin:
         raise HTTPException(403)
-    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.id == empresa_id).first()
-    if not empresa:
-        raise HTTPException(404)
-    form = dict(await request.form())
-    empresa.ativo = 1 if str(form.get("ativo") or "0") == "1" else 0
-    db.commit()
-    return RedirectResponse("/organiza/configuracoes/solvoz-empresas", status_code=303)
+    return RedirectResponse(
+        f"/organiza/configuracoes/solvoz-empresas?responsavel={empresa_id}&erro=Defina+o+responsável+da+empresa.+O+Humiat+ID+só+é+criado+para+esse+responsável.",
+        status_code=303,
+    )
 
+
+# Status/nome/slug pertencem ao SolVoz. Mantemos a rota antiga apenas para não
+# quebrar favoritos/formulários de versões anteriores.
+@app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/status")
+def solvoz_empresa_status_legado(
+    empresa_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+):
+    if not usuario.is_admin:
+        raise HTTPException(403)
+    return RedirectResponse(
+        "/organiza/configuracoes/solvoz-empresas?erro=Ative+ou+inative+a+empresa+no+SolVoz.+O+Organiza+recebe+a+alteração+automaticamente.",
+        status_code=303,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -10137,48 +10419,45 @@ async def api_solvoz_email_recuperacao(
 
 
 @app.post("/api/integracoes/solvoz/empresas")
-def api_solvoz_empresa_criar(
+def api_solvoz_empresa_sincronizar(
     nome: str = Form(...),
     slug: str = Form(...),
+    solvoz_id: int = Form(0),
+    ativo: int = Form(1),
     x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
     db: Session = Depends(get_db),
 ):
-    """Cria/garante no Organiza a empresa clonada no SolVoz (idempotente)."""
+    """Cria ou atualiza no Organiza a empresa mestre do SolVoz (idempotente)."""
     _validar_token_solvoz(x_solvoz_token)
-    nome_n = (nome or "").strip()
-    slug_n = normalizar_slug_solvoz(slug or nome_n)
-    if not nome_n or not slug_n:
-        raise HTTPException(400, "Nome e slug são obrigatórios.")
-    empresa = db.query(SolVozEmpresa).filter(SolVozEmpresa.slug == slug_n).first()
-    criada = False
-    if not empresa:
-        empresa = SolVozEmpresa(
-            nome=nome_n,
-            slug=slug_n,
-            connect_slug=("vivioke" if slug_n == "vivikaraoke" else slug_n),
-            dominio=dominio_solvoz_por_slug(slug_n),
-            ativo=1,
+    try:
+        empresa, criada, alterada = _solvoz_empresa_upsert_origem(
+            db,
+            solvoz_id=int(solvoz_id or 0) or None,
+            nome=nome,
+            slug=slug,
+            ativo=int(ativo or 0),
         )
-        db.add(empresa)
-        db.flush()
-        criada = True
-    else:
-        empresa.nome = nome_n
-        empresa.dominio = dominio_solvoz_por_slug(slug_n)
-        if not (empresa.connect_slug or "").strip():
-            empresa.connect_slug = "vivioke" if slug_n == "vivikaraoke" else slug_n
-        # Preserve o status existente; esta integração não reativa decisão manual.
-    h_empresa = garantir_empresa_solvoz_humiat(db, nome_n, slug_n, ativo=1)
-    db.commit()
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+    except Exception:
+        db.rollback()
+        raise
+    h_empresa = db.query(HumiatEmpresa).filter(func.lower(HumiatEmpresa.slug) == normalizar_slug_solvoz(empresa.slug)).first()
     return {
         "ok": True,
         "criada": criada,
+        "alterada": alterada,
         "empresa_id": empresa.id,
-        "humiat_empresa_id": h_empresa.id,
+        "solvoz_id": empresa.solvoz_id,
+        "humiat_empresa_id": h_empresa.id if h_empresa else None,
         "nome": empresa.nome,
         "slug": empresa.slug,
         "connect_slug": empresa.connect_slug or empresa.slug,
         "dominio": empresa.dominio,
+        "ativo": int(empresa.ativo or 0),
+        "responsavel_pendente": not bool(empresa.responsavel_humiat_usuario_id),
     }
 
 
