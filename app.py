@@ -39,7 +39,7 @@ from humiat_id import (
     HumiatUsuarioProduto, gerar_hash_senha_id,
     garantir_empresa_solvoz_humiat,
     permissoes_usuario_humiat, salvar_permissoes_usuario_humiat,
-    usuario_humiat_interno, usuario_humiat_equipe_prioritaria, enviar_link_acesso_humiat,
+    usuario_humiat_interno, usuario_humiat_equipe_prioritaria, enviar_link_acesso_humiat, aplicar_rotinas_cliente_humiat,
     enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao, _enviar_resend_humiat,
 )
 
@@ -2800,6 +2800,10 @@ def _humiat_salvar_acessos_cliente(cliente: Cliente, form: dict, db: Session, re
             )
 
     if not interno:
+        # Regras padrão do cliente Humiat: Organiza Tarefas rápidas e LokaFest sempre ativos;
+        # SolVoz é reconhecido automaticamente pelo vínculo já existente no Organiza.
+        aplicar_rotinas_cliente_humiat(db, usuario, int(cliente.id), garantir_lokafest=True)
+
         # APP 1.1.96: um cliente externo possui uma única empresa no Humiat ID.
         # A sincronização também remove vínculos legados e habilita os produtos
         # já liberados no cadastro para essa empresa.

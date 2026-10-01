@@ -37,6 +37,8 @@ CONNECT_LOGOUT_URL = os.getenv("HUMIAT_CONNECT_LOGOUT_URL", f"{CONNECT_BASE_URL}
 SOLVOZ_LOGOUT_URL = os.getenv("HUMIAT_SOLVOZ_LOGOUT_URL", f"{SOLVOZ_BASE_URL}/_sv/logout-humiat").strip()
 
 RESET_MINUTES = int(os.getenv("HUMIAT_RESET_MINUTES", "30") or "30")
+PAINEL_CACHE_MINUTES = int(os.getenv("HUMIAT_PAINEL_CACHE_MINUTES", "240") or "240")
+PENDENCIAS_CACHE_MINUTES = int(os.getenv("HUMIAT_PENDENCIAS_CACHE_MINUTES", "60") or "60")
 RESEND_API_KEY = os.getenv("HUMIAT_RESEND_API_KEY", "").strip()
 EMAIL_FROM = os.getenv("HUMIAT_EMAIL_FROM", "").strip()
 RESEND_API_URL = os.getenv("HUMIAT_RESEND_API_URL", "https://api.resend.com/emails").strip()
@@ -194,6 +196,14 @@ class HumiatMigracaoLokaFest(Base):
     email_enviado_em = Column(DateTime, nullable=True)
     ultimo_erro = Column(Text, nullable=True)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class HumiatIntegracaoCache(Base):
+    __tablename__ = "humiat_integracao_cache"
+    id = Column(Integer, primary_key=True)
+    chave = Column(String(220), unique=True, nullable=False, index=True)
+    conteudo = Column(Text, nullable=False, default="{}")
+    atualizado_em = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class HumiatAuditoria(Base):
@@ -1257,6 +1267,30 @@ def _limpar_vinculos_equipe_interna_legada(db: Session) -> int:
     return alterados
 
 
+def _reconciliar_acessos_clientes_humiat(db: Session) -> int:
+    """Corrige clientes já vinculados para as regras atuais sem consultar sistemas externos."""
+    try:
+        rows = db.execute(text("""
+            SELECT id,nome,email,documento,telefone,ddi,cep,cidade,municipio,estado,bairro,endereco,humiat_usuario_id
+            FROM clientes
+            WHERE humiat_usuario_id IS NOT NULL
+            ORDER BY id
+        """)).mappings().all()
+    except Exception:
+        return 0
+    alterados = 0
+    for row in rows:
+        uid = int(row.get("humiat_usuario_id") or 0)
+        if not uid:
+            continue
+        hu = db.query(HumiatUsuario).filter(HumiatUsuario.id == uid).first()
+        if not hu:
+            continue
+        _aplicar_acessos_cliente_humiat(db, hu, dict(row), liberar_lokafest=True)
+        alterados += 1
+    return alterados
+
+
 def seed_humiat_id():
     """Cria estrutura lógica inicial sem destruir dados existentes."""
     db = SessionLocal()
@@ -1319,6 +1353,9 @@ def seed_humiat_id():
         elif not admin_senha:
             print("[HUMIAT ID] Administrador inicial não criado: configure HUMIAT_ADMIN_SENHA no ambiente.")
         db.flush()
+        clientes_reconciliados = _reconciliar_acessos_clientes_humiat(db)
+        if clientes_reconciliados:
+            print(f"[HUMIAT ID] 1.2.03: {clientes_reconciliados} cliente(s) reconciliado(s) com Tarefas rápidas, LokaFest e vínculo SolVoz local.")
         acessos_iniciais = _garantir_acessos_iniciais_equipe(db)
         if acessos_iniciais:
             print(f"[HUMIAT ID] 1.1.31: {acessos_iniciais} acesso(s) iniciais de Junior/Debora/Luiz criados.")
@@ -1500,6 +1537,33 @@ def _pendencia_financeira_cliente_humiat(db: Session, cliente_id: int) -> float:
     return round(total_aberto, 2)
 
 
+def _cache_integracao_get(db: Session, chave: str, minutos: int) -> dict | None:
+    item = db.query(HumiatIntegracaoCache).filter(HumiatIntegracaoCache.chave == chave).first()
+    if not item or not item.atualizado_em:
+        return None
+    if datetime.utcnow() - item.atualizado_em > timedelta(minutes=max(1, minutos)):
+        return None
+    try:
+        return json.loads(item.conteudo or "{}")
+    except Exception:
+        return None
+
+
+def _cache_integracao_put(db: Session, chave: str, dados: dict) -> dict:
+    item = db.query(HumiatIntegracaoCache).filter(HumiatIntegracaoCache.chave == chave).first()
+    if not item:
+        item = HumiatIntegracaoCache(chave=chave)
+        db.add(item)
+    item.conteudo = json.dumps(dados or {}, ensure_ascii=False)
+    item.atualizado_em = datetime.utcnow()
+    db.commit()
+    return dados
+
+
+def _cache_integracao_apagar(db: Session, prefixo: str) -> None:
+    db.query(HumiatIntegracaoCache).filter(HumiatIntegracaoCache.chave.like(prefixo + "%")).delete(synchronize_session=False)
+
+
 def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
     """Resumo do Organiza mostrado no portal sem liberar o sistema completo."""
     try:
@@ -1538,18 +1602,20 @@ def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
     }
 
 
-def _solvoz_resumo_humiat(empresa: HumiatEmpresa | None) -> dict:
-    """Consulta o resumo comercial do SolVoz independentemente da permissao de abertura.
-
-    A permissao do cliente continua servindo somente para abrir a area autenticada.
-    """
+def _solvoz_resumo_humiat(db: Session, empresa: HumiatEmpresa | None, *, forcar: bool = False) -> dict:
+    """Resumo do SolVoz com snapshot local para não consultar o produto a cada abertura do painel."""
     if not empresa or not SSO_SECRET:
         return {"ok": False, "catalogo_existe": False}
+    chave = f"painel:solvoz:{int(empresa.id)}"
+    if not forcar:
+        cache = _cache_integracao_get(db, chave, PAINEL_CACHE_MINUTES)
+        if cache is not None:
+            return cache
     url = f"{SOLVOZ_BASE_URL}/_sv/api/humiat/painel?{urlencode({'slug': empresa.slug})}"
     req = urllib.request.Request(url, headers={
         "X-Humiat-SSO-Secret": SSO_SECRET,
         "Accept": "application/json",
-        "User-Agent": "Humiat-ID-Painel/1.2.00",
+        "User-Agent": "Humiat-ID-Painel/1.2.03",
     })
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -1560,7 +1626,7 @@ def _solvoz_resumo_humiat(empresa: HumiatEmpresa | None) -> dict:
             dias = int(dias) if dias is not None else None
         except (TypeError, ValueError):
             dias = None
-        return {
+        return _cache_integracao_put(db, chave, {
             "ok": bool(dados.get("ok")),
             "catalogo_existe": bool(dados.get("catalogo_existe")),
             "url_catalogo": str(catalogo.get("url") or ""),
@@ -1568,7 +1634,7 @@ def _solvoz_resumo_humiat(empresa: HumiatEmpresa | None) -> dict:
             "valido_ate": str(catalogo.get("valido_ate_br") or catalogo.get("valido_ate") or ""),
             "dias_restantes": dias,
             "pacote_mais_recente": str((dados.get("pacote_mais_recente") or {}).get("label") or ""),
-        }
+        })
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return {"ok": True, "catalogo_existe": False}
@@ -1577,24 +1643,29 @@ def _solvoz_resumo_humiat(empresa: HumiatEmpresa | None) -> dict:
         return {"ok": False, "catalogo_existe": False}
 
 
-def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
+def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None, *, forcar: bool = False) -> dict:
     """Consulta enxuta do Connect somente quando o usuário possui acesso."""
     if not empresa:
         return {"ok": False}
     slug_connect = _connect_slug_por_global(db, empresa.slug)
+    chave = f"painel:connect:{int(empresa.id)}"
+    if not forcar:
+        cache = _cache_integracao_get(db, chave, PAINEL_CACHE_MINUTES)
+        if cache is not None:
+            return cache
     if not SSO_SECRET:
         return {"ok": False, "slug": slug_connect}
     url = f"{CONNECT_BASE_URL}/_connect/api/humiat/painel?{urlencode({'slug': slug_connect})}"
     req = urllib.request.Request(url, headers={
         "X-Humiat-SSO-Secret": SSO_SECRET,
         "Accept": "application/json",
-        "User-Agent": "Humiat-ID-Painel/1.2.00",
+        "User-Agent": "Humiat-ID-Painel/1.2.03",
     })
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             dados = json.loads(resp.read().decode("utf-8"))
         gratis = dados.get("contratos_gratis") or {}
-        return {
+        return _cache_integracao_put(db, chave, {
             "ok": bool(dados.get("ok")),
             "slug": slug_connect,
             "gratis_limite": int(gratis.get("limite") or 4),
@@ -1602,13 +1673,13 @@ def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
             "gratis_restantes": int(gratis.get("restantes") or 0),
             "faturado": float(dados.get("faturado_contratos") or 0),
             "faturado_fmt": _painel_moeda(float(dados.get("faturado_contratos") or 0)),
-        }
+        })
     except Exception:
         return {"ok": False, "slug": slug_connect, "gratis_limite": 4}
 
 
 
-def _lokafest_resumo_humiat(usuario: HumiatUsuario) -> dict:
+def _lokafest_resumo_humiat(db: Session, usuario: HumiatUsuario, *, forcar: bool = False) -> dict:
     """Consulta o LokaFest pela identidade pessoal do Humiat.
 
     LokaFest nao usa empresa/tenant. O cadastro local e localizado por CPF e,
@@ -1617,6 +1688,11 @@ def _lokafest_resumo_humiat(usuario: HumiatUsuario) -> dict:
     """
     if not usuario or not SSO_SECRET:
         return {"ok": False, "usuario_existe": False}
+    chave = f"painel:lokafest:{int(usuario.id)}"
+    if not forcar:
+        cache = _cache_integracao_get(db, chave, PAINEL_CACHE_MINUTES)
+        if cache is not None:
+            return cache
 
     payload = urlencode({
         "documento": (usuario.documento or "").strip(),
@@ -1630,13 +1706,13 @@ def _lokafest_resumo_humiat(usuario: HumiatUsuario) -> dict:
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
-            "User-Agent": "Humiat-ID-Painel/1.2.00",
+            "User-Agent": "Humiat-ID-Painel/1.2.03",
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             dados = json.loads(resp.read().decode("utf-8"))
-        return {
+        return _cache_integracao_put(db, chave, {
             "ok": bool(dados.get("ok")),
             "usuario_existe": bool(dados.get("usuario_existe")),
             "cadastro_ativo": bool(dados.get("cadastro_ativo")),
@@ -1653,7 +1729,7 @@ def _lokafest_resumo_humiat(usuario: HumiatUsuario) -> dict:
             "status_pacote": str(dados.get("status_pacote") or ""),
             "mensagem": str(dados.get("mensagem") or ""),
             "cadastro_url": str(dados.get("cadastro_url") or f"{LOKAFEST_BASE_URL}/cadastro"),
-        }
+        })
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return {"ok": True, "usuario_existe": False, "cadastro_url": f"{LOKAFEST_BASE_URL}/cadastro"}
@@ -1754,7 +1830,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Humiat-ID-LokaFest/1.2.02",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.03",
         })
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -1795,7 +1871,7 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.02")
+    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.03")
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
@@ -1815,11 +1891,31 @@ def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, clien
             db.add(HumiatUsuarioEmpresa(usuario_id=usuario_h.id, empresa_id=empresa_h.id))
 
 
-def _pendencias_lokafest_humiat(db: Session) -> tuple[list[dict], str]:
+def aplicar_rotinas_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente_id: int, *, garantir_lokafest: bool = True) -> None:
+    """Aplica no automático as mesmas regras do cadastro manual de cliente."""
+    cliente = None
     try:
-        dados = _lokafest_humiat_request("/_lokafest/api/humiat/usuarios")
-    except Exception as exc:
-        return [], str(exc)
+        row = db.execute(text("""SELECT id,nome,email,documento,telefone,ddi,cep,cidade,municipio,estado,bairro,endereco,humiat_usuario_id FROM clientes WHERE id=:id LIMIT 1"""), {"id": int(cliente_id)}).mappings().first()
+        cliente = dict(row) if row else None
+    except Exception:
+        cliente = None
+    if not cliente:
+        raise ValueError("Cliente não localizado no Organiza")
+    _aplicar_acessos_cliente_humiat(db, usuario_h, cliente, liberar_lokafest=True)
+    if garantir_lokafest:
+        _garantir_usuario_lokafest_humiat(cliente, usuario_h.nome)
+    _cache_integracao_apagar(db, f"painel:lokafest:{int(usuario_h.id)}")
+
+
+def _pendencias_lokafest_humiat(db: Session) -> tuple[list[dict], str]:
+    chave = "migracao:lokafest:usuarios"
+    dados = _cache_integracao_get(db, chave, PENDENCIAS_CACHE_MINUTES)
+    if dados is None:
+        try:
+            dados = _lokafest_humiat_request("/_lokafest/api/humiat/usuarios")
+            _cache_integracao_put(db, chave, dados)
+        except Exception as exc:
+            return [], str(exc)
     migrados = {int(x.lokafest_usuario_id): x for x in db.query(HumiatMigracaoLokaFest).all()}
     pendencias = []
     for item in dados.get("usuarios") or []:
@@ -1878,6 +1974,10 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         empresa_por_usuario.setdefault(v.usuario_id, v.empresa_id)
     pendencias_lokafest, pendencias_lokafest_erro = _pendencias_lokafest_humiat(db)
     erros_email_lokafest = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.status == "EMAIL_ERRO").order_by(HumiatMigracaoLokaFest.id.desc()).all()
+    try:
+        cliente_humiat_ids = {int(x[0]) for x in db.execute(text("SELECT DISTINCT humiat_usuario_id FROM clientes WHERE humiat_usuario_id IS NOT NULL")).all() if x[0]}
+    except Exception:
+        cliente_humiat_ids = set()
     return {
         "request": request,
         "usuario": usuario,
@@ -1893,6 +1993,7 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "pendencias_lokafest": pendencias_lokafest,
         "pendencias_lokafest_erro": pendencias_lokafest_erro,
         "erros_email_lokafest": erros_email_lokafest,
+        "cliente_humiat_ids": cliente_humiat_ids,
         "admin_humiat": True,
     }
 
@@ -2087,8 +2188,8 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
     connect_liberado = bool(meus_acessos.get("CONNECT", {}).get("sistema", False))
     connect_resumo = _connect_resumo_humiat(db, empresa) if connect_liberado else {"ok": False, "gratis_limite": 4}
     organiza_rapido = _cliente_rapido_humiat(db, usuario.id)
-    solvoz_resumo = _solvoz_resumo_humiat(empresa)
-    lokafest_resumo = _lokafest_resumo_humiat(usuario)
+    solvoz_resumo = _solvoz_resumo_humiat(db, empresa)
+    lokafest_resumo = _lokafest_resumo_humiat(db, usuario)
     return templates.TemplateResponse(
         "humiat/painel.html",
         {
@@ -2609,7 +2710,7 @@ def aprovar_migracao_lokafest(
             alvo.telefone = str(cliente.get("telefone") or alvo.telefone or item.get("whatsapp") or "").strip()[:40] or None
 
         db.execute(text("UPDATE clientes SET humiat_usuario_id=:uid WHERE id=:cid"), {"uid": int(alvo.id), "cid": int(cliente.get("id"))})
-        _aplicar_acessos_cliente_humiat(db, alvo, cliente, liberar_lokafest=True)
+        aplicar_rotinas_cliente_humiat(db, alvo, int(cliente.get("id")), garantir_lokafest=True)
 
         mig = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.lokafest_usuario_id == int(lokafest_usuario_id)).first()
         if not mig:
@@ -2733,7 +2834,8 @@ async def criar_usuario_humiat(
         lokafest_solicitado = str(form.get(f"produto_{produto_lf.id}_sistema") or "0") == "1"
     if cliente_organiza:
         db.execute(text("UPDATE clientes SET humiat_usuario_id=:uid WHERE id=:cid"), {"uid": int(novo.id), "cid": int(cliente_organiza.get("id"))})
-        _aplicar_acessos_cliente_humiat(db, novo, cliente_organiza, liberar_lokafest=lokafest_solicitado)
+        _aplicar_acessos_cliente_humiat(db, novo, cliente_organiza, liberar_lokafest=True)
+        lokafest_solicitado = True
     _auditar(db, request, "CRIAR_USUARIO", usuario.id, empresa_vinculada, f"{email}; " + ",".join(resumo_acessos))
     token_primeiro = _novo_token_reset(db, novo, request=request) if cliente_organiza else ""
     link_primeiro = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token_primeiro)}" if token_primeiro else ""
@@ -2826,9 +2928,40 @@ async def editar_usuario_humiat(
         if sistema or adm or comprado or catalogo:
             resumo_acessos.append(f"{produto.codigo}:S{int(sistema)}A{int(adm)}C{int(comprado)}K{int(catalogo)}")
 
+    cliente_vinculado = _cliente_organiza_humiat(db, email=alvo.email, documento=alvo.documento or "", telefone=alvo.telefone or "")
+    if cliente_vinculado:
+        db.execute(text("UPDATE clientes SET humiat_usuario_id=:uid WHERE id=:cid"), {"uid": int(alvo.id), "cid": int(cliente_vinculado.get("id"))})
+        _aplicar_acessos_cliente_humiat(db, alvo, cliente_vinculado, liberar_lokafest=True)
     _auditar(db, request, "EDITAR_USUARIO", usuario.id, empresa_auditoria, f"usuario_id={alvo.id}; email={alvo.email}; tipo={alvo.tipo}; ativo={alvo.ativo}; " + ",".join(resumo_acessos))
     db.commit()
     return RedirectResponse(f"/painel?empresa_id={empresa_id if empresa_id.strip().isdigit() else ''}&ok=usuario_atualizado", status_code=303)
+
+
+@router.post("/admin-humiat/usuarios/{usuario_id}/reenviar-email")
+def reenviar_email_usuario_humiat(
+    usuario_id: int, request: Request, usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db)
+):
+    alvo = db.query(HumiatUsuario).filter(HumiatUsuario.id == int(usuario_id)).first()
+    if not alvo:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    if not int(alvo.ativo or 0):
+        return RedirectResponse("/painel?erro=Ative o Humiat ID antes de reenviar o e-mail", status_code=303)
+    try:
+        enviar_link_acesso_humiat(db, alvo, request=request, primeiro_acesso=False)
+        return RedirectResponse("/painel?ok=E-mail de acesso reenviado", status_code=303)
+    except Exception as exc:
+        db.rollback()
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc))}", status_code=303)
+
+
+@router.post("/painel/atualizar-dados")
+def atualizar_dados_painel_humiat(request: Request, usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)):
+    _cache_integracao_apagar(db, f"painel:lokafest:{int(usuario.id)}")
+    for empresa in empresas_do_usuario(db, usuario):
+        _cache_integracao_apagar(db, f"painel:solvoz:{int(empresa.id)}")
+        _cache_integracao_apagar(db, f"painel:connect:{int(empresa.id)}")
+    db.commit()
+    return RedirectResponse("/painel", status_code=303)
 
 
 @router.post("/admin-humiat/empresa/{empresa_id}/produto/{produto_id}")
