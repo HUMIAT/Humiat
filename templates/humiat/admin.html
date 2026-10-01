@@ -33,6 +33,7 @@
   <div class="id-success admin-alert">
     {% set ok = request.query_params.get('ok') %}
     {% if ok == 'usuario_criado' %}Usuário criado com sucesso.
+    {% elif ok == 'usuario_criado_email_enviado' %}Usuário criado e e-mail de primeiro acesso enviado.
     {% elif ok == 'usuario_atualizado' %}Usuário atualizado.
     {% elif ok == 'senha_redefinida' %}Senha redefinida.
     {% else %}Alteração salva com sucesso.{% endif %}
@@ -72,7 +73,9 @@
           {% if p.codigo == 'SOLVOZ' %}
             {% if acc.get('solvoz_comprado', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_site">Cliente Site</a>{% endif %}
             {% if acc.get('solvoz_catalogo', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
-          {% elif p.codigo != 'ORGANIZA' and acc.get('sistema', false) %}
+          {% elif p.codigo == 'ORGANIZA' and acc.get('sistema', false) %}
+            <a class="btn-secondary" href="/admin-humiat/diagnostico-organiza">Abrir sistema</a>
+          {% elif acc.get('sistema', false) %}
             <a class="btn-secondary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir sistema</a>
           {% endif %}
           {% if acc.get('adm', false) %}
@@ -106,10 +109,63 @@
           <button type="button" class="btn-ghost" data-dialog-open="novo-usuario">+ Novo usuário</button>
         </div>
       </article>
+
+      <article class="workspace-card{% if pendencias_lokafest|length == 0 %} is-disabled{% endif %}">
+        <div class="card-title-row">
+          <div>
+            <span class="card-kicker">Migração inicial</span>
+            <h3>Pendências Humiat ID</h3>
+          </div>
+          <span class="status-badge {% if pendencias_lokafest|length > 0 %}active{% endif %}">{{ pendencias_lokafest|length }}</span>
+        </div>
+        <p class="muted-copy">Usuários que já existem no LokaFest e ainda precisam ser conciliados com o Organiza e aprovados no Humiat ID.</p>
+        {% if pendencias_lokafest_erro %}<small style="color:#b91c1c;display:block;margin-top:8px">Não foi possível consultar o LokaFest: {{ pendencias_lokafest_erro }}</small>{% endif %}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+          <button type="button" class="btn-primary" data-dialog-open="pendencias-lokafest">Revisar pendências</button>
+          {% if erros_email_lokafest|length %}<span class="status-badge">{{ erros_email_lokafest|length }} e-mail(is) com erro</span>{% endif %}
+        </div>
+      </article>
     </div>
   </section>
 
 </main>
+
+<dialog class="admin-dialog" id="pendencias-lokafest">
+  <div class="dialog-card dialog-wide">
+    <div class="dialog-head"><div><span class="card-kicker">Migração inicial</span><h2>Pendências Humiat ID</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <p class="muted-copy">Aprovação individual. Ao aprovar, o Humiat vincula o cliente do Organiza, libera Tarefas rápidas + LokaFest, reconhece o SolVoz pelo equipamento e envia o e-mail de primeiro acesso imediatamente.</p>
+    <div style="display:grid;gap:10px;max-height:62vh;overflow:auto;margin-top:14px">
+      {% for p in pendencias_lokafest %}
+      <div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(160px,1fr) minmax(180px,1.4fr) auto;gap:12px;align-items:center">
+        <div><strong>{{ p.nome }}</strong><small style="display:block;color:var(--muted)">CPF {{ p.cpf or '—' }} · {{ p.whatsapp or '—' }}</small></div>
+        <div><small style="display:block;color:var(--muted)">Organiza</small><strong>{{ 'Encontrado' if p.organiza_encontrado else 'Não encontrado' }}</strong></div>
+        <div><small style="display:block;color:var(--muted)">E-mail / SolVoz</small><strong>{{ p.email or 'Sem e-mail' }}</strong><small style="display:block;color:var(--muted)">{{ p.solvoz.nome if p.solvoz else 'Sem vínculo SolVoz' }}</small></div>
+        <div>
+          {% if p.pode_aprovar %}
+          <form method="post" action="/admin-humiat/migracao-lokafest/{{ p.id }}/aprovar"><button class="btn-primary" type="submit">Aprovar</button></form>
+          {% else %}
+          <span class="status-badge">Revisar cadastro</span>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="id-success">Pendências Humiat ID: 0. Migração inicial concluída.</div>
+      {% endfor %}
+    </div>
+    {% if erros_email_lokafest %}
+    <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+      <h3>E-mails com erro</h3>
+      {% for e in erros_email_lokafest %}
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)">
+        <div><strong>{{ e.email or '—' }}</strong><small style="display:block;color:#b91c1c">{{ e.ultimo_erro or 'Falha no envio' }}</small></div>
+        <form method="post" action="/admin-humiat/migracao-lokafest/{{ e.lokafest_usuario_id }}/reenviar-email"><button class="btn-secondary" type="submit">Reenviar e-mail</button></form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
+  </div>
+</dialog>
 
 <dialog class="admin-dialog" id="novo-usuario">
   <form method="post" action="/admin-humiat/usuarios" class="dialog-card">
@@ -134,7 +190,7 @@
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" style="width:auto"> Tarefas rápidas (chamado e cadastro)</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> Acesso ao Organiza / ADM</label>
       {% else %}
-      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" style="width:auto"> Acesso como usuário</label>
+      <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_sistema" value="1" {% if p.codigo == 'LOKAFEST' %}checked{% endif %} style="width:auto"> Acesso como usuário</label>
       <label style="display:flex;align-items:center;gap:10px"><input type="checkbox" name="produto_{{ p.id }}_adm" value="1" style="width:auto"> Acesso ao ADM</label>
       {% endif %}
     </fieldset>
