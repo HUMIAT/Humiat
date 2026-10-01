@@ -1631,6 +1631,23 @@ def _cache_integracao_apagar(db: Session, prefixo: str) -> None:
     db.query(HumiatIntegracaoCache).filter(HumiatIntegracaoCache.chave.like(prefixo + "%")).delete(synchronize_session=False)
 
 
+def _lokafest_usuario_snapshot_humiat(db: Session, usuario_id: int) -> dict | None:
+    """Retorna um usuário do último snapshot manual do LokaFest.
+
+    Aprovar uma pendência não deve fazer outra consulta de rede se a fila já foi
+    carregada pelo administrador. Se o snapshot não tiver o registro, o chamador
+    ainda pode usar a API remota como fallback.
+    """
+    dados = _cache_integracao_get_stale(db, "migracao:lokafest:usuarios") or {}
+    for item in dados.get("usuarios") or []:
+        try:
+            if int(item.get("id") or 0) == int(usuario_id):
+                return dict(item)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
     """Resumo do Organiza mostrado no portal sem liberar o sistema completo."""
     try:
@@ -3053,11 +3070,13 @@ def enviar_cadastro_migracao_lokafest(
     primeiro acesso ao Humiat ID.
     """
     try:
-        remoto = _lokafest_humiat_request(f"/_lokafest/api/humiat/usuarios?usuario_id={int(lokafest_usuario_id)}")
-        itens = remoto.get("usuarios") or []
-        if not itens:
-            raise ValueError("Usuário não encontrado no LokaFest")
-        item = itens[0]
+        item = _lokafest_usuario_snapshot_humiat(db, int(lokafest_usuario_id))
+        if not item:
+            remoto = _lokafest_humiat_request(f"/_lokafest/api/humiat/usuarios?usuario_id={int(lokafest_usuario_id)}")
+            itens = remoto.get("usuarios") or []
+            if not itens:
+                raise ValueError("Usuário não encontrado no LokaFest")
+            item = itens[0]
         cliente = _cliente_organiza_humiat(db, documento=item.get("cpf") or "", telefone=item.get("whatsapp") or "")
         if not cliente:
             raise ValueError("Cliente não localizado no Organiza pelo WhatsApp")
@@ -3082,11 +3101,13 @@ def aprovar_migracao_lokafest(
     db: Session = Depends(get_db),
 ):
     try:
-        remoto = _lokafest_humiat_request(f"/_lokafest/api/humiat/usuarios?usuario_id={int(lokafest_usuario_id)}")
-        itens = remoto.get("usuarios") or []
-        if not itens:
-            raise ValueError("Usuário não encontrado no LokaFest")
-        item = itens[0]
+        item = _lokafest_usuario_snapshot_humiat(db, int(lokafest_usuario_id))
+        if not item:
+            remoto = _lokafest_humiat_request(f"/_lokafest/api/humiat/usuarios?usuario_id={int(lokafest_usuario_id)}")
+            itens = remoto.get("usuarios") or []
+            if not itens:
+                raise ValueError("Usuário não encontrado no LokaFest")
+            item = itens[0]
         cliente = _cliente_organiza_humiat(db, documento=item.get("cpf") or "", telefone=item.get("whatsapp") or "")
         if not cliente:
             raise ValueError("Cliente não localizado no Organiza por CPF ou WhatsApp")
@@ -3111,9 +3132,10 @@ def aprovar_migracao_lokafest(
                 mig.email = email
                 mig.ultimo_erro = None
                 _auditar(db, request, "MIGRACAO_LOKAFEST_JA_REGULAR", usuario.id, detalhe=f"lokafest_id={lokafest_usuario_id}; humiat_id={alvo.id}; email_fonte={email_fonte}")
-                _cache_integracao_apagar(db, "migracao:lokafest:usuarios")
+                # Mantém o snapshot manual da fila. O item aprovado será filtrado
+                # por HumiatMigracaoLokaFest sem precisar consultar o LokaFest novamente.
                 db.commit()
-                return RedirectResponse("/painel?ok=Cadastro já estava regular no Humiat e foi retirado das pendências", status_code=303)
+                return RedirectResponse("/painel?carregar=pendencias&ok=Cadastro já estava regular no Humiat e foi retirado das pendências", status_code=303)
 
         if not alvo:
             alvo = HumiatUsuario(
@@ -3155,15 +3177,15 @@ def aprovar_migracao_lokafest(
             mig.ultimo_erro = None
             _auditar(db, request, "MIGRACAO_LOKAFEST_EMAIL_ENVIADO", usuario.id, detalhe=f"lokafest_id={lokafest_usuario_id}; humiat_id={alvo.id}")
             db.commit()
-            return RedirectResponse("/painel?ok=LokaFest aprovado, Humiat vinculado e e-mail enviado", status_code=303)
+            return RedirectResponse("/painel?carregar=pendencias&ok=LokaFest aprovado, Humiat vinculado e e-mail enviado", status_code=303)
         except Exception as exc:
             mig.status = "EMAIL_ERRO"
             mig.ultimo_erro = str(exc)[:1000]
             db.commit()
-            return RedirectResponse(f"/painel?erro={urllib.parse.quote('Usuário aprovado, mas o e-mail falhou: ' + str(exc))}", status_code=303)
+            return RedirectResponse(f"/painel?carregar=pendencias&erro={urllib.parse.quote('Usuário aprovado, mas o e-mail falhou: ' + str(exc))}", status_code=303)
     except Exception as exc:
         db.rollback()
-        return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc))}", status_code=303)
+        return RedirectResponse(f"/painel?carregar=pendencias&erro={urllib.parse.quote(str(exc))}", status_code=303)
 
 
 @router.post("/admin-humiat/migracao-lokafest/{lokafest_usuario_id}/reenviar-email")
@@ -3176,7 +3198,7 @@ def reenviar_email_migracao_lokafest(
     mig = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.lokafest_usuario_id == int(lokafest_usuario_id)).first()
     alvo = db.query(HumiatUsuario).filter(HumiatUsuario.id == mig.humiat_usuario_id).first() if mig and mig.humiat_usuario_id else None
     if not mig or not alvo:
-        return RedirectResponse("/painel?erro=Migração não encontrada", status_code=303)
+        return RedirectResponse("/painel?carregar=pendencias&erro=Migração não encontrada", status_code=303)
     token = _novo_token_reset(db, alvo, request=request)
     link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
     db.commit()
@@ -3186,12 +3208,12 @@ def reenviar_email_migracao_lokafest(
         mig.email_enviado_em = datetime.utcnow()
         mig.ultimo_erro = None
         db.commit()
-        return RedirectResponse("/painel?ok=E-mail reenviado com sucesso", status_code=303)
+        return RedirectResponse("/painel?carregar=pendencias&ok=E-mail reenviado com sucesso", status_code=303)
     except Exception as exc:
         mig.status = "EMAIL_ERRO"
         mig.ultimo_erro = str(exc)[:1000]
         db.commit()
-        return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc))}", status_code=303)
+        return RedirectResponse(f"/painel?carregar=pendencias&erro={urllib.parse.quote(str(exc))}", status_code=303)
 
 
 @router.post("/admin-humiat/usuarios-novos/{cliente_id}/criar")
