@@ -509,3 +509,86 @@ body.organiza-corpo .botao.primario,
 body.organiza-corpo .btn.primario,
 body.organiza-corpo .btn-primary{background-image:none!important;text-shadow:none!important}
 body.organiza-corpo a{text-decoration-thickness:1px;text-underline-offset:2px}
+
+/* =========================================================
+   1.2.04 · DENSIDADE E FLUIDEZ
+   Menos rolagem e menos espaço desperdiçado em todo o Organiza.
+   ========================================================= */
+body.organiza-corpo .pagina-clean{gap:10px!important;max-width:1320px}
+body.organiza-corpo .cartao,
+body.organiza-corpo .panel-card,
+body.organiza-corpo .form-card{padding:12px!important}
+body.organiza-corpo h1{font-size:1.55rem;line-height:1.15;margin:.1rem 0 .28rem}
+body.organiza-corpo h2{font-size:1.02rem;line-height:1.2;margin:.05rem 0 .18rem}
+body.organiza-corpo h3{font-size:.93rem;line-height:1.25}
+body.organiza-corpo .texto-suave{line-height:1.35}
+body.organiza-corpo .titulo-linha,
+body.organiza-corpo .cabecalho-pagina{gap:9px!important}
+body.organiza-corpo .titulo-linha>div>p,
+body.organiza-corpo .cabecalho-pagina>div>p{margin:.12rem 0 0!important}
+body.organiza-corpo .formulario,
+body.organiza-corpo .formulario-grade,
+body.organiza-corpo .form-grid-organizada{gap:9px!important}
+body.organiza-corpo .app-main input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]),
+body.organiza-corpo .app-main select{min-height:36px;padding:7px 9px}
+body.organiza-corpo .app-main textarea{min-height:72px;padding:8px 9px}
+body.organiza-corpo .botao,
+body.organiza-corpo .btn,
+body.organiza-corpo .btn-new,
+body.organiza-corpo .btn-primary,
+body.organiza-corpo .btn-small{min-height:34px;padding:7px 11px}
+body.organiza-corpo .lista-dados{gap:6px 12px!important}
+body.organiza-corpo .lista-dados dt,
+body.organiza-corpo .lista-dados dd{line-height:1.28}
+body.organiza-corpo table th,
+body.organiza-corpo table td{padding-top:7px;padding-bottom:7px}
+
+@media(min-width:1101px){
+  body.organiza-corpo .app-main{padding:12px 18px 36px!important}
+  body.organiza-corpo .app-sidebar{padding:16px 12px}
+  body.organiza-corpo .side-logo{margin:0 6px 18px;font-size:1.12rem}
+  body.organiza-corpo .side-nav,
+  body.organiza-corpo .side-bottom{gap:4px}
+  body.organiza-corpo .side-nav a,
+  body.organiza-corpo .side-bottom a{min-height:40px;height:40px;padding:0 10px;border-radius:9px;font-size:.76rem;gap:10px}
+  body.organiza-corpo .menu-grupo{gap:3px}
+}
+
+/* Ficha de cliente: cadastro + equipamentos dominam a tela. */
+body.organiza-corpo .cliente-detalhe-page{gap:9px!important}
+body.organiza-corpo .cliente-hero{margin-bottom:2px!important;padding:0 2px 2px!important;gap:10px!important}
+body.organiza-corpo .cliente-hero h1{font-size:1.55rem!important}
+body.organiza-corpo .cliente-topo-tags{gap:5px!important}
+body.organiza-corpo .cliente-topo-tags span{padding:4px 7px!important;font-size:.7rem!important}
+body.organiza-corpo .cliente-secao-nav-compacta{margin:0 0 4px!important;padding:4px!important;border-radius:10px!important}
+body.organiza-corpo .cliente-secao-nav-compacta a{padding:6px 8px!important;font-size:.72rem!important}
+body.organiza-corpo .cliente-secao-nav-compacta a.ativo{background:var(--ui-primary-soft);color:var(--ui-primary)}
+body.organiza-corpo .grade-ficha.clean-ficha{gap:9px!important}
+body.organiza-corpo .resumo-coluna{gap:9px!important}
+body.organiza-corpo .resumo-unico strong{font-size:1.5rem!important}
+body.organiza-corpo .humiat-produtos-cliente{gap:5px!important}
+body.organiza-corpo .humiat-produto-linha{padding:7px 0!important}
+body.organiza-corpo .bloco-secundario-cliente{margin-top:2px}
+
+body.organiza-corpo .equip-grid{gap:9px!important}
+body.organiza-corpo .equip-card{padding:11px!important;border-radius:11px!important}
+body.organiza-corpo .equip-head{margin-bottom:7px!important}
+body.organiza-corpo .equip-head h3{font-size:1rem!important;margin:.2rem 0 .1rem!important}
+body.organiza-corpo .equip-head p{margin:.1rem 0!important}
+body.organiza-corpo .equip-resumo-essencial{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
+body.organiza-corpo .equip-resumo-essencial>span{display:grid;gap:2px;padding:7px 8px;border:1px solid var(--ui-line);border-radius:8px;background:#f8fafc;min-width:0}
+body.organiza-corpo .equip-resumo-essencial small{font-size:.66rem;color:var(--ui-muted);text-transform:uppercase;font-weight:800}
+body.organiza-corpo .equip-resumo-essencial strong{font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.organiza-corpo .equip-detalhes-compactos{margin-top:8px;border-top:1px solid var(--ui-line);padding-top:7px}
+body.organiza-corpo .equip-detalhes-compactos>summary{cursor:pointer;color:var(--ui-primary);font-size:.76rem;font-weight:800;list-style:none}
+body.organiza-corpo .equip-detalhes-compactos>summary::-webkit-details-marker{display:none}
+body.organiza-corpo .equip-detalhes-compactos>summary::after{content:" ▾"}
+body.organiza-corpo .equip-detalhes-compactos[open]>summary::after{content:" ▴"}
+body.organiza-corpo .equip-detalhes-compactos dl{margin-top:9px!important}
+body.organiza-corpo .acoes-documentos{gap:5px!important;margin-top:8px!important}
+body.organiza-corpo .carregar-estoque-equip{display:inline-block;margin-top:8px;font-size:.74rem;font-weight:800;color:var(--ui-primary);text-decoration:none}
+
+@media(max-width:760px){
+  body.organiza-corpo .equip-resumo-essencial{grid-template-columns:1fr 1fr}
+  body.organiza-corpo .cliente-secao-nav-compacta{overflow-x:auto}
+}

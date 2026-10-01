@@ -2677,23 +2677,34 @@ def _humiat_sincronizar_empresa_unica_cliente(cliente: Cliente, db: Session) -> 
         alteracoes += 1
 
     produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).all()
-    for produto in produtos:
-        perm = permissoes_usuario_humiat(db, int(usuario.id), produto.codigo)
-        if not any(bool(v) for v in perm.values()):
-            continue
-        item = db.query(HumiatEmpresaProduto).filter(
+    if produtos:
+        produto_ids = [int(p.id) for p in produtos]
+        acessos_usuario = db.query(HumiatUsuarioProduto).filter(
+            HumiatUsuarioProduto.usuario_id == int(usuario.id),
+            HumiatUsuarioProduto.produto_id.in_(produto_ids),
+        ).all()
+        liberados = {
+            int(item.produto_id) for item in acessos_usuario
+            if bool(item.acesso_sistema) or bool(item.acesso_adm)
+            or bool(getattr(item, "acesso_solvoz_comprado", 0))
+            or bool(getattr(item, "acesso_solvoz_catalogo", 0))
+        }
+        existentes = db.query(HumiatEmpresaProduto).filter(
             HumiatEmpresaProduto.empresa_id == int(empresa.id),
-            HumiatEmpresaProduto.produto_id == int(produto.id),
-        ).first()
-        if item:
-            if not int(item.ativo or 0):
-                item.ativo = 1
+            HumiatEmpresaProduto.produto_id.in_(produto_ids),
+        ).all()
+        por_produto = {int(item.produto_id): item for item in existentes}
+        for produto_id in liberados:
+            item = por_produto.get(produto_id)
+            if item:
+                if not int(item.ativo or 0):
+                    item.ativo = 1
+                    alteracoes += 1
+            else:
+                db.add(HumiatEmpresaProduto(
+                    empresa_id=int(empresa.id), produto_id=produto_id, ativo=1
+                ))
                 alteracoes += 1
-        else:
-            db.add(HumiatEmpresaProduto(
-                empresa_id=int(empresa.id), produto_id=int(produto.id), ativo=1
-            ))
-            alteracoes += 1
     return alteracoes
 
 
@@ -2744,23 +2755,32 @@ def _humiat_garantir_usuario_cliente(cliente: Cliente, db: Session) -> tuple[Hum
 
     cliente.humiat_usuario_id = int(usuario.id)
     db.flush()
-    if not interno:
-        _humiat_sincronizar_empresa_unica_cliente(cliente, db)
-        db.flush()
+    # A sincronização de empresa/produtos é feita uma única vez no final do
+    # salvamento dos acessos, depois de aplicar as rotinas padrão do cliente.
     return usuario, criado, interno
 
 
 def _humiat_contexto_cliente(cliente: Cliente, db: Session) -> dict:
+    """Monta os acessos do cliente em lote, sem N+1 por produto."""
     usuario = _humiat_usuario_do_cliente(cliente, db)
     produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).order_by(HumiatProduto.nome).all()
-    acessos = {}
-    if usuario:
+    padrao = {"sistema": False, "adm": False, "solvoz_comprado": False, "solvoz_catalogo": False}
+    acessos = {p.codigo: dict(padrao) for p in produtos}
+    if usuario and produtos:
+        itens = db.query(HumiatUsuarioProduto).filter(
+            HumiatUsuarioProduto.usuario_id == int(usuario.id),
+            HumiatUsuarioProduto.produto_id.in_([int(p.id) for p in produtos]),
+        ).all()
+        por_produto = {int(item.produto_id): item for item in itens}
         for produto in produtos:
-            acessos[produto.codigo] = permissoes_usuario_humiat(db, int(usuario.id), produto.codigo)
-    else:
-        for produto in produtos:
+            item = por_produto.get(int(produto.id))
+            if not item:
+                continue
             acessos[produto.codigo] = {
-                "sistema": False, "adm": False, "solvoz_comprado": False, "solvoz_catalogo": False,
+                "sistema": bool(item.acesso_sistema),
+                "adm": bool(item.acesso_adm),
+                "solvoz_comprado": bool(getattr(item, "acesso_solvoz_comprado", 0)),
+                "solvoz_catalogo": bool(getattr(item, "acesso_solvoz_catalogo", 0)),
             }
     return {
         "usuario": usuario,
@@ -2776,28 +2796,33 @@ def _humiat_salvar_acessos_cliente(cliente: Cliente, form: dict, db: Session, re
     usuario, criado, interno = _humiat_garantir_usuario_cliente(cliente, db)
     usuario.ativo = 1 if str(form.get("humiat_ativo") or "0") == "1" else 0
     produtos = db.query(HumiatProduto).filter(HumiatProduto.ativo == 1).all()
-    precisa_cliente_site = False
+    existentes = db.query(HumiatUsuarioProduto).filter(
+        HumiatUsuarioProduto.usuario_id == int(usuario.id),
+        HumiatUsuarioProduto.produto_id.in_([int(p.id) for p in produtos]) if produtos else False,
+    ).all() if produtos else []
+    por_produto = {int(item.produto_id): item for item in existentes}
     for produto in produtos:
+        item = por_produto.get(int(produto.id))
+        if not item:
+            item = HumiatUsuarioProduto(usuario_id=int(usuario.id), produto_id=int(produto.id))
+            db.add(item)
+            por_produto[int(produto.id)] = item
         codigo = (produto.codigo or "").upper()
         if codigo == "SOLVOZ":
             cliente_site = str(form.get(f"produto_{produto.id}_solvoz_site") or "0") == "1"
             cliente_catalogo = str(form.get(f"produto_{produto.id}_solvoz_catalogo") or "0") == "1"
-            precisa_cliente_site = cliente_site
-            adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1"
-            # O ADM SolVoz é uma função de equipe. Clientes externos usam Site e/ou Catálogo.
-            if not interno:
-                adm = False
-            salvar_permissoes_usuario_humiat(
-                db, int(usuario.id), produto,
-                sistema=(cliente_site or cliente_catalogo), adm=adm,
-                cliente_site=cliente_site, cliente_catalogo=cliente_catalogo,
-            )
+            adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1" if interno else False
+            item.acesso_sistema = 1 if (cliente_site or cliente_catalogo) else 0
+            item.acesso_adm = 1 if adm else 0
+            item.acesso_solvoz_comprado = 1 if cliente_site else 0
+            item.acesso_solvoz_catalogo = 1 if cliente_catalogo else 0
         else:
             sistema = str(form.get(f"produto_{produto.id}_sistema") or "0") == "1"
             adm = str(form.get(f"produto_{produto.id}_adm") or "0") == "1"
-            salvar_permissoes_usuario_humiat(
-                db, int(usuario.id), produto, sistema=sistema, adm=adm,
-            )
+            item.acesso_sistema = 1 if sistema else 0
+            item.acesso_adm = 1 if adm else 0
+            item.acesso_solvoz_comprado = 0
+            item.acesso_solvoz_catalogo = 0
 
     if not interno:
         # Regras padrão do cliente Humiat: Organiza Tarefas rápidas e LokaFest sempre ativos;
@@ -3933,11 +3958,11 @@ def organiza_service_worker():
 @app.get("/organiza/diagnostico-performance", response_class=HTMLResponse)
 def organiza_diagnostico_performance(
         request: Request,
-        limit: int = 250,
+        limit: int = 80,
         usuario: Usuario = Depends(usuario_logado),
 ):
     exigir_admin(usuario)
-    limit = max(20, min(limit, 400))
+    limit = max(20, min(limit, 150))
     resumo = performance_summary(limit)
     return templates.TemplateResponse("organiza/diagnostico_performance.html", {
         "request": request,
@@ -3954,13 +3979,23 @@ def organiza_diagnostico_performance(
 
 @app.get("/organiza/diagnostico-performance/dados", response_class=JSONResponse)
 def organiza_diagnostico_performance_dados(
-        limit: int = 250,
+        limit: int = 80,
+        detalhes: bool = False,
         usuario: Usuario = Depends(usuario_logado),
 ):
     exigir_admin(usuario)
-    limit = max(20, min(limit, 400))
+    limit = max(20, min(limit, 150))
     resumo = performance_summary(limit)
-    return {"monitor": monitor_status(), **resumo}
+    if detalhes:
+        return {"monitor": monitor_status(), **resumo}
+    # JSON leve por padrão: a tela/integração recebe somente o necessário.
+    return {
+        "monitor": monitor_status(),
+        "ranking": resumo.get("ranking", [])[:20],
+        "tables": resumo.get("tables", [])[:20],
+        "suggestions": resumo.get("suggestions", [])[:30],
+        "records_count": len(resumo.get("records", [])),
+    }
 
 
 @app.post("/organiza/diagnostico-performance/limpar")
@@ -4574,6 +4609,9 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         cliente.token_ficha = secrets.token_urlsafe(24)
         db.commit()
     somente_consulta = (request.query_params.get("consulta") or "").strip() == "1"
+    secao_cliente = (request.query_params.get("secao") or "").strip().lower()
+    if secao_cliente not in {"agenda", "campanhas", "atualizacoes", "manutencoes", "estoque"}:
+        secao_cliente = ""
     status_filtro = (request.query_params.get("status_equipamento") or "Ativo").strip()
     if somente_consulta and (request.query_params.get("venda_id") or "").strip():
         # Ao consultar a partir de Vendas, a venda selecionada precisa aparecer
@@ -4587,16 +4625,17 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         equipamentos = [eq for eq in equipamentos if tipo_equipamento_padrao(eq.tipo or "") == tipo_filtro]
     equipamentos = ordenar_equipamentos(equipamentos)
     for eq_item in equipamentos:
-        if eq_item.produto_venda_id:
+        eq_item.estoque_utilizado_linhas = []
+        eq_item.estoque_utilizado_total = 0
+        eq_item.estoque_utilizado_manual = False
+        if secao_cliente == "estoque" and eq_item.produto_venda_id:
             estoque_ctx = contexto_estoque_utilizado_venda(db, eq_item)
             eq_item.estoque_utilizado_linhas = estoque_ctx["linhas"]
             eq_item.estoque_utilizado_total = estoque_ctx["total"]
             eq_item.estoque_utilizado_manual = estoque_ctx["manual"]
-        else:
-            eq_item.estoque_utilizado_linhas = []
-            eq_item.estoque_utilizado_total = 0
-            eq_item.estoque_utilizado_manual = False
-    manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).all()
+    manutencoes = []
+    if secao_cliente == "manutencoes" or somente_consulta:
+        manutencoes = db.query(Manutencao).filter(Manutencao.cliente_id == cliente_id).order_by(Manutencao.criado_em.desc()).limit(30).all()
 
     venda_consulta = None
     campanha_manual = None
@@ -4634,12 +4673,16 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     retorno_consulta = (request.query_params.get("retorno") or "/organiza/vendas").strip()
     if not retorno_consulta.startswith("/organiza/vendas"):
         retorno_consulta = "/organiza/vendas"
-    atualizacoes_ctx = _atualizacao_contexto_admin_cliente(db, cliente) if not somente_consulta else {"compras": [], "agendamentos": {}, "pacotes": [], "gmail_ok": _gmail_valido(cliente.email)}
+    atualizacoes_ctx = {"compras": [], "agendamentos": {}, "pacotes": [], "gmail_ok": _gmail_valido(cliente.email)}
+    if not somente_consulta and secao_cliente == "atualizacoes":
+        atualizacoes_ctx = _atualizacao_contexto_admin_cliente(db, cliente)
+    elif not somente_consulta:
+        # A lista de pacotes é leve e necessária no bloco principal de equipamentos.
+        atualizacoes_ctx["pacotes"] = db.query(AtualizacaoPacote).filter(AtualizacaoPacote.ativo == 1).order_by(AtualizacaoPacote.pacote.asc()).all()
     resumo_visual = _cliente_resumo_visual(cliente)
-    campanha_recente = None if somente_consulta else _ultima_campanha_atualizacao_cliente(db, cliente)
     campanhas_cliente = []
     agendamentos_cliente = []
-    if not somente_consulta:
+    if not somente_consulta and secao_cliente == "campanhas":
         destinos = (
             db.query(CampanhaDestinatario)
             .options(selectinload(CampanhaDestinatario.campanha))
@@ -4658,6 +4701,7 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
                 "status_rotulo": _rotulo_status_envio_campanha(dest.status, True),
                 "whatsapp_url": _whatsapp_url_pronta(dest.telefone_pronto or cliente.whatsapp_completo() or "", dest.mensagem_pronta or ""),
             })
+    if not somente_consulta and secao_cliente == "agenda":
         agendamentos_cliente = (
             db.query(AgendaManual)
             .filter(AgendaManual.cliente_id == cliente.id)
@@ -4669,7 +4713,6 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
     return templates.TemplateResponse("organiza/cliente_detalhe.html", {
         "request": request, "usuario": usuario, "cliente": cliente, "manutencoes": manutencoes,
         "equipamentos": equipamentos, "status_filtro": status_filtro, "tipo_filtro": tipo_filtro,
-        "solvoz_acesso": _solvoz_contexto_cliente(cliente, db),
         "humiat_acesso": _humiat_contexto_cliente(cliente, db),
         "solvoz_sucesso": request.query_params.get("solvoz_sucesso", ""),
         "solvoz_erro": request.query_params.get("solvoz_erro", ""),
@@ -4689,7 +4732,7 @@ def cliente_detalhe(cliente_id: int, request: Request, usuario: Usuario = Depend
         "atualizacao_sucesso": request.query_params.get("atualizacao_sucesso", ""),
         "atualizacao_erro": request.query_params.get("atualizacao_erro", ""),
         "resumo_visual": resumo_visual,
-        "campanha_recente": campanha_recente,
+        "secao_cliente": secao_cliente,
         "campanhas_cliente": campanhas_cliente,
         "agendamentos_cliente": agendamentos_cliente,
         "agenda_sucesso": request.query_params.get("agenda_sucesso", ""),

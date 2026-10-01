@@ -1383,15 +1383,29 @@ def seed_humiat_id():
 
 
 def humiat_usuario_da_requisicao(request: Request, db: Session) -> HumiatUsuario | None:
+    """Valida a sessão com uma única leitura e evita UPDATE em todo request."""
     token = request.cookies.get(COOKIE_NAME, "")
     if not token:
         return None
-    sessao = db.query(HumiatSessao).filter(HumiatSessao.token_hash == _hash_token(token)).first()
-    if not sessao or sessao.expira_em < datetime.utcnow():
+    agora = datetime.utcnow()
+    row = (
+        db.query(HumiatSessao, HumiatUsuario)
+        .join(HumiatUsuario, HumiatUsuario.id == HumiatSessao.usuario_id)
+        .filter(
+            HumiatSessao.token_hash == _hash_token(token),
+            HumiatUsuario.ativo == 1,
+        )
+        .first()
+    )
+    if not row:
         return None
-    usuario = db.query(HumiatUsuario).filter(HumiatUsuario.id == sessao.usuario_id, HumiatUsuario.ativo == 1).first()
-    if usuario:
-        sessao.ultimo_acesso = datetime.utcnow()
+    sessao, usuario = row
+    if sessao.expira_em < agora:
+        return None
+    # Persistir atividade uma vez a cada 10 minutos é suficiente para auditoria
+    # e elimina uma gravação/commit em cada abertura de tela.
+    if not sessao.ultimo_acesso or (agora - sessao.ultimo_acesso) >= timedelta(minutes=10):
+        sessao.ultimo_acesso = agora
         db.commit()
     return usuario
 
@@ -1875,20 +1889,48 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
-    organiza = _produto_por_codigo(db, "ORGANIZA")
-    if organiza:
-        _salvar_usuario_produto_acesso(db, usuario_h.id, organiza, sistema=True, adm=False)
-    lokafest = _produto_por_codigo(db, "LOKAFEST")
-    if lokafest and liberar_lokafest:
-        _salvar_usuario_produto_acesso(db, usuario_h.id, lokafest, sistema=True, adm=False)
+    """Aplica as rotinas padrão em lote para reduzir round-trips ao banco."""
+    produtos = db.query(HumiatProduto).filter(HumiatProduto.codigo.in_(["ORGANIZA", "LOKAFEST", "SOLVOZ"])).all()
+    por_codigo = {(p.codigo or "").upper(): p for p in produtos}
+    existentes = db.query(HumiatUsuarioProduto).filter(
+        HumiatUsuarioProduto.usuario_id == int(usuario_h.id),
+        HumiatUsuarioProduto.produto_id.in_([int(p.id) for p in produtos]) if produtos else False,
+    ).all() if produtos else []
+    por_produto = {int(item.produto_id): item for item in existentes}
+
+    def garantir(produto: HumiatProduto | None, *, sistema: bool, adm: bool = False, catalogo: bool = False) -> None:
+        if not produto:
+            return
+        item = por_produto.get(int(produto.id))
+        if not item:
+            item = HumiatUsuarioProduto(usuario_id=int(usuario_h.id), produto_id=int(produto.id))
+            db.add(item)
+            por_produto[int(produto.id)] = item
+        item.acesso_sistema = 1 if (sistema or catalogo) else 0
+        item.acesso_adm = 1 if adm else 0
+        if (produto.codigo or "").upper() == "SOLVOZ":
+            item.acesso_solvoz_catalogo = 1 if catalogo else 0
+            item.acesso_solvoz_comprado = int(getattr(item, "acesso_solvoz_comprado", 0) or 0)
+        else:
+            item.acesso_solvoz_catalogo = 0
+            item.acesso_solvoz_comprado = 0
+
+    garantir(por_codigo.get("ORGANIZA"), sistema=True)
+    if liberar_lokafest:
+        garantir(por_codigo.get("LOKAFEST"), sistema=True)
+
     empresa_sv = _empresa_solvoz_do_cliente_humiat(db, int(cliente.get("id") or 0))
     if empresa_sv:
-        solvoz = _produto_por_codigo(db, "SOLVOZ")
-        if solvoz:
-            _salvar_usuario_produto_acesso(db, usuario_h.id, solvoz, sistema=True, adm=False, solvoz_catalogo=True)
-        empresa_h = db.query(HumiatEmpresa).filter(func.lower(HumiatEmpresa.slug) == str(empresa_sv.get("slug") or "").lower()).first()
-        if empresa_h and not db.query(HumiatUsuarioEmpresa).filter(HumiatUsuarioEmpresa.usuario_id == usuario_h.id, HumiatUsuarioEmpresa.empresa_id == empresa_h.id).first():
-            db.add(HumiatUsuarioEmpresa(usuario_id=usuario_h.id, empresa_id=empresa_h.id))
+        garantir(por_codigo.get("SOLVOZ"), sistema=True, catalogo=True)
+        slug = str(empresa_sv.get("slug") or "").lower()
+        empresa_h = db.query(HumiatEmpresa).filter(func.lower(HumiatEmpresa.slug) == slug).first()
+        if empresa_h:
+            vinculo = db.query(HumiatUsuarioEmpresa).filter(
+                HumiatUsuarioEmpresa.usuario_id == int(usuario_h.id),
+                HumiatUsuarioEmpresa.empresa_id == int(empresa_h.id),
+            ).first()
+            if not vinculo:
+                db.add(HumiatUsuarioEmpresa(usuario_id=int(usuario_h.id), empresa_id=int(empresa_h.id)))
 
 
 def aplicar_rotinas_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente_id: int, *, garantir_lokafest: bool = True) -> None:

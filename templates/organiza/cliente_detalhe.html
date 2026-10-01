@@ -27,7 +27,7 @@
         <details class="cliente-acoes-menu">
           <summary class="botao primario">Ações rápidas ▾</summary>
           <div class="cliente-acoes-popover">
-            <a href="#agenda-cliente">Agendar atendimento</a>
+            <a href="/organiza/clientes/{{ cliente.id }}?secao=agenda#agenda-cliente">Agendar atendimento</a>
             <a href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">Nova manutenção</a>
             <a href="/organiza/vendas/nova?cliente_id={{ cliente.id }}">Nova venda</a>
             <a href="/organiza/clientes/{{ cliente.id }}/equipamentos/novo">Novo equipamento</a>
@@ -39,12 +39,13 @@
     </div>
   </div>
   {% if not somente_consulta %}
-  <nav class="cliente-secao-nav" aria-label="Seções do cliente">
+  <nav class="cliente-secao-nav cliente-secao-nav-compacta" aria-label="Seções do cliente">
     <a href="#cadastro-cliente">Cadastro</a>
-    <a href="#agenda-cliente">Agenda</a>
-    <a href="#atualizacoes">Atualizações</a>
-    <a href="#campanhas-cliente">Campanhas</a>
     <a href="#equipamentos-cliente">Equipamentos</a>
+    <a class="{% if secao_cliente == 'agenda' %}ativo{% endif %}" href="/organiza/clientes/{{ cliente.id }}?secao=agenda#agenda-cliente">Agenda</a>
+    <a class="{% if secao_cliente == 'atualizacoes' %}ativo{% endif %}" href="/organiza/clientes/{{ cliente.id }}?secao=atualizacoes#atualizacoes">Atualizações</a>
+    <a class="{% if secao_cliente == 'campanhas' %}ativo{% endif %}" href="/organiza/clientes/{{ cliente.id }}?secao=campanhas#campanhas-cliente">Campanhas</a>
+    <a class="{% if secao_cliente == 'manutencoes' %}ativo{% endif %}" href="/organiza/clientes/{{ cliente.id }}?secao=manutencoes#manutencoes-cliente">Manutenções</a>
   </nav>
   {% endif %}
 {% if humiat_sucesso %}<div class="alerta sucesso">{{ humiat_sucesso }}</div>{% endif %}
@@ -178,8 +179,8 @@
     </article>{% endif %}
   </div>
 </div>
-{% if not somente_consulta %}
-<section class="cartao cliente-agenda-rapida" id="agenda-cliente">
+{% if not somente_consulta and secao_cliente == 'agenda' %}
+<section class="cartao cliente-agenda-rapida bloco-secundario-cliente" id="agenda-cliente">
   <div class="titulo-linha compacto">
     <div><p class="tag">AGENDA</p><h2>Agendar atendimento</h2><p class="texto-suave">Para conversas, orientações e atendimentos que não precisam virar manutenção ou orçamento.</p></div>
     <a class="botao pequeno" href="/organiza/agenda">Abrir agenda completa</a>
@@ -218,8 +219,9 @@
   </div>
   {% endif %}
 </section>
-
-<section class="cartao cliente-campanhas" id="campanhas-cliente">
+{% endif %}
+{% if not somente_consulta and secao_cliente == 'campanhas' %}
+<section class="cartao cliente-campanhas bloco-secundario-cliente" id="campanhas-cliente">
   <div class="titulo-linha compacto">
     <div><p class="tag">CAMPANHAS</p><h2>Campanhas deste cliente</h2><p class="texto-suave">Reenvie a mensagem ou o link individual sem precisar procurar o cliente dentro da campanha.</p></div>
     <a class="botao pequeno" href="/organiza/campanhas">Ver todas as campanhas</a>
@@ -246,8 +248,9 @@
   {% endfor %}
   </div>
 </section>
-
-<section class="cartao tabela-cartao atualizacao-admin-card" id="atualizacoes">
+{% endif %}
+{% if not somente_consulta and secao_cliente == 'atualizacoes' %}
+<section class="cartao tabela-cartao atualizacao-admin-card bloco-secundario-cliente" id="atualizacoes">
   <div class="titulo-linha compacto">
     <div><p class="tag">ATUALIZAÇÕES</p><h2>Compras e agendamentos</h2><p class="texto-suave">O Organiza é a fonte oficial dos pacotes comprados, Gmail e reservas.</p></div>
   </div>
@@ -404,6 +407,14 @@
         </div>
         {% if not somente_consulta %}<a class="botao pequeno" href="/organiza/clientes/{{ cliente.id }}/equipamentos/{{ eq.id }}/editar">Editar</a>{% endif %}
       </div>
+      <div class="equip-resumo-essencial">
+        <span><small>Pacote</small><strong>{{ eq.pacote or '-' }}</strong></span>
+        <span><small>Plano</small><strong>{{ eq.plano or '-' }}</strong></span>
+        <span><small>HD</small><strong>{{ eq.numero_hd or '-' }}</strong></span>
+        <span><small>Falta</small><strong>{{ eq.falta|moeda }}</strong></span>
+      </div>
+      <details class="equip-detalhes-compactos" {% if secao_cliente == 'estoque' %}open{% endif %}>
+        <summary>Ver detalhes, opcionais e documentos</summary>
       <dl>
         <dt>Identificação</dt><dd><strong>{{ eq|rotulo_maquina }}</strong></dd>
         <dt>Código técnico / monitor</dt><dd>{{ eq|codigo_tecnico }}</dd>
@@ -458,12 +469,16 @@
         <button class="botao pequeno copiar-chave-nfe" type="button" data-chave="{{ eq.chave_acesso_nfe or '' }}" onclick="copiarChaveNfeCard(this)" {% if not eq.chave_acesso_nfe %}disabled title="Cadastre a chave de acesso na tela da NFA-e"{% endif %}>Copiar chave</button>
       </div>
       {% if eq.observacao %}<p class="observacao">{{ eq.observacao }}</p>{% endif %}
+      {% if eq.produto_venda_id and secao_cliente != 'estoque' and not somente_consulta %}
+        <a class="carregar-estoque-equip" href="/organiza/clientes/{{ cliente.id }}?secao=estoque#equipamentos-cliente">Carregar estoque utilizado</a>
+      {% endif %}
+      </details>
     </article>
     {% else %}
     <p class="texto-suave vazio">Nenhum equipamento cadastrado.</p>
     {% endfor %}
   </div>
-</section><section class="cartao tabela-cartao"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div>{% if not somente_consulta %}<a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a>{% endif %}</div><div class="lista-cards-mobile">{% for m in manutencoes %}{% if somente_consulta %}<div class="cliente-card-clean"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></div>{% else %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% endif %}{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section></section>
+</section>{% if somente_consulta or secao_cliente == 'manutencoes' %}<section class="cartao tabela-cartao bloco-secundario-cliente" id="manutencoes-cliente"><div class="titulo-linha compacto"><div><h2>Manutenções</h2><p class="texto-suave">Histórico de serviços por equipamento.</p></div>{% if not somente_consulta %}<a class="botao primario" href="/organiza/manutencoes/nova?cliente_id={{ cliente.id }}">+ Nova</a>{% endif %}</div><div class="lista-cards-mobile">{% for m in manutencoes %}{% if somente_consulta %}<div class="cliente-card-clean"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></div>{% else %}<a class="cliente-card-clean" href="/organiza/manutencoes/{{ m.id }}"><div><strong>#{{ m.id }} · {{ m.equipamento|rotulo_maquina }} · {{ m.equipamento.tipo }}</strong><small>{{ m.defeito }}</small></div><span>{{ m.status }}</span></a>{% endif %}{% else %}<p class="texto-suave vazio">Nenhuma manutenção registrada.</p>{% endfor %}</div></section>{% endif %}</section>
 <style>
 .consulta-somente{background:#eef2ff;color:#3730a3}.consulta-campanha-card{margin:14px 0;padding:16px}.consulta-campanha-topo{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.consulta-campanha-topo h2{margin:2px 0 4px}.consulta-envio-ok{background:#e8f7ee;color:#166534}.consulta-envio-pendente{background:#fff2df;color:#9a4d00}.consulta-campanha-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.8fr);gap:16px;margin-top:14px}.consulta-campanha-grid>div{display:grid;align-content:start;gap:7px}.consulta-campanha-grid small{font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.consulta-campanha-grid pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.45;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px}.consulta-campanha-grid a{word-break:break-word}.consulta-campanha-acoes{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}.consulta-campanha-acoes form{margin:0}.consulta-campanha-nota{margin:10px 0 0}.equip-card-consulta-destaque{outline:2px solid #2563eb;outline-offset:2px}.estoque-equipamento-resumo{margin:10px 0;border:1px solid #dbe3ee;border-radius:10px;overflow:hidden}.estoque-equipamento-resumo summary{cursor:pointer;padding:9px 11px;background:#f8fafc;display:flex;justify-content:space-between;gap:10px;align-items:center}.estoque-equipamento-resumo summary span{font-size:11px;color:#64748b}.estoque-equipamento-conteudo{padding:9px 11px}.estoque-equipamento-conteudo table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px}.estoque-equipamento-conteudo th,.estoque-equipamento-conteudo td{padding:5px 6px;border-bottom:1px solid #e5e7eb;text-align:left}.estoque-equipamento-conteudo th:last-child,.estoque-equipamento-conteudo td:last-child{text-align:right}@media(max-width:760px){.consulta-campanha-topo,.consulta-campanha-acoes{align-items:stretch;flex-direction:column}.consulta-campanha-grid{grid-template-columns:1fr}.consulta-campanha-acoes .botao,.consulta-campanha-acoes form,.consulta-campanha-acoes form .botao{width:100%;text-align:center}}
 
