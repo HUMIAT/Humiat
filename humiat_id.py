@@ -1743,22 +1743,31 @@ def _zona_lokafest_por_cliente(cliente: dict | None) -> str:
 def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str | None = None) -> dict:
     if not SSO_SECRET:
         raise RuntimeError("HUMIAT_SSO_SECRET não configurado")
-    url = f"{LOKAFEST_BASE_URL}{path}"
     data = urllib.parse.urlencode(form or {}).encode("utf-8") if form is not None else None
-    req = urllib.request.Request(url, data=data, method=method or ("POST" if data is not None else "GET"), headers={
-        "X-Humiat-SSO-Secret": SSO_SECRET,
-        "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Humiat-ID-LokaFest/1.2.01",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detalhe = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LokaFest HTTP {exc.code}: {detalhe[:400]}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Falha de rede com LokaFest: {exc.reason}") from exc
+    paths = [path]
+    if path.startswith("/_lokafest/api/"):
+        paths.append(path.replace("/_lokafest/api/", "/api/", 1))
+    ultimo_erro = None
+    for caminho in paths:
+        url = f"{LOKAFEST_BASE_URL}{caminho}"
+        req = urllib.request.Request(url, data=data, method=method or ("POST" if data is not None else "GET"), headers={
+            "X-Humiat-SSO-Secret": SSO_SECRET,
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.02",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detalhe = exc.read().decode("utf-8", errors="replace")
+            ultimo_erro = f"LokaFest HTTP {exc.code}: {detalhe[:400]}"
+            if exc.code == 404 and caminho != paths[-1]:
+                continue
+            raise RuntimeError(ultimo_erro) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Falha de rede com LokaFest: {exc.reason}") from exc
+    raise RuntimeError(ultimo_erro or "Falha ao consultar LokaFest")
 
 
 def _garantir_usuario_lokafest_humiat(cliente: dict, nome: str) -> dict:
@@ -1786,7 +1795,7 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.01")
+    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.02")
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
@@ -2143,10 +2152,13 @@ def abrir_produto(
     db.commit()
 
     if codigo == "ORGANIZA":
-        # O sistema completo é administrativo. Usuários comuns usam somente
-        # Abrir chamado / Atualizar cadastro no próprio Humiat ID.
-        if acesso_interno and modo == "adm":
+        # No hub administrativo, "Abrir sistema" abre o Organiza e "Abrir ADM"
+        # fica reservado ao diagnóstico/performance. Clientes continuam usando
+        # somente as tarefas rápidas exibidas no Humiat ID.
+        if acesso_interno and modo == "sistema":
             return RedirectResponse("/organiza", status_code=303)
+        if acesso_interno and modo == "adm":
+            return RedirectResponse("/organiza/diagnostico-performance", status_code=303)
         raise HTTPException(status_code=403, detail="Use as tarefas rápidas do Organiza no Humiat ID.")
 
     # Cliente Site e Cliente Catálogo também usam SSO. Para o piloto da equipe
