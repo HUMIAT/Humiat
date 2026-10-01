@@ -1387,12 +1387,106 @@ def _produto_conheca_url(produto: HumiatProduto) -> str:
     return configuradas.get(codigo) or (produto.url_publica or PUBLIC_BASE_URL)
 
 
-def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
-    """Atalhos públicos do Organiza para o cliente ligado ao Humiat ID.
+def _painel_numero(valor) -> float:
+    texto_v = str(valor or "").strip().replace("R$", "").replace(" ", "")
+    if not texto_v:
+        return 0.0
+    if "," in texto_v:
+        texto_v = texto_v.replace(".", "").replace(",", ".")
+    elif texto_v.count(".") > 1:
+        partes = texto_v.split(".")
+        texto_v = "".join(partes[:-1]) + "." + partes[-1] if len(partes[-1]) <= 2 else "".join(partes)
+    try:
+        return max(float(texto_v), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
-    O portal não duplica dados do Organiza; guarda apenas os links para as
-    rotinas públicas que já existem no cadastro central.
+
+def _painel_moeda(valor: float) -> str:
+    bruto = f"{max(float(valor or 0), 0.0):,.2f}"
+    return "R$ " + bruto.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _pendencia_financeira_cliente_humiat(db: Session, cliente_id: int) -> float:
+    """Saldo do cliente no Organiza para aviso do portal Humiat.
+
+    O card não expõe a composição. Considera vendas de equipamento, manutenções
+    aprovadas e atualizações ainda não quitadas.
     """
+    total_aberto = 0.0
+    try:
+        vendas = db.execute(text("""
+            SELECT e.id, e.valor, e.pago, e.status, e.data_compra, e.previsao_entrega,
+                   COALESCE(SUM(vp.valor), 0) AS pagamentos
+            FROM equipamentos e
+            LEFT JOIN venda_pagamentos vp ON vp.equipamento_id=e.id
+            WHERE e.cliente_id=:cid
+              AND (e.data_compra IS NOT NULL OR e.previsao_entrega IS NOT NULL
+                   OR COALESCE(TRIM(e.valor),'')<>'' OR COALESCE(TRIM(e.pago),'')<>''
+                   OR e.status IN ('Solicitar gabinete','Montagem','Pronto para entrega','Entregue'))
+            GROUP BY e.id, e.valor, e.pago, e.status, e.data_compra, e.previsao_entrega
+        """), {"cid": int(cliente_id)}).mappings().all()
+        for row in vendas:
+            valor = _painel_numero(row.get("valor"))
+            recebido = max(_painel_numero(row.get("pago")), float(row.get("pagamentos") or 0))
+            total_aberto += max(valor - recebido, 0.0)
+    except Exception:
+        pass
+
+    try:
+        manutencoes = db.execute(text("""
+            SELECT id FROM assistencias
+            WHERE cliente_id=:cid AND UPPER(COALESCE(status,'')) <> 'CANCELADA'
+        """), {"cid": int(cliente_id)}).mappings().all()
+        for m in manutencoes:
+            orc = db.execute(text("""
+                SELECT id, status, valor_manutencao, desconto, desconto_somente_com_opcionais
+                FROM assistencia_orcamentos
+                WHERE manutencao_id=:mid
+                ORDER BY versao DESC, id DESC LIMIT 1
+            """), {"mid": int(m["id"])}).mappings().first()
+            if not orc:
+                continue
+            st = str(orc.get("status") or "")
+            if not (st in {"Aprovado", "Aprovado parcialmente", "Aprovado manualmente"} or st.startswith("Aprovado:")):
+                continue
+            itens = db.execute(text("""
+                SELECT quantidade, preco_venda, opcional, aprovado
+                FROM assistencia_orcamento_itens WHERE orcamento_id=:oid
+            """), {"oid": int(orc["id"])}).mappings().all()
+            subtotal = max(float(orc.get("valor_manutencao") or 0), 0.0)
+            opcionais = [i for i in itens if int(i.get("opcional") or 0)]
+            for i in itens:
+                if not int(i.get("opcional") or 0) or int(i.get("aprovado") or 0):
+                    subtotal += max(float(i.get("preco_venda") or 0), 0.0) * max(int(i.get("quantidade") or 0), 0)
+            todos_opcionais = all(int(i.get("aprovado") or 0) for i in opcionais)
+            condicional = bool(int(orc.get("desconto_somente_com_opcionais") or 0))
+            desconto = max(float(orc.get("desconto") or 0), 0.0) if (not condicional or todos_opcionais) else 0.0
+            devido = max(subtotal - min(desconto, subtotal), 0.0)
+            recebido = db.execute(text("""
+                SELECT COALESCE(SUM(valor),0) FROM assistencia_pagamentos WHERE orcamento_id=:oid
+            """), {"oid": int(orc["id"])}).scalar() or 0
+            total_aberto += max(devido - float(recebido or 0), 0.0)
+    except Exception:
+        pass
+
+    try:
+        atualizacoes = db.execute(text("""
+            SELECT valor_a_pagar_centavos, frete_centavos, valor_pago_centavos
+            FROM atualizacao_compras
+            WHERE cliente_id=:cid AND UPPER(COALESCE(status,'')) NOT IN ('CANCELADO','CANCELADA')
+        """), {"cid": int(cliente_id)}).mappings().all()
+        for row in atualizacoes:
+            devido = (int(row.get("valor_a_pagar_centavos") or 0) + int(row.get("frete_centavos") or 0)) / 100.0
+            recebido = int(row.get("valor_pago_centavos") or 0) / 100.0
+            total_aberto += max(devido - recebido, 0.0)
+    except Exception:
+        pass
+    return round(total_aberto, 2)
+
+
+def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
+    """Resumo do Organiza mostrado no portal sem liberar o sistema completo."""
     try:
         row = db.execute(text("""
             SELECT id, token_ficha, telefone, email
@@ -1404,15 +1498,57 @@ def _cliente_rapido_humiat(db: Session, usuario_id: int) -> dict:
     except Exception:
         row = None
     if not row:
-        return {"vinculado": False, "cadastro_url": "", "chamado_url": ""}
+        return {"vinculado": False, "cadastro_url": "", "chamado_url": "", "equipamentos": 0, "pendencia": 0.0, "pendencia_fmt": ""}
+    cliente_id = int(row.get("id") or 0)
+    try:
+        equipamentos = int(db.execute(text("""
+            SELECT COUNT(*) FROM equipamentos
+            WHERE cliente_id=:cid AND UPPER(COALESCE(status,'')) <> 'INATIVO'
+        """), {"cid": cliente_id}).scalar() or 0)
+    except Exception:
+        equipamentos = 0
+    pendencia = _pendencia_financeira_cliente_humiat(db, cliente_id)
     token = str(row.get("token_ficha") or "").strip()
     return {
         "vinculado": True,
-        "cliente_id": int(row.get("id") or 0),
-        "cadastro_url": f"/humiat/organiza/cadastro",
-        "chamado_url": f"/humiat/organiza/chamado",
+        "cliente_id": cliente_id,
+        "cadastro_url": "/humiat/organiza/cadastro",
+        "chamado_url": "/humiat/organiza/chamado",
         "tem_token": bool(token),
+        "equipamentos": equipamentos,
+        "pendencia": pendencia,
+        "pendencia_fmt": _painel_moeda(pendencia) if pendencia > 0.009 else "",
     }
+
+
+def _connect_resumo_humiat(db: Session, empresa: HumiatEmpresa | None) -> dict:
+    """Consulta enxuta do Connect somente quando o usuário possui acesso."""
+    if not empresa:
+        return {"ok": False}
+    slug_connect = _connect_slug_por_global(db, empresa.slug)
+    if not SSO_SECRET:
+        return {"ok": False, "slug": slug_connect}
+    url = f"{CONNECT_BASE_URL}/_connect/api/humiat/painel?{urlencode({'slug': slug_connect})}"
+    req = urllib.request.Request(url, headers={
+        "X-Humiat-SSO-Secret": SSO_SECRET,
+        "Accept": "application/json",
+        "User-Agent": "Humiat-ID-Painel/1.1.97",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+        gratis = dados.get("contratos_gratis") or {}
+        return {
+            "ok": bool(dados.get("ok")),
+            "slug": slug_connect,
+            "gratis_limite": int(gratis.get("limite") or 4),
+            "gratis_usados": int(gratis.get("usados") or 0),
+            "gratis_restantes": int(gratis.get("restantes") or 0),
+            "faturado": float(dados.get("faturado_contratos") or 0),
+            "faturado_fmt": _painel_moeda(float(dados.get("faturado_contratos") or 0)),
+        }
+    except Exception:
+        return {"ok": False, "slug": slug_connect, "gratis_limite": 4}
 
 
 def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session, empresa_id: int | None = None) -> dict:
@@ -1646,6 +1782,8 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
     # Todos os produtos aparecem no portal. A permissão decide se o botão de
     # acesso fica ativo; sem permissão o cliente pode apenas conhecer o produto.
     produtos = produtos_todos
+    connect_liberado = bool(meus_acessos.get("CONNECT", {}).get("sistema", False))
+    connect_resumo = _connect_resumo_humiat(db, empresa) if connect_liberado else {"ok": False, "gratis_limite": 4}
     return templates.TemplateResponse(
         "humiat/painel.html",
         {
@@ -1653,13 +1791,14 @@ def painel_humiat(request: Request, empresa_id: int | None = None, usuario: Humi
             "produtos": produtos, "meus_acessos": meus_acessos, "admin_humiat": False,
             "conheca_urls": {p.codigo: _produto_conheca_url(p) for p in produtos},
             "organiza_rapido": _cliente_rapido_humiat(db, usuario.id),
+            "connect_resumo": connect_resumo,
         },
     )
 
 
 @router.get("/painel/produto/{codigo}")
 def abrir_produto(
-    codigo: str, request: Request, empresa_id: int | None = None, modo: str = "adm",
+    codigo: str, request: Request, empresa_id: int | None = None, modo: str = "adm", destino: str = "",
     usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db),
 ):
     codigo = codigo.strip().upper()
@@ -1759,7 +1898,10 @@ def abrir_produto(
         ))
         db.commit()
         sep = "&" if "?" in produto.url_sso else "?"
-        return RedirectResponse(f"{produto.url_sso}{sep}{urlencode({'humiat_ticket': token})}", status_code=303)
+        params_sso = {"humiat_ticket": token}
+        if codigo == "CONNECT" and destino.startswith("/") and not destino.startswith("//"):
+            params_sso["destino"] = destino
+        return RedirectResponse(f"{produto.url_sso}{sep}{urlencode(params_sso)}", status_code=303)
 
     if produto.url_publica:
         return RedirectResponse(produto.url_publica, status_code=303)
