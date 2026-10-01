@@ -16152,8 +16152,15 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
                 "agendamento_tipo": "retirada",
             })
 
-    for e in db.query(AgendaManual).order_by(AgendaManual.data_hora.asc()).all():
-        cliente_manual = db.get(Cliente, e.cliente_id) if e.cliente_id else None
+    # Agenda manual: carrega clientes em lote para evitar N+1.
+    agenda_manuais = db.query(AgendaManual).order_by(AgendaManual.data_hora.asc()).all()
+    cliente_ids_manuais = {e.cliente_id for e in agenda_manuais if e.cliente_id}
+    clientes_manuais = {
+        c.id: c
+        for c in (db.query(Cliente).filter(Cliente.id.in_(cliente_ids_manuais)).all() if cliente_ids_manuais else [])
+    }
+    for e in agenda_manuais:
+        cliente_manual = clientes_manuais.get(e.cliente_id) if e.cliente_id else None
         categoria_manual = _agenda_categoria_evento(e)
         local_manual = _agenda_local_evento(e)
         eventos.append({
@@ -16170,9 +16177,26 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             "google_sync_erro": e.google_sync_erro,
         })
 
-    for a in db.query(AtualizacaoAgendamento).filter(AtualizacaoAgendamento.status == "RESERVADO").order_by(AtualizacaoAgendamento.data_hora.asc()).all():
-        compra = db.get(AtualizacaoCompra, a.compra_id)
-        cliente_at = db.get(Cliente, a.cliente_id)
+    # Atualizações agendadas: compras e clientes também são resolvidos em lote.
+    atualizacoes_agendadas = (
+        db.query(AtualizacaoAgendamento)
+        .filter(AtualizacaoAgendamento.status == "RESERVADO")
+        .order_by(AtualizacaoAgendamento.data_hora.asc())
+        .all()
+    )
+    compra_ids = {a.compra_id for a in atualizacoes_agendadas if a.compra_id}
+    cliente_ids_at = {a.cliente_id for a in atualizacoes_agendadas if a.cliente_id}
+    compras_por_id = {
+        c.id: c
+        for c in (db.query(AtualizacaoCompra).filter(AtualizacaoCompra.id.in_(compra_ids)).all() if compra_ids else [])
+    }
+    clientes_at_por_id = {
+        c.id: c
+        for c in (db.query(Cliente).filter(Cliente.id.in_(cliente_ids_at)).all() if cliente_ids_at else [])
+    }
+    for a in atualizacoes_agendadas:
+        compra = compras_por_id.get(a.compra_id)
+        cliente_at = clientes_at_por_id.get(a.cliente_id)
         if not compra or not cliente_at:
             continue
         eventos.append({
@@ -16191,7 +16215,7 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     google = _google_integracao(db)
     return templates.TemplateResponse("organiza/agenda.html", {
         "request": request, "usuario": usuario, "eventos": eventos,
-        "google": google, "google_configurado": _google_configurado() if config_aberta else False, "config_aberta": config_aberta,
+        "google": google, "google_configurado": _google_configurado(),
         "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
     })
 
