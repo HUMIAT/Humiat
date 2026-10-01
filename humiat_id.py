@@ -1798,10 +1798,13 @@ def _cliente_organiza_humiat(db: Session, *, email: str = "", documento: str = "
     doc_n = _so_digitos_humiat(documento)
     tel_n = _so_digitos_humiat(telefone)
     try:
-        rows = db.execute(text("""
-            SELECT id,nome,email,documento,telefone,ddi,cep,cidade,municipio,estado,bairro,endereco,humiat_usuario_id
-            FROM clientes ORDER BY id
-        """)).mappings().all()
+        # SAVEPOINT: uma incompatibilidade pontual de leitura não pode deixar
+        # a transação inteira do painel em estado abortado no PostgreSQL.
+        with db.begin_nested():
+            rows = db.execute(text("""
+                SELECT id,nome,email,documento,telefone,ddi,cep,cidade,municipio,estado,bairro,endereco,humiat_usuario_id
+                FROM clientes ORDER BY id
+            """)).mappings().all()
     except Exception:
         return None
     if email_n:
@@ -1824,15 +1827,18 @@ def _cliente_organiza_humiat(db: Session, *, email: str = "", documento: str = "
 
 def _empresa_solvoz_do_cliente_humiat(db: Session, cliente_id: int) -> dict | None:
     try:
-        row = db.execute(text("""
-            SELECT se.id,se.nome,se.slug
-            FROM equipamentos e
-            JOIN solvoz_empresas se ON se.id=e.solvoz_empresa_id
-            WHERE e.cliente_id=:cid AND se.ativo=1
-              AND UPPER(COALESCE(e.status,'')) <> 'INATIVO'
-            ORDER BY COALESCE(e.catalogo_online,0) DESC,e.id
-            LIMIT 1
-        """), {"cid": int(cliente_id)}).mappings().first()
+        # Isola a consulta opcional para que um schema antigo/incompleto não
+        # contamine as demais consultas do painel com InFailedSqlTransaction.
+        with db.begin_nested():
+            row = db.execute(text("""
+                SELECT se.id,se.nome,se.slug
+                FROM equipamentos e
+                JOIN solvoz_empresas se ON se.id=e.solvoz_empresa_id
+                WHERE e.cliente_id=:cid AND se.ativo=1
+                  AND UPPER(COALESCE(e.status,'')) <> 'INATIVO'
+                ORDER BY COALESCE(e.catalogo_online,0) DESC,e.id
+                LIMIT 1
+            """), {"cid": int(cliente_id)}).mappings().first()
         return dict(row) if row else None
     except Exception:
         return None
@@ -1882,7 +1888,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Humiat-ID-LokaFest/1.2.09",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.10",
         })
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -1931,13 +1937,17 @@ def _email_migracao_lokafest_humiat(db: Session, cliente: dict | None, item_loka
     cliente_id = int((cliente or {}).get("id") or 0)
     if cliente_id:
         try:
-            row = db.execute(text("""
-                SELECT email
-                FROM solvoz_acessos_clientes
-                WHERE cliente_id=:cid AND TRIM(COALESCE(email,''))<>''
-                ORDER BY COALESCE(atualizado_em,'') DESC,id DESC
-                LIMIT 1
-            """), {"cid": cliente_id}).first()
+            # Não use COALESCE(timestamp, '') no PostgreSQL: a string vazia
+            # pode gerar erro de conversão e abortar toda a transação.
+            # O SAVEPOINT mantém esta consulta opcional isolada.
+            with db.begin_nested():
+                row = db.execute(text("""
+                    SELECT email
+                    FROM solvoz_acessos_clientes
+                    WHERE cliente_id=:cid AND TRIM(COALESCE(email,''))<>''
+                    ORDER BY CASE WHEN atualizado_em IS NULL THEN 1 ELSE 0 END, atualizado_em DESC, id DESC
+                    LIMIT 1
+                """), {"cid": cliente_id}).first()
             email = _email_valido_humiat(row[0] if row else "")
             if email:
                 return email, "SolVoz"
@@ -1983,7 +1993,7 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.09")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.10")
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
@@ -2153,19 +2163,23 @@ def _novos_usuarios_lokafest_humiat(db: Session, pendencias_lokafest: list[dict]
             pass
 
     try:
-        rows = db.execute(text("""
-            SELECT
-                c.id, c.nome, c.email, c.documento, c.telefone, c.ddi, c.empresa,
-                c.cep, c.cidade, c.municipio, c.estado, c.bairro, c.endereco,
-                se.id AS solvoz_empresa_id, se.nome AS solvoz_empresa_nome, se.slug AS solvoz_empresa_slug,
-                COALESCE(e.catalogo_online,0) AS catalogo_online, e.id AS equipamento_id
-            FROM clientes c
-            JOIN equipamentos e ON e.cliente_id=c.id
-            JOIN solvoz_empresas se ON se.id=e.solvoz_empresa_id AND se.ativo=1
-            WHERE c.humiat_usuario_id IS NULL
-              AND UPPER(COALESCE(e.status,'')) <> 'INATIVO'
-            ORDER BY c.id, COALESCE(e.catalogo_online,0) DESC, e.id
-        """)).mappings().all()
+        # Esta lista é complementar ao painel. Se algum banco ainda estiver
+        # terminando uma migração, a falha fica restrita ao SAVEPOINT em vez
+        # de derrubar o Humiat ID inteiro.
+        with db.begin_nested():
+            rows = db.execute(text("""
+                SELECT
+                    c.id, c.nome, c.email, c.documento, c.telefone, c.ddi, c.empresa,
+                    c.cep, c.cidade, c.municipio, c.estado, c.bairro, c.endereco,
+                    se.id AS solvoz_empresa_id, se.nome AS solvoz_empresa_nome, se.slug AS solvoz_empresa_slug,
+                    COALESCE(e.catalogo_online,0) AS catalogo_online, e.id AS equipamento_id
+                FROM clientes c
+                JOIN equipamentos e ON e.cliente_id=c.id
+                JOIN solvoz_empresas se ON se.id=e.solvoz_empresa_id AND se.ativo=1
+                WHERE c.humiat_usuario_id IS NULL
+                  AND UPPER(COALESCE(e.status,'')) <> 'INATIVO'
+                ORDER BY c.id, COALESCE(e.catalogo_online,0) DESC, e.id
+            """)).mappings().all()
     except Exception as exc:
         return [], str(exc)
 
