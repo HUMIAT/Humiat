@@ -4228,9 +4228,45 @@ def _lokafest_token_valido(authorization: str | None) -> bool:
     return secrets.compare_digest(recebido, LOKAFEST_API_TOKEN)
 
 
-def _lokafest_cliente_por_identificador(db: Session, cpf: str = "", whatsapp: str = ""):
+def _lokafest_cliente_por_identificador(
+    db: Session,
+    cpf: str = "",
+    whatsapp: str = "",
+    cliente_id: str = "",
+    maquina: str = "",
+):
     cpf_limpo = _lokafest_digitos(cpf)
     whats_limpo = _lokafest_digitos(whatsapp)
+    cliente_id_limpo = _lokafest_digitos(cliente_id)
+    maquina_limpa = (maquina or "").strip().upper()
+
+    # Recuperação manual: o número técnico da máquina (ex.: KRJ00786)
+    # identifica diretamente o equipamento e, por consequência, seu cliente.
+    if maquina_limpa:
+        equipamento = (
+            db.query(Equipamento)
+            .filter(func.upper(func.trim(Equipamento.maquina)) == maquina_limpa)
+            .first()
+        )
+        if equipamento:
+            return (
+                db.query(Cliente)
+                .options(selectinload(Cliente.equipamentos))
+                .filter(Cliente.id == equipamento.cliente_id)
+                .first()
+            )
+
+    # Em uma revalidação do LokaFest, o cliente_id salvo anteriormente é a
+    # referência mais estável. Telefone/CPF podem ter sido corrigidos depois.
+    if cliente_id_limpo:
+        cliente = (
+            db.query(Cliente)
+            .options(selectinload(Cliente.equipamentos))
+            .filter(Cliente.id == int(cliente_id_limpo))
+            .first()
+        )
+        if cliente:
+            return cliente
 
     candidatos = db.query(Cliente).options(selectinload(Cliente.equipamentos)).all()
 
@@ -4284,14 +4320,17 @@ def _lokafest_tipo_modelo(eq: Equipamento) -> str | None:
 def api_lokafest_cliente(
     cpf: str = "",
     whatsapp: str = "",
+    cliente_id: str = "",
+    maquina: str = "",
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     """
     Endpoint privado consumido pelo LokaFest.
 
-    Busca cliente por CPF ou WhatsApp e devolve somente equipamentos
-    Karaoke RJ dos tipos Jukebox, Portátil/Maleta e iPhone.
+    Busca cliente por cliente_id salvo, CPF, WhatsApp ou número técnico da
+    máquina e devolve somente equipamentos Karaoke RJ dos tipos
+    Jukebox, Portátil/Maleta e iPhone.
 
     Header obrigatório:
         Authorization: Bearer <LOKAFEST_API_TOKEN>
@@ -4299,10 +4338,17 @@ def api_lokafest_cliente(
     if not _lokafest_token_valido(authorization):
         raise HTTPException(status_code=401, detail="Token de integração inválido.")
 
-    if not _lokafest_digitos(cpf) and not _lokafest_digitos(whatsapp):
-        raise HTTPException(status_code=400, detail="Informe CPF ou WhatsApp.")
+    if (
+        not _lokafest_digitos(cpf)
+        and not _lokafest_digitos(whatsapp)
+        and not _lokafest_digitos(cliente_id)
+        and not (maquina or "").strip()
+    ):
+        raise HTTPException(status_code=400, detail="Informe CPF, WhatsApp, cliente ou máquina.")
 
-    cliente = _lokafest_cliente_por_identificador(db, cpf, whatsapp)
+    cliente = _lokafest_cliente_por_identificador(
+        db, cpf, whatsapp, cliente_id=cliente_id, maquina=maquina
+    )
     if not cliente:
         return {
             "encontrado": False,

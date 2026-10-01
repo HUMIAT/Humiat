@@ -1955,7 +1955,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Humiat-ID-LokaFest/1.2.12",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.15",
         })
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -1977,6 +1977,18 @@ def _garantir_usuario_lokafest_humiat(cliente: dict, nome: str) -> dict:
         "documento": cliente.get("documento") or "",
         "telefone": cliente.get("telefone") or "",
         "zona": _zona_lokafest_por_cliente(cliente),
+    })
+
+
+def _vincular_id_local_lokafest_humiat(lokafest_usuario_id: int, humiat_usuario_id: int) -> dict:
+    """Grava o vínculo no banco do LokaFest no momento da aprovação.
+
+    A tela de usuários do LokaFest continua 100% local: ela apenas lê
+    `usuarios.humiat_user_id`, sem consultar Humiat/Organiza.
+    """
+    return _lokafest_humiat_request("/_lokafest/api/humiat/vincular-id", form={
+        "usuario_id": int(lokafest_usuario_id),
+        "humiat_user_id": int(humiat_usuario_id),
     })
 
 
@@ -2171,8 +2183,14 @@ def _pendencias_lokafest_humiat(db: Session, *, forcar: bool = False) -> tuple[l
                 humiat = h_por_tel.get(tel) or h_por_tel.get(tel[-11:] if len(tel) >= 10 else tel)
 
         # Já possui Humiat ID e LokaFest liberado: cadastro está correto, não
-        # é pendência. Isso cobre também os perfis administrativos internos.
+        # é pendência. Ao atualizar manualmente esta lista, aproveitamos para
+        # fazer o backfill do ID no próprio banco do LokaFest. A tela de
+        # usuários do LokaFest continua sem qualquer consulta externa.
         if humiat and int(humiat.id) in usuarios_com_lokafest:
+            try:
+                _vincular_id_local_lokafest_humiat(int(lid), int(humiat.id))
+            except Exception:
+                pass
             continue
 
         pendencias.append({
@@ -3132,6 +3150,12 @@ def aprovar_migracao_lokafest(
                 mig.email = email
                 mig.ultimo_erro = None
                 _auditar(db, request, "MIGRACAO_LOKAFEST_JA_REGULAR", usuario.id, detalhe=f"lokafest_id={lokafest_usuario_id}; humiat_id={alvo.id}; email_fonte={email_fonte}")
+                # Grava o ID diretamente no cadastro local do LokaFest. A tela
+                # de usuários não faz consulta externa para exibir o selo.
+                try:
+                    _vincular_id_local_lokafest_humiat(int(lokafest_usuario_id), int(alvo.id))
+                except Exception as exc:
+                    mig.ultimo_erro = f"Vínculo local LokaFest pendente: {exc}"[:1000]
                 # Mantém o snapshot manual da fila. O item aprovado será filtrado
                 # por HumiatMigracaoLokaFest sem precisar consultar o LokaFest novamente.
                 db.commit()
@@ -3165,6 +3189,13 @@ def aprovar_migracao_lokafest(
         mig.status = "APROVADO"
         mig.email = email
         mig.ultimo_erro = None
+
+        # Sincronização por evento: o LokaFest recebe o ID uma única vez na
+        # aprovação. A listagem de usuários continua sem consultas externas.
+        try:
+            _vincular_id_local_lokafest_humiat(int(lokafest_usuario_id), int(alvo.id))
+        except Exception as exc:
+            mig.ultimo_erro = f"Vínculo local LokaFest pendente: {exc}"[:1000]
 
         token = _novo_token_reset(db, alvo, request=request)
         link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
