@@ -94,6 +94,13 @@
         <div class="admin-actions"><button type="button" class="btn-secondary" data-dialog-open="todos-usuarios">Gerenciar usuários</button><button type="button" class="btn-primary" data-dialog-open="novo-usuario">+ Novo usuário</button></div>
       </article>
 
+      <article class="admin-app-card app-identidade{% if novos_usuarios_lokafest|length == 0 and not novos_usuarios_lokafest_erro %} is-disabled{% endif %}">
+        <div class="admin-card-head"><div class="admin-app-icon">N</div><div class="admin-card-copy"><span class="card-kicker">Cadastro automático</span><h3>Usuários novos</h3><p>Clientes com empresa, sem Humiat ID e fora das pendências antigas do LokaFest.</p></div></div>
+        <div class="admin-badges"><span class="status-badge {% if novos_usuarios_lokafest|length > 0 %}active{% endif %}">{{ novos_usuarios_lokafest|length }} novo(s)</span></div>
+        {% if novos_usuarios_lokafest_erro %}<small class="error-inline">{{ novos_usuarios_lokafest_erro }}</small>{% endif %}
+        <div class="admin-actions one"><button type="button" class="btn-primary" data-dialog-open="novos-usuarios-lokafest">Revisar novos usuários</button></div>
+      </article>
+
       <article class="admin-app-card app-migracao{% if pendencias_lokafest|length == 0 and not pendencias_lokafest_erro %} is-disabled{% endif %}">
         <div class="admin-card-head"><div class="admin-app-icon">P</div><div class="admin-card-copy"><span class="card-kicker">Migração inicial</span><h3>Pendências Humiat ID</h3><p>Usuários existentes no LokaFest que ainda precisam ser conciliados e aprovados.</p></div></div>
         <div class="admin-badges"><span class="status-badge {% if pendencias_lokafest|length > 0 %}active{% endif %}">{{ pendencias_lokafest|length }} pendências</span>{% if erros_email_lokafest|length %}<span class="status-badge">{{ erros_email_lokafest|length }} e-mail(is) com erro</span>{% endif %}</div>
@@ -104,6 +111,32 @@
   </section>
 
 </main>
+
+<dialog class="admin-dialog" id="novos-usuarios-lokafest">
+  <div class="dialog-card dialog-wide">
+    <div class="dialog-head"><div><span class="card-kicker">Cadastro automático</span><h2>Usuários novos</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <p class="muted-copy">Ao criar, o Humiat usa o cadastro do Organiza como fonte, vincula a empresa, libera Organiza/Tarefas rápidas + LokaFest + SolVoz Cliente Catálogo, cria o perfil LokaFest já ativo e envia o primeiro acesso.</p>
+    <div style="display:grid;gap:10px;max-height:62vh;overflow:auto;margin-top:14px">
+      {% for p in novos_usuarios_lokafest %}
+      <div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(170px,1.1fr) minmax(170px,1.1fr) auto;gap:12px;align-items:center">
+        <div><strong>{{ p.nome }}</strong><small style="display:block;color:var(--muted)">CPF {{ p.documento or '—' }} · {{ p.telefone_completo or '—' }}</small></div>
+        <div><small style="display:block;color:var(--muted)">E-mail</small><strong>{{ p.email or 'Sem e-mail' }}</strong></div>
+        <div><small style="display:block;color:var(--muted)">Empresa / SolVoz</small><strong>{{ p.solvoz_empresa_nome or p.empresa or '—' }}</strong><small style="display:block;color:var(--muted)">{{ p.solvoz_empresa_slug or '' }}</small></div>
+        <div>
+          {% if p.pode_criar %}
+          <form method="post" action="/admin-humiat/usuarios-novos/{{ p.id }}/criar"><button class="btn-primary" type="submit">Criar acesso</button></form>
+          {% else %}
+          <span class="status-badge">Completar {{ p.faltas|join(', ') }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="id-success">Nenhum usuário novo aguardando criação.</div>
+      {% endfor %}
+    </div>
+    <div class="dialog-actions"><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
+  </div>
+</dialog>
 
 <dialog class="admin-dialog" id="pendencias-lokafest">
   <div class="dialog-card dialog-wide">

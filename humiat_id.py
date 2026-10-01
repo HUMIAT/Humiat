@@ -1882,7 +1882,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "X-Humiat-SSO-Secret": SSO_SECRET,
             "Accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Humiat-ID-LokaFest/1.2.03",
+            "User-Agent": "Humiat-ID-LokaFest/1.2.08",
         })
         try:
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -1924,6 +1924,27 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
     </div>
     """
     _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.03")
+
+
+def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> None:
+    """Envia o primeiro acesso de um cliente criado diretamente pelo Organiza/Humiat."""
+    nome_exibicao = (nome or "cliente").strip()
+    texto_msg = (
+        f"Olá, {nome_exibicao}.\n\n"
+        "Seu Humiat ID foi criado e seus acessos já estão preparados.\n"
+        "Crie sua senha única para acessar Organiza, LokaFest e SolVoz.\n"
+        f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n"
+    )
+    html_msg = f"""
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
+      <h2>Seu Humiat ID está pronto</h2>
+      <p>Olá, {html.escape(nome_exibicao)}.</p>
+      <p>Seu acesso foi criado com os dados já cadastrados no Organiza. Use uma única senha para acessar seus sistemas.</p>
+      <p style="margin:28px 0"><a href="{html.escape(link)}" style="background:#0b5bd3;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar minha senha</a></p>
+      <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
+    </div>
+    """
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.08")
 
 
 def _aplicar_acessos_cliente_humiat(db: Session, usuario_h: HumiatUsuario, cliente: dict, *, liberar_lokafest: bool = True) -> None:
@@ -2024,6 +2045,72 @@ def _pendencias_lokafest_humiat(db: Session) -> tuple[list[dict], str]:
     return pendencias, ""
 
 
+def _novos_usuarios_lokafest_humiat(db: Session, pendencias_lokafest: list[dict], pendencias_erro: str = "") -> tuple[list[dict], str]:
+    """Clientes do Organiza prontos para nascer no ecossistema Humiat/LokaFest.
+
+    Regra: possui empresa SolVoz vinculada por equipamento, ainda não possui
+    Humiat ID e não corresponde a uma pendência legada do LokaFest. A consulta
+    é feita em lote para não repetir o N+1 das telas antigas.
+    """
+    if pendencias_erro:
+        # Sem conseguir confirmar a fila legada, não arriscamos duplicar perfil.
+        return [], "Não foi possível confirmar as pendências do LokaFest. Tente atualizar novamente."
+
+    pendentes_cliente_ids: set[int] = set()
+    for item in pendencias_lokafest or []:
+        cliente = item.get("cliente") or {}
+        try:
+            if cliente.get("id"):
+                pendentes_cliente_ids.add(int(cliente.get("id")))
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        rows = db.execute(text("""
+            SELECT
+                c.id, c.nome, c.email, c.documento, c.telefone, c.ddi, c.empresa,
+                c.cep, c.cidade, c.municipio, c.estado, c.bairro, c.endereco,
+                se.id AS solvoz_empresa_id, se.nome AS solvoz_empresa_nome, se.slug AS solvoz_empresa_slug,
+                COALESCE(e.catalogo_online,0) AS catalogo_online, e.id AS equipamento_id
+            FROM clientes c
+            JOIN equipamentos e ON e.cliente_id=c.id
+            JOIN solvoz_empresas se ON se.id=e.solvoz_empresa_id AND se.ativo=1
+            WHERE c.humiat_usuario_id IS NULL
+              AND UPPER(COALESCE(e.status,'')) <> 'INATIVO'
+            ORDER BY c.id, COALESCE(e.catalogo_online,0) DESC, e.id
+        """)).mappings().all()
+    except Exception as exc:
+        return [], str(exc)
+
+    novos: list[dict] = []
+    vistos: set[int] = set()
+    for row in rows:
+        cid = int(row.get("id") or 0)
+        if not cid or cid in vistos or cid in pendentes_cliente_ids:
+            continue
+        vistos.add(cid)
+        item = dict(row)
+        email = str(item.get("email") or "").strip().lower()
+        documento = _so_digitos_humiat(item.get("documento"))
+        telefone = _so_digitos_humiat(f"{item.get('ddi') or ''}{item.get('telefone') or ''}")
+        faltas = []
+        if not email or "@" not in email:
+            faltas.append("e-mail")
+        if len(documento) != 11:
+            faltas.append("CPF")
+        if len(telefone) < 10:
+            faltas.append("WhatsApp")
+        item.update({
+            "email": email,
+            "documento_limpo": documento,
+            "telefone_completo": telefone,
+            "pode_criar": not faltas,
+            "faltas": faltas,
+        })
+        novos.append(item)
+    return novos, ""
+
+
 def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session, empresa_id: int | None = None) -> dict:
     """Contexto do hub Humiat.
 
@@ -2053,6 +2140,9 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
     for v in vinculos:
         empresa_por_usuario.setdefault(v.usuario_id, v.empresa_id)
     pendencias_lokafest, pendencias_lokafest_erro = _pendencias_lokafest_humiat(db)
+    novos_usuarios_lokafest, novos_usuarios_lokafest_erro = _novos_usuarios_lokafest_humiat(
+        db, pendencias_lokafest, pendencias_lokafest_erro
+    )
     erros_email_lokafest = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.status == "EMAIL_ERRO").order_by(HumiatMigracaoLokaFest.id.desc()).all()
     try:
         cliente_humiat_ids = {int(x[0]) for x in db.execute(text("SELECT DISTINCT humiat_usuario_id FROM clientes WHERE humiat_usuario_id IS NOT NULL")).all() if x[0]}
@@ -2072,6 +2162,8 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "empresa_por_usuario": empresa_por_usuario,
         "pendencias_lokafest": pendencias_lokafest,
         "pendencias_lokafest_erro": pendencias_lokafest_erro,
+        "novos_usuarios_lokafest": novos_usuarios_lokafest,
+        "novos_usuarios_lokafest_erro": novos_usuarios_lokafest_erro,
         "erros_email_lokafest": erros_email_lokafest,
         "cliente_humiat_ids": cliente_humiat_ids,
         "admin_humiat": True,
@@ -2849,7 +2941,7 @@ def reenviar_email_migracao_lokafest(
     link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
     db.commit()
     try:
-        _enviar_email_migracao_humiat(alvo.email, alvo.nome, link)
+        _enviar_email_primeiro_acesso_humiat(alvo.email, alvo.nome, link)
         mig.status = "EMAIL_ENVIADO"
         mig.email_enviado_em = datetime.utcnow()
         mig.ultimo_erro = None
@@ -2860,6 +2952,143 @@ def reenviar_email_migracao_lokafest(
         mig.ultimo_erro = str(exc)[:1000]
         db.commit()
         return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc))}", status_code=303)
+
+
+@router.post("/admin-humiat/usuarios-novos/{cliente_id}/criar")
+def criar_usuario_novo_lokafest_humiat(
+    cliente_id: int,
+    request: Request,
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat),
+    db: Session = Depends(get_db),
+):
+    """Cria o ecossistema completo para cliente novo vindo do Organiza.
+
+    O cadastro do Organiza é a fonte. Não depende de aprovação posterior no
+    LokaFest: o perfil remoto nasce ativo/aprovado e recebe equipamentos/pacote
+    pela integração já existente.
+    """
+    try:
+        row = db.execute(text("""
+            SELECT id,nome,email,documento,telefone,ddi,cep,cidade,municipio,estado,bairro,endereco,humiat_usuario_id
+            FROM clientes WHERE id=:id LIMIT 1
+        """), {"id": int(cliente_id)}).mappings().first()
+        cliente = dict(row) if row else None
+    except Exception as exc:
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote(str(exc)[:180])}", status_code=303)
+    if not cliente:
+        return RedirectResponse("/painel?erro=Cliente não encontrado no Organiza", status_code=303)
+    if cliente.get("humiat_usuario_id"):
+        return RedirectResponse("/painel?ok=Cliente já possui Humiat ID", status_code=303)
+
+    pendencias, erro_pendencias = _pendencias_lokafest_humiat(db)
+    if erro_pendencias:
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote('Não foi possível confirmar a fila antiga do LokaFest: ' + erro_pendencias[:140])}", status_code=303)
+    if any(int(((p.get("cliente") or {}).get("id") or 0)) == int(cliente_id) for p in pendencias):
+        return RedirectResponse("/painel?erro=Este cliente já está em Pendências Humiat ID do LokaFest", status_code=303)
+
+    empresa_sv = _empresa_solvoz_do_cliente_humiat(db, int(cliente_id))
+    if not empresa_sv:
+        return RedirectResponse("/painel?erro=Cliente sem empresa SolVoz vinculada", status_code=303)
+
+    email = str(cliente.get("email") or "").strip().lower()
+    documento = _so_digitos_humiat(cliente.get("documento"))
+    telefone = _so_digitos_humiat(f"{cliente.get('ddi') or ''}{cliente.get('telefone') or ''}")
+    faltas = []
+    if not email or "@" not in email:
+        faltas.append("e-mail")
+    if len(documento) != 11:
+        faltas.append("CPF")
+    if len(telefone) < 10:
+        faltas.append("WhatsApp")
+    if faltas:
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote('Complete no Organiza: ' + ', '.join(faltas))}", status_code=303)
+
+    # 1) Cria/atualiza primeiro o perfil do LokaFest. A operação é idempotente.
+    # Assim, se a etapa central falhar, uma nova tentativa apenas reaproveita o perfil remoto.
+    try:
+        perfil_lokafest = _garantir_usuario_lokafest_humiat(cliente, str(cliente.get("nome") or "Cliente Humiat"))
+    except Exception as exc:
+        return RedirectResponse(f"/painel?erro={urllib.parse.quote('LokaFest: ' + str(exc)[:180])}", status_code=303)
+
+    # 2) Garante a empresa central e cria/reaproveita o Humiat ID.
+    empresa_h = garantir_empresa_solvoz_humiat(
+        db,
+        str(empresa_sv.get("nome") or empresa_sv.get("slug") or "Empresa"),
+        str(empresa_sv.get("slug") or ""),
+        ativo=1,
+    )
+    alvo = db.query(HumiatUsuario).filter(func.lower(HumiatUsuario.email) == email).first()
+    criado = alvo is None
+    if alvo is None:
+        alvo = HumiatUsuario(
+            nome=str(cliente.get("nome") or "Cliente Humiat").strip(),
+            email=email,
+            senha_hash=gerar_hash_senha_id(secrets.token_urlsafe(32)),
+            tipo=TIPO_CLIENTE_EMPRESA,
+            ativo=1,
+            organiza_usuario=None,
+            documento=str(cliente.get("documento") or "").strip()[:30] or None,
+            telefone=str(cliente.get("telefone") or "").strip()[:40] or None,
+        )
+        db.add(alvo)
+        db.flush()
+    else:
+        alvo.ativo = 1
+        # Reaproveita a identidade central sem rebaixar um eventual perfil interno.
+        if not (alvo.documento or "").strip():
+            alvo.documento = str(cliente.get("documento") or "").strip()[:30] or None
+        if not (alvo.telefone or "").strip():
+            alvo.telefone = str(cliente.get("telefone") or "").strip()[:40] or None
+
+    vinculo = db.query(HumiatUsuarioEmpresa).filter(
+        HumiatUsuarioEmpresa.usuario_id == int(alvo.id),
+        HumiatUsuarioEmpresa.empresa_id == int(empresa_h.id),
+    ).first()
+    if not vinculo:
+        db.add(HumiatUsuarioEmpresa(usuario_id=int(alvo.id), empresa_id=int(empresa_h.id)))
+
+    db.execute(text("UPDATE clientes SET humiat_usuario_id=:uid WHERE id=:cid"), {"uid": int(alvo.id), "cid": int(cliente_id)})
+    _aplicar_acessos_cliente_humiat(db, alvo, cliente, liberar_lokafest=True)
+
+    # O registro também impede que o usuário criado pelo Humiat volte como
+    # 'pendência legada' na próxima leitura da base do LokaFest.
+    lokafest_usuario_id = int(perfil_lokafest.get("usuario_id") or 0)
+    mig = None
+    if lokafest_usuario_id:
+        mig = db.query(HumiatMigracaoLokaFest).filter(HumiatMigracaoLokaFest.lokafest_usuario_id == lokafest_usuario_id).first()
+        if not mig:
+            mig = HumiatMigracaoLokaFest(lokafest_usuario_id=lokafest_usuario_id)
+            db.add(mig)
+        mig.humiat_usuario_id = int(alvo.id)
+        mig.email = email
+        mig.status = "APROVADO"
+        mig.ultimo_erro = None
+
+    token_primeiro = _novo_token_reset(db, alvo, request=request)
+    link_primeiro = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token_primeiro)}"
+    _auditar(
+        db, request, "CRIAR_USUARIO_NOVO_LOKAFEST", usuario.id, int(empresa_h.id),
+        f"cliente={cliente_id}; humiat={alvo.id}; lokafest={lokafest_usuario_id}; criado={int(criado)}",
+    )
+    _cache_integracao_apagar(db, "migracao:lokafest:usuarios")
+    db.commit()
+
+    aviso = "novo_usuario_criado"
+    try:
+        _enviar_email_primeiro_acesso_humiat(email, alvo.nome, link_primeiro)
+        aviso = "novo_usuario_criado_email_enviado"
+        if mig:
+            mig.status = "EMAIL_ENVIADO"
+            mig.email_enviado_em = datetime.utcnow()
+            mig.ultimo_erro = None
+            db.commit()
+    except Exception as exc:
+        aviso = "novo_usuario_criado_email_erro"
+        if mig:
+            mig.status = "EMAIL_ERRO"
+            mig.ultimo_erro = str(exc)[:1000]
+            db.commit()
+    return RedirectResponse(f"/painel?ok={urllib.parse.quote(aviso)}", status_code=303)
 
 
 @router.post("/admin-humiat/usuarios")
