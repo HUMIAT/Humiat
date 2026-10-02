@@ -32,6 +32,10 @@
         <svg viewBox="0 0 24 24"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
         <span>Painel</span>
       </a>
+      <a class="h-nav-link" href="#versoes" title="Versões dos sistemas">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/><path d="M18 15v6M15 18h6"/></svg>
+        <span>Versões</span>
+      </a>
     </nav>
 
     <nav class="h-nav-section">
@@ -112,9 +116,34 @@
     {% elif ok == 'usuario_criado_email_enviado' %}Usuário criado e e-mail de primeiro acesso enviado.
     {% elif ok == 'usuario_atualizado' %}Usuário atualizado.
     {% elif ok == 'senha_redefinida' %}Senha redefinida.
+    {% elif ok == 'versoes_salvas' %}Versões salvas.
+    {% elif ok == 'versoes_atualizadas' %}Versões consultadas e atualizadas.
     {% else %}Alteração salva com sucesso.{% endif %}
   </div>
   {% endif %}
+
+  {% if clientes_logos %}
+  <section class="h-client-strip" aria-label="Nossos clientes">
+    <div class="h-client-strip-copy"><span>NOSSOS CLIENTES</span><strong>Empresas que fazem parte do ecossistema Humiat</strong></div>
+    <div class="h-client-strip-viewport"><div class="h-client-strip-track">
+      {% for rodada in range(2) %}{% for cliente in clientes_logos %}<span class="h-client-logo" title="{{ cliente.nome }}"><img src="{{ cliente.logo_url }}" alt="Logo {{ cliente.nome }}" loading="lazy" decoding="async"></span>{% endfor %}{% endfor %}
+    </div></div>
+  </section>
+  {% endif %}
+
+  <section class="h-version-panel" id="versoes">
+    <div class="h-version-head"><div><p class="eyebrow">MANUTENÇÃO</p><h2>Versões dos sistemas</h2><p>O Hub usa estes valores locais. Atualize sob demanda ou corrija manualmente.</p></div>
+      <form method="post" action="/admin-humiat/versoes/atualizar"><button class="btn-secondary" type="submit">Atualizar versões</button></form>
+    </div>
+    {% if request.query_params.get('aviso') %}<div class="h-version-warning">{{ request.query_params.get('aviso') }}</div>{% endif %}
+    <form class="h-version-form" method="post" action="/admin-humiat/versoes/salvar">
+      <label><span>Connect</span><input name="connect" value="{{ PRODUCT_VERSIONS.get('CONNECT','') }}" autocomplete="off"></label>
+      <label><span>LokaFest</span><input name="lokafest" value="{{ PRODUCT_VERSIONS.get('LOKAFEST','') }}" autocomplete="off"></label>
+      <label><span>Organiza</span><input name="organiza" value="{{ PRODUCT_VERSIONS.get('ORGANIZA','') }}" autocomplete="off"></label>
+      <label><span>SolVoz</span><input name="solvoz" value="{{ PRODUCT_VERSIONS.get('SOLVOZ','') }}" autocomplete="off"></label>
+      <button class="btn-primary" type="submit">Salvar versões</button>
+    </form>
+  </section>
 
   <section style="margin-bottom:18px">
     <div class="section-title" style="margin-bottom:12px">

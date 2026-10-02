@@ -30,12 +30,93 @@ templates = Jinja2Templates(directory="templates")
 HUMIAT_ID_VERSION = ORGANIZA_VERSAO
 PRODUCT_VERSIONS = {
     "CONNECT": (os.getenv("HUMIAT_CONNECT_VERSION") or "1.0.85").strip(),
-    "LOKAFEST": (os.getenv("HUMIAT_LOKAFEST_VERSION") or "1.0.17").strip(),
+    "LOKAFEST": (os.getenv("HUMIAT_LOKAFEST_VERSION") or "1.0.20").strip(),
     "ORGANIZA": ORGANIZA_VERSAO,
-    "SOLVOZ": (os.getenv("HUMIAT_SOLVOZ_VERSION") or "2.5.93").strip(),
+    "SOLVOZ": (os.getenv("HUMIAT_SOLVOZ_VERSION") or "2.5.95").strip(),
 }
 templates.env.globals["HUMIAT_ID_VERSION"] = HUMIAT_ID_VERSION
 templates.env.globals["PRODUCT_VERSIONS"] = PRODUCT_VERSIONS
+
+_VERSION_CONFIG_KEYS = {
+    "CONNECT": "humiat_versao_connect",
+    "LOKAFEST": "humiat_versao_lokafest",
+    "ORGANIZA": "humiat_versao_organiza",
+    "SOLVOZ": "humiat_versao_solvoz",
+}
+
+
+def _versoes_produtos_humiat(db: Session) -> dict[str, str]:
+    """Versões exibidas no Hub, lidas localmente e sem chamadas externas no render."""
+    versoes = dict(PRODUCT_VERSIONS)
+    versoes["ORGANIZA"] = ORGANIZA_VERSAO
+    try:
+        rows = db.execute(text(
+            "SELECT chave, valor FROM configuracoes_sistema WHERE chave IN (:c1,:c2,:c3,:c4)"
+        ), {
+            "c1": _VERSION_CONFIG_KEYS["CONNECT"],
+            "c2": _VERSION_CONFIG_KEYS["LOKAFEST"],
+            "c3": _VERSION_CONFIG_KEYS["ORGANIZA"],
+            "c4": _VERSION_CONFIG_KEYS["SOLVOZ"],
+        }).mappings().all()
+        por_chave = {str(r.get("chave") or ""): str(r.get("valor") or "").strip() for r in rows}
+        for codigo, chave in _VERSION_CONFIG_KEYS.items():
+            valor = por_chave.get(chave, "").strip()
+            if valor:
+                versoes[codigo] = valor
+    except Exception:
+        pass
+    return versoes
+
+
+def _salvar_versao_produto_humiat(db: Session, codigo: str, versao: str) -> None:
+    codigo = str(codigo or "").strip().upper()
+    chave = _VERSION_CONFIG_KEYS.get(codigo)
+    valor = str(versao or "").strip().lstrip("vV")[:40]
+    if not chave or not valor:
+        return
+    atual = db.execute(text("SELECT id FROM configuracoes_sistema WHERE chave=:chave LIMIT 1"), {"chave": chave}).first()
+    if atual:
+        db.execute(text("UPDATE configuracoes_sistema SET valor=:valor, atualizado_em=CURRENT_TIMESTAMP WHERE chave=:chave"), {"valor": valor, "chave": chave})
+    else:
+        db.execute(text("INSERT INTO configuracoes_sistema (chave, valor) VALUES (:chave,:valor)"), {"chave": chave, "valor": valor})
+
+
+def _descobrir_versao_openapi(base_url: str) -> str:
+    """Consulta sob demanda a versão FastAPI; nunca é chamada ao abrir o Hub."""
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    req = urllib.request.Request(
+        f"{base}/openapi.json",
+        headers={"Accept": "application/json", "User-Agent": f"Humiat-ID/{HUMIAT_ID_VERSION}"},
+    )
+    with urllib.request.urlopen(req, timeout=4) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return str(((payload or {}).get("info") or {}).get("version") or "").strip().lstrip("vV")[:40]
+
+
+def _clientes_logos_humiat(db: Session) -> list[dict]:
+    """Miniaturas já locais no Organiza para a faixa 'Nossos clientes'."""
+    try:
+        rows = db.execute(text("""
+            SELECT id, nome, logo_mini_hash
+            FROM solvoz_empresas
+            WHERE ativo=1 AND logo_mini_data IS NOT NULL
+            ORDER BY nome
+        """)).mappings().all()
+    except Exception:
+        return []
+    itens = []
+    for row in rows:
+        eid = int(row.get("id") or 0)
+        if not eid:
+            continue
+        versao = str(row.get("logo_mini_hash") or "")[:12]
+        url = f"/api/publico/lokafest/empresas/{eid}/logo"
+        if versao:
+            url += f"?v={versao}"
+        itens.append({"id": eid, "nome": str(row.get("nome") or "").strip(), "logo_url": url})
+    return itens
 
 COOKIE_NAME = "humiat_id"
 SESSION_DAYS = 1  # sessão central Humiat ID: 24 horas
@@ -899,7 +980,7 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
         "Humiat ID - Redefinição de senha",
         texto,
         html,
-        user_agent="Humiat-ID/1.2.27",
+        user_agent="Humiat-ID/1.2.28",
     )
 
 
@@ -2088,7 +2169,7 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
       {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.27")
+    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.28")
 
 
 def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> None:
@@ -2112,7 +2193,7 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.27")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.28")
 
 
 def _aplicar_acessos_cliente_humiat(
@@ -2558,6 +2639,8 @@ def _contexto_admin_humiat(request: Request, usuario: HumiatUsuario, db: Session
         "cliente_humiat_ids": cliente_humiat_ids,
         "carregar": carregar,
         "admin_humiat": True,
+        "PRODUCT_VERSIONS": _versoes_produtos_humiat(db),
+        "clientes_logos": _clientes_logos_humiat(db),
     }
 
 @router.get("/entrar", response_class=HTMLResponse)
@@ -2721,6 +2804,41 @@ def sair_humiat(request: Request, db: Session = Depends(get_db)):
     return resposta
 
 
+@router.post("/admin-humiat/versoes/salvar")
+def salvar_versoes_humiat(
+    connect: str = Form(""), lokafest: str = Form(""), organiza: str = Form(""), solvoz: str = Form(""),
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db),
+):
+    for codigo, valor in (("CONNECT", connect), ("LOKAFEST", lokafest), ("ORGANIZA", organiza), ("SOLVOZ", solvoz)):
+        _salvar_versao_produto_humiat(db, codigo, valor)
+    db.commit()
+    return RedirectResponse("/painel?ok=versoes_salvas#versoes", status_code=303)
+
+
+@router.post("/admin-humiat/versoes/atualizar")
+def atualizar_versoes_humiat(
+    usuario: HumiatUsuario = Depends(exigir_admin_humiat), db: Session = Depends(get_db),
+):
+    encontrados = {"ORGANIZA": ORGANIZA_VERSAO}
+    falhas = []
+    for codigo, base in (("CONNECT", CONNECT_BASE_URL), ("LOKAFEST", LOKAFEST_BASE_URL), ("SOLVOZ", SOLVOZ_BASE_URL)):
+        try:
+            versao = _descobrir_versao_openapi(base)
+            if versao:
+                encontrados[codigo] = versao
+            else:
+                falhas.append(codigo)
+        except Exception:
+            falhas.append(codigo)
+    for codigo, valor in encontrados.items():
+        _salvar_versao_produto_humiat(db, codigo, valor)
+    db.commit()
+    if falhas:
+        detalhe = urllib.parse.quote("Versões atualizadas. Sem resposta: " + ", ".join(falhas))
+        return RedirectResponse(f"/painel?ok=versoes_atualizadas&aviso={detalhe}#versoes", status_code=303)
+    return RedirectResponse("/painel?ok=versoes_atualizadas#versoes", status_code=303)
+
+
 @router.get("/painel", response_class=HTMLResponse)
 def painel_humiat(request: Request, empresa_id: int | None = None, carregar: str = "", usuario: HumiatUsuario = Depends(exigir_humiat_login), db: Session = Depends(get_db)):
     # O hub administrativo abre leve. Dados pesados são carregados somente por
@@ -2762,6 +2880,8 @@ def painel_humiat(request: Request, empresa_id: int | None = None, carregar: str
             "connect_resumo": connect_resumo,
             "solvoz_resumo": solvoz_resumo,
             "lokafest_resumo": lokafest_resumo,
+            "PRODUCT_VERSIONS": _versoes_produtos_humiat(db),
+            "clientes_logos": _clientes_logos_humiat(db),
         },
     )
 

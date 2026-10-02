@@ -998,6 +998,7 @@ class Item(Base):
     # 1.1.74: controle individual. Categorias lógicas ainda podem forçar fora do estoque.
     controla_estoque = Column(Integer, nullable=False, default=1)
     fornecedor_id = Column(Integer, ForeignKey("fornecedores.id"), nullable=True, index=True)
+    unidade = Column(String(10), nullable=False, default="UN")
     preco_custo = Column(Float, nullable=False, default=0)
     preco_venda = Column(Float, nullable=False, default=0)
     ativo = Column(Integer, nullable=False, default=1)
@@ -1736,6 +1737,7 @@ class IntegracaoConect(Base):
 ESTOQUE_ITENS_COR = {"BOTOES", "BOTAO", "COOLER 12 MM", "FITA LED", "LED"}
 # Categorias padronizadas para leitura de estoque/cadastro.
 CATEGORIAS_ITENS_PADRAO = ["Sistema", "Manutenção", "Info e Eletrônicos", "Som", "Cabos e Conectores", "Botões e LEDs", "Gabinetes", "Espelhos", "Fliperama", "Geral"]
+UNIDADES_ITEM = ("UN", "M")
 # Itens destas categorias são serviços/valores lógicos e não representam material físico.
 ESTOQUE_CATEGORIAS_SEM_CONTROLE = {"SISTEMA", "MANUTENCAO", "MANUTENCOES"}
 ESTOQUE_ITENS_SEM_CONTROLE = {"ATUALIZACAO", "CATALOGO ENCARDENADO"}
@@ -1747,6 +1749,11 @@ ESTOQUE_MANUTENCAO_CANCELADA = {"Cancelada", "Cancelado"}
 
 def _texto_sem_acento(valor: str) -> str:
     return unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii").strip().upper()
+
+
+def _normalizar_unidade_item(valor: str | None) -> str:
+    unidade = str(valor or "UN").strip().upper()
+    return unidade if unidade in UNIDADES_ITEM else "UN"
 
 
 def item_controla_estoque(item: Item | None) -> bool:
@@ -4026,6 +4033,15 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN controla_estoque INTEGER NOT NULL DEFAULT 1"))
             if "fornecedor_id" not in existentes_itens:
                 conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN fornecedor_id INTEGER"))
+            unidade_criada = "unidade" not in existentes_itens
+            if unidade_criada:
+                conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN unidade VARCHAR(10) NOT NULL DEFAULT 'UN'"))
+                # Carga inicial 1.2.28: todos os itens começam como UN. CABO BIPOLAR
+                # e FITA LED já entram como M. Depois da primeira migração, a unidade
+                # é sempre editável por Item e não é mais sobrescrita automaticamente.
+                conn.execute(text("UPDATE catalogo_itens SET unidade = 'M' WHERE UPPER(TRIM(nome)) IN ('CABO BIPOLAR', 'FITA LED')"))
+            else:
+                conn.execute(text("UPDATE catalogo_itens SET unidade = 'UN' WHERE unidade IS NULL OR TRIM(unidade) = ''"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_catalogo_itens_fornecedor_id ON catalogo_itens (fornecedor_id)"))
 
     if "estoque_compras_pedidos" in insp.get_table_names():
@@ -13489,10 +13505,10 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
     itens_resumo = _agrupar_movimentacoes_item(linhas)
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["CATEGORIA", "ITEM", "COR", "ENTRADAS", "SAIDAS", "RESERVADO", "MOVIMENTO_LIQUIDO"])
+    writer.writerow(["CATEGORIA", "ITEM", "UNIDADE", "COR", "ENTRADAS", "SAIDAS", "RESERVADO", "MOVIMENTO_LIQUIDO"])
     for l in itens_resumo:
         writer.writerow([
-            l["item"].categoria if l["item"] else "", l["item"].nome if l["item"] else "", l["cor"], f'{float(l["entradas"]):g}',
+            l["item"].categoria if l["item"] else "", l["item"].nome if l["item"] else "", _normalizar_unidade_item(getattr(l["item"], "unidade", "UN")) if l["item"] else "UN", l["cor"], f'{float(l["entradas"]):g}',
             f'{float(l["saidas"]):g}', f'{float(l["reservas"]):g}', f'{float(l["movimento_liquido"]):g}',
         ])
     conteudo = "\ufeff" + buffer.getvalue()
@@ -13619,12 +13635,12 @@ def estoque_contagem_nova(usuario: Usuario = Depends(usuario_logado), db: Sessio
 def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["CATEGORIA", "ITEM", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "OBSERVACAO"])
+    writer.writerow(["CATEGORIA", "ITEM", "UNIDADE", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "OBSERVACAO"])
     for linha in _linhas_contagem_estoque(db):
         contagem = linha.get("contagem_salva") if linha.get("salvo") else None
         diferenca = (float(contagem) - float(linha["fisico"])) if contagem is not None else None
         writer.writerow([
-            linha["item"].categoria, linha["item"].nome, linha["cor"], "CONTADO" if linha.get("salvo") else "PENDENTE",
+            linha["item"].categoria, linha["item"].nome, _normalizar_unidade_item(getattr(linha["item"], "unidade", "UN")), linha["cor"], "CONTADO" if linha.get("salvo") else "PENDENTE",
             f'{float(linha.get("custo_unitario") or 0):.2f}',
             f'{float(linha["fisico"]):g}', f'{float(contagem):g}' if contagem is not None else "",
             f'{float(contagem) * float(linha.get("custo_unitario") or 0):.2f}' if contagem is not None else "",
@@ -13922,6 +13938,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
         ativo = 1 if str(form.get(f"ativo_{item.id}") or "0") == "1" else 0
         custo = moeda_num(form.get(f"custo_{item.id}"))
         preco = moeda_num(form.get(f"preco_{item.id}"))
+        unidade = _normalizar_unidade_item(form.get(f"unidade_{item.id}"))
         try:
             fornecedor_id = int(form.get(f"fornecedor_{item.id}") or 0) or None
         except (TypeError, ValueError):
@@ -13944,6 +13961,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
             item.nome != nome or item.categoria != categoria or int(item.controla_estoque or 0) != controla
             or float(item.preco_custo or 0) != float(custo or 0) or float(item.preco_venda or 0) != float(preco or 0)
             or int(item.ativo or 0) != ativo or item.fornecedor_id != fornecedor_id
+            or _normalizar_unidade_item(getattr(item, "unidade", "UN")) != unidade
             or (minimo_novo is not None and abs(float((saldos_por_id_1226.get(item.id) or {}).get("minimo") or 0) - minimo_novo) > 0.0001)
         )
         if not mudou:
@@ -13955,6 +13973,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
         item.preco_custo = custo
         item.preco_venda = preco
         item.fornecedor_id = fornecedor_id
+        item.unidade = unidade
         item.ativo = ativo
         if minimo_novo is not None:
             _salvar_minimo_estoque(db, item.id, "", minimo_novo)
@@ -14007,6 +14026,7 @@ async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado)
                 categoria=categoria,
                 controla_estoque=controla,
                 fornecedor_id=fornecedor_id,
+                unidade=_normalizar_unidade_item(form.get("unidade")),
                 preco_custo=moeda_num(form.get("preco_custo")),
                 preco_venda=moeda_num(form.get("preco_venda")),
                 ativo=1,

@@ -51,17 +51,18 @@
     </div>
     <div class="planilha-scroll">
       <table class="mov-table item-table">
-        <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th>ENTRADAS</th><th>SAÍDAS</th><th>RESERVADO</th><th>MOV. LÍQUIDO</th></tr></thead>
+        <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>UNID.</th><th>COR</th><th>ENTRADAS</th><th>SAÍDAS</th><th>RESERVADO</th><th>MOV. LÍQUIDO</th></tr></thead>
         <tbody>
           {% for h in movimentos_itens %}<tr>
             <td>{{ h.item.categoria if h.item else '—' }}</td>
             <td><strong>{{ h.item.nome if h.item else '-' }}</strong></td>
+            <td><strong>{{ (h.item.unidade or 'UN') if h.item else 'UN' }}</strong></td>
             <td>{{ h.cor or '—' }}</td>
             <td class="num entrada">{{ '%g'|format(h.entradas) }}</td>
             <td class="num saida">{{ '%g'|format(h.saidas) }}</td>
             <td class="num reserva">{{ '%g'|format(h.reservas) }}</td>
             <td class="num forte {% if h.movimento_liquido < 0 %}negativo{% endif %}">{{ '%g'|format(h.movimento_liquido) }}</td>
-          </tr>{% else %}<tr><td colspan="7" class="vazio">Nenhum movimento de Item encontrado para os filtros informados.</td></tr>{% endfor %}
+          </tr>{% else %}<tr><td colspan="8" class="vazio">Nenhum movimento de Item encontrado para os filtros informados.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
