@@ -18,7 +18,7 @@
   <link rel="stylesheet" href="/static/css/humiat-design-system.css?v={{ ORGANIZA_VERSION }}">
   <link rel="stylesheet" href="/static/css/organiza.css?v={{ ORGANIZA_VERSION }}">
 </head>
-<body class="organiza-corpo humiat-ui {{ HUMIAT_THEME.class_name }}" data-theme-source="{{ HUMIAT_THEME.source }}" data-theme-company="{{ HUMIAT_THEME.company_slug }}" style="{{ HUMIAT_THEME.style|safe }}">
+<body class="organiza-corpo humiat-ui humiat-system-shell {{ HUMIAT_THEME.class_name }}" data-theme-source="{{ HUMIAT_THEME.source }}" data-theme-company="{{ HUMIAT_THEME.company_slug }}" style="{{ HUMIAT_THEME.style|safe }}">
 {% if usuario %}
 <div class="app-shell humiat-clean">
   <div class="mobile-menu-backdrop" data-menu-close aria-hidden="true"></div>
@@ -78,7 +78,11 @@
     <a class="mobile-appbar-brand" href="/organiza"><img src="/static/icons/organiza/icon-192.png?v=20260805-2" alt=""><span><strong>ORGANIZA</strong><small>v{{ ORGANIZA_VERSION }}</small></span></a>
     <div class="mobile-user-mini" aria-label="Usuário {{ usuario.nome }}">{{ usuario.nome[:1] }}</div>
   </header>
-  <main class="app-main">{% block conteudo %}{% endblock %}</main>
+  <main class="app-main">
+    <header class="organiza-system-topbar">
+      <div class="organiza-system-crumbs"><a href="/painel">Humiat ID</a><span>/</span><strong>Organiza</strong></div>
+      <div class="organiza-system-meta"><span>v{{ ORGANIZA_VERSION }}</span><a href="/painel" title="Voltar ao Humiat ID">Humiat ID</a></div>
+    </header>{% block conteudo %}{% endblock %}</main>
   <link rel="stylesheet" href="/static/css/organiza-theme.css?v={{ ORGANIZA_VERSION }}">
   <nav class="mobile-nav clean-mobile" aria-label="Navegação principal no celular">
     <a class="{% if request.url.path == '/organiza' %}ativo{% endif %}" href="/organiza">

@@ -21,10 +21,21 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Session, relationship
 
 from database import Base, SessionLocal, get_db
-from config import ADMIN_NOME, ADMIN_SENHA, PUBLIC_BASE_URL
+from config import ADMIN_NOME, ADMIN_SENHA, PUBLIC_BASE_URL, ORGANIZA_VERSAO
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+
+
+HUMIAT_ID_VERSION = ORGANIZA_VERSAO
+PRODUCT_VERSIONS = {
+    "CONNECT": (os.getenv("HUMIAT_CONNECT_VERSION") or "1.0.85").strip(),
+    "LOKAFEST": (os.getenv("HUMIAT_LOKAFEST_VERSION") or "1.0.17").strip(),
+    "ORGANIZA": ORGANIZA_VERSAO,
+    "SOLVOZ": (os.getenv("HUMIAT_SOLVOZ_VERSION") or "2.5.93").strip(),
+}
+templates.env.globals["HUMIAT_ID_VERSION"] = HUMIAT_ID_VERSION
+templates.env.globals["PRODUCT_VERSIONS"] = PRODUCT_VERSIONS
 
 COOKIE_NAME = "humiat_id"
 SESSION_DAYS = 1  # sessão central Humiat ID: 24 horas
@@ -888,7 +899,7 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
         "Humiat ID - Redefinição de senha",
         texto,
         html,
-        user_agent="Humiat-ID/1.2.22",
+        user_agent="Humiat-ID/1.2.23",
     )
 
 
@@ -2077,7 +2088,7 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
       {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.22")
+    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.23")
 
 
 def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> None:
@@ -2101,7 +2112,7 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.22")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.23")
 
 
 def _aplicar_acessos_cliente_humiat(

@@ -1,5 +1,5 @@
 /* =========================================================
-   ORGANIZA 1.2.20 — HUMIAT DESIGN SYSTEM
+   ORGANIZA 1.2.23 — HUMIAT / ADMINATOR DESIGN SYSTEM
    Camada final de padronização visual. Carregada depois das
    folhas históricas e dos estilos locais dos templates.
    ========================================================= */
@@ -605,3 +605,91 @@ body.organiza-corpo .acao-icone{display:inline-grid!important;place-items:center
 body.organiza-corpo .acao-icone:hover{background:var(--ui-primary-soft)!important;border-color:var(--h-primary-border)!important;color:var(--ui-primary)!important}
 body.organiza-corpo .acao-icone.perigo:hover{background:#fef2f2!important;border-color:#fecaca!important;color:#b91c1c!important}
 body.organiza-corpo .acoes-compactas{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+
+
+/* =========================================================
+   1.2.23 — MESMO COMPONENTE VISUAL DO HUMIAT ID
+   O Organiza é um módulo do mesmo sistema: sidebar, superfícies,
+   controles, cartões e hierarquia de ações usam a mesma linguagem.
+   A empresa altera somente --h-primary/secondary/accent.
+   ========================================================= */
+body.organiza-corpo.humiat-system-shell{
+  --ui-bg:#0b1120;
+  --ui-card:#141b2d;
+  --ui-card-soft:#1a2237;
+  --ui-hover:#1c2438;
+  --ui-text:#f1f5f9;
+  --ui-text-2:#cbd5e1;
+  --ui-muted:#94a3b8;
+  --ui-line:#222c42;
+  --ui-line-soft:#1a2237;
+  --ui-shadow:0 1px 3px rgba(0,0,0,.30);
+  background:var(--ui-bg)!important;
+  color:var(--ui-text)!important;
+}
+body.organiza-corpo.humiat-system-shell .app-shell{grid-template-columns:248px minmax(0,1fr)!important;background:var(--ui-bg)!important}
+body.organiza-corpo.humiat-system-shell .app-sidebar{width:248px!important;background:var(--ui-card)!important;border-right:1px solid var(--ui-line)!important;box-shadow:none!important;padding:18px 14px 16px!important}
+body.organiza-corpo.humiat-system-shell .side-head{border-bottom:1px solid var(--ui-line-soft);padding-bottom:14px;margin-bottom:8px}
+body.organiza-corpo.humiat-system-shell .side-logo{margin:0 6px!important;color:var(--ui-text)!important}
+body.organiza-corpo.humiat-system-shell .side-logo small{color:var(--ui-muted)!important}
+body.organiza-corpo.humiat-system-shell .side-nav-simples .menu-grupo>strong,body.organiza-corpo.humiat-system-shell .side-admin-label{color:#64748b!important;font-size:10px!important;letter-spacing:.16em!important}
+body.organiza-corpo.humiat-system-shell .side-nav a,body.organiza-corpo.humiat-system-shell .side-bottom a{color:var(--ui-muted)!important;text-transform:none!important;font-size:13px!important;font-weight:600!important;min-height:38px!important;padding:9px 11px!important;border-radius:8px!important}
+body.organiza-corpo.humiat-system-shell .side-nav a:hover,body.organiza-corpo.humiat-system-shell .side-bottom a:hover{background:var(--ui-hover)!important;color:var(--ui-text)!important}
+body.organiza-corpo.humiat-system-shell .side-nav a.ativo{background:var(--ui-primary-soft)!important;color:var(--ui-primary)!important;box-shadow:inset 3px 0 0 var(--ui-primary)!important}
+body.organiza-corpo.humiat-system-shell .side-nav a.ativo .nav-icon{color:var(--ui-primary)!important}
+body.organiza-corpo.humiat-system-shell .nav-icon svg{width:17px!important;height:17px!important;stroke-width:1.8!important}
+body.organiza-corpo.humiat-system-shell .side-bottom{border-top-color:var(--ui-line-soft)!important}
+body.organiza-corpo.humiat-system-shell .avatar{background:color-mix(in srgb,var(--ui-primary) 18%,var(--ui-card))!important;color:var(--ui-primary)!important}
+body.organiza-corpo.humiat-system-shell .side-user strong{color:var(--ui-text)!important}
+body.organiza-corpo.humiat-system-shell .side-user small{color:var(--ui-muted)!important}
+
+body.organiza-corpo.humiat-system-shell .app-main{background:var(--ui-bg)!important;color:var(--ui-text)!important;padding:0 30px 54px!important}
+body.organiza-corpo.humiat-system-shell .organiza-system-topbar{height:60px;margin:0 -30px 28px;padding:0 30px;display:flex;align-items:center;justify-content:space-between;gap:16px;background:rgba(11,17,32,.88);border-bottom:1px solid var(--ui-line);position:sticky;top:0;z-index:12;backdrop-filter:blur(10px)}
+body.organiza-corpo.humiat-system-shell .organiza-system-crumbs,body.organiza-corpo.humiat-system-shell .organiza-system-meta{display:flex;align-items:center;gap:9px;color:var(--ui-muted);font-size:12.5px}
+body.organiza-corpo.humiat-system-shell .organiza-system-crumbs strong{color:var(--ui-text)}
+body.organiza-corpo.humiat-system-shell .organiza-system-meta a{display:inline-flex;align-items:center;min-height:32px;padding:6px 10px;border:1px solid var(--ui-line);border-radius:8px;color:var(--ui-text);text-decoration:none}
+body.organiza-corpo.humiat-system-shell .organiza-system-meta a:hover{background:var(--ui-hover);border-color:color-mix(in srgb,var(--ui-primary) 45%,var(--ui-line));color:var(--ui-primary)}
+
+body.organiza-corpo.humiat-system-shell h1,body.organiza-corpo.humiat-system-shell h2,body.organiza-corpo.humiat-system-shell h3,body.organiza-corpo.humiat-system-shell strong{color:var(--ui-text)}
+body.organiza-corpo.humiat-system-shell p,body.organiza-corpo.humiat-system-shell small,body.organiza-corpo.humiat-system-shell .texto-suave{color:var(--ui-muted)!important}
+body.organiza-corpo.humiat-system-shell .tag{color:var(--ui-primary)!important}
+
+body.organiza-corpo.humiat-system-shell .cartao,body.organiza-corpo.humiat-system-shell .panel-card,body.organiza-corpo.humiat-system-shell .form-card,body.organiza-corpo.humiat-system-shell .equip-card,body.organiza-corpo.humiat-system-shell .atualizacao-compra-item,body.organiza-corpo.humiat-system-shell .cliente-campanha-linha,body.organiza-corpo.humiat-system-shell .cliente-agenda-item,body.organiza-corpo.humiat-system-shell .card-os,body.organiza-corpo.humiat-system-shell .cliente-card-clean,body.organiza-corpo.humiat-system-shell .agenda-linha,body.organiza-corpo.humiat-system-shell .cliente-secao-nav{background:var(--ui-card)!important;border:1px solid var(--ui-line)!important;border-radius:14px!important;box-shadow:var(--ui-shadow)!important;color:var(--ui-text)!important}
+body.organiza-corpo.humiat-system-shell .cliente-card-clean:hover{border-color:color-mix(in srgb,var(--ui-primary) 50%,var(--ui-line))!important}
+body.organiza-corpo.humiat-system-shell .cliente-card-clean .cliente-mini-tags span,body.organiza-corpo.humiat-system-shell .cliente-topo-tags span,body.organiza-corpo.humiat-system-shell .resumo-valores>div,body.organiza-corpo.humiat-system-shell .venda-resumo-card,body.organiza-corpo.humiat-system-shell .venda-resumo-datas>div,body.organiza-corpo.humiat-system-shell .atualizacao-status-grid>div{background:var(--ui-card-soft)!important;border-color:var(--ui-line)!important;color:var(--ui-muted)!important}
+body.organiza-corpo.humiat-system-shell .cliente-hero{border-bottom-color:var(--ui-line)!important}
+body.organiza-corpo.humiat-system-shell .cliente-secao-nav a{color:var(--ui-muted)!important}
+body.organiza-corpo.humiat-system-shell .cliente-secao-nav a:hover{background:var(--ui-hover)!important;color:var(--ui-primary)!important}
+body.organiza-corpo.humiat-system-shell .cliente-acoes-popover{background:var(--ui-card)!important;border-color:var(--ui-line)!important;color:var(--ui-text)!important}
+
+/* Controles no mesmo tamanho/raio do componente Adminator. */
+body.organiza-corpo.humiat-system-shell .app-main input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),body.organiza-corpo.humiat-system-shell .app-main select,body.organiza-corpo.humiat-system-shell .app-main textarea{min-height:38px!important;padding:8px 11px!important;border:1px solid var(--ui-line)!important;border-radius:8px!important;background:#0f1726!important;color:var(--ui-text)!important;font-size:13px!important}
+body.organiza-corpo.humiat-system-shell .app-main input::placeholder,body.organiza-corpo.humiat-system-shell .app-main textarea::placeholder{color:#64748b!important}
+body.organiza-corpo.humiat-system-shell .app-main input:focus,body.organiza-corpo.humiat-system-shell .app-main select:focus,body.organiza-corpo.humiat-system-shell .app-main textarea:focus{border-color:var(--ui-primary)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--ui-primary) 24%,transparent)!important}
+body.organiza-corpo.humiat-system-shell .app-main label{color:var(--ui-text-2)!important;font-size:13px!important;font-weight:650!important}
+body.organiza-corpo.humiat-system-shell input[type=checkbox],body.organiza-corpo.humiat-system-shell input[type=radio]{accent-color:var(--ui-primary)}
+
+/* Botões: principal forte; alternativas em outline; estados semânticos continuam próprios. */
+body.organiza-corpo.humiat-system-shell .botao,body.organiza-corpo.humiat-system-shell .btn,body.organiza-corpo.humiat-system-shell .btn-new,body.organiza-corpo.humiat-system-shell .btn-primary,body.organiza-corpo.humiat-system-shell .btn-small,body.organiza-corpo.humiat-system-shell .item-botao{min-height:38px!important;padding:8px 13px!important;border-radius:8px!important;font-size:13px!important;font-weight:650!important;box-shadow:none!important}
+body.organiza-corpo.humiat-system-shell .botao.fantasma,body.organiza-corpo.humiat-system-shell .botao.secundario,body.organiza-corpo.humiat-system-shell .btn-secondary,body.organiza-corpo.humiat-system-shell .campanha-pular-btn{background:transparent!important;border:1px solid var(--ui-line)!important;color:var(--ui-text)!important}
+body.organiza-corpo.humiat-system-shell .botao.fantasma:hover,body.organiza-corpo.humiat-system-shell .botao.secundario:hover,body.organiza-corpo.humiat-system-shell .btn-secondary:hover,body.organiza-corpo.humiat-system-shell .campanha-pular-btn:hover{background:var(--ui-hover)!important;border-color:color-mix(in srgb,var(--ui-primary) 48%,var(--ui-line))!important;color:var(--ui-primary)!important}
+body.organiza-corpo.humiat-system-shell .btn-new{background:var(--ui-primary)!important;border-color:var(--ui-primary)!important;color:#07111d!important}
+body.organiza-corpo.humiat-system-shell .botao:not(.fantasma):not(.secundario):not(.sucesso):not(.whatsapp):not(.perigo),body.organiza-corpo.humiat-system-shell .btn-primary{background:var(--ui-primary)!important;border-color:var(--ui-primary)!important;color:#07111d!important}
+body.organiza-corpo.humiat-system-shell .botao:not(.fantasma):not(.secundario):not(.sucesso):not(.whatsapp):not(.perigo):hover,body.organiza-corpo.humiat-system-shell .btn-primary:hover,body.organiza-corpo.humiat-system-shell .btn-new:hover{background:var(--ui-primary-hover)!important;border-color:var(--ui-primary-hover)!important;color:#07111d!important}
+body.organiza-corpo.humiat-system-shell .botao.sucesso,body.organiza-corpo.humiat-system-shell .botao.whatsapp,body.organiza-corpo.humiat-system-shell .btn-whatsapp,body.organiza-corpo.humiat-system-shell .btn-ok{color:#04150d!important}
+
+/* Tabelas / listas / modais também deixam de usar o visual antigo claro. */
+body.organiza-corpo.humiat-system-shell table{color:var(--ui-text)!important;background:transparent!important}
+body.organiza-corpo.humiat-system-shell table th{color:var(--ui-muted)!important;background:var(--ui-card-soft)!important;border-color:var(--ui-line)!important}
+body.organiza-corpo.humiat-system-shell table td{border-color:var(--ui-line)!important;background:var(--ui-card)!important}
+body.organiza-corpo.humiat-system-shell table tr:hover td{background:var(--ui-hover)!important}
+body.organiza-corpo.humiat-system-shell dialog,body.organiza-corpo.humiat-system-shell .modal,body.organiza-corpo.humiat-system-shell .modal-conteudo,body.organiza-corpo.humiat-system-shell .dialog-card{background:var(--ui-card)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}
+body.organiza-corpo.humiat-system-shell dialog::backdrop{background:rgba(2,6,23,.76)}
+body.organiza-corpo.humiat-system-shell hr{border-color:var(--ui-line)!important}
+
+body.organiza-corpo.humiat-system-shell .alerta.sucesso{background:#0f2a20!important;color:#34d399!important;border-color:#1f5b45!important}
+body.organiza-corpo.humiat-system-shell .alerta.erro{background:#2b1414!important;color:#f87171!important;border-color:#5b2626!important}
+body.organiza-corpo.humiat-system-shell .alerta.info,body.organiza-corpo.humiat-system-shell .alerta.informacao{background:#0d2232!important;color:#38bdf8!important;border-color:#174560!important}
+
+@media(max-width:1100px){body.organiza-corpo.humiat-system-shell .app-shell{display:block!important;background:var(--ui-bg)!important}body.organiza-corpo.humiat-system-shell .app-sidebar{width:min(88vw,320px)!important}body.organiza-corpo.humiat-system-shell .app-main{padding:0 16px 92px!important}body.organiza-corpo.humiat-system-shell .organiza-system-topbar{margin:0 -16px 20px;padding:0 16px}}
+@media(max-width:760px){body.organiza-corpo.humiat-system-shell .organiza-system-topbar{display:none}body.organiza-corpo.humiat-system-shell .app-main{padding:12px 10px 92px!important}body.organiza-corpo.humiat-system-shell .app-main input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),body.organiza-corpo.humiat-system-shell .app-main select,body.organiza-corpo.humiat-system-shell .app-main textarea{font-size:16px!important}}

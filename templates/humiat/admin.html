@@ -13,7 +13,7 @@
     .admin-app-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;align-items:stretch}.admin-app-card{--accent:#0b74ff;position:relative;display:flex;flex-direction:column;min-height:310px;padding:22px;border-radius:23px;background:var(--panel);color:var(--ink);border:1px solid rgba(226,232,240,.95);box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden}.admin-app-card:before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--accent)}.admin-app-card.app-connect{--accent:#1578ff}.admin-app-card.app-lokafest{--accent:#f59e0b}.admin-app-card.app-organiza{--accent:#18a66a}.admin-app-card.app-solvoz{--accent:#7c4dff}.admin-app-card.app-identidade{--accent:#00a7c4}.admin-app-card.app-migracao{--accent:#f59e0b}.admin-app-card.is-disabled{opacity:.82}.admin-card-head{display:flex;gap:13px;align-items:flex-start;margin-bottom:16px}.admin-app-icon{flex:0 0 48px;width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:950;background:linear-gradient(145deg,#29d9f0,#725cff);color:#07111d}.admin-card-copy{min-width:0;flex:1}.admin-card-copy h3{font-size:22px;margin:6px 0 5px;letter-spacing:-.025em}.admin-card-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.admin-badges{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 14px}.admin-actions{margin-top:auto;display:grid;gap:9px;grid-template-columns:repeat(2,minmax(0,1fr))}.admin-actions.one{grid-template-columns:1fr}.admin-app-card .status-badge{background:#eaf8f1;color:#18714f;border-color:#ccebdd}.admin-app-card .muted-copy{color:#64748b}.admin-app-card small{color:#64748b}.admin-app-card .btn-secondary{background:#fff;color:#203047;border:1px solid #d5dfeb}.admin-app-card .btn-primary{color:#fff}.admin-app-card .btn-ghost{background:#f8fafc;color:#203047;border:1px solid #e2e8f0}.admin-app-card .error-inline{color:#b42318!important}
     @media(max-width:1050px){.admin-app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:680px){.admin-unified{padding:20px 16px 38px}.admin-unified-head{align-items:flex-start;flex-direction:column}.admin-app-grid{grid-template-columns:1fr}.admin-actions{grid-template-columns:1fr}}
   </style>
-  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v=1222">
+  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v={{ HUMIAT_ID_VERSION }}">
 </head>
 <body class="portal-body admin-unified-body humiat-adminator">
 <div id="humiat-loading" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center">
@@ -22,8 +22,8 @@
 <div class="h-shell">
   <aside class="h-sidebar" id="h-sidebar" aria-label="Menu Humiat ID">
     <a class="h-brand" href="/painel">
-      <span class="h-brand-logo"><img src="/static/icons/humiat/icon-192.png" alt=""></span>
-      <span class="h-brand-copy"><span class="h-brand-name">Humiat ID</span><span class="h-brand-tag">Central de sistemas</span></span>
+      <span class="h-brand-logo"><img src="/static/icons/humiat/humiat-mark.svg" alt=""></span>
+      <span class="h-brand-copy"><span class="h-brand-name">Humiat ID</span><span class="h-brand-tag">Central de sistemas • v{{ HUMIAT_ID_VERSION }}</span></span>
     </a>
 
     <nav class="h-nav-section">
@@ -43,7 +43,7 @@
         {% elif p.codigo == 'ORGANIZA' %}<img class="h-product-icon" src="/static/img/produtos/icons/organiza.png" alt="">
         {% elif p.codigo == 'SOLVOZ' %}<img class="h-product-icon" src="/static/img/produtos/icons/solvoz.svg" alt="">
         {% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg>{% endif %}
-        <span>{{ p.nome }}</span>
+        <span>{{ p.nome }}</span><span class="h-nav-version">v{{ PRODUCT_VERSIONS.get(p.codigo, "") }}</span>
       </a>
       {% endfor %}
     </nav>
@@ -127,7 +127,7 @@
       <article id="sistema-{{ p.codigo|lower }}" class="admin-app-card app-{{ p.codigo|lower }}{% if not (acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz) %} is-disabled{% endif %}">
         <div class="admin-card-head">
           <div class="admin-app-icon">{% if p.codigo == 'CONNECT' %}<img src="/static/img/produtos/icons/connect.png" alt="Ícone Connect">{% elif p.codigo == 'LOKAFEST' %}<img src="/static/img/produtos/icons/lokafest.png" alt="Ícone LokaFest">{% elif p.codigo == 'ORGANIZA' %}<img src="/static/img/produtos/icons/organiza.png" alt="Ícone Organiza">{% elif p.codigo == 'SOLVOZ' %}<img src="/static/img/produtos/icons/solvoz.svg" alt="Ícone SolVoz">{% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>{% endif %}</div>
-          <div class="admin-card-copy"><span class="card-kicker">{{ p.codigo }}</span><h3>{{ p.nome }}</h3><p>{{ p.descricao }}</p></div>
+          <div class="admin-card-copy"><div class="admin-card-meta"><span class="card-kicker">{{ p.codigo }}</span><span class="system-version">v{{ PRODUCT_VERSIONS.get(p.codigo, "") }}</span></div><h3>{{ p.nome }}</h3><p>{{ p.descricao }}</p></div>
         </div>
         <div class="admin-badges">
           {% if p.codigo == 'SOLVOZ' %}
@@ -144,15 +144,15 @@
         </div>
         <div class="admin-actions">
           {% if p.codigo == 'SOLVOZ' %}
-            {% if acc.get('solvoz_comprado', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_site">Cliente Site</a>{% endif %}
-            {% if acc.get('solvoz_catalogo', false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Cliente Catálogo</a>{% endif %}
-            {% if acc.get('adm', false) and adm_disponivel.get(p.codigo, false) %}<a class="btn-primary" href="/painel/produto/SOLVOZ?modo=adm">Abrir ADM</a>{% endif %}
+            {% if acc.get('solvoz_comprado', false) %}<a class="btn-primary" href="/painel/produto/SOLVOZ?modo=cliente_site">Entrar no Site</a>{% endif %}
+            {% if acc.get('solvoz_catalogo', false) %}<a class="{% if not acc.get('solvoz_comprado', false) %}btn-primary{% else %}btn-secondary{% endif %}" href="/painel/produto/SOLVOZ?modo=cliente_catalogo">Entrar no Catálogo</a>{% endif %}
+            {% if acc.get('adm', false) and adm_disponivel.get(p.codigo, false) %}<a class="btn-secondary" href="/painel/produto/SOLVOZ?modo=adm">Abrir ADM</a>{% endif %}
           {% elif p.codigo == 'ORGANIZA' %}
-            {% if acc.get('sistema', false) or acc.get('adm', false) %}<a class="btn-secondary" href="/painel/produto/ORGANIZA?modo=sistema">Abrir sistema</a>{% endif %}
-            {% if acc.get('adm', false) %}<a class="btn-primary" href="/admin-humiat/diagnostico-organiza">Abrir ADM</a>{% endif %}
+            {% if acc.get('sistema', false) or acc.get('adm', false) %}<a class="btn-primary" href="/painel/produto/ORGANIZA?modo=sistema">Entrar</a>{% endif %}
+            {% if acc.get('adm', false) %}<a class="btn-secondary" href="/admin-humiat/diagnostico-organiza">Abrir ADM</a>{% endif %}
           {% else %}
-            {% if acc.get('sistema', false) %}<a class="btn-secondary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Abrir sistema</a>{% endif %}
-            {% if acc.get('adm', false) and adm_disponivel.get(p.codigo, false) %}<a class="btn-primary" href="/painel/produto/{{ p.codigo }}?modo=adm">Abrir ADM</a>{% endif %}
+            {% if acc.get('sistema', false) %}<a class="btn-primary" href="/painel/produto/{{ p.codigo }}?modo=sistema">Entrar</a>{% endif %}
+            {% if acc.get('adm', false) and adm_disponivel.get(p.codigo, false) %}<a class="btn-secondary" href="/painel/produto/{{ p.codigo }}?modo=adm">Abrir ADM</a>{% endif %}
           {% endif %}
         </div>
       </article>

@@ -34,14 +34,14 @@
     @media(max-width:1050px){.app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.company-hero{grid-template-columns:1fr}.qr-panel{min-width:0;width:100%;max-width:520px}}
     @media(max-width:680px){.portal-main{padding:0 16px 38px}.portal-hello h1{font-size:31px}.company-hero{padding:20px}.company-hero h2{font-size:25px}.qr-panel{align-items:flex-start}.qr-panel img{width:78px;height:78px}.app-grid{grid-template-columns:1fr}.app-card{min-height:auto}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.actions.two{grid-template-columns:1fr}.section-head{align-items:flex-start}.group-row{align-items:flex-start;flex-direction:column}}
   </style>
-  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v=1222">
+  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v={{ HUMIAT_ID_VERSION }}">
 </head>
 <body class="portal-body humiat-adminator">
 <div class="h-shell">
   <aside class="h-sidebar" id="h-sidebar" aria-label="Menu Humiat ID">
     <a class="h-brand" href="/painel">
-      <span class="h-brand-logo"><img src="/static/icons/humiat/icon-192.png" alt=""></span>
-      <span class="h-brand-copy"><span class="h-brand-name">Humiat ID</span><span class="h-brand-tag">Central de sistemas</span></span>
+      <span class="h-brand-logo"><img src="/static/icons/humiat/humiat-mark.svg" alt=""></span>
+      <span class="h-brand-copy"><span class="h-brand-name">Humiat ID</span><span class="h-brand-tag">Central de sistemas • v{{ HUMIAT_ID_VERSION }}</span></span>
     </a>
 
     <nav class="h-nav-section">
@@ -67,7 +67,7 @@
         {% elif p.codigo == 'ORGANIZA' %}<img class="h-product-icon" src="/static/img/produtos/icons/organiza.png" alt="">
         {% elif p.codigo == 'SOLVOZ' %}<img class="h-product-icon" src="/static/img/produtos/icons/solvoz.svg" alt="">
         {% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg>{% endif %}
-        <span>{{ p.nome }}</span>
+        <span>{{ p.nome }}</span><span class="h-nav-version">v{{ PRODUCT_VERSIONS.get(p.codigo, "") }}</span>
       </a>
       {% endfor %}
     </nav>
@@ -143,6 +143,7 @@
         <div class="card-head">
           <div class="app-icon">{% if p.codigo == 'CONNECT' %}<img src="/static/img/produtos/icons/connect.png" alt="Ícone Connect">{% elif p.codigo == 'LOKAFEST' %}<img src="/static/img/produtos/icons/lokafest.png" alt="Ícone LokaFest">{% elif p.codigo == 'ORGANIZA' %}<img src="/static/img/produtos/icons/organiza.png" alt="Ícone Organiza">{% elif p.codigo == 'SOLVOZ' %}<img src="/static/img/produtos/icons/solvoz.svg" alt="Ícone SolVoz">{% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>{% endif %}</div>
           <div class="card-copy">
+            <div class="card-status-line">
             {% if p.codigo == 'LOKAFEST' and lokafest_resumo.ok and lokafest_resumo.usuario_existe %}
               <span class="status {{ 'on' if lokafest_resumo.apto_indicacoes else 'attn' }}">{{ 'Apto para indicações' if lokafest_resumo.apto_indicacoes else 'Atenção necessária' }}</span>
             {% elif p.codigo == 'SOLVOZ' and solvoz_resumo.ok and solvoz_resumo.catalogo_existe %}
@@ -150,6 +151,8 @@
             {% else %}
               <span class="status {{ 'on' if liberado else '' }}">{{ 'Acesso liberado' if liberado else 'Conheça' }}</span>
             {% endif %}
+              <span class="system-version">v{{ PRODUCT_VERSIONS.get(p.codigo, "") }}</span>
+            </div>
             <h3>{{ p.nome }}</h3>
             <p>{{ p.descricao }}</p>
           </div>

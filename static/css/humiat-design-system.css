@@ -1,5 +1,5 @@
 /* =========================================================
-   HUMIAT DESIGN SYSTEM v1
+   HUMIAT DESIGN SYSTEM v2 — Adminator base
    Estrutura universal: tamanhos, tipografia, espaçamento e estados.
    Identidade da empresa: somente --h-primary/secondary/accent.
    Sem SolVoz => tema HUMIAT.
@@ -13,14 +13,14 @@
   --h-accent:#845CFF;
 
   /* superfícies neutras compartilhadas */
-  --h-page:#F5F7FB;
-  --h-surface:#FFFFFF;
-  --h-surface-soft:#F8FAFC;
-  --h-text:#172033;
-  --h-text-2:#334155;
-  --h-muted:#667085;
-  --h-border:#E4E7EC;
-  --h-border-soft:#EEF2F6;
+  --h-page:#0B1120;
+  --h-surface:#141B2D;
+  --h-surface-soft:#1A2237;
+  --h-text:#F1F5F9;
+  --h-text-2:#CBD5E1;
+  --h-muted:#94A3B8;
+  --h-border:#222C42;
+  --h-border-soft:#1A2237;
 
   /* estados universais */
   --h-success:#16A34A;
@@ -50,15 +50,15 @@
 
   /* derivados: mudam automaticamente quando a empresa muda --h-primary */
   --h-primary-hover:color-mix(in srgb,var(--h-primary) 84%,#000 16%);
-  --h-primary-soft:color-mix(in srgb,var(--h-primary) 9%,#fff 91%);
-  --h-primary-border:color-mix(in srgb,var(--h-primary) 28%,#fff 72%);
+  --h-primary-soft:color-mix(in srgb,var(--h-primary) 18%,var(--h-surface) 82%);
+  --h-primary-border:color-mix(in srgb,var(--h-primary) 38%,var(--h-border) 62%);
 }
 
 /* A classe existe para todos os sistemas. A cor vem por variáveis, não por CSS específico. */
 .theme-solvoz{
   --h-primary-hover:color-mix(in srgb,var(--h-primary) 84%,#000 16%);
-  --h-primary-soft:color-mix(in srgb,var(--h-primary) 9%,#fff 91%);
-  --h-primary-border:color-mix(in srgb,var(--h-primary) 28%,#fff 72%);
+  --h-primary-soft:color-mix(in srgb,var(--h-primary) 18%,var(--h-surface) 82%);
+  --h-primary-border:color-mix(in srgb,var(--h-primary) 38%,var(--h-border) 62%);
 }
 
 .humiat-ui{

@@ -1,2 +1,17 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Humiat ID | Entrar</title><link rel="icon" href="/static/icons/humiat/favicon.ico"><link rel="stylesheet" href="/static/css/humiat-id.css"></head><body class="id-body">
-<main class="login-shell"><a class="id-brand" href="/"><img src="/static/img/logo-humiat.svg" alt="Humiat"><span>Humiat ID</span></a><section class="login-panel"><div><p class="eyebrow">Acesso único Humiat</p><h1>Um login.<br>Todos os seus produtos.</h1><p>Entre uma vez e acesse Connect, LokaFest, SolVoz e Organiza conforme os produtos habilitados para sua empresa.</p></div><form method="post" action="/entrar" class="login-form"><input type="hidden" name="next" value="{{ next or '/painel' }}"><h2>Entrar</h2>{% if erro %}<div class="id-alert">{{ erro }}</div>{% endif %}<label>E-mail<input type="email" name="email" autocomplete="username" required autofocus placeholder="voce@empresa.com.br"></label><label>Senha<input type="password" name="senha" autocomplete="current-password" required placeholder="Sua senha"></label><button type="submit">Entrar na Humiat</button><a class="id-forgot" href="/esqueci-senha">Esqueci minha senha</a><small>Seu acesso é individual e protegido.</small></form></section></main></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Humiat ID | Entrar</title><link rel="icon" href="/static/icons/humiat/favicon.ico">
+  <link rel="stylesheet" href="/static/css/humiat-design-system.css?v={{ HUMIAT_ID_VERSION }}">
+  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v={{ HUMIAT_ID_VERSION }}">
+</head>
+<body class="humiat-adminator h-auth-page">
+<main class="h-auth-shell">
+  <a class="h-auth-brand" href="/"><img src="/static/img/logo-humiat.svg" alt="Humiat"><span>Humiat ID <small>v{{ HUMIAT_ID_VERSION }}</small></span></a>
+  <section class="h-auth-card">
+    <div class="h-auth-intro"><p class="h-auth-kicker">Acesso único Humiat</p><h1>Um login.<br>Todos os seus produtos.</h1><p>Entre uma vez e acesse Connect, LokaFest, SolVoz e Organiza conforme os produtos habilitados para sua empresa.</p></div>
+    <form method="post" action="/entrar" class="h-auth-form"><input type="hidden" name="next" value="{{ next or '/painel' }}"><h2>Entrar</h2>{% if erro %}<div class="id-alert">{{ erro }}</div>{% endif %}<label>E-mail<input type="email" name="email" autocomplete="username" required autofocus placeholder="voce@empresa.com.br"></label><label>Senha<input type="password" name="senha" autocomplete="current-password" required placeholder="Sua senha"></label><button class="btn-primary" type="submit">Entrar</button><a class="h-auth-link" href="/esqueci-senha">Esqueci minha senha</a><small>Seu acesso é individual e protegido.</small></form>
+  </section>
+</main>
+</body></html>
