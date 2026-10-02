@@ -535,3 +535,34 @@ footer strong span{color:var(--azul);text-shadow:0 0 16px rgba(0,174,255,.8)}
 .produto-conteudo li:before{content:'✓';color:#55d6c2;font-weight:900;margin-right:9px}
 .link-produto{display:inline-flex;color:#77dff0;font-weight:800;text-decoration:none;border-bottom:1px solid rgba(119,223,240,.35);padding-bottom:3px}
 @media(max-width:850px){.vitrine-produtos{grid-template-columns:1fr}.produto-imagem{height:220px}.produto-conteudo{padding:22px}}
+
+/* =========================================================
+   HUMIAT 1.2.25 — SITE: ADMINATOR + IDENTIDADE HUMIAT
+   Hero/header/footer escuros; conteúdo principal claro.
+   ========================================================= */
+:root{
+    --site-bg:#f0f4f8;
+    --site-card:#ffffff;
+    --site-muted:#64748b;
+    --site-text:#1e293b;
+    --site-border:#e4e8ef;
+    --site-dark:#0b1120;
+    --site-dark-card:#141b2d;
+    --site-primary:#2563eb;
+    --site-primary-light:#3b82f6;
+    --site-primary-soft:#eff6ff;
+}
+body{background:var(--site-bg);color:var(--site-text)}
+#particulas{background:linear-gradient(145deg,#02070f,#07111f)!important}
+.topo{height:72px;background:rgba(11,17,32,.94)!important;border-bottom:1px solid #222c42!important;padding:0 max(24px,calc((100vw - 1180px)/2))!important}
+.topo .marca img{height:52px!important}.topo nav{color:#cbd5e1!important;gap:22px!important;font-size:12px!important}.topo nav a:hover{color:#60a5fa!important}.area-restrita-mobile{background:#141b2d!important;border:1px solid #334155!important;border-radius:8px!important;color:#f8fafc!important;padding:9px 13px!important}
+.secao{padding:92px max(24px,calc((100vw - 1180px)/2))!important}
+.hero{min-height:720px!important;padding-top:116px!important;color:#fff!important;background:#0b1120!important}.hero-imagem{opacity:.9}.hero-imagem:after{background:linear-gradient(to top,#0b1120 0,rgba(11,17,32,.22) 48%,rgba(11,17,32,.1) 100%)!important}.hero .tag{color:#60a5fa!important}.hero h1{max-width:880px!important}.hero h1 span{background:linear-gradient(90deg,#fff,#60a5fa)!important;-webkit-background-clip:text!important;color:transparent!important}.hero .texto-grande{color:#dbe7f5!important;max-width:720px!important}.acoes{gap:12px!important}.botao{padding:11px 16px!important;border-radius:8px!important;border:1px solid #334155!important;background:#141b2d!important;color:#f8fafc!important;box-shadow:none!important}.botao.primario{background:var(--site-primary)!important;border-color:var(--site-primary)!important;color:#fff!important;box-shadow:none!important}.botao:hover{transform:translateY(-1px)!important;border-color:#60a5fa!important}
+#empresa.manifesto{background:#fff!important;color:var(--site-text)!important;border-bottom:1px solid var(--site-border)!important}.manifesto .tag,#plataformas .tag,#metodo .tag,.contato .tag{color:var(--site-primary)!important}.manifesto h2,#plataformas h2,#metodo h2,.contato h2{color:var(--site-text)!important}.manifesto .grade p{color:var(--site-muted)!important}
+#plataformas{background:var(--site-bg)!important}.introducao-produtos{color:var(--site-muted)!important}.vitrine-produtos{gap:18px!important}.produto-real{background:#fff!important;border:1px solid var(--site-border)!important;border-radius:14px!important;box-shadow:0 1px 3px rgba(15,23,42,.06),0 1px 2px -1px rgba(15,23,42,.04)!important;overflow:hidden!important}.produto-real:hover{transform:translateY(-3px)!important;box-shadow:0 10px 15px -3px rgba(15,23,42,.08),0 4px 6px -4px rgba(15,23,42,.05)!important}.produto-imagem{background:#f8fafc!important;border-bottom:1px solid var(--site-border)!important}.produto-conteudo{color:var(--site-text)!important}.produto-conteudo h3{color:var(--site-text)!important}.produto-conteudo p,.produto-conteudo li{color:var(--site-muted)!important}.produto-status{background:#ecfdf5!important;color:#047857!important;border-radius:999px!important}.link-produto{color:var(--site-primary)!important}
+#metodo{background:#fff!important;border-top:1px solid var(--site-border)!important;border-bottom:1px solid var(--site-border)!important}.fluxo{gap:10px!important}.fluxo span{padding:18px 12px!important;border:1px solid var(--site-border)!important;border-radius:10px!important;background:#f8fafc!important;color:var(--site-text)!important;box-shadow:none!important}
+.secao:has(.painel){background:var(--site-dark)!important}.painel{padding:48px!important;border:1px solid #222c42!important;border-radius:16px!important;background:var(--site-dark-card)!important;box-shadow:none!important}.painel h2{color:#f8fafc!important}.painel p{color:#cbd5e1!important}.painel .tag{color:#60a5fa!important}
+.contato{background:#fff!important}.contato p{color:var(--site-muted)!important}.contato a{color:var(--site-primary)!important}
+.whatsapp-flutuante{border-radius:999px!important;box-shadow:0 8px 22px rgba(15,23,42,.18)!important}
+footer{padding:30px max(24px,calc((100vw - 1180px)/2))!important;background:var(--site-dark)!important;border-top:1px solid #222c42!important;color:#94a3b8!important}footer strong{color:#fff!important}footer strong span{color:#60a5fa!important}
+@media(max-width:780px){.secao{padding:70px 22px!important}.hero{min-height:650px!important;padding-top:105px!important}.topo{padding:0 18px!important}.produto-real{border-radius:12px!important}.painel{padding:30px 22px!important}.fluxo{grid-template-columns:repeat(2,1fr)!important}}

@@ -1,11 +1,11 @@
 /* =========================================================
-   HUMIAT ID — Adminator base + HUMIAT shell (1.2.24)
+   HUMIAT ID — Adminator base + HUMIAT shell (1.2.25)
    Base visual: componente Adminator claro; sidebar HUMIAT escura.
    Mantém conteúdo e textos; ícones complementam a informação.
    ========================================================= */
 
 .humiat-adminator{
-  /* 1.2.24: Adminator claro como base; HUMIAT personaliza apenas o menu/branding. */
+  /* 1.2.25: Adminator claro como base; HUMIAT personaliza apenas o menu/branding. */
   --bg-body:#f0f4f8;
   --bg-card:#fff;
   --bg-sidebar:#141b2d;
@@ -152,3 +152,25 @@
 @media(max-width:520px){.h-auth-shell{width:min(100% - 22px,1100px);padding-top:18px}.h-auth-brand{margin-bottom:18px;gap:12px}.h-auth-brand img{width:118px}.h-auth-brand>span{padding-left:12px;font-size:13px}.h-auth-card{padding:20px;border-radius:14px}.h-auth-intro h1{font-size:38px}.h-auth-form{padding:18px}.h-access-option{grid-template-columns:40px minmax(0,1fr)}.h-access-option b{grid-column:2}.h-access-mark{width:40px;height:40px}}
 
 .card-status-line{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px}.card-status-line .status{margin:0!important}
+
+/* =========================================================
+   HUMIAT 1.2.25 — AUTH NO PADRÃO ESCURO HUMIAT
+   Fundo escuro; formulário e conteúdo continuam claros no
+   contrato visual Adminator aprovado.
+   ========================================================= */
+.h-auth-page{
+  background:
+    radial-gradient(circle at 14% 12%,rgba(0,174,255,.16),transparent 32%),
+    radial-gradient(circle at 86% 18%,rgba(37,99,235,.12),transparent 28%),
+    linear-gradient(145deg,#02070f,#0b1120 58%,#07111f)!important;
+  color:#f8fafc!important;
+}
+.h-auth-page .h-auth-shell{padding-top:46px}
+.h-auth-page .h-auth-brand{color:#f8fafc!important}
+.h-auth-page .h-auth-brand>span{border-left-color:#334155;color:#f8fafc}
+.h-auth-page .h-auth-brand small{color:#94a3b8!important}
+.h-auth-page .h-auth-card{background:#fff!important;border-color:#dfe5ee!important;box-shadow:0 28px 70px rgba(0,0,0,.34)!important}
+.h-auth-page .h-auth-intro h1{color:#0f172a!important}
+.h-auth-page .h-auth-intro>p:last-child{color:#64748b!important}
+.h-auth-page .h-auth-kicker{color:#2563eb!important}
+.h-auth-page .h-auth-form{background:#fff!important;border-color:#e4e8ef!important}
