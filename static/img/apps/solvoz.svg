@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">SolVoz</title>
+  <desc id="desc">Símbolo SolVoz em forma de ondas</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#35c7ff"/>
+      <stop offset="0.5" stop-color="#7b2fff"/>
+      <stop offset="1" stop-color="#ff3fb4"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="#070a15"/>
+  <path d="M27 38c15-16 39-22 63-11 9 4 15 10 17 17-20-8-39-6-55 2-12 6-19 14-25 22-7-9-7-21 0-30Z" fill="none" stroke="url(#g)" stroke-width="10" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M101 90c-15 16-39 22-63 11-9-4-15-10-17-17 20 8 39 6 55-2 12-6 19-14 25-22 7 9 7 21 0 30Z" fill="none" stroke="url(#g)" stroke-width="10" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="64" cy="64" r="7" fill="#fff" opacity=".96"/>
+</svg>
