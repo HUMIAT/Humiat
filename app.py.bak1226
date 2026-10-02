@@ -974,15 +974,6 @@ class TransferenciaEquipamento(Base):
     cliente_destino = relationship("Cliente", foreign_keys=[cliente_destino_id])
 
 
-class Fornecedor(Base):
-    __tablename__ = "fornecedores"
-    id = Column(Integer, primary_key=True)
-    nome = Column(String(180), unique=True, nullable=False, index=True)
-    ativo = Column(Integer, nullable=False, default=1)
-    criado_em = Column(DateTime, server_default=func.now())
-    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
 class Item(Base):
     __tablename__ = "catalogo_itens"
     id = Column(Integer, primary_key=True)
@@ -991,12 +982,10 @@ class Item(Base):
     categoria = Column(String(80), nullable=False, default="Geral")
     # 1.1.74: controle individual. Categorias lógicas ainda podem forçar fora do estoque.
     controla_estoque = Column(Integer, nullable=False, default=1)
-    fornecedor_id = Column(Integer, ForeignKey("fornecedores.id"), nullable=True, index=True)
     preco_custo = Column(Float, nullable=False, default=0)
     preco_venda = Column(Float, nullable=False, default=0)
     ativo = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
-    fornecedor = relationship("Fornecedor")
 
 
 class VendaModeloEquipamento(Base):
@@ -1640,7 +1629,6 @@ class EstoqueCompraPedido(Base):
     __tablename__ = "estoque_compras_pedidos"
     id = Column(Integer, primary_key=True)
     item_id = Column(Integer, ForeignKey("catalogo_itens.id"), nullable=False, index=True)
-    fornecedor_id = Column(Integer, ForeignKey("fornecedores.id"), nullable=True, index=True)
     cor = Column(String(80), nullable=True, index=True)
     quantidade = Column(Float, nullable=False, default=0)
     valor_total = Column(Float, nullable=False, default=0)
@@ -1651,7 +1639,6 @@ class EstoqueCompraPedido(Base):
     criado_em = Column(DateTime, server_default=func.now())
     recebido_em = Column(DateTime, nullable=True)
     item = relationship("Item")
-    fornecedor = relationship("Fornecedor")
     usuario = relationship("Usuario")
 
 
@@ -2321,90 +2308,10 @@ def relatorio_compras_estoque(db: Session) -> list[dict]:
             for c in cores.get(item.id, []):
                 if c["cor"] == ESTOQUE_COR_PENDENTE or c["comprar"] <= 0:
                     continue
-                compras.append({"item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor", "cor": c["cor"], "disponivel": c["disponivel"], "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": c["custo_compra"]})
+                compras.append({"item": item, "cor": c["cor"], "disponivel": c["disponivel"], "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": c["custo_compra"]})
         elif l["comprar"] > 0:
-            compras.append({"item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor", "cor": "", "disponivel": l["disponivel"], "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": l["custo_compra"]})
-    return sorted(compras, key=lambda x: ((_texto_sem_acento(x["fornecedor_nome"])), (_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
-
-
-FORNECEDORES_INICIAIS_1226 = [
-    "Marcelo - KN",
-    "Walter - Canaã",
-    "Cleyton - Gabinetes",
-    "Mercado livre",
-    "Nelio - Entronix",
-    "Boa dica",
-    "Aliexpress",
-    "Magazine Luiza",
-    "Shoppe",
-    "Frankil Microfones",
-]
-
-FORNECEDOR_INICIAL_POR_CATEGORIA_1226 = {
-    "ESPELHOS": "Marcelo - KN",
-    "FLIPERAMA": "Mercado livre",
-    "GABINETES": "Walter - Canaã",
-    "GERAL": "Mercado livre",
-    "INFO E ELETRONICOS": "Boa dica",
-    "SOM": "Mercado livre",
-    "BOTOES": "Mercado livre",
-    "BOTOES E LEDS": "Mercado livre",
-}
-
-
-def _seed_fornecedores_itens_1226(db: Session) -> tuple[int, int]:
-    """Cria fornecedores e vincula itens atuais apenas na implantação inicial.
-
-    Não existe vínculo Categoria -> Fornecedor. Depois da implantação, fornecedor é
-    uma propriedade individual de cada Item.
-    """
-    criados = 0
-    fornecedores = {}
-    for nome in FORNECEDORES_INICIAIS_1226:
-        fornecedor = db.query(Fornecedor).filter(func.lower(Fornecedor.nome) == nome.lower()).first()
-        if not fornecedor:
-            fornecedor = Fornecedor(nome=nome, ativo=1)
-            db.add(fornecedor)
-            db.flush()
-            criados += 1
-        fornecedores[_texto_sem_acento(nome)] = fornecedor
-
-    chave = "fornecedor_item_inicial_1_2_26"
-    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
-    if marcador and (marcador.valor or "").strip().lower() == "ok":
-        return criados, 0
-
-    vinculados = 0
-    for item in db.query(Item).filter(Item.fornecedor_id.is_(None)).all():
-        nome_fornecedor = FORNECEDOR_INICIAL_POR_CATEGORIA_1226.get(_texto_sem_acento(item.categoria))
-        fornecedor = fornecedores.get(_texto_sem_acento(nome_fornecedor)) if nome_fornecedor else None
-        if fornecedor:
-            item.fornecedor_id = fornecedor.id
-            vinculados += 1
-    if not marcador:
-        marcador = ConfiguracaoSistema(chave=chave)
-        db.add(marcador)
-    marcador.valor = "ok"
-    db.flush()
-    return criados, vinculados
-
-
-def _linhas_minimos_itens(db: Session) -> list[dict]:
-    """Estoque mínimo é mantido em Itens, separado da contagem física."""
-    linhas, cores = estoque_saldos(db)
-    saida = []
-    for linha in linhas:
-        item = linha["item"]
-        if item_controla_cor(item):
-            conhecidas = [c for c in cores.get(item.id, []) if c.get("cor") != ESTOQUE_COR_PENDENTE]
-            if conhecidas:
-                for c in conhecidas:
-                    saida.append({"item": item, "cor": c.get("cor") or "", "minimo": float(c.get("minimo") or 0), "controla_cor": True})
-            else:
-                saida.append({"item": item, "cor": "", "minimo": 0.0, "controla_cor": True})
-        else:
-            saida.append({"item": item, "cor": "", "minimo": float(linha.get("minimo") or 0), "controla_cor": False})
-    return saida
+            compras.append({"item": item, "cor": "", "disponivel": l["disponivel"], "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": l["custo_compra"]})
+    return sorted(compras, key=lambda x: ((_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
 
 
 def _migrar_estoque_primeira_implantacao_1166(db: Session) -> int:
@@ -4008,16 +3915,6 @@ def iniciar_banco():
         with engine.begin() as conn:
             if "controla_estoque" not in existentes_itens:
                 conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN controla_estoque INTEGER NOT NULL DEFAULT 1"))
-            if "fornecedor_id" not in existentes_itens:
-                conn.execute(text("ALTER TABLE catalogo_itens ADD COLUMN fornecedor_id INTEGER"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_catalogo_itens_fornecedor_id ON catalogo_itens (fornecedor_id)"))
-
-    if "estoque_compras_pedidos" in insp.get_table_names():
-        existentes_pedidos = {c["name"] for c in insp.get_columns("estoque_compras_pedidos")}
-        with engine.begin() as conn:
-            if "fornecedor_id" not in existentes_pedidos:
-                conn.execute(text("ALTER TABLE estoque_compras_pedidos ADD COLUMN fornecedor_id INTEGER"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_estoque_compras_fornecedor_id ON estoque_compras_pedidos (fornecedor_id)"))
 
     if "venda_opcionais_config" in insp.get_table_names():
         existentes_opcionais = {c["name"] for c in insp.get_columns("venda_opcionais_config")}
@@ -4191,9 +4088,6 @@ def iniciar_banco():
         categorias_1175 = _migrar_categorias_itens_1175(db)
         if categorias_1175:
             print(f"[ESTOQUE] 1.1.75: categorias reorganizadas={categorias_1175}.")
-        fornecedores_1226, vinculos_1226 = _seed_fornecedores_itens_1226(db)
-        if fornecedores_1226 or vinculos_1226:
-            print(f"[ITENS] 1.2.26: fornecedores criados={fornecedores_1226}; vínculos iniciais={vinculos_1226}.")
         db.commit()
         # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
         _carregar_tema_visual_runtime(db)
@@ -13357,6 +13251,7 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
     item_ids = form.getlist("item_id")
     cores = form.getlist("cor")
     contagens = form.getlist("contagem")
+    minimos = form.getlist("minimo")
     observacoes = form.getlist("observacao_linha")
     salvos_originais = form.getlist("salvo_original")
     if not item_ids:
@@ -13377,22 +13272,29 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
             continue
         cor = normalizar_cor(cores[idx] if idx < len(cores) else "") if item_controla_cor(item) else ""
         contagem_txt = str(contagens[idx] if idx < len(contagens) else "").strip()
+        minimo_txt = str(minimos[idx] if idx < len(minimos) else "").strip()
         observacao = str(observacoes[idx] if idx < len(observacoes) else "").strip()
 
-        # Linha totalmente em branco = ainda não contada. Estoque mínimo não é alterado nesta tela.
-        if item_controla_cor(item) and contagem_txt and not cor:
+        # Linha totalmente em branco = ainda não contada. Não obriga cor e não altera nada.
+        minimo_relevante = minimo_txt not in ("", "0", "0,0", "0.0", "0,00", "0.00")
+        if item_controla_cor(item) and (contagem_txt or minimo_relevante) and not cor:
             erros.append(f"Informe a cor de {item.nome} somente na linha que estiver contando.")
             continue
-        if not contagem_txt and not cor:
+        if not contagem_txt and not minimo_relevante and not cor:
             continue
 
         chave = (item.id, cor)
-        registro = desejados.setdefault(chave, {"item": item, "cor": cor, "contagem": None, "observacao": observacao})
+        registro = desejados.setdefault(chave, {"item": item, "cor": cor, "contagem": None, "minimo": None, "observacao": observacao})
         if contagem_txt != "":
             try:
                 registro["contagem"] = max(float(contagem_txt.replace(",", ".")), 0)
             except ValueError:
                 erros.append(f"Contagem inválida para {item.nome} {cor}.".strip())
+        if minimo_txt != "":
+            try:
+                registro["minimo"] = max(float(minimo_txt.replace(",", ".")), 0)
+            except ValueError:
+                erros.append(f"Estoque mínimo inválido para {item.nome} {cor}.".strip())
 
     if erros:
         db.rollback()
@@ -13404,6 +13306,8 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
     for registro in desejados.values():
         item = registro["item"]
         cor = registro["cor"]
+        if registro["minimo"] is not None:
+            _salvar_minimo_estoque(db, item.id, cor, registro["minimo"])
         if registro["contagem"] is None:
             continue
         atual = _estoque_fisico_chave(db, item.id, cor)
@@ -13421,7 +13325,7 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
             ))
             ajustes += 1
         _salvar_progresso_contagem(
-            db, item.id, cor, registro["contagem"], None,
+            db, item.id, cor, registro["contagem"], registro["minimo"],
             registro.get("observacao"), usuario.id,
         )
         salvos += 1
@@ -13447,7 +13351,7 @@ def estoque_contagem_nova(usuario: Usuario = Depends(usuario_logado), db: Sessio
 def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["CATEGORIA", "ITEM", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "OBSERVACAO"])
+    writer.writerow(["CATEGORIA", "ITEM", "COR", "STATUS", "CUSTO UNITARIO", "ESTOQUE SISTEMA", "CONTAGEM FISICA", "VALOR CONTADO", "DIFERENCA", "ESTOQUE MINIMO", "OBSERVACAO"])
     for linha in _linhas_contagem_estoque(db):
         contagem = linha.get("contagem_salva") if linha.get("salvo") else None
         diferenca = (float(contagem) - float(linha["fisico"])) if contagem is not None else None
@@ -13456,7 +13360,8 @@ def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session
             f'{float(linha.get("custo_unitario") or 0):.2f}',
             f'{float(linha["fisico"]):g}', f'{float(contagem):g}' if contagem is not None else "",
             f'{float(contagem) * float(linha.get("custo_unitario") or 0):.2f}' if contagem is not None else "",
-            f'{float(diferenca):g}' if diferenca is not None else "", linha.get("observacao_salva") or "",
+            f'{float(diferenca):g}' if diferenca is not None else "", f'{float(linha["minimo"]):g}',
+            linha.get("observacao_salva") or "",
         ])
     conteudo = "\ufeff" + buffer.getvalue()
     return Response(
@@ -13468,15 +13373,9 @@ def estoque_contagem_csv(usuario: Usuario = Depends(usuario_logado), db: Session
 @app.get("/organiza/estoque/compras", response_class=HTMLResponse)
 def estoque_relatorio_compras(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     compras = relatorio_compras_estoque(db)
-    pedidos = db.query(EstoqueCompraPedido).options(
-        selectinload(EstoqueCompraPedido.item).selectinload(Item.fornecedor),
-        selectinload(EstoqueCompraPedido.fornecedor),
+    pedidos = db.query(EstoqueCompraPedido).options(selectinload(EstoqueCompraPedido.item)).order_by(
+        EstoqueCompraPedido.status.asc(), EstoqueCompraPedido.previsao_entrega.asc(), EstoqueCompraPedido.id.desc()
     ).all()
-    pedidos.sort(key=lambda p: (
-        1 if (p.status or "").upper() == "RECEBIDA" else 0,
-        _texto_sem_acento(p.fornecedor.nome if p.fornecedor else (p.item.fornecedor.nome if p.item and p.item.fornecedor else "Sem fornecedor")),
-        p.previsao_entrega or date.max, -(p.id or 0),
-    ))
     itens = [
         i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria), func.upper(Item.nome)).all()
         if item_controla_estoque(i)
@@ -13515,7 +13414,7 @@ async def estoque_compra_nova(request: Request, usuario: Usuario = Depends(usuar
     if item_controla_cor(item) and not cor:
         return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
     pedido = EstoqueCompraPedido(
-        item_id=item.id, fornecedor_id=item.fornecedor_id, cor=cor or None, quantidade=quantidade, valor_total=valor_total,
+        item_id=item.id, cor=cor or None, quantidade=quantidade, valor_total=valor_total,
         previsao_entrega=previsao, status="AGUARDANDO", observacao=(form.get("observacao") or "").strip() or None,
         usuario_id=usuario.id,
     )
@@ -13580,7 +13479,7 @@ async def estoque_compra_lote(request: Request, usuario: Usuario = Depends(usuar
         valor_total = round(float(item.preco_custo or 0) * float(quantidade), 2)
         total_lote += valor_total
         db.add(EstoqueCompraPedido(
-            item_id=item.id, fornecedor_id=item.fornecedor_id, cor=cor or None, quantidade=quantidade, valor_total=valor_total,
+            item_id=item.id, cor=cor or None, quantidade=quantidade, valor_total=valor_total,
             previsao_entrega=previsao, status="AGUARDANDO", observacao=observacao, usuario_id=usuario.id,
         ))
         criados += 1
@@ -13669,15 +13568,9 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
     if termo:
         filtro = f"%{termo}%"
         q = q.filter(or_(Item.nome.ilike(filtro), Item.categoria.ilike(filtro)))
-    itens = q.options(selectinload(Item.fornecedor)).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
-    saldos_itens, _cores_itens = estoque_saldos(db)
-    saldos_por_id = {l["item"].id: l for l in saldos_itens}
+    itens = q.order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
     for item in itens:
         item.controla_estoque_ui = item_controla_estoque(item)
-        item.estoque_minimo_ui = float((saldos_por_id.get(item.id) or {}).get("minimo") or 0)
-    fornecedores = db.query(Fornecedor).filter(Fornecedor.ativo == 1).order_by(func.upper(Fornecedor.nome)).all()
-    minimos_linhas = _linhas_minimos_itens(db)
-    itens_cor_ids = {l["item"].id for l in minimos_linhas if l.get("controla_cor")}
     existentes = [r[0] for r in db.query(Item.categoria).filter(Item.categoria.isnot(None)).distinct().order_by(Item.categoria).all() if r[0]]
     categorias = []
     for categoria in CATEGORIAS_ITENS_PADRAO + existentes:
@@ -13685,7 +13578,6 @@ def itens_lista(request: Request, busca: str = "", usuario: Usuario = Depends(us
             categorias.append(categoria)
     return templates.TemplateResponse("organiza/itens.html", {
         "request": request, "usuario": usuario, "itens": itens, "categorias": categorias, "busca": busca,
-        "fornecedores": fornecedores, "minimos_linhas": minimos_linhas, "itens_cor_ids": itens_cor_ids,
         "ok": request.query_params.get("ok", ""), "erro": request.query_params.get("erro", ""),
     })
 
@@ -13734,8 +13626,6 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
         if nome.casefold() in existentes_fora:
             return RedirectResponse("/organiza/itens?erro=" + quote_plus(f"Já existe outro item chamado {nome}."), status_code=303)
 
-    saldos_1226, _cores_1226 = estoque_saldos(db)
-    saldos_por_id_1226 = {l["item"].id: l for l in saldos_1226}
     alterados = 0
     estoque_alterado = False
     for item_id in ids:
@@ -13750,19 +13640,6 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
         ativo = 1 if str(form.get(f"ativo_{item.id}") or "0") == "1" else 0
         custo = moeda_num(form.get(f"custo_{item.id}"))
         preco = moeda_num(form.get(f"preco_{item.id}"))
-        try:
-            fornecedor_id = int(form.get(f"fornecedor_{item.id}") or 0) or None
-        except (TypeError, ValueError):
-            fornecedor_id = None
-        if fornecedor_id and not db.query(Fornecedor.id).filter(Fornecedor.id == fornecedor_id, Fornecedor.ativo == 1).first():
-            fornecedor_id = None
-        minimo_txt = str(form.get(f"minimo_{item.id}") or "").strip()
-        minimo_novo = None
-        if minimo_txt != "" and not item_controla_cor(item):
-            try:
-                minimo_novo = max(float(minimo_txt.replace(",", ".")), 0)
-            except ValueError:
-                return RedirectResponse("/organiza/itens?erro=" + quote_plus(f"Estoque mínimo inválido para {nome}."), status_code=303)
 
         if _texto_sem_acento(categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(nome) in ESTOQUE_ITENS_SEM_CONTROLE:
             controla = 0
@@ -13771,8 +13648,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
         mudou = (
             item.nome != nome or item.categoria != categoria or int(item.controla_estoque or 0) != controla
             or float(item.preco_custo or 0) != float(custo or 0) or float(item.preco_venda or 0) != float(preco or 0)
-            or int(item.ativo or 0) != ativo or item.fornecedor_id != fornecedor_id
-            or (minimo_novo is not None and abs(float((saldos_por_id_1226.get(item.id) or {}).get("minimo") or 0) - minimo_novo) > 0.0001)
+            or int(item.ativo or 0) != ativo
         )
         if not mudou:
             continue
@@ -13782,10 +13658,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
         item.controla_estoque = controla
         item.preco_custo = custo
         item.preco_venda = preco
-        item.fornecedor_id = fornecedor_id
         item.ativo = ativo
-        if minimo_novo is not None:
-            _salvar_minimo_estoque(db, item.id, "", minimo_novo)
         depois_controla = item_controla_estoque(item)
         if antes_controlava != depois_controla:
             estoque_alterado = True
@@ -13823,81 +13696,17 @@ async def item_novo(request: Request, usuario: Usuario = Depends(usuario_logado)
             controla = 1 if str(form.get("controla_estoque") or "1").strip() == "1" else 0
             if _texto_sem_acento(categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(nome) in ESTOQUE_ITENS_SEM_CONTROLE:
                 controla = 0
-            try:
-                fornecedor_id = int(form.get("fornecedor_id") or 0) or None
-            except (TypeError, ValueError):
-                fornecedor_id = None
-            if fornecedor_id and not db.query(Fornecedor.id).filter(Fornecedor.id == fornecedor_id, Fornecedor.ativo == 1).first():
-                fornecedor_id = None
-            novo_item = Item(
+            db.add(Item(
                 nome=nome,
                 codigo=None,
                 categoria=categoria,
                 controla_estoque=controla,
-                fornecedor_id=fornecedor_id,
                 preco_custo=moeda_num(form.get("preco_custo")),
                 preco_venda=moeda_num(form.get("preco_venda")),
                 ativo=1,
-            )
-            db.add(novo_item)
-            db.flush()
-            minimo_txt = str(form.get("estoque_minimo") or "").strip()
-            if minimo_txt and not item_controla_cor(novo_item):
-                try:
-                    _salvar_minimo_estoque(db, novo_item.id, "", max(float(minimo_txt.replace(",", ".")), 0))
-                except ValueError:
-                    pass
+            ))
             db.commit()
     return RedirectResponse(destino, status_code=303)
-
-
-@app.post("/organiza/fornecedores/novo")
-async def fornecedor_novo(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    form = dict(await request.form())
-    nome = (form.get("nome") or "").strip()
-    if not nome:
-        return RedirectResponse("/organiza/itens?erro=" + quote_plus("Informe o nome do fornecedor."), status_code=303)
-    existente = db.query(Fornecedor).filter(func.lower(Fornecedor.nome) == nome.lower()).first()
-    if existente:
-        if not existente.ativo:
-            existente.ativo = 1
-            db.commit()
-            return RedirectResponse("/organiza/itens?ok=" + quote_plus(f"Fornecedor {existente.nome} reativado."), status_code=303)
-        return RedirectResponse("/organiza/itens?erro=" + quote_plus("Este fornecedor já está cadastrado."), status_code=303)
-    db.add(Fornecedor(nome=nome, ativo=1))
-    db.commit()
-    return RedirectResponse("/organiza/itens?ok=" + quote_plus(f"Fornecedor {nome} criado."), status_code=303)
-
-
-@app.post("/organiza/itens/minimos")
-async def itens_minimos_salvar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    form = await request.form()
-    item_ids = form.getlist("item_id")
-    cores = form.getlist("cor")
-    minimos = form.getlist("minimo")
-    alterados = 0
-    for idx, bruto_id in enumerate(item_ids):
-        try:
-            item_id = int(bruto_id or 0)
-        except (TypeError, ValueError):
-            continue
-        item = db.query(Item).filter(Item.id == item_id).first()
-        if not item or not item_controla_estoque(item):
-            continue
-        cor = normalizar_cor(cores[idx] if idx < len(cores) else "") if item_controla_cor(item) else ""
-        minimo_txt = str(minimos[idx] if idx < len(minimos) else "").strip()
-        if minimo_txt == "":
-            continue
-        try:
-            minimo = max(float(minimo_txt.replace(",", ".")), 0)
-        except ValueError:
-            return RedirectResponse("/organiza/itens?erro=" + quote_plus(f"Estoque mínimo inválido para {item.nome}."), status_code=303)
-        if item_controla_cor(item) and not cor:
-            return RedirectResponse("/organiza/itens?erro=" + quote_plus(f"Informe a cor para definir o mínimo de {item.nome}."), status_code=303)
-        _salvar_minimo_estoque(db, item.id, cor, minimo)
-        alterados += 1
-    db.commit()
-    return RedirectResponse("/organiza/itens?ok=" + quote_plus(f"Estoque mínimo atualizado em {alterados} linha(s)."), status_code=303)
 
 
 @app.post("/organiza/itens/{item_id}/editar")
@@ -13917,13 +13726,6 @@ async def item_editar(item_id: int, request: Request, usuario: Usuario = Depends
         if _texto_sem_acento(item.categoria) in ESTOQUE_CATEGORIAS_SEM_CONTROLE or _texto_sem_acento(item.nome) in ESTOQUE_ITENS_SEM_CONTROLE:
             controla = 0
         item.controla_estoque = controla
-        try:
-            fornecedor_id = int(form.get("fornecedor_id") or 0) or None
-        except (TypeError, ValueError):
-            fornecedor_id = None
-        if fornecedor_id and not db.query(Fornecedor.id).filter(Fornecedor.id == fornecedor_id, Fornecedor.ativo == 1).first():
-            fornecedor_id = None
-        item.fornecedor_id = fornecedor_id
         item.preco_custo = moeda_num(form.get("preco_custo"))
         item.preco_venda = moeda_num(form.get("preco_venda"))
         # Se o item saiu do controle, remove somente reservas futuras. Movimentos físicos históricos permanecem.
