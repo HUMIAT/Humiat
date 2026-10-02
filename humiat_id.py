@@ -30,9 +30,9 @@ templates = Jinja2Templates(directory="templates")
 HUMIAT_ID_VERSION = ORGANIZA_VERSAO
 PRODUCT_VERSIONS = {
     "CONNECT": (os.getenv("HUMIAT_CONNECT_VERSION") or "1.0.85").strip(),
-    "LOKAFEST": (os.getenv("HUMIAT_LOKAFEST_VERSION") or "1.0.21").strip(),
+    "LOKAFEST": (os.getenv("HUMIAT_LOKAFEST_VERSION") or "1.0.22").strip(),
     "ORGANIZA": ORGANIZA_VERSAO,
-    "SOLVOZ": (os.getenv("HUMIAT_SOLVOZ_VERSION") or "2.5.96").strip(),
+    "SOLVOZ": (os.getenv("HUMIAT_SOLVOZ_VERSION") or "2.5.97").strip(),
 }
 templates.env.globals["HUMIAT_ID_VERSION"] = HUMIAT_ID_VERSION
 templates.env.globals["PRODUCT_VERSIONS"] = PRODUCT_VERSIONS

@@ -10984,7 +10984,7 @@ def api_publico_lokafest_empresa_logo(empresa_id: int, db: Session = Depends(get
         content=data,
         media_type=str(empresa.logo_mini_mime or "image/webp"),
         headers={
-            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Cache-Control": "public, max-age=31536000, immutable",
             "ETag": f'"{etag}"',
         },
     )

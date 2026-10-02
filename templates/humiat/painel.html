@@ -133,7 +133,7 @@
   <section class="h-client-strip" aria-label="Nossos clientes">
     <div class="h-client-strip-copy"><span>NOSSOS CLIENTES</span><strong>Empresas que fazem parte do ecossistema Humiat</strong></div>
     <div class="h-client-strip-viewport"><div class="h-client-strip-track">
-      {% for rodada in range(2) %}{% for cliente in clientes_logos %}<span class="h-client-logo" title="{{ cliente.nome }}"><img src="{{ cliente.logo_url }}" alt="Logo {{ cliente.nome }}" loading="lazy" decoding="async"></span>{% endfor %}{% endfor %}
+      {% for rodada in range(2) %}{% for cliente in clientes_logos %}<span class="h-client-logo" title="{{ cliente.nome }}"><img src="{{ cliente.logo_url }}" alt="Logo {{ cliente.nome }}" decoding="async"></span>{% endfor %}{% endfor %}
     </div></div>
   </section>
   {% endif %}
