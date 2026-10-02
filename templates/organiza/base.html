@@ -56,7 +56,7 @@
       </div>
       <div class="menu-grupo">
         <strong>Ações rápidas</strong>
-        <a class="menu-principal" href="/organiza/manutencoes/nova"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span> Nova manutenção</a>
+        <a class="menu-principal" href="/organiza/manutencoes/rapida"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span> Manutenção rápida</a>
         <a class="menu-principal" href="/organiza/vendas/nova"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span> Nova venda</a>
       </div>
     </nav>
@@ -94,7 +94,7 @@
     <a class="{% if request.url.path.startswith('/organiza/campanhas') %}ativo{% endif %}" href="/organiza/campanhas">
       <span>✉</span><small>Campanhas</small>
     </a>
-    <a class="plus {% if request.url.path == '/organiza/manutencoes/nova' %}ativo{% endif %}" href="/organiza/manutencoes/nova" aria-label="Nova manutenção">+</a>
+    <a class="plus {% if request.url.path == '/organiza/manutencoes/rapida' %}ativo{% endif %}" href="/organiza/manutencoes/rapida" aria-label="Manutenção rápida">+</a>
     <a class="{% if request.url.path.startswith('/organiza/agenda') %}ativo{% endif %}" href="/organiza/agenda">
       <span>▣</span><small>Agenda</small>
     </a>

@@ -14232,6 +14232,250 @@ async def manutencao_criar(request: Request, usuario: Usuario = Depends(usuario_
     return RedirectResponse(f"/organiza/manutencoes/{m.id}", status_code=303)
 
 
+
+@app.get("/organiza/manutencoes/rapida", response_class=HTMLResponse)
+def manutencao_rapida_form(
+    request: Request,
+    salva: int = 0,
+    erro: str = "",
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Tela enxuta para registrar uma manutenção em poucos toques.
+
+    Não depende do fluxo de aprovação do orçamento. Ao salvar, a manutenção já
+    nasce aprovada administrativamente e os materiais passam a comprometer o
+    estoque conforme a regra normal de manutenção aprovada.
+    """
+    clientes = (
+        db.query(Cliente)
+        .options(selectinload(Cliente.equipamentos))
+        .order_by(Cliente.nome)
+        .all()
+    )
+    clientes_dados = []
+    for cliente in clientes:
+        equipamentos = [
+            eq for eq in ordenar_equipamentos(cliente.equipamentos)
+            if (eq.status or "Ativo") == "Ativo"
+        ]
+        if not equipamentos:
+            continue
+        clientes_dados.append({
+            "id": cliente.id,
+            "nome": cliente.nome,
+            "telefone": cliente.telefone or "",
+            "equipamentos": [
+                {
+                    "id": eq.id,
+                    "rotulo": f"{rotulo_maquina(eq)} · {eq.tipo or ''}{(' · ' + eq.modelo) if eq.modelo else ''} · Cód. {codigo_tecnico(eq)}",
+                }
+                for eq in equipamentos
+            ],
+        })
+    itens = db.query(Item).filter(Item.ativo == 1).order_by(Item.nome).all()
+    itens_dados = [
+        {
+            "id": item.id,
+            "nome": item.nome,
+            "preco": round(float(item.preco_venda or 0), 2),
+            "unidade": (item.unidade or "UN").upper(),
+            "categoria": item.categoria or "Geral",
+        }
+        for item in itens
+    ]
+    manutencao_salva = carregar_manutencao(db, salva) if salva else None
+    whatsapp_salvo = ""
+    if manutencao_salva:
+        whatsapp_salvo = _whatsapp_manutencao_rapida_url(manutencao_salva, db)
+    return templates.TemplateResponse("organiza/manutencao_rapida.html", {
+        "request": request,
+        "usuario": usuario,
+        "clientes_dados": clientes_dados,
+        "itens_dados": itens_dados,
+        "manutencao_salva": manutencao_salva,
+        "whatsapp_salvo": whatsapp_salvo,
+        "erro": erro,
+        "hoje_pagamento": _hoje_organiza().isoformat(),
+    })
+
+
+def _manutencao_rapida_mensagem(m: Manutencao) -> str:
+    o = _orcamento_atual(m)
+    if not o:
+        return ""
+    totais = totais_orcamento(o)
+    linhas = [
+        f"Olá, {m.cliente.nome}!",
+        "",
+        f"Segue o orçamento da manutenção #{m.id}:",
+        f"Equipamento: {descricao_equipamento(m.equipamento)}",
+    ]
+    if float(o.valor_manutencao or 0) > 0:
+        linhas.append(f"Serviço de manutenção: {formatar_moeda(o.valor_manutencao)}")
+    if o.itens:
+        linhas.extend(["", "Materiais:"])
+        for oi in o.itens:
+            unidade = "UN"
+            if oi.item_id:
+                # O item pode ser alterado depois; a mensagem usa a unidade atual.
+                item = next((x for x in getattr(o, "_itens_catalogo_rapido", []) if x.id == oi.item_id), None)
+                if item:
+                    unidade = (item.unidade or "UN").upper()
+            linhas.append(f"• {oi.quantidade} {unidade} · {oi.descricao} — {formatar_moeda(float(oi.preco_venda or 0) * int(oi.quantidade or 0))}")
+    if float(totais.get("desconto_informado", 0) or 0) > 0:
+        linhas.extend(["", f"Desconto: {formatar_moeda(totais['desconto_informado'])}"])
+    linhas.append(f"Total: {formatar_moeda(totais.get('aprovado', 0))}")
+    recebido = float(totais.get("recebido", 0) or 0)
+    if recebido > 0:
+        linhas.append(f"Pagamento registrado: {formatar_moeda(recebido)}")
+        linhas.append(f"Saldo: {formatar_moeda(totais.get('falta', 0))}")
+    linhas.extend(["", "Mensagem informativa, sem necessidade de aprovação pelo link.", "", "Karaokê RJ"])
+    return "\n".join(linhas)
+
+
+def _whatsapp_manutencao_rapida_url(m: Manutencao, db: Session | None = None) -> str:
+    o = _orcamento_atual(m)
+    if not o or not m.cliente:
+        return ""
+    item_ids = [oi.item_id for oi in o.itens if oi.item_id]
+    itens_catalogo = db.query(Item).filter(Item.id.in_(item_ids)).all() if (db is not None and item_ids) else []
+    setattr(o, "_itens_catalogo_rapido", itens_catalogo)
+    return _whatsapp_url_pronta(m.cliente.whatsapp_completo() or "", _manutencao_rapida_mensagem(m))
+
+
+@app.post("/organiza/manutencoes/rapida")
+async def manutencao_rapida_salvar(
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+
+    def _int(v, default=0):
+        try:
+            return int(v or default)
+        except (TypeError, ValueError):
+            return default
+
+    cliente_id = _int(form.get("cliente_id"))
+    equipamento_id = _int(form.get("equipamento_id"))
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    equipamento = db.query(Equipamento).filter(
+        Equipamento.id == equipamento_id,
+        Equipamento.cliente_id == cliente_id,
+        Equipamento.status == "Ativo",
+    ).first()
+    if not cliente or not equipamento:
+        return RedirectResponse("/organiza/manutencoes/rapida?erro=" + quote_plus("Selecione o cliente e o equipamento."), status_code=303)
+
+    nomes = list(form.getlist("item_nome"))
+    ids = list(form.getlist("item_id"))
+    quantidades = list(form.getlist("quantidade"))
+    valores = list(form.getlist("preco_venda"))
+    linhas = []
+    max_len = max(len(nomes), len(ids), len(quantidades), len(valores), 0)
+    for idx in range(max_len):
+        item_id = _int(ids[idx] if idx < len(ids) else 0)
+        nome = (nomes[idx] if idx < len(nomes) else "").strip()
+        item = None
+        if item_id:
+            item = db.query(Item).filter(Item.id == item_id, Item.ativo == 1).first()
+        if not item and nome:
+            item = db.query(Item).filter(func.lower(Item.nome) == nome.lower(), Item.ativo == 1).first()
+        if not item:
+            continue
+        qtd = max(_int(quantidades[idx] if idx < len(quantidades) else 1, 1), 1)
+        valor_txt = valores[idx] if idx < len(valores) else ""
+        preco = moeda_num(valor_txt) if str(valor_txt or "").strip() else float(item.preco_venda or 0)
+        linhas.append((item, qtd, max(preco, 0.0)))
+
+    valor_servico = max(moeda_num(form.get("valor_manutencao") or ""), 0.0)
+    desconto = max(moeda_num(form.get("desconto") or ""), 0.0)
+    bruto = valor_servico + sum(qtd * preco for _item, qtd, preco in linhas)
+    if bruto <= 0:
+        return RedirectResponse("/organiza/manutencoes/rapida?erro=" + quote_plus("Informe pelo menos um material ou valor de serviço."), status_code=303)
+    desconto = min(desconto, bruto)
+    total = round(bruto - desconto, 2)
+
+    observacao = (form.get("observacao") or "").strip() or None
+    m = Manutencao(
+        cliente_id=cliente.id,
+        equipamento_id=equipamento.id,
+        defeito=observacao or "Manutenção rápida",
+        observacao=observacao,
+        tipo_atendimento="loja",
+        status="Em manutenção",
+        recebido_em=datetime.now(),
+    )
+    db.add(m)
+    db.flush()
+
+    registrar_pagamento = bool(form.get("registrar_pagamento"))
+    forma_pagamento = (form.get("forma_pagamento") or "").strip()
+    o = Orcamento(
+        manutencao=m,
+        versao=1,
+        token=secrets.token_urlsafe(24),
+        status="Aprovado manualmente",
+        desconto=desconto,
+        valor_manutencao=valor_servico,
+        forma_pagamento_orcamento=forma_pagamento or "A combinar",
+        aprovado_em=datetime.now(),
+    )
+    db.add(o)
+    for item, qtd, preco in linhas:
+        o.itens.append(OrcamentoItem(
+            item_id=item.id,
+            descricao=item.nome,
+            quantidade=qtd,
+            preco_custo=float(item.preco_custo or 0),
+            preco_venda=preco,
+            opcional=0,
+            aprovado=1,
+        ))
+    db.flush()
+
+    if registrar_pagamento:
+        valor_pagamento = moeda_num(form.get("valor_pagamento") or "") or total
+        if valor_pagamento <= 0 or not forma_pagamento:
+            db.rollback()
+            return RedirectResponse("/organiza/manutencoes/rapida?erro=" + quote_plus("Para registrar pagamento, informe a forma de pagamento."), status_code=303)
+        if valor_pagamento > total + 0.01:
+            db.rollback()
+            return RedirectResponse("/organiza/manutencoes/rapida?erro=" + quote_plus("O pagamento não pode ser maior que o total da manutenção."), status_code=303)
+        o.pagamentos.append(Pagamento(
+            data=data_form(form.get("data_pagamento") or "") or _hoje_organiza(),
+            valor=round(valor_pagamento, 2),
+            forma=forma_pagamento,
+            banco=forma_pagamento,
+            observacao=_obs_pagamento_padrao(equipamento, cliente, "Manutenção rápida"),
+        ))
+        db.flush()
+
+    sincronizar_estoque_manutencao(m, db)
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/rapida?salva={m.id}", status_code=303)
+
+
+@app.get("/organiza/manutencoes/{manutencao_id}/whatsapp-rapido")
+def manutencao_whatsapp_rapido(
+    manutencao_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    o = _orcamento_atual(m)
+    if not o:
+        return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}", status_code=303)
+    # Injeta unidades apenas durante a montagem da mensagem, sem consultas externas.
+    item_ids = [oi.item_id for oi in o.itens if oi.item_id]
+    setattr(o, "_itens_catalogo_rapido", db.query(Item).filter(Item.id.in_(item_ids)).all() if item_ids else [])
+    return RedirectResponse(_whatsapp_url_pronta(m.cliente.whatsapp_completo() or "", _manutencao_rapida_mensagem(m)), status_code=303)
+
+
 @app.get("/organiza/manutencoes/{manutencao_id}", response_class=HTMLResponse)
 def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     m = carregar_manutencao(db, manutencao_id)

@@ -1,0 +1,162 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="rapida-page">
+  <header class="rapida-header">
+    <div>
+      <p class="tag">Ação rápida</p>
+      <h1>Manutenção rápida</h1>
+      <p class="texto-suave">Cliente, material, valor, desconto e pagamento. Salve e siga para a próxima.</p>
+    </div>
+    <a class="botao secundario" href="/organiza/manutencoes">Ver manutenções</a>
+  </header>
+
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if manutencao_salva %}
+  <div class="rapida-sucesso">
+    <div><small>SALVO</small><strong>Manutenção #{{ manutencao_salva.id }} · {{ manutencao_salva.cliente.nome }}</strong></div>
+    <div class="rapida-sucesso-acoes">
+      <a class="botao secundario" href="/organiza/manutencoes/{{ manutencao_salva.id }}">Abrir</a>
+      <a class="botao primario" href="/organiza/manutencoes/{{ manutencao_salva.id }}/whatsapp-rapido" target="_blank" rel="noopener">WhatsApp</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/organiza/manutencoes/rapida" class="rapida-form" id="manutencao-rapida-form" autocomplete="off">
+    <section class="rapida-card">
+      <div class="rapida-passo"><b>1</b><span>Cliente</span></div>
+      <label class="rapida-campo">Cliente
+        <input id="cliente_nome" list="clientes-lista" placeholder="Digite o nome do cliente" inputmode="search" required>
+        <input type="hidden" name="cliente_id" id="cliente_id">
+        <datalist id="clientes-lista">
+          {% for c in clientes_dados %}<option value="{{ c.nome }}"></option>{% endfor %}
+        </datalist>
+      </label>
+      <label class="rapida-campo">Equipamento
+        <select name="equipamento_id" id="equipamento_id" required disabled>
+          <option value="">Selecione o cliente</option>
+        </select>
+      </label>
+      <label class="rapida-campo larga">Observação <span>(opcional)</span>
+        <input name="observacao" placeholder="Ex.: troca de fonte, revisão rápida...">
+      </label>
+    </section>
+
+    <section class="rapida-card">
+      <div class="rapida-passo"><b>2</b><span>Materiais e valores</span></div>
+      <div id="linhas-itens" class="rapida-itens"></div>
+      <button class="botao secundario rapida-add" type="button" id="adicionar-item">+ Adicionar material</button>
+      <datalist id="itens-lista">
+        {% for i in itens_dados %}<option value="{{ i.nome }}">{{ i.categoria }} · {{ i.unidade }}</option>{% endfor %}
+      </datalist>
+
+      <div class="rapida-valores">
+        <label>Serviço / mão de obra
+          <div class="campo-moeda"><span>R$</span><input name="valor_manutencao" id="valor_manutencao" inputmode="decimal" placeholder="0,00"></div>
+        </label>
+        <label>Desconto
+          <div class="campo-moeda"><span>R$</span><input name="desconto" id="desconto" inputmode="decimal" placeholder="0,00"></div>
+        </label>
+        <div class="rapida-total"><small>TOTAL</small><strong id="total-geral">R$ 0,00</strong></div>
+      </div>
+    </section>
+
+    <section class="rapida-card pagamento-card">
+      <div class="rapida-passo"><b>3</b><span>Pagamento</span></div>
+      <label class="rapida-check">
+        <input type="checkbox" name="registrar_pagamento" id="registrar_pagamento" value="1">
+        <span><strong>Registrar pagamento agora</strong><small>Desmarcado = apenas salva a manutenção.</small></span>
+      </label>
+      <div id="pagamento-campos" class="rapida-pagamento-campos" hidden>
+        <label>Valor recebido
+          <div class="campo-moeda"><span>R$</span><input name="valor_pagamento" id="valor_pagamento" inputmode="decimal"></div>
+        </label>
+        <label>Forma
+          <select name="forma_pagamento" id="forma_pagamento">
+            <option value="">Selecione</option>
+            <option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option><option>Outro</option>
+          </select>
+        </label>
+        <label>Data
+          <input type="date" name="data_pagamento" value="{{ hoje_pagamento }}">
+        </label>
+      </div>
+    </section>
+
+    <div class="rapida-fixo">
+      <div><small>Total</small><strong id="total-fixo">R$ 0,00</strong></div>
+      <button class="botao primario" type="submit">Salvar manutenção</button>
+    </div>
+  </form>
+</section>
+
+<template id="linha-item-template">
+  <div class="rapida-item">
+    <div class="rapida-item-nome">
+      <label>Material
+        <input class="js-item-nome" name="item_nome" list="itens-lista" placeholder="Digite o material">
+        <input class="js-item-id" type="hidden" name="item_id">
+      </label>
+      <small class="js-item-meta">Selecione um item cadastrado</small>
+    </div>
+    <label class="rapida-qtd">Qtd.
+      <input class="js-item-qtd" name="quantidade" type="number" min="1" step="1" value="1" inputmode="numeric">
+    </label>
+    <label class="rapida-preco">Valor unit.
+      <div class="campo-moeda"><span>R$</span><input class="js-item-preco" name="preco_venda" inputmode="decimal" placeholder="0,00"></div>
+    </label>
+    <button class="rapida-remover" type="button" aria-label="Remover material">×</button>
+  </div>
+</template>
+
+<style>
+.rapida-page{max-width:980px;margin:0 auto;padding:26px 22px 110px}.rapida-header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:18px}.rapida-header h1{margin:4px 0 6px}.rapida-form{display:grid;gap:14px}.rapida-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;box-shadow:0 4px 14px rgba(15,23,42,.04);display:grid;grid-template-columns:1fr 1fr;gap:14px}.rapida-passo{grid-column:1/-1;display:flex;align-items:center;gap:9px;margin-bottom:2px}.rapida-passo b{width:28px;height:28px;border-radius:8px;background:var(--ui-primary,#2563eb);color:#fff;display:grid;place-items:center}.rapida-passo span{font-weight:800;color:#0f172a}.rapida-campo,.rapida-card label{display:grid;gap:6px;font-size:13px;font-weight:700;color:#334155}.rapida-campo span{font-weight:500;color:#94a3b8}.rapida-campo.larga{grid-column:1/-1}.rapida-card input,.rapida-card select{min-height:44px;border:1px solid #d7dee9;border-radius:9px;background:#fff;padding:9px 11px;font:inherit;color:#0f172a}.rapida-card input:focus,.rapida-card select:focus{outline:3px solid color-mix(in srgb,var(--ui-primary,#2563eb) 18%,transparent);border-color:var(--ui-primary,#2563eb)}.rapida-itens{grid-column:1/-1;display:grid;gap:10px}.rapida-item{display:grid;grid-template-columns:minmax(220px,1fr) 84px 150px 42px;gap:9px;align-items:end;padding:12px;border:1px solid #e2e8f0;border-radius:11px;background:#f8fafc}.rapida-item-nome small{display:block;margin-top:4px;color:#64748b;font-size:11px;font-weight:500}.rapida-remover{width:42px;height:44px;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:9px;font-size:22px;cursor:pointer}.rapida-add{grid-column:1/-1;justify-self:start}.rapida-valores{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr minmax(180px,.75fr);gap:12px;padding-top:8px;border-top:1px solid #edf1f6;align-items:end}.campo-moeda{display:flex;align-items:center;border:1px solid #d7dee9;border-radius:9px;background:#fff;overflow:hidden}.campo-moeda span{padding:0 0 0 11px;color:#64748b;font-size:13px}.campo-moeda input{border:0!important;border-radius:0!important;min-width:0;width:100%;box-shadow:none!important;outline:0!important}.rapida-total{height:66px;border-radius:11px;background:#eff6ff;border:1px solid #dbeafe;padding:10px 14px;display:flex;flex-direction:column;justify-content:center}.rapida-total small{color:#64748b;font-size:10px;font-weight:800}.rapida-total strong{font-size:22px;color:#0f172a}.pagamento-card{display:block}.rapida-check{display:flex!important;align-items:center;gap:12px;cursor:pointer}.rapida-check input{width:22px;height:22px;min-height:0}.rapida-check span{display:grid;gap:2px}.rapida-check small{font-weight:500;color:#64748b}.rapida-pagamento-campos{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px}.rapida-fixo{position:sticky;bottom:12px;background:#0f172a;color:#fff;border-radius:13px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:12px;box-shadow:0 14px 30px rgba(15,23,42,.22);z-index:4}.rapida-fixo div{display:grid}.rapida-fixo small{font-size:10px;color:#94a3b8}.rapida-fixo strong{font-size:18px}.rapida-fixo .botao{min-height:46px}.rapida-sucesso{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#ecfdf5;border:1px solid #bbf7d0;border-radius:12px;padding:12px 14px;margin-bottom:14px}.rapida-sucesso div:first-child{display:grid;gap:2px}.rapida-sucesso small{font-size:10px;font-weight:800;color:#15803d}.rapida-sucesso-acoes{display:flex;gap:8px}
+@media(max-width:700px){.rapida-page{padding:16px 12px 100px}.rapida-header{align-items:stretch;flex-direction:column}.rapida-header>.botao{align-self:flex-start}.rapida-card{grid-template-columns:1fr;padding:14px}.rapida-campo.larga,.rapida-passo,.rapida-itens,.rapida-add,.rapida-valores{grid-column:1}.rapida-item{grid-template-columns:minmax(0,1fr) 72px 42px}.rapida-item-nome{grid-column:1/-1}.rapida-preco{grid-column:1/3}.rapida-qtd{grid-column:3}.rapida-remover{grid-column:3;grid-row:2;align-self:end}.rapida-valores{grid-template-columns:1fr 1fr}.rapida-total{grid-column:1/-1}.rapida-pagamento-campos{grid-template-columns:1fr}.rapida-sucesso{align-items:stretch;flex-direction:column}.rapida-sucesso-acoes .botao{flex:1}.rapida-fixo{bottom:72px}.rapida-fixo .botao{flex:1}.rapida-fixo>div{min-width:105px}}
+</style>
+
+<script>
+const CLIENTES = {{ clientes_dados|tojson }};
+const ITENS = {{ itens_dados|tojson }};
+const clientesPorNome = new Map(CLIENTES.map(c => [c.nome.toLocaleLowerCase('pt-BR'), c]));
+const itensPorNome = new Map(ITENS.map(i => [i.nome.toLocaleLowerCase('pt-BR'), i]));
+const clienteNome = document.getElementById('cliente_nome');
+const clienteId = document.getElementById('cliente_id');
+const equipamento = document.getElementById('equipamento_id');
+
+function moedaNum(v){v=(v||'').toString().trim();if(!v)return 0;if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');return Number(v.replace(/[^0-9.-]/g,''))||0}
+function moeda(v){return (Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}
+function atualizarCliente(){
+  const c=clientesPorNome.get((clienteNome.value||'').trim().toLocaleLowerCase('pt-BR'));
+  clienteId.value=c?.id||'';
+  equipamento.innerHTML='';
+  if(!c){equipamento.disabled=true;equipamento.innerHTML='<option value="">Selecione o cliente</option>';return}
+  c.equipamentos.forEach(eq=>{const op=document.createElement('option');op.value=eq.id;op.textContent=eq.rotulo;equipamento.appendChild(op)});
+  equipamento.disabled=false;
+}
+clienteNome.addEventListener('input',atualizarCliente);clienteNome.addEventListener('change',atualizarCliente);
+
+const linhas=document.getElementById('linhas-itens');
+const tpl=document.getElementById('linha-item-template');
+function adicionarLinha(){
+  const el=tpl.content.firstElementChild.cloneNode(true);linhas.appendChild(el);
+  const nome=el.querySelector('.js-item-nome'),id=el.querySelector('.js-item-id'),preco=el.querySelector('.js-item-preco'),meta=el.querySelector('.js-item-meta');
+  function sincronizar(){const item=itensPorNome.get((nome.value||'').trim().toLocaleLowerCase('pt-BR'));id.value=item?.id||'';if(item){preco.value=item.preco.toFixed(2).replace('.',',');meta.textContent=`${item.categoria} · ${item.unidade}`;}else{meta.textContent='Selecione um item cadastrado';}recalcular()}
+  nome.addEventListener('input',sincronizar);nome.addEventListener('change',sincronizar);preco.addEventListener('input',recalcular);el.querySelector('.js-item-qtd').addEventListener('input',recalcular);
+  el.querySelector('.rapida-remover').addEventListener('click',()=>{el.remove();recalcular()});
+}
+document.getElementById('adicionar-item').addEventListener('click',adicionarLinha);adicionarLinha();
+
+function recalcular(){
+  let total=moedaNum(document.getElementById('valor_manutencao').value);
+  document.querySelectorAll('.rapida-item').forEach(l=>{total+=(Number(l.querySelector('.js-item-qtd').value)||0)*moedaNum(l.querySelector('.js-item-preco').value)});
+  total=Math.max(total-moedaNum(document.getElementById('desconto').value),0);
+  document.getElementById('total-geral').textContent=moeda(total);document.getElementById('total-fixo').textContent=moeda(total);
+  const pag=document.getElementById('valor_pagamento');if(document.getElementById('registrar_pagamento').checked && !pag.dataset.editado)pag.value=total.toFixed(2).replace('.',',');
+}
+document.getElementById('valor_manutencao').addEventListener('input',recalcular);document.getElementById('desconto').addEventListener('input',recalcular);
+const chk=document.getElementById('registrar_pagamento'),pagCampos=document.getElementById('pagamento-campos'),pag=document.getElementById('valor_pagamento');
+chk.addEventListener('change',()=>{pagCampos.hidden=!chk.checked;if(chk.checked){pag.dataset.editado='';recalcular();document.getElementById('forma_pagamento').focus()}});pag.addEventListener('input',()=>pag.dataset.editado='1');
+
+document.getElementById('manutencao-rapida-form').addEventListener('submit',e=>{atualizarCliente();if(!clienteId.value||!equipamento.value){e.preventDefault();clienteNome.focus();alert('Selecione um cliente válido e o equipamento.')}});
+recalcular();
+</script>
+{% endblock %}
