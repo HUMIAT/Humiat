@@ -98,14 +98,14 @@
       </article>
 
       <article class="admin-app-card app-identidade">
-        <div class="admin-card-head"><div class="admin-app-icon">N</div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Usuários novos</h3><p>Somente responsáveis definidos em Empresas SolVoz. A busca não roda na abertura do Humiat ID.</p></div></div>
+        <div class="admin-card-head"><div class="admin-app-icon">N</div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Usuários novos</h3><p>Responsáveis de Empresas SolVoz sem Humiat ID ou com cadastro incompleto. A busca só roda quando você solicitar.</p></div></div>
         <div class="admin-badges">{% if carregar == 'novos' %}<span class="status-badge {% if novos_usuarios_lokafest|length > 0 %}active{% endif %}">{{ novos_usuarios_lokafest|length }} encontrado(s)</span>{% else %}<span class="status-badge">Sob demanda</span>{% endif %}</div>
         {% if novos_usuarios_lokafest_erro %}<small class="error-inline">{{ novos_usuarios_lokafest_erro }}</small>{% endif %}
         <div class="admin-actions one"><a class="btn-primary" href="/painel?carregar=novos" data-loading-link>Buscar novos usuários</a></div>
       </article>
 
       <article class="admin-app-card app-migracao">
-        <div class="admin-card-head"><div class="admin-app-icon">P</div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Pendências Humiat ID</h3><p>A fila antiga do LokaFest só é consultada quando você solicitar.</p></div></div>
+        <div class="admin-card-head"><div class="admin-app-icon">P</div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Pendências Humiat ID</h3><p>Usuários já existentes no LokaFest, sem Empresa SolVoz, que ainda precisam do vínculo Humiat ID.</p></div></div>
         <div class="admin-badges">{% if carregar == 'pendencias' %}<span class="status-badge {% if pendencias_lokafest|length > 0 %}active{% endif %}">{{ pendencias_lokafest|length }} pendência(s)</span>{% else %}<span class="status-badge">Sob demanda</span>{% endif %}</div>
         {% if pendencias_lokafest_erro %}<small class="error-inline">Não foi possível consultar o LokaFest: {{ pendencias_lokafest_erro }}</small>{% endif %}
         <div class="admin-actions one"><a class="btn-primary" href="/painel?carregar=pendencias" data-loading-link>Consultar pendências</a></div>
@@ -117,17 +117,17 @@
 
 <dialog class="admin-dialog" id="novos-usuarios-lokafest">
   <div class="dialog-card dialog-wide">
-    <div class="dialog-head"><div><span class="card-kicker">Empresas SolVoz</span><h2>Responsáveis sem Humiat ID</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    <p class="muted-copy">A lista vem somente do responsável definido em Empresas SolVoz no Organiza. Clientes comuns da Karaokê RJ não entram nesta rotina.</p>
+    <div class="dialog-head"><div><span class="card-kicker">Empresas SolVoz</span><h2>Novos usuários e cadastros incompletos</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
+    <p class="muted-copy">A lista vem somente do responsável definido em Empresas SolVoz no Organiza. Ao concluir, o Humiat libera Tarefas rápidas, cria/aprova o usuário no LokaFest e marca Cliente Catálogo no SolVoz.</p>
     <div style="display:grid;gap:10px;max-height:62vh;overflow:auto;margin-top:14px">
       {% for p in novos_usuarios_lokafest %}
       <div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(170px,1.1fr) minmax(170px,1.1fr) auto;gap:12px;align-items:center">
         <div><strong>{{ p.nome }}</strong><small style="display:block;color:var(--muted)">CPF {{ p.documento or '—' }} · {{ p.telefone_completo or '—' }}</small></div>
         <div><small style="display:block;color:var(--muted)">E-mail</small><strong>{{ p.email or 'Sem e-mail' }}</strong></div>
-        <div><small style="display:block;color:var(--muted)">Empresa / SolVoz</small><strong>{{ p.solvoz_empresa_nome or p.empresa or '—' }}</strong><small style="display:block;color:var(--muted)">{{ p.solvoz_empresa_slug or '' }}</small></div>
+        <div><small style="display:block;color:var(--muted)">Empresa / SolVoz</small><strong>{{ p.solvoz_empresa_nome or p.empresa or '—' }}</strong><small style="display:block;color:var(--muted)">{{ p.solvoz_empresa_slug or '' }}</small>{% if p.pendencias_config %}<small style="display:block;color:#b45309;margin-top:4px">Pendente: {{ p.pendencias_config|join(' · ') }}</small>{% endif %}</div>
         <div>
           {% if p.pode_criar %}
-          <form method="post" action="/admin-humiat/usuarios-novos/{{ p.id }}/criar"><button class="btn-primary" type="submit">Criar Humiat ID</button></form>
+          <form method="post" action="/admin-humiat/usuarios-novos/{{ p.id }}/criar"><button class="btn-primary" type="submit">{{ p.acao_label or 'Criar e liberar acessos' }}</button></form>
           {% elif p.cadastro_whatsapp_url %}
           <a class="btn-secondary" href="{{ p.cadastro_whatsapp_url }}" target="_blank" rel="noopener">Enviar cadastro</a>
           {% else %}
@@ -136,7 +136,7 @@
         </div>
       </div>
       {% else %}
-      <div class="id-success">Nenhum usuário novo aguardando criação.</div>
+      <div class="id-success">Nenhum usuário novo ou cadastro incompleto aguardando ação.</div>
       {% endfor %}
     </div>
     <div class="dialog-actions"><a class="btn-secondary" href="/painel?carregar=novos" data-loading-link>Atualizar lista</a><button type="button" class="btn-ghost" data-dialog-close>Fechar</button></div>
@@ -146,13 +146,13 @@
 <dialog class="admin-dialog" id="pendencias-lokafest">
   <div class="dialog-card dialog-wide">
     <div class="dialog-head"><div><span class="card-kicker">Migração inicial</span><h2>Pendências Humiat ID</h2></div><button type="button" class="dialog-close" data-dialog-close>×</button></div>
-    <p class="muted-copy">Conciliação individual pelo WhatsApp. O telefone é a chave principal entre LokaFest e Organiza; CPF/CNPJ fica como apoio. O primeiro acesso só é liberado quando existe e-mail válido no Organiza.</p>
+    <p class="muted-copy">Esta fila é para usuários do LokaFest sem Empresa SolVoz. Ao aprovar, libera Humiat ID, Organiza/Tarefas rápidas e LokaFest/Usuário. Não marca Cliente Catálogo no SolVoz. O vínculo real é conferido no próprio banco do LokaFest.</p>
     <div style="display:grid;gap:10px;max-height:62vh;overflow:auto;margin-top:14px">
       {% for p in pendencias_lokafest %}
       <div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(160px,1fr) minmax(180px,1.4fr) auto;gap:12px;align-items:center">
         <div><strong>{{ p.nome }}</strong><small style="display:block;color:var(--muted)">CPF {{ p.cpf or '—' }} · {{ p.whatsapp or '—' }}</small></div>
         <div><small style="display:block;color:var(--muted)">Organiza</small><strong>{{ 'Encontrado' if p.organiza_encontrado else 'Não encontrado' }}</strong></div>
-        <div><small style="display:block;color:var(--muted)">E-mail do Organiza</small><strong>{{ p.email or 'Sem e-mail' }}</strong><small style="display:block;color:var(--muted)">{{ p.solvoz.nome if p.solvoz else 'Sem vínculo SolVoz' }}</small></div>
+        <div><small style="display:block;color:var(--muted)">E-mail do Organiza</small><strong>{{ p.email or 'Sem e-mail' }}</strong><small style="display:block;color:var(--muted)">Sem Empresa SolVoz</small>{% if p.pendencias_config %}<small style="display:block;color:#b45309;margin-top:4px">Pendente: {{ p.pendencias_config|join(' · ') }}</small>{% endif %}</div>
         <div>
           {% if p.pode_aprovar %}
           <form method="post" action="/admin-humiat/migracao-lokafest/{{ p.id }}/aprovar"><button class="btn-primary" type="submit">Aprovar</button></form>
