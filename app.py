@@ -8494,11 +8494,14 @@ def _solvoz_empresas_contexto_batched(db: Session, empresas: list[SolVozEmpresa]
         usuario_resp = humiat_resp.get(int(empresa.responsavel_humiat_usuario_id or 0))
         eqs = equipamentos_por_cliente.get(int(empresa.responsavel_cliente_id or 0), []) if cliente_resp else []
         divergentes = [eqid for eqid, seid in eqs if seid != int(empresa.id)]
+        clientes_detectados = clientes_por_empresa.get(int(empresa.id), [])
+        responsavel_sugerido = clientes_detectados[0] if (not cliente_resp and not usuario_resp and len(clientes_detectados) == 1) else None
         linhas.append({
             "empresa": empresa,
-            "clientes": clientes_por_empresa.get(int(empresa.id), []),
+            "clientes": clientes_detectados,
             "responsavel_cliente": cliente_resp,
             "responsavel_humiat": usuario_resp,
+            "responsavel_sugerido": responsavel_sugerido,
             "equipamentos_divergentes": divergentes,
             "equipamentos_responsavel": len(eqs),
             "responsavel_ok": bool(usuario_resp),
@@ -8624,6 +8627,64 @@ def solvoz_empresas_sincronizar_manual(
     except Exception as exc:
         db.rollback()
         return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?erro={quote_plus(str(exc)[:300])}", status_code=303)
+
+
+@app.post("/organiza/configuracoes/solvoz-empresas/copiar-responsaveis-equipamentos")
+def solvoz_empresas_copiar_responsaveis_equipamentos(
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Preenche em lote o responsável quando a empresa tem um único cliente por equipamentos.
+
+    A ação não cria Humiat ID nem envia e-mail: ela corrige somente o vínculo
+    obrigatório Empresa SolVoz -> Cliente. O onboarding fica para "Usuários novos".
+    """
+    if not usuario.is_admin:
+        raise HTTPException(403)
+
+    empresas = db.query(SolVozEmpresa).filter(
+        SolVozEmpresa.ativo == 1,
+        SolVozEmpresa.responsavel_cliente_id.is_(None),
+        SolVozEmpresa.responsavel_humiat_usuario_id.is_(None),
+    ).all()
+    corrigidas = ambiguas = sem_cliente = conflitos = 0
+    for empresa in empresas:
+        if normalizar_slug_solvoz(empresa.slug) == "karaokerj":
+            continue
+        rows = db.query(Equipamento.cliente_id).filter(
+            Equipamento.solvoz_empresa_id == int(empresa.id),
+            func.upper(func.coalesce(Equipamento.status, "")) != "INATIVO",
+        ).distinct().all()
+        cliente_ids = sorted({int(r[0]) for r in rows if r and r[0]})
+        if not cliente_ids:
+            sem_cliente += 1
+            continue
+        if len(cliente_ids) != 1:
+            ambiguas += 1
+            continue
+        cid = cliente_ids[0]
+        outra = db.query(SolVozEmpresa).filter(
+            SolVozEmpresa.responsavel_cliente_id == cid,
+            SolVozEmpresa.id != int(empresa.id),
+            SolVozEmpresa.ativo == 1,
+        ).first()
+        if outra:
+            conflitos += 1
+            continue
+        empresa.responsavel_cliente_id = cid
+        empresa.responsavel_humiat_usuario_id = None
+        corrigidas += 1
+
+    db.commit()
+    msg = (
+        f"Responsáveis copiados: {corrigidas}. "
+        f"Sem cliente pelos equipamentos: {sem_cliente}. "
+        f"Com mais de um cliente: {ambiguas}. Conflitos: {conflitos}."
+    )
+    return RedirectResponse(
+        f"/organiza/configuracoes/solvoz-empresas?sucesso={quote_plus(msg)}",
+        status_code=303,
+    )
 
 
 @app.post("/organiza/configuracoes/solvoz-empresas/{empresa_id}/responsavel")

@@ -7,9 +7,14 @@
       <h1>Empresas SolVoz</h1>
       <p class="texto-suave">O SolVoz é a fonte principal de empresa, nome, slug e status. O Organiza mantém o responsável Humiat e o vínculo dos equipamentos.</p>
     </div>
-    <form method="post" action="/organiza/configuracoes/solvoz-empresas/sincronizar">
-      <button class="botao primario empresa-btn" type="submit">Atualizar empresas do SolVoz</button>
-    </form>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+      <form method="post" action="/organiza/configuracoes/solvoz-empresas/sincronizar">
+        <button class="botao primario empresa-btn" type="submit">Atualizar empresas do SolVoz</button>
+      </form>
+      <form method="post" action="/organiza/configuracoes/solvoz-empresas/copiar-responsaveis-equipamentos" onsubmit="return confirm('Copiar automaticamente o cliente dos equipamentos como responsável das empresas que ainda estão sem responsável?')">
+        <button class="botao empresa-btn" type="submit">Copiar responsáveis dos equipamentos</button>
+      </form>
+    </div>
   </div>
 
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
@@ -126,7 +131,10 @@
               <small>{{ linha.responsavel_cliente.nome }} · <strong>Humiat ID pendente</strong></small>
               <a class="botao empresa-btn" href="/organiza/clientes/{{ linha.responsavel_cliente.id }}/cadastro-publico" target="_blank" rel="noopener">Atualizar cadastro</a>
             {% else %}
-              <small class="empresa-sem-cliente"><strong>Sem responsável vinculado.</strong></small>
+              <small class="empresa-sem-cliente"><strong>Empresa SolVoz: corrija o responsável no ADM — vínculo obrigatório.</strong></small>
+              {% if linha.responsavel_sugerido %}
+              <small>Cliente detectado pelos equipamentos: <strong>{{ linha.responsavel_sugerido.nome }}</strong></small>
+              {% endif %}
             {% endif %}
           </div>
 

@@ -8,6 +8,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -59,7 +60,10 @@ _EQUIPE_INTERNA_PADRAO = {"junior", "debora", "luiz"}
 _EQUIPE_INTERNA_EMAILS_PADRAO = {"jr.delphi@gmail.com", "deborapavonerabello@gmail.com", "bidults@gmail.com"}
 
 def _norm_identidade(valor: str | None) -> str:
-    return (valor or "").strip().lower()
+    texto = str(valor or "").strip().casefold()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    return " ".join(texto.split())
 
 def _equipe_interna_usuarios_configurados() -> set[str]:
     extra = os.getenv("HUMIAT_EQUIPE_INTERNA_USUARIOS", "")
@@ -1934,6 +1938,11 @@ def _empresa_solvoz_responsavel_cliente_humiat(db: Session, cliente_id: int) -> 
 
 
 def _zona_lokafest_por_cliente(cliente: dict | None) -> str:
+    """Classifica a área do LokaFest usando município e bairro do Organiza.
+
+    A normalização ignora acentos (ex.: Nova Iguaçu -> nova iguacu), evitando
+    que clientes válidos caiam em "Outros RJ" por diferença de grafia.
+    """
     if not cliente:
         return "Outros RJ"
     municipio = _norm_identidade(cliente.get("municipio") or cliente.get("cidade"))
@@ -1944,21 +1953,25 @@ def _zona_lokafest_por_cliente(cliente: dict | None) -> str:
     costa = {"angra dos reis","mangaratiba","paraty","itatiaia"}
     marica = {"marica","itaborai","tangua","rio bonito"}
     niteroi = {"niteroi","sao goncalo"}
+    norte_noroeste = {"campos dos goytacazes","macae","rio das ostras","itaperuna","santo antonio de padua","miracema","bom jesus do itabapoana"}
     if municipio in baixada: return "Baixada Fluminense"
     if municipio in lagos: return "Região dos Lagos"
     if municipio in serrana: return "Região Serrana"
     if municipio in costa: return "Costa Verde"
     if municipio in marica: return "Maricá / Itaboraí"
     if municipio in niteroi: return "Niterói / São Gonçalo"
+    if municipio in norte_noroeste: return "Norte / Noroeste Fluminense"
     if municipio in {"rio de janeiro","rio"}:
-        if any(x in bairro for x in ("barra", "recreio", "jacarepagua", "vargem grande", "vargem pequena")):
+        if any(x in bairro for x in ("barra", "recreio", "jacarepagua", "vargem grande", "vargem pequena", "curicica", "taquara", "freguesia")):
             return "Barra / Recreio / Jacarepaguá / Vargens"
         if "campo grande" in bairro:
             return "Campo Grande"
-        if any(x in bairro for x in ("santa cruz", "guaratiba", "pedra de guaratiba", "barra de guaratiba")):
+        if any(x in bairro for x in ("santa cruz", "guaratiba", "pedra de guaratiba", "barra de guaratiba", "paciencia", "sepeteiba")):
             return "Santa Cruz / Guaratiba"
-        if any(x in bairro for x in ("centro", "santa teresa", "lapa", "gloria", "catete")):
+        if any(x in bairro for x in ("centro", "santa teresa", "lapa", "gloria", "catete", "flamengo", "botafogo", "copacabana", "ipanema", "leblon", "laranjeiras")):
             return "Centro"
+        # Ramos, Méier, Tijuca, Ilha, Madureira e demais bairros urbanos do Rio
+        # permanecem na Zona Norte, que é o agrupamento operacional existente.
         return "Zona Norte"
     return "Outros RJ"
 
@@ -2196,6 +2209,10 @@ def aplicar_rotinas_cliente_humiat(db: Session, usuario_h: HumiatUsuario, client
     if garantir_lokafest:
         _garantir_usuario_lokafest_humiat(cliente, usuario_h.nome, humiat_usuario_id=int(usuario_h.id))
     _cache_integracao_apagar(db, f"painel:lokafest:{int(usuario_h.id)}")
+    # O snapshot da fila de migração contém o humiat_user_id local do LokaFest.
+    # Depois de concluir/vincular um cadastro ele precisa ser descartado, senão
+    # um usuário já regular pode continuar aparecendo como pendente até o cache expirar.
+    _cache_integracao_apagar(db, "migracao:lokafest:usuarios")
 
 
 def _pendencias_lokafest_humiat(db: Session, *, forcar: bool = False) -> tuple[list[dict], str]:
@@ -2257,9 +2274,20 @@ def _pendencias_lokafest_humiat(db: Session, *, forcar: bool = False) -> tuple[l
         email, email_fonte = _email_migracao_lokafest_humiat(db, cliente, item)
         empresa_solvoz = _empresa_solvoz_responsavel_cliente_humiat(db, int((cliente or {}).get("id") or 0)) if cliente else None
         slug_solvoz = str((empresa_solvoz or {}).get("slug") or "").strip().lower()
+        empresa_por_equipamento = _empresa_solvoz_do_cliente_humiat(db, int((cliente or {}).get("id") or 0)) if cliente else None
+        slug_por_equipamento = str((empresa_por_equipamento or {}).get("slug") or "").strip().lower()
+        empresa_sem_responsavel = bool(
+            empresa_por_equipamento
+            and slug_por_equipamento
+            and slug_por_equipamento != "karaokerj"
+            and not empresa_solvoz
+        )
 
-        # Responsáveis de uma Empresa SolVoz pertencem à outra rotina
-        # (“Usuários novos”), que também concede Cliente Catálogo.
+        # Responsáveis corretos de uma Empresa SolVoz pertencem à outra rotina
+        # (“Usuários novos”), que também concede Cliente Catálogo. Se existe
+        # empresa pelos equipamentos mas o responsável ainda não foi definido,
+        # não aprovamos como usuário simples do LokaFest: mostramos a correção
+        # obrigatória no ADM de Empresas SolVoz.
         if empresa_solvoz and slug_solvoz and slug_solvoz != "karaokerj":
             continue
 
@@ -2289,10 +2317,12 @@ def _pendencias_lokafest_humiat(db: Session, *, forcar: bool = False) -> tuple[l
 
         vinculo_local_ok = bool(local_hid and humiat and int(humiat.id) == int(local_hid))
         acesso_lokafest_ok = bool(humiat and int(humiat.id) in usuarios_com_lokafest)
-        if vinculo_local_ok and acesso_lokafest_ok:
+        if vinculo_local_ok and acesso_lokafest_ok and not empresa_sem_responsavel:
             continue
 
         pendencias_config = []
+        if empresa_sem_responsavel:
+            pendencias_config.append("Empresa SolVoz: corrigir responsável no ADM")
         if not humiat:
             pendencias_config.append("Humiat ID")
         elif not int(humiat.ativo or 0):
@@ -2310,10 +2340,11 @@ def _pendencias_lokafest_humiat(db: Session, *, forcar: bool = False) -> tuple[l
             "organiza_encontrado": bool(cliente),
             "humiat_existente": bool(humiat),
             "humiat_local_id": local_hid_txt,
-            "pode_aprovar": bool(cliente and email),
+            "pode_aprovar": bool(cliente and email and not empresa_sem_responsavel),
             "pendencias_config": pendencias_config,
             "cadastro_whatsapp_url": (f"/admin-humiat/migracao-lokafest/{lid}/enviar-cadastro" if cliente and not email else ""),
-            "solvoz": None,
+            "solvoz": empresa_por_equipamento if empresa_sem_responsavel else None,
+            "solvoz_responsavel_pendente": empresa_sem_responsavel,
         })
     return pendencias, ""
 
