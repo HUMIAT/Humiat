@@ -5,7 +5,7 @@
     <div>
       <p class="tag">Integração</p>
       <h1>Empresas SolVoz</h1>
-      <p class="texto-suave">O SolVoz é a fonte principal de empresa, nome, slug e status. O Organiza mantém o responsável Humiat e o vínculo dos equipamentos.</p>
+      <p class="texto-suave">O SolVoz é a fonte principal de empresa, nome, slug, status e logo. O Organiza mantém o responsável Humiat, o vínculo dos equipamentos e uma miniatura local da logo para a LokaFest.</p>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
       <form method="post" action="/organiza/configuracoes/solvoz-empresas/sincronizar">
@@ -96,7 +96,7 @@
       <span>{{ 2 if editar or responsavel_editar else 1 }}</span>
       <div>
         <h2>Empresas sincronizadas</h2>
-        <p>A lista abaixo deve espelhar o cadastro real do SolVoz. A consulta geral só acontece quando você clica em “Atualizar empresas do SolVoz”.</p>
+        <p>A lista abaixo deve espelhar o cadastro real do SolVoz. Ao atualizar, o Organiza também guarda uma miniatura leve da logo, usada automaticamente na página pública da LokaFest.</p>
       </div>
     </div>
 
@@ -105,10 +105,20 @@
       {% for linha in linhas_empresas %}{% set empresa=linha.empresa %}
       <article class="empresa-integracao-card">
         <div class="empresa-integracao-info">
-          <div class="empresa-integracao-titulo">
-            <div>
-              <strong>{{ empresa.nome }}</strong>
-              <small>ID SolVoz {{ empresa.solvoz_id or 'pendente' }}</small>
+          <div class="empresa-integracao-titulo empresa-integracao-titulo-logo">
+            <div class="empresa-logo-identidade">
+              <div class="empresa-logo-mini">
+                {% if empresa.logo_mini_data and empresa.ativo %}
+                <img src="/api/publico/lokafest/empresas/{{ empresa.id }}/logo?v={{ (empresa.logo_mini_hash or '')[:12] }}" alt="Logo {{ empresa.nome }}" loading="lazy">
+                {% else %}
+                <span>{{ (empresa.nome or 'E')[:1]|upper }}</span>
+                {% endif %}
+              </div>
+              <div>
+                <strong>{{ empresa.nome }}</strong>
+                <small>ID SolVoz {{ empresa.solvoz_id or 'pendente' }}</small>
+                <small>{{ 'Logo LokaFest sincronizada' if empresa.logo_mini_data else 'Sem logo sincronizada' }}</small>
+              </div>
             </div>
             <span class="empresa-status {{ 'ativo' if empresa.ativo else 'inativo' }}">{{ 'Ativa' if empresa.ativo else 'Inativa' }}</span>
           </div>

@@ -725,6 +725,12 @@ class SolVozEmpresa(Base):
     # diretamente para um Humiat ID interno (Junior/Débora/Luiz).
     responsavel_cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=True, index=True)
     responsavel_humiat_usuario_id = Column(Integer, ForeignKey("humiat_usuarios.id"), nullable=True, index=True)
+    # Miniatura pública usada pela LokaFest. A origem continua sendo o SolVoz;
+    # o Organiza apenas mantém uma cópia leve para evitar dependência externa na Home.
+    logo_mini_data = Column(LargeBinary, nullable=True)
+    logo_mini_mime = Column(String(80), nullable=True)
+    logo_mini_hash = Column(String(64), nullable=True)
+    logo_mini_atualizado_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     responsavel_cliente = relationship("Cliente", foreign_keys=[responsavel_cliente_id])
     responsavel_humiat_usuario = relationship("HumiatUsuario", foreign_keys=[responsavel_humiat_usuario_id])
@@ -3791,6 +3797,16 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN responsavel_cliente_id INTEGER"))
             if "responsavel_humiat_usuario_id" not in existentes_solvoz_empresas:
                 conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN responsavel_humiat_usuario_id INTEGER"))
+            tipo_blob_solvoz = "BYTEA" if engine.dialect.name == "postgresql" else "BLOB"
+            tipo_dt_solvoz = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+            if "logo_mini_data" not in existentes_solvoz_empresas:
+                conn.execute(text(f"ALTER TABLE solvoz_empresas ADD COLUMN logo_mini_data {tipo_blob_solvoz}"))
+            if "logo_mini_mime" not in existentes_solvoz_empresas:
+                conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN logo_mini_mime VARCHAR(80)"))
+            if "logo_mini_hash" not in existentes_solvoz_empresas:
+                conn.execute(text("ALTER TABLE solvoz_empresas ADD COLUMN logo_mini_hash VARCHAR(64)"))
+            if "logo_mini_atualizado_em" not in existentes_solvoz_empresas:
+                conn.execute(text(f"ALTER TABLE solvoz_empresas ADD COLUMN logo_mini_atualizado_em {tipo_dt_solvoz}"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_solvoz_empresas_solvoz_id ON solvoz_empresas (solvoz_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solvoz_empresas_responsavel_cliente ON solvoz_empresas (responsavel_cliente_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solvoz_empresas_responsavel_humiat ON solvoz_empresas (responsavel_humiat_usuario_id)"))
@@ -8513,6 +8529,83 @@ async def equipamento_salvar(cliente_id: int, equipamento_id: int, request: Requ
 # vínculo operacional com responsável, Humiat ID e equipamentos.
 # ---------------------------------------------------------
 
+def _logo_mini_lokafest(data: bytes, mime: str = "image/png") -> tuple[bytes, str]:
+    """Normaliza a logo do SolVoz para uma miniatura leve com transparência."""
+    from PIL import Image
+
+    if not data:
+        raise ValueError("Logo vazia")
+    with Image.open(io.BytesIO(data)) as img:
+        try:
+            img.seek(0)
+        except Exception:
+            pass
+        # Mantém transparência quando existir; logos sem alpha usam RGB.
+        tem_alpha = img.mode in {"RGBA", "LA"} or (img.mode == "P" and "transparency" in img.info)
+        img = img.convert("RGBA" if tem_alpha else "RGB")
+        img.thumbnail((260, 120), Image.Resampling.LANCZOS)
+        saida = io.BytesIO()
+        img.save(saida, format="WEBP", quality=84, method=6)
+        return saida.getvalue(), "image/webp"
+
+
+def _baixar_logo_empresa_solvoz(slug: str) -> tuple[bytes, str] | None:
+    """Busca a logo pública do SolVoz somente durante rotinas de sincronização."""
+    slug_n = normalizar_slug_solvoz(slug)
+    if not slug_n:
+        return None
+    url = f"{SOLVOZ_BASE_URL.rstrip('/')}/_sv/media/empresa/{quote(slug_n)}/logo"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "image/webp,image/png,image/jpeg,image/*;q=0.8",
+            "User-Agent": f"Organiza/{ORGANIZA_VERSION}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=max(2, min(int(SOLVOZ_API_TIMEOUT or 8), 10))) as resp:
+            mime = str(resp.headers.get("Content-Type") or "image/png").split(";", 1)[0].strip().lower()
+            if not mime.startswith("image/"):
+                raise RuntimeError("SolVoz retornou um arquivo que não é imagem")
+            data = resp.read(5 * 1024 * 1024 + 1)
+            if len(data) > 5 * 1024 * 1024:
+                raise RuntimeError("Logo do SolVoz maior que 5 MB")
+            if not data:
+                return None
+            return data, mime
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise RuntimeError(f"SolVoz respondeu HTTP {exc.code} ao buscar a logo") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Não foi possível buscar a logo no SolVoz: {exc.reason}") from exc
+
+
+def _sincronizar_logo_empresa_solvoz(db: Session, empresa: SolVozEmpresa) -> tuple[bool, str]:
+    """Copia uma miniatura da logo do SolVoz para o cadastro local da empresa."""
+    origem = _baixar_logo_empresa_solvoz(empresa.slug)
+    if not origem:
+        tinha = bool(empresa.logo_mini_data)
+        if tinha:
+            empresa.logo_mini_data = None
+            empresa.logo_mini_mime = None
+            empresa.logo_mini_hash = None
+            empresa.logo_mini_atualizado_em = datetime.now()
+            db.flush()
+        return tinha, "sem_logo"
+
+    mini, mime = _logo_mini_lokafest(origem[0], origem[1])
+    digest = hashlib.sha256(mini).hexdigest()
+    if digest == str(empresa.logo_mini_hash or "") and empresa.logo_mini_data:
+        return False, "igual"
+    empresa.logo_mini_data = mini
+    empresa.logo_mini_mime = mime
+    empresa.logo_mini_hash = digest
+    empresa.logo_mini_atualizado_em = datetime.now()
+    db.flush()
+    return True, "atualizada"
+
+
 def _sincronizar_humiat_empresa_solvoz(db: Session, empresa: SolVozEmpresa, old_slug: str = "") -> HumiatEmpresa:
     """Mantém a mesma empresa Humiat quando nome/slug mudam no SolVoz."""
     slug_n = normalizar_slug_solvoz(empresa.slug)
@@ -8801,6 +8894,7 @@ def solvoz_empresas_sincronizar_manual(
         itens = dados.get("empresas") or []
         criadas = atualizadas = inativadas_ausentes = 0
         temas_sincronizados = temas_erro = 0
+        logos_sincronizadas = logos_erro = 0
         ids_origem: set[int] = set()
         slugs_origem: set[str] = set()
         for item in itens:
@@ -8810,7 +8904,7 @@ def solvoz_empresas_sincronizar_manual(
                 ids_origem.add(int(sid))
             if slug_item:
                 slugs_origem.add(slug_item)
-            _, criada, alterada = _solvoz_empresa_upsert_origem(
+            empresa_local, criada, alterada = _solvoz_empresa_upsert_origem(
                 db,
                 solvoz_id=sid,
                 nome=str(item.get("nome") or "").strip(),
@@ -8826,6 +8920,12 @@ def solvoz_empresas_sincronizar_manual(
                 except Exception as exc_tema:
                     temas_erro += 1
                     print(f"[TEMA HUMIAT] Não foi possível sincronizar {slug_item}: {exc_tema}")
+                try:
+                    mudou_logo, _ = _sincronizar_logo_empresa_solvoz(db, empresa_local)
+                    logos_sincronizadas += int(mudou_logo)
+                except Exception as exc_logo:
+                    logos_erro += 1
+                    print(f"[LOGO LOKAFEST] Não foi possível sincronizar {slug_item}: {exc_logo}")
         # Não apaga histórico local. Registros que não existem mais na lista mestre
         # ficam inativos até revisão manual.
         for local in db.query(SolVozEmpresa).all():
@@ -8838,8 +8938,10 @@ def solvoz_empresas_sincronizar_manual(
         _carregar_tema_visual_runtime(db)
         msg = quote_plus(
             f"Sincronização concluída: {len(itens)} empresa(s), {criadas} nova(s), {atualizadas} atualizada(s), "
-            f"{inativadas_ausentes} ausente(s) inativada(s), {temas_sincronizados} identidade(s) visual(is) sincronizada(s)"
-            + (f", {temas_erro} com falha de tema." if temas_erro else ".")
+            f"{inativadas_ausentes} ausente(s) inativada(s), {temas_sincronizados} identidade(s) visual(is) sincronizada(s), "
+            f"{logos_sincronizadas} logo(s) LokaFest atualizada(s)"
+            + (f", {temas_erro} com falha de tema" if temas_erro else "")
+            + (f", {logos_erro} com falha de logo." if logos_erro else ".")
         )
         return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?sucesso={msg}", status_code=303)
     except Exception as exc:
@@ -10765,6 +10867,8 @@ def api_solvoz_empresa_sincronizar(
     slug: str = Form(...),
     solvoz_id: int = Form(0),
     ativo: int = Form(1),
+    logo_mini_b64: str = Form(""),
+    logo_mini_mime: str = Form(""),
     x_solvoz_token: Optional[str] = Header(default=None, alias="X-SolVoz-Token"),
     db: Session = Depends(get_db),
 ):
@@ -10778,6 +10882,25 @@ def api_solvoz_empresa_sincronizar(
             slug=slug,
             ativo=int(ativo or 0),
         )
+        logo_status = "nao_enviada"
+        if str(logo_mini_b64 or "").strip():
+            try:
+                raw_logo = base64.b64decode(str(logo_mini_b64).strip(), validate=True)
+                if len(raw_logo) > 2 * 1024 * 1024:
+                    raise ValueError("Miniatura maior que 2 MB")
+                mini_logo, mini_mime = _logo_mini_lokafest(raw_logo, logo_mini_mime or "image/webp")
+                digest = hashlib.sha256(mini_logo).hexdigest()
+                if digest != str(empresa.logo_mini_hash or "") or not empresa.logo_mini_data:
+                    empresa.logo_mini_data = mini_logo
+                    empresa.logo_mini_mime = mini_mime
+                    empresa.logo_mini_hash = digest
+                    empresa.logo_mini_atualizado_em = datetime.now()
+                    logo_status = "atualizada"
+                else:
+                    logo_status = "igual"
+            except Exception as exc_logo:
+                logo_status = "erro"
+                print(f"[LOGO LOKAFEST] Miniatura recebida do SolVoz para {empresa.slug}: {exc_logo}")
         db.commit()
     except ValueError as exc:
         db.rollback()
@@ -10798,8 +10921,57 @@ def api_solvoz_empresa_sincronizar(
         "connect_slug": empresa.connect_slug or empresa.slug,
         "dominio": empresa.dominio,
         "ativo": int(empresa.ativo or 0),
+        "logo_lokafest": logo_status,
         "responsavel_pendente": not bool(empresa.responsavel_humiat_usuario_id),
     }
+
+
+@app.get("/api/publico/lokafest/empresas")
+def api_publico_lokafest_empresas(request: Request, db: Session = Depends(get_db)):
+    """Lista pública e leve de empresas ativas para a faixa de parceiros da LokaFest."""
+    empresas = (
+        db.query(SolVozEmpresa)
+        .filter(SolVozEmpresa.ativo == 1, SolVozEmpresa.logo_mini_data.isnot(None))
+        .order_by(SolVozEmpresa.nome.asc())
+        .all()
+    )
+    base = PUBLIC_BASE_URL.rstrip("/") or str(request.base_url).rstrip("/")
+    itens = []
+    for empresa in empresas:
+        versao = str(empresa.logo_mini_hash or "")[:12]
+        logo_url = f"{base}/api/publico/lokafest/empresas/{int(empresa.id)}/logo"
+        if versao:
+            logo_url += f"?v={versao}"
+        itens.append({
+            "id": int(empresa.id),
+            "nome": str(empresa.nome or "").strip(),
+            "slug": str(empresa.slug or "").strip(),
+            "logo_url": logo_url,
+        })
+    return JSONResponse(
+        {"ok": True, "total": len(itens), "empresas": itens},
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=900"},
+    )
+
+
+@app.get("/api/publico/lokafest/empresas/{empresa_id}/logo")
+def api_publico_lokafest_empresa_logo(empresa_id: int, db: Session = Depends(get_db)):
+    empresa = db.query(SolVozEmpresa).filter(
+        SolVozEmpresa.id == int(empresa_id),
+        SolVozEmpresa.ativo == 1,
+    ).first()
+    if not empresa or not empresa.logo_mini_data:
+        raise HTTPException(404, "Logo não disponível")
+    data = bytes(empresa.logo_mini_data)
+    etag = str(empresa.logo_mini_hash or hashlib.sha256(data).hexdigest())
+    return Response(
+        content=data,
+        media_type=str(empresa.logo_mini_mime or "image/webp"),
+        headers={
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "ETag": f'"{etag}"',
+        },
+    )
 
 
 @app.get("/api/integracoes/solvoz/maquinas")
