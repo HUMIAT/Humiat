@@ -834,6 +834,8 @@ class Equipamento(Base):
     # Quando manual=0, o consumo continua acompanhando composição + Opcionais.
     estoque_uso_override = Column(Text, nullable=True)
     estoque_uso_manual = Column(Integer, nullable=False, default=0)
+    # 1.2.35: permite excluir a venda do estoque sem deixar reserva/saída no histórico.
+    descontar_estoque = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
     solvoz_empresa = relationship("SolVozEmpresa")
@@ -1199,6 +1201,8 @@ class Manutencao(Base):
     comunicado = Column(Integer, nullable=False, default=0)
     ultima_comunicacao_em = Column(DateTime, nullable=True)
     ultima_comunicacao_tipo = Column(String(30), nullable=True)
+    # 1.2.35: quando 0, a manutenção não cria reserva nem saída e qualquer movimento existente é removido.
+    descontar_estoque = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente")
     equipamento = relationship("Equipamento")
@@ -2018,8 +2022,17 @@ def _desejado_venda_estoque(eq: Equipamento, db: Session) -> dict[tuple[int, str
 
 
 def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
-    """Venda a fazer reserva. Somente uma venda nova que tinha reserva vira saída ao ser entregue."""
+    """Venda pode reservar; somente venda entregue vira saída física.
+
+    Se a venda estiver marcada como "não descontar estoque", qualquer reserva ou
+    saída automática vinculada a ela é removida. Assim ela também desaparece da
+    tela de movimentações, sem criar linha de estorno/lixo operacional.
+    """
     if not eq or not eq.id:
+        return
+    if int(getattr(eq, "descontar_estoque", 1) or 0) == 0:
+        _sincronizar_reservas_origem(db, "VENDA", eq.id, {})
+        _sincronizar_saidas_origem(db, "VENDA", eq.id, {})
         return
     status = (eq.status or "").strip()
     desejado = _desejado_venda_estoque(eq, db)
@@ -2097,52 +2110,66 @@ def _desejado_manutencao_estoque(m: Manutencao, o: Orcamento, db: Session, somen
     return desejado
 
 
-def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
-    """Sincroniza a manutenção com o estoque sem depender do encerramento da OS.
+def resumo_estoque_manutencao(m: Manutencao | None, o: Orcamento | None, db: Session) -> list[dict]:
+    """Resumo operacional: mostra o que realmente desconta do estoque.
 
-    Regra 1.2.33:
-    - orçamento pendente/em elaboração: reserva os materiais do orçamento;
-    - orçamento aprovado (cliente ou manual): baixa fisicamente apenas os itens aprovados;
-    - cancelado ou encerrado sem aprovação: libera a reserva e não cria saída;
-    - a sincronização é idempotente: editar quantidade/cor/aprovação corrige a mesma saída,
-      sem duplicar movimentações.
+    Manutenção não reserva mais material. Antes da aprovação, ou quando a própria
+    manutenção estiver marcada como "não descontar", o item aparece como
+    NÃO DESCONTA e não existe em estoque_reservas/estoque_movimentos.
+    """
+    if not o:
+        return []
+    item_ids = [oi.item_id for oi in o.itens if oi.item_id]
+    itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(item_ids)).all()} if item_ids else {}
+    aprovado = _orcamento_aprovado(o)
+    manut_desconta = bool(m and int(getattr(m, "descontar_estoque", 1) or 0) != 0)
+    linhas = []
+    for oi in o.itens:
+        item = itens.get(oi.item_id) if oi.item_id else None
+        controla = item_controla_estoque(item)
+        desconta = bool(controla and manut_desconta and aprovado and bool(oi.aprovado))
+        linhas.append({
+            "item_id": oi.item_id,
+            "descricao": oi.descricao,
+            "quantidade": float(oi.quantidade or 0),
+            "unidade": _normalizar_unidade_item(getattr(item, "unidade", "UN")),
+            "controla_estoque": bool(controla),
+            "aprovado": bool(oi.aprovado),
+            "estado": "DESCONTA" if desconta else "NAO_DESCONTA",
+        })
+    return linhas
+
+
+def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
+    """Sincroniza a manutenção com uma regra única de estoque (1.2.35).
+
+    - manutenção pendente/não aprovada: não reserva e não movimenta;
+    - manutenção aprovada: baixa fisicamente os itens aprovados;
+    - "não descontar estoque": exclui reservas/saídas automáticas da manutenção;
+    - cancelada/encerrada sem aprovação: não movimenta;
+    - nunca cria linha de estorno para corrigir: remove a própria movimentação automática.
     """
     if not m or not m.id:
+        return
+
+    # Reserva é exclusiva de VENDA. Remove qualquer legado da manutenção sempre.
+    _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
+
+    if int(getattr(m, "descontar_estoque", 1) or 0) == 0:
+        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
         return
 
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     status = (m.status or "").strip()
     cancelada = status in ESTOQUE_MANUTENCAO_CANCELADA or (o and (o.status or "").strip() == "Cancelado")
-    finalizada = status in ESTOQUE_MANUTENCAO_FINAL or bool(m.entregue_em)
-
-    if not o or cancelada:
-        _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
+    if not o or cancelada or not _orcamento_aprovado(o):
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
         return
 
-    if _orcamento_aprovado(o):
-        # A aprovação é o momento de consumo: sai do físico imediatamente.
-        desejado_saida = _desejado_manutencao_estoque(m, o, db, somente_aprovados=True)
-        _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
-        _sincronizar_saidas_origem(
-            db, "MANUTENCAO", m.id, desejado_saida,
-            observacao=f"Manutenção #{m.id} aprovada · baixa física",
-        )
-        return
-
-    # Uma OS encerrada sem aceite não pode continuar comprometendo estoque.
-    if finalizada:
-        _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
-        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
-        return
-
-    # Enquanto o orçamento está em elaboração/aguardando cliente, os materiais ficam
-    # apenas reservados. Inclui opcionais ainda não decididos para garantir disponibilidade.
-    desejado_reserva = _desejado_manutencao_estoque(m, o, db, somente_aprovados=False)
-    _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
-    _sincronizar_reservas_origem(
-        db, "MANUTENCAO", m.id, desejado_reserva,
-        observacao=f"Manutenção #{m.id} · orçamento pendente",
+    desejado_saida = _desejado_manutencao_estoque(m, o, db, somente_aprovados=True)
+    _sincronizar_saidas_origem(
+        db, "MANUTENCAO", m.id, desejado_saida,
+        observacao=f"Manutenção #{m.id} aprovada · baixa física",
     )
 
 
@@ -2188,7 +2215,8 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
         if item_controla_estoque(i)
     ]
     movimentos = db.query(EstoqueMovimento).all()
-    reservas = db.query(EstoqueReserva).all()
+    # Reserva é exclusiva de venda. Qualquer registro legado de manutenção é ignorado.
+    reservas = db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "VENDA").all()
     minimos = _mapa_minimos_estoque(db)
     por_item: dict[int, dict] = {
         i.id: {"item": i, "fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0, "reservado": 0.0, "disponivel": 0.0}
@@ -2203,7 +2231,7 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
             c = cores.setdefault(mov.item_id, {}).setdefault(mov.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
             c["fisico"] += sinal * float(mov.quantidade or 0)
     for res in reservas:
-        campo = "vendas_a_fazer" if (res.origem_tipo or "").upper() == "VENDA" else "manutencoes_a_fazer"
+        campo = "vendas_a_fazer"
         if res.item_id in por_item:
             por_item[res.item_id][campo] += float(res.quantidade or 0)
         if res.cor:
@@ -2222,7 +2250,8 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
         dados["fisico"] = round(dados["fisico"], 4)
         dados["vendas_a_fazer"] = round(dados["vendas_a_fazer"], 4)
         dados["manutencoes_a_fazer"] = round(dados["manutencoes_a_fazer"], 4)
-        dados["reservado"] = round(dados["vendas_a_fazer"] + dados["manutencoes_a_fazer"], 4)
+        dados["reservado"] = round(dados["vendas_a_fazer"], 4)
+        dados["manutencoes_a_fazer"] = 0.0
         dados["disponivel"] = round(dados["fisico"] - dados["reservado"], 4)
 
         linhas_cor = []
@@ -2230,8 +2259,8 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
             for cor, c in sorted(cores.get(item.id, {}).items(), key=lambda x: x[0]):
                 fisico = round(c["fisico"], 4)
                 vendas = round(c["vendas_a_fazer"], 4)
-                manut = round(c["manutencoes_a_fazer"], 4)
-                disponivel = round(fisico - vendas - manut, 4)
+                manut = 0.0
+                disponivel = round(fisico - vendas, 4)
                 minimo = round(float(minimos.get((item.id, cor), 0) or 0), 4)
                 comprar = round(max(minimo - disponivel, 0), 4) if minimo > 0 and cor != ESTOQUE_COR_PENDENTE else 0.0
                 linhas_cor.append({
@@ -2524,6 +2553,31 @@ def _migrar_estoque_manutencao_aprovacao_1233(db: Session) -> tuple[int, int]:
     marcador.valor = "ok"
     db.commit()
     return aprovadas_corrigidas, pendentes_recalculadas
+
+
+def _migrar_estoque_regra_unica_1235(db: Session) -> tuple[int, int]:
+    """Uma única verdade: reserva só em venda; manutenção só sai após aprovação."""
+    chave = "estoque_regra_unica_venda_reserva_manut_saida_1_2_35"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0, 0
+    reservas_removidas = db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo == "MANUTENCAO"
+    ).delete(synchronize_session=False)
+    manutencao_ids = [mid for (mid,) in db.query(Manutencao.id).all()]
+    revisadas = 0
+    for manutencao_id in manutencao_ids:
+        manutencao = carregar_manutencao(db, manutencao_id)
+        if not manutencao:
+            continue
+        sincronizar_estoque_manutencao(manutencao, db)
+        revisadas += 1
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+    return int(reservas_removidas or 0), revisadas
 
 def _migrar_itens_e_reservas_1174(db: Session) -> tuple[int, int]:
     """Padroniza categorias/controle de estoque e refaz reservas abertas de venda.
@@ -3896,6 +3950,8 @@ def iniciar_banco():
                 conn.execute(text(f"ALTER TABLE assistencias ADD COLUMN ultima_comunicacao_em {tipo_dt}"))
             if "ultima_comunicacao_tipo" not in existentes:
                 conn.execute(text("ALTER TABLE assistencias ADD COLUMN ultima_comunicacao_tipo VARCHAR(30)"))
+            if "descontar_estoque" not in existentes:
+                conn.execute(text("ALTER TABLE assistencias ADD COLUMN descontar_estoque INTEGER NOT NULL DEFAULT 1"))
     if "assistencia_orcamentos" in insp.get_table_names():
         existentes_orcamento = {c["name"] for c in insp.get_columns("assistencia_orcamentos")}
         with engine.begin() as conn:
@@ -4178,6 +4234,8 @@ def iniciar_banco():
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN estoque_uso_override TEXT"))
             if "estoque_uso_manual" not in existentes_equipamentos:
                 conn.execute(text("ALTER TABLE equipamentos ADD COLUMN estoque_uso_manual INTEGER NOT NULL DEFAULT 0"))
+            if "descontar_estoque" not in existentes_equipamentos:
+                conn.execute(text("ALTER TABLE equipamentos ADD COLUMN descontar_estoque INTEGER NOT NULL DEFAULT 1"))
     db = SessionLocal()
     try:
         # Preserva o comportamento histórico do QR sem exigir configuração manual
@@ -4277,6 +4335,12 @@ def iniciar_banco():
             print(
                 f"[ESTOQUE] 1.2.33: manutenções aprovadas corrigidas={manut_aprovadas_1233}; "
                 f"pendentes recalculadas={manut_pendentes_1233}."
+            )
+        reservas_manut_1235, manut_revisadas_1235 = _migrar_estoque_regra_unica_1235(db)
+        if reservas_manut_1235 or manut_revisadas_1235:
+            print(
+                f"[ESTOQUE] 1.2.35: reservas de manutenção removidas={reservas_manut_1235}; "
+                f"manutenções revisadas={manut_revisadas_1235}."
             )
         db.commit()
         # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
@@ -8164,6 +8228,9 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         ).order_by(SolVozEmpresa.id).first()
     eq.solvoz_empresa_id = int(empresa_responsavel.id) if empresa_responsavel else (solvoz_empresa_id or None)
     eq.catalogo_online = 1 if str(form.get("catalogo_online") or "").strip().lower() in ("1", "true", "on", "sim") else 0
+    # Em edição de venda, o checkbox é a fonte explícita. Novos/legados mantêm o padrão 1.
+    if "descontar_estoque" in form or "descontar_estoque_presente" in form:
+        eq.descontar_estoque = 1 if str(form.get("descontar_estoque") or "").strip().lower() in ("1", "true", "on", "sim") else 0
 
     # Opcionais operacionais da venda. São salvos no próprio equipamento para
     # acompanhar a configuração entregue ao cliente e aparecer no card principal.
@@ -13367,7 +13434,8 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
         if item_controla_estoque(m.item)
     ]
 
-    q_res = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item))
+    # Reserva operacional existe somente para VENDA. Manutenção nunca aparece aqui.
+    q_res = db.query(EstoqueReserva).options(selectinload(EstoqueReserva.item)).filter(EstoqueReserva.origem_tipo == "VENDA")
     if item_id:
         q_res = q_res.filter(EstoqueReserva.item_id == int(item_id))
     if inicio_dt:
@@ -14333,6 +14401,7 @@ def manutencao_rapida_form(
             "preco": round(float(item.preco_venda or 0), 2),
             "unidade": (item.unidade or "UN").upper(),
             "categoria": item.categoria or "Geral",
+            "controla_estoque": bool(item_controla_estoque(item)),
         }
         for item in itens
     ]
@@ -14459,6 +14528,7 @@ async def manutencao_rapida_salvar(
         tipo_atendimento="loja",
         status="Em manutenção",
         recebido_em=datetime.now(),
+        descontar_estoque=1 if form.get("descontar_estoque") else 0,
     )
     db.add(m)
     db.flush()
@@ -14573,6 +14643,7 @@ def manutencao_detalhe(manutencao_id: int, request: Request, usuario: Usuario = 
         "itens_catalogo": itens, "equipamentos_cliente": equipamentos_cliente, "totais": totais,
         "etapa_atual": etapa_manutencao(m), "manutencoes_prontas_cliente": prontas_cliente,
         "mensagem_retirada": mensagem_retirada, "estoque_cores_orcamento": contexto_cores_manutencao(db, orcamento),
+        "resumo_estoque_manutencao": resumo_estoque_manutencao(m, orcamento, db),
         "hoje_pagamento": _hoje_organiza().isoformat(),
         "infinitepay_habilitada": bool(INFINITEPAY_HANDLE and orcamento and _orcamento_aprovado(orcamento)),
         "cobranca_infinitepay": cobranca_infinitepay,
@@ -14974,6 +15045,23 @@ async def aprovar_manual(
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-3", status_code=303)
 
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/estoque/regra")
+async def manutencao_estoque_regra(
+    manutencao_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    form = await request.form()
+    m.descontar_estoque = 1 if str(form.get("descontar_estoque") or "").strip() == "1" else 0
+    sincronizar_estoque_manutencao(m, db)
+    db.commit()
+    return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}?estoque_regra=1#estoque-resumo", status_code=303)
 
 
 @app.post("/organiza/manutencoes/{manutencao_id}/estoque/ressincronizar")

@@ -39,6 +39,7 @@
   {% if request.query_params.get('erro_etapa4') %}<div class="alerta erro">{{ request.query_params.get('erro_etapa4') }}</div>{% endif %}
   {% if request.query_params.get('salvo_etapa4') %}<div class="alerta sucesso">Prazo do serviço salvo.</div>{% endif %}
   {% if request.query_params.get('estoque_corrigido') %}<div class="alerta sucesso">Estoque desta manutenção recalculado conforme a aprovação atual.</div>{% endif %}
+  {% if request.query_params.get('estoque_regra') %}<div class="alerta sucesso">Regra de estoque desta manutenção atualizada.</div>{% endif %}
 
   <details class="cartao manutencao-cliente-resumo">
     <summary><strong>Dados do cliente</strong><span>Consultar cadastro completo</span></summary>
@@ -51,6 +52,40 @@
       <div><small>Município</small><strong>{{ m.cliente.municipio or m.cliente.cidade or '-' }}</strong></div>
     </div>
   </details>
+
+  <section class="cartao manutencao-estoque-resumo" id="estoque-resumo">
+    <div class="estoque-resumo-cabecalho">
+      <div><small>ESTOQUE</small><h2>Resumo da manutenção</h2></div>
+      <span class="texto-suave">Só o que aparece aqui pode movimentar o estoque.</span>
+    </div>
+    <form method="post" action="/organiza/manutencoes/{{ m.id }}/estoque/regra" class="estoque-regra-form">
+      <label>Movimentação desta manutenção
+        <select name="descontar_estoque">
+          <option value="1" {% if m.descontar_estoque != 0 %}selected{% endif %}>Descontar do estoque</option>
+          <option value="0" {% if m.descontar_estoque == 0 %}selected{% endif %}>Não descontar do estoque</option>
+        </select>
+      </label>
+      <button class="botao pequeno" type="submit">Salvar regra</button>
+      <small>Ao marcar “Não descontar”, qualquer reserva/saída automática desta manutenção é excluída da movimentação.</small>
+    </form>
+    {% if resumo_estoque_manutencao %}
+      <div class="estoque-resumo-lista">
+        {% for linha in resumo_estoque_manutencao %}
+        <div class="estoque-resumo-linha">
+          <div><strong>{{ linha.descricao }}</strong><small>{{ '%g'|format(linha.quantidade) }} {{ linha.unidade }}</small></div>
+          {% if linha.estado == 'DESCONTA' %}
+            <span class="estoque-status desconta">DESCONTA</span>
+          {% else %}
+            <span class="estoque-status nao-desconta">NÃO DESCONTA</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="texto-suave estoque-resumo-vazio">Nenhum material nesta manutenção. Não desconta nada do estoque.</p>
+    {% endif %}
+    <p class="estoque-resumo-regra"><strong>Regra simples:</strong> manutenção não aprovada não reserva nada. Após a aprovação, os materiais aprovados descontam do físico. Se a manutenção estiver em “Não descontar”, ela não aparece na movimentação.</p>
+  </section>
 
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
     {% for numero, info in ETAPAS_MANUTENCAO.items() %}
@@ -223,7 +258,7 @@
           {% set corinfo = estoque_cores_orcamento.get(i.id) if estoque_cores_orcamento else none %}
           {% if corinfo %}
           <form class="estoque-cor-manutencao" method="post" action="/organiza/manutencoes/{{ m.id }}/orcamento/item/{{ i.id }}/cores">
-            <div class="estoque-cor-manutencao-topo"><strong>Cores consumidas / reservadas</strong><small>Precisa {{ '%g'|format(corinfo.quantidade) }} · informado {{ '%g'|format(corinfo.informado) }}</small></div>
+            <div class="estoque-cor-manutencao-topo"><strong>Cores consumidas</strong><small>Precisa {{ '%g'|format(corinfo.quantidade) }} · informado {{ '%g'|format(corinfo.informado) }}</small></div>
             <div class="estoque-cor-manutencao-grid">
               {% for uso in corinfo.usos %}
               <div><input name="cor_{{ loop.index }}" value="{{ uso.cor }}" list="cores-manut-{{ i.id }}" placeholder="COR"><input name="qtd_{{ loop.index }}" value="{{ uso.quantidade }}" inputmode="decimal" placeholder="Qtd."></div>
@@ -673,7 +708,8 @@ function prepararItemOrcamento(form) {
 
 
 <style>
-.manutencao-estoque-correcao{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}.manutencao-estoque-correcao small{color:#64748b;max-width:560px}
+.manutencao-estoque-resumo{margin:14px 0;padding:16px 18px}.estoque-resumo-cabecalho{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:10px}.estoque-resumo-cabecalho small{font-size:10px;font-weight:800;color:#64748b}.estoque-resumo-cabecalho h2{font-size:18px;margin:2px 0 0}.estoque-resumo-lista{display:grid;gap:7px}.estoque-resumo-linha{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#f8fafc}.estoque-resumo-linha>div{display:grid;gap:2px}.estoque-resumo-linha small{color:#64748b}.estoque-status{font-size:11px;font-weight:900;border-radius:999px;padding:5px 9px;white-space:nowrap}.estoque-status.desconta{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}.estoque-status.nao-desconta{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}.estoque-resumo-regra{margin:10px 0 0;font-size:12px;color:#64748b}.estoque-resumo-vazio{margin:4px 0}
+.estoque-regra-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:10px;border:1px solid #dbe3ee;border-radius:10px;background:#fbfdff}.estoque-regra-form label{display:grid;gap:5px;font-size:12px;font-weight:800}.estoque-regra-form select{min-width:220px}.estoque-regra-form small{color:#64748b;max-width:560px}.manutencao-estoque-correcao{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}.manutencao-estoque-correcao small{color:#64748b;max-width:560px}
 .estoque-cor-manutencao{margin:10px 0;padding:10px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.estoque-cor-manutencao-topo{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px}.estoque-cor-manutencao-topo small{color:#64748b}.estoque-cor-manutencao-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:7px;margin-bottom:7px}.estoque-cor-manutencao-grid>div{display:grid;grid-template-columns:1fr 64px;gap:5px}.estoque-cor-manutencao-grid input{min-width:0}.estoque-cor-disponiveis{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 8px}.estoque-cor-disponiveis span{font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #dbe3ee;background:#fff}.estoque-cor-disponiveis span.negativo{color:#b42318;border-color:#f2b8b5}@media(max-width:760px){.estoque-cor-manutencao-grid{grid-template-columns:1fr}}
 </style>
 <script>

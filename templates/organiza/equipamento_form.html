@@ -91,6 +91,11 @@
 
       {% if equipamento and equipamento.id and equipamento.produto_venda_id %}
       <div class="estoque-utilizado" id="estoque-utilizado">
+        <input type="hidden" name="descontar_estoque_presente" value="1">
+        <label class="estoque-regra-venda">
+          <input type="checkbox" name="descontar_estoque" value="1" {% if equipamento.descontar_estoque != 0 %}checked{% endif %}>
+          <span><strong>Descontar / reservar materiais desta venda no estoque</strong><small>Desmarque para excluir esta venda da movimentação de estoque. Nenhuma reserva ou saída ficará no histórico.</small></span>
+        </label>
         <div class="estoque-utilizado-cabecalho">
           <div><h3>Estoque utilizado nesta máquina</h3><p class="texto-suave">Confira os materiais vinculados à composição e aos Opcionais. Se algo estiver diferente do que foi realmente usado, corrija aqui.</p></div>
           <div class="estoque-utilizado-status"><span class="pill {% if estoque_utilizado_venda.manual %}manual{% endif %}">{{ 'Corrigido manualmente' if estoque_utilizado_venda.manual else 'Automático' }}</span><button type="button" class="botao pequeno secundario" id="estoque-usar-automatico">Usar composição automática</button></div>
@@ -490,6 +495,7 @@
   atualizaTotal();
 })();
 </script>
+<style>.estoque-regra-venda{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px;padding:10px 12px;border:1px solid #dbe3ee;border-radius:10px;background:#fbfdff}.estoque-regra-venda input{width:20px;height:20px;margin-top:2px}.estoque-regra-venda span{display:grid;gap:2px}.estoque-regra-venda small{color:#64748b;font-weight:500}</style>
 {% endblock %}
 
 <style>
