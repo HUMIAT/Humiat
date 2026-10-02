@@ -4305,6 +4305,8 @@ def _lokafest_tipo_modelo(eq: Equipamento) -> str | None:
         return "portatil"
     if tipo == "JUKEBOX":
         return "jukebox"
+    if tipo == "FLIPERAMA":
+        return "fliperama"
 
     # Compatibilidade com cadastros antigos ou sem tipo padronizado.
     if "IPHONE" in modelo:
@@ -4313,6 +4315,8 @@ def _lokafest_tipo_modelo(eq: Equipamento) -> str | None:
         return "portatil"
     if "JUKEBOX" in modelo:
         return "jukebox"
+    if "FLIPERAMA" in modelo or "ARCADE" in modelo:
+        return "fliperama"
     return None
 
 
@@ -4329,8 +4333,8 @@ def api_lokafest_cliente(
     Endpoint privado consumido pelo LokaFest.
 
     Busca cliente por cliente_id salvo, CPF, WhatsApp ou número técnico da
-    máquina e devolve somente equipamentos Karaoke RJ dos tipos
-    Jukebox, Portátil/Maleta e iPhone.
+    máquina e devolve equipamentos ativos Karaoke RJ dos tipos
+    Jukebox, Portátil/Maleta, iPhone e Fliperama.
 
     Header obrigatório:
         Authorization: Bearer <LOKAFEST_API_TOKEN>
@@ -4355,27 +4359,39 @@ def api_lokafest_cliente(
             "cliente_id": None,
             "cpf": _lokafest_digitos(cpf),
             "atualizacao": obter_pacote_atual(db),
-            "equipamentos": {"jukebox": 0, "portatil": 0, "iphone": 0},
+            "equipamentos": {"jukebox": 0, "portatil": 0, "iphone": 0, "fliperama": 0},
             "detalhes": [],
         }
 
     pacote_obrigatorio = obter_pacote_atual(db)
-    contagem = {"jukebox": 0, "portatil": 0, "iphone": 0}
+    contagem = {"jukebox": 0, "portatil": 0, "iphone": 0, "fliperama": 0}
     detalhes = []
 
     for eq in cliente.equipamentos:
         if (eq.status or "").strip().lower() != "ativo":
-            continue
-        if (eq.fabricante or "").strip().upper() != "KARAOKERJ":
             continue
 
         classe = _lokafest_tipo_modelo(eq)
         if not classe:
             continue
 
+        # Karaokê continua restrito aos equipamentos Karaokê RJ. Para Fliperama
+        # não existe outra restrição: basta o cliente possuir um Fliperama ativo.
+        if classe != "fliperama" and (eq.fabricante or "").strip().upper() != "KARAOKERJ":
+            continue
+
         contagem[classe] += 1
         pacote_instalado = (eq.pacote or "").strip() or None
-        falta = calcular_falta_pacote(pacote_instalado, pacote_obrigatorio)
+        if classe == "fliperama":
+            # Fliperama não usa catálogo/pacote de músicas. Para o LokaFest
+            # basta existir ao menos um equipamento ativo.
+            falta = 0
+            pacote_alvo = None
+            atualizado = True
+        else:
+            falta = calcular_falta_pacote(pacote_instalado, pacote_obrigatorio)
+            pacote_alvo = pacote_obrigatorio
+            atualizado = bool(pacote_instalado and pacote_instalado == pacote_obrigatorio)
 
         detalhes.append({
             "id": eq.id,
@@ -4386,9 +4402,9 @@ def api_lokafest_cliente(
             "numero_maquina": eq.maquina,
             "numero_cliente": eq.numero_maquina_cliente,
             "pacote": pacote_instalado,
-            "pacote_obrigatorio": pacote_obrigatorio,
+            "pacote_obrigatorio": pacote_alvo,
             "falta_pacote": falta,
-            "atualizado": bool(pacote_instalado and pacote_instalado == pacote_obrigatorio),
+            "atualizado": atualizado,
         })
 
     # Campo resumido mantido para compatibilidade com o LokaFest atual.
