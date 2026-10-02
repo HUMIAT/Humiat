@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Painel Humiat</title>
   <link rel="icon" href="/static/icons/humiat/favicon.ico">
-  <link rel="stylesheet" href="/static/css/humiat-design-system.css?v=1.2.21">
   <link rel="stylesheet" href="/static/css/humiat-id.css">
   <style>
     :root{
@@ -25,7 +24,7 @@
     .app-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;align-items:stretch}
     .app-card{--accent:#0b74ff;position:relative;display:flex;flex-direction:column;min-height:430px;padding:22px;border-radius:23px;background:var(--panel);color:var(--ink);border:1px solid rgba(226,232,240,.95);box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden;transition:transform .18s ease,box-shadow .18s ease}.app-card:hover{transform:translateY(-3px);box-shadow:0 24px 60px rgba(0,0,0,.24)}.app-card:before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--accent)}
     .app-connect{--accent:#1578ff}.app-lokafest{--accent:#f59e0b}.app-organiza{--accent:#18a66a}.app-solvoz{--accent:#7c4dff}
-    .card-head{display:flex;gap:13px;align-items:flex-start;margin-bottom:17px}.app-icon{flex:0 0 54px;width:54px;height:54px;border-radius:15px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);overflow:hidden;box-shadow:0 8px 20px rgba(40,153,240,.12)}.app-icon img{width:100%;height:100%;object-fit:cover}.app-icon img.is-solvoz{object-fit:contain;background:#070a15;padding:3px}.card-copy{min-width:0}.card-copy h3{font-size:22px;margin:6px 0 5px;letter-spacing:-.025em}.card-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+    .card-head{display:flex;gap:13px;align-items:flex-start;margin-bottom:17px}.app-icon{flex:0 0 48px;width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:950;background:linear-gradient(145deg,#29d9f0,#725cff);color:#07111d;box-shadow:0 8px 20px rgba(40,153,240,.18)}.card-copy{min-width:0}.card-copy h3{font-size:22px;margin:6px 0 5px;letter-spacing:-.025em}.card-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
     .status{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:999px;background:#f0f4f8;color:#526174;font-size:10px;font-weight:950;letter-spacing:.055em;text-transform:uppercase}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#94a3b8}.status.on{background:#eaf8f1;color:#18714f}.status.on:before{background:#22a66d}.status.attn{background:#fff5db;color:#8b6200}.status.attn:before{background:#f5a623}
     .metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:13px}.metric{padding:14px;border-radius:15px;background:var(--panel-soft);border:1px solid var(--line);min-height:88px}.metric small{display:block;color:#778498;font-size:9px;font-weight:950;letter-spacing:.08em;text-transform:uppercase;line-height:1.3}.metric strong{display:block;margin-top:8px;font-size:20px;line-height:1.15;letter-spacing:-.025em;color:#111827}.metric strong.compact{font-size:17px}
     .message{padding:13px 14px;border-radius:15px;border:1px solid var(--line);background:#f8fafc;color:#475569;font-size:12px;line-height:1.48;margin-bottom:12px}.message strong{color:#1f2937}.message.ok{background:var(--ok-soft);border-color:#caeadb;color:#277153}.message.warn{background:var(--warn-soft);border-color:#f2dc9b;color:#785a12}.message.danger{background:var(--danger-soft);border-color:#f1c7c2;color:#8f2e25}
@@ -88,7 +87,7 @@
 
       <article class="app-card app-{{ p.codigo|lower }}">
         <div class="card-head">
-          <div class="app-icon">{% if p.codigo == 'SOLVOZ' %}<img class="is-solvoz" src="/static/icons/apps/solvoz.svg" alt="SolVoz">{% elif p.codigo == 'CONNECT' %}<img src="/static/icons/apps/connect.png" alt="Connect">{% elif p.codigo == 'LOKAFEST' %}<img src="/static/icons/apps/lokafest.png" alt="LokaFest">{% elif p.codigo == 'ORGANIZA' %}<img src="/static/icons/apps/organiza.png" alt="Organiza">{% else %}<img src="/static/icons/apps/humiat.png" alt="{{ p.nome }}">{% endif %}</div>
+          <div class="app-icon">{{ p.nome[0] }}</div>
           <div class="card-copy">
             {% if p.codigo == 'LOKAFEST' and lokafest_resumo.ok and lokafest_resumo.usuario_existe %}
               <span class="status {{ 'on' if lokafest_resumo.apto_indicacoes else 'attn' }}">{{ 'Apto para indicações' if lokafest_resumo.apto_indicacoes else 'Atenção necessária' }}</span>
