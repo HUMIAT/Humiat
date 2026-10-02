@@ -1,0 +1,96 @@
+/* =========================================================
+   HUMIAT DESIGN SYSTEM v1
+   Estrutura universal: tamanhos, tipografia, espaçamento e estados.
+   Identidade da empresa: somente --h-primary/secondary/accent.
+   Sem SolVoz => tema HUMIAT.
+   ========================================================= */
+
+:root,
+.theme-humiat{
+  /* identidade HUMIAT (fallback) */
+  --h-primary:#0B74FF;
+  --h-secondary:#00AFC8;
+  --h-accent:#845CFF;
+
+  /* superfícies neutras compartilhadas */
+  --h-page:#F5F7FB;
+  --h-surface:#FFFFFF;
+  --h-surface-soft:#F8FAFC;
+  --h-text:#172033;
+  --h-text-2:#334155;
+  --h-muted:#667085;
+  --h-border:#E4E7EC;
+  --h-border-soft:#EEF2F6;
+
+  /* estados universais */
+  --h-success:#16A34A;
+  --h-warning:#D97706;
+  --h-danger:#DC2626;
+  --h-info:#0284C7;
+
+  /* medidas universais */
+  --h-font:Inter,Segoe UI,Roboto,Arial,sans-serif;
+  --h-font-xs:12px;
+  --h-font-sm:14px;
+  --h-font-md:16px;
+  --h-font-lg:20px;
+  --h-font-xl:28px;
+  --h-control-height:42px;
+  --h-control-height-sm:34px;
+  --h-radius-sm:9px;
+  --h-radius-md:12px;
+  --h-radius-lg:16px;
+  --h-space-1:4px;
+  --h-space-2:8px;
+  --h-space-3:12px;
+  --h-space-4:16px;
+  --h-space-5:24px;
+  --h-space-6:32px;
+  --h-shadow:0 8px 24px rgba(15,23,42,.06);
+
+  /* derivados: mudam automaticamente quando a empresa muda --h-primary */
+  --h-primary-hover:color-mix(in srgb,var(--h-primary) 84%,#000 16%);
+  --h-primary-soft:color-mix(in srgb,var(--h-primary) 9%,#fff 91%);
+  --h-primary-border:color-mix(in srgb,var(--h-primary) 28%,#fff 72%);
+}
+
+/* A classe existe para todos os sistemas. A cor vem por variáveis, não por CSS específico. */
+.theme-solvoz{
+  --h-primary-hover:color-mix(in srgb,var(--h-primary) 84%,#000 16%);
+  --h-primary-soft:color-mix(in srgb,var(--h-primary) 9%,#fff 91%);
+  --h-primary-border:color-mix(in srgb,var(--h-primary) 28%,#fff 72%);
+}
+
+.humiat-ui{
+  font-family:var(--h-font);
+  color:var(--h-text);
+}
+
+/* Classes-base reutilizáveis nos próximos produtos. */
+.h-ui-button{
+  min-height:var(--h-control-height);
+  padding:8px 14px;
+  border:1px solid var(--h-primary);
+  border-radius:var(--h-radius-sm);
+  background:var(--h-primary);
+  color:#fff;
+  font:inherit;
+  font-size:var(--h-font-sm);
+  font-weight:800;
+}
+.h-ui-button:hover{background:var(--h-primary-hover);border-color:var(--h-primary-hover)}
+.h-ui-control{
+  min-height:var(--h-control-height);
+  border:1px solid var(--h-border);
+  border-radius:var(--h-radius-sm);
+  background:var(--h-surface);
+  color:var(--h-text);
+  font:inherit;
+  font-size:var(--h-font-sm);
+}
+.h-ui-card{
+  border:1px solid var(--h-border);
+  border-radius:var(--h-radius-md);
+  background:var(--h-surface);
+  box-shadow:var(--h-shadow);
+}

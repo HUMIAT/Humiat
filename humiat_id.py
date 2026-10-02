@@ -46,6 +46,37 @@ EMAIL_FROM = os.getenv("HUMIAT_EMAIL_FROM", "").strip()
 EMAIL_COPIA = (os.getenv("HUMIAT_EMAIL_COPIA") or os.getenv("HUMIAT_ADMIN_EMAIL") or "").strip().lower()
 RESEND_API_URL = os.getenv("HUMIAT_RESEND_API_URL", "https://api.resend.com/emails").strip()
 
+def _enderecos_sistemas_email() -> tuple[str, str]:
+    """Bloco padrão com os endereços oficiais dos produtos HUMIAT.
+
+    A lista é informativa: cada usuário só consegue entrar nos produtos liberados
+    no seu Humiat ID. Mantemos os endereços centralizados para que todos os e-mails
+    de primeiro acesso e recuperação usem o mesmo padrão.
+    """
+    urls = [
+        ("Central Humiat ID", PUBLIC_BASE_URL.rstrip("/")),
+        ("Organiza", f"{PUBLIC_BASE_URL.rstrip('/')}/organiza"),
+        ("Contratos / Connect", CONNECT_BASE_URL.rstrip("/")),
+        ("LokaFest", LOKAFEST_BASE_URL.rstrip("/")),
+        ("SolVoz", SOLVOZ_BASE_URL.rstrip("/")),
+    ]
+    texto = "Endereços dos sistemas (conforme os acessos liberados):\n" + "\n".join(
+        f"- {rotulo}: {url}" for rotulo, url in urls
+    )
+    itens = "".join(
+        f'<li style="margin:6px 0"><strong>{html.escape(rotulo)}:</strong> '
+        f'<a href="{html.escape(url, quote=True)}" style="color:#0b5bd3">{html.escape(url)}</a></li>'
+        for rotulo, url in urls
+    )
+    bloco_html = (
+        '<div style="margin-top:24px;padding:16px 18px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc">'
+        '<strong style="display:block;margin-bottom:8px">Endereços dos sistemas</strong>'
+        '<div style="font-size:13px;color:#64748b;margin-bottom:8px">Use somente os produtos liberados no seu cadastro.</div>'
+        f'<ul style="margin:0;padding-left:20px;color:#334155;font-size:13px">{itens}</ul></div>'
+    )
+    return texto, bloco_html
+
+
 TIPO_ADMIN_HUMIAT = "ADMIN_HUMIAT"
 # APP 8.7 — o acesso é decidido pelo vínculo com empresa.
 # Sem vínculo = equipe interna/perfil completo. Com vínculo = Área da Empresa.
@@ -661,10 +692,12 @@ def _enviar_email_primeiro_acesso(destino: str, nome: str, empresa_nome: str, li
         raise RuntimeError("HUMIAT_EMAIL_FROM não configurado no servidor")
     nome_exibicao = (nome or "cliente").strip()
     empresa_exibicao = (empresa_nome or "sua empresa").strip()
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto_msg = (
         f"Olá, {nome_exibicao}.\n\n"
         f"Seu acesso ao SolVoz da empresa {empresa_exibicao} foi criado.\n"
         f"Crie sua senha neste link em até {RESET_MINUTES} minutos:\n{link}\n\n"
+        f"{enderecos_txt}\n\n"
         "Este acesso é exclusivo ao SolVoz e não libera acesso ao Organiza.\n"
     )
     html = f"""
@@ -674,37 +707,18 @@ def _enviar_email_primeiro_acesso(destino: str, nome: str, empresa_nome: str, li
       <p>O acesso da empresa <strong>{empresa_exibicao}</strong> foi criado.</p>
       <p>Defina sua senha pelo botão abaixo. O link é válido por <strong>{RESET_MINUTES} minutos</strong> e só pode ser usado uma vez.</p>
       <p style="margin:28px 0"><a href="{link}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar minha senha</a></p>
+      {enderecos_html}
       <p style="font-size:13px;color:#475569">Este acesso é exclusivo ao SolVoz e não dá acesso ao Organiza.</p>
       <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{link}</p>
     </div>
     """
-    payload = json.dumps({
-        "from": EMAIL_FROM,
-        "to": [destino],
-        "subject": f"SolVoz - acesso da {empresa_exibicao}",
-        "text": texto_msg,
-        "html": html,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        RESEND_API_URL,
-        data=payload,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Humiat-ID-SolVoz/1.0",
-        },
+    _enviar_resend_humiat(
+        destino,
+        f"SolVoz - acesso da {empresa_exibicao}",
+        texto_msg,
+        html,
+        user_agent="Humiat-ID-SolVoz/1.0",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            if resp.status < 200 or resp.status >= 300:
-                raise RuntimeError(f"Resend retornou HTTP {resp.status}")
-    except urllib.error.HTTPError as exc:
-        detalhe = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Falha Resend HTTP {exc.code}: {detalhe[:500]}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
 
 
 def garantir_empresa_solvoz_humiat(db: Session, nome: str, slug: str, ativo: int = 1) -> HumiatEmpresa:
@@ -849,10 +863,12 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
         raise RuntimeError("HUMIAT_EMAIL_FROM não configurado no servidor")
 
     nome_exibicao = (nome or "usuário").strip()
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto = (
         f"Olá, {nome_exibicao}.\n\n"
         "Recebemos uma solicitação para redefinir sua senha do Humiat ID.\n"
         f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n\n"
+        f"{enderecos_txt}\n\n"
         "Se você não pediu a alteração, ignore esta mensagem.\n"
     )
     html = f"""
@@ -863,37 +879,17 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
       <p>O link abaixo é válido por <strong>{RESET_MINUTES} minutos</strong> e só pode ser utilizado uma vez.</p>
       <p style="margin:28px 0"><a href="{link}" style="background:#0ea5e9;color:white;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700">Criar nova senha</a></p>
       <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{link}</p>
+      {enderecos_html}
       <p style="font-size:13px;color:#475569">Se você não solicitou a alteração, ignore este e-mail.</p>
     </div>
     """
-
-    payload = json.dumps({
-        "from": EMAIL_FROM,
-        "to": [destino],
-        "subject": "Humiat ID - Redefinição de senha",
-        "text": texto,
-        "html": html,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        RESEND_API_URL,
-        data=payload,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Humiat-ID/1.0.8",
-        },
+    _enviar_resend_humiat(
+        destino,
+        "Humiat ID - Redefinição de senha",
+        texto,
+        html,
+        user_agent="Humiat-ID/1.2.20",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            if resp.status < 200 or resp.status >= 300:
-                raise RuntimeError(f"Resend retornou HTTP {resp.status}")
-    except urllib.error.HTTPError as exc:
-        detalhe = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Falha Resend HTTP {exc.code}: {detalhe[:500]}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Falha de rede ao acessar Resend: {exc.reason}") from exc
 
 
 
@@ -993,11 +989,13 @@ def enviar_link_acesso_humiat(
     link = f"{PUBLIC_BASE_URL.rstrip('/')}/redefinir-senha?token={urllib.parse.quote(token)}"
     nome = (usuario.nome or 'cliente').strip()
     titulo = 'Crie sua senha' if primeiro_acesso else 'Refaça seu acesso'
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto = (
         f"Olá, {nome}.\n\n"
         f"{titulo} do Humiat ID pelo link abaixo.\n"
         "O mesmo Humiat ID será usado em todos os sistemas liberados para você.\n\n"
         f"Link válido por {RESET_MINUTES} minutos:\n{link}\n\n"
+        f"{enderecos_txt}\n\n"
         "Se precisar de ajuda, responda ao atendimento que enviou este acesso.\n"
     )
     html_nome = html.escape(nome)
@@ -1011,6 +1009,7 @@ def enviar_link_acesso_humiat(
       <p style="margin:28px 0"><a href="{html_link}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">{titulo}</a></p>
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
       <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{html_link}</p>
+      {enderecos_html}
     </div>
     """
     _enviar_resend_humiat(
@@ -1044,6 +1043,7 @@ def enviar_email_solvoz_senha_provisoria(
     itens = [str(x).strip() for x in (equipamentos or []) if str(x).strip()]
     equipamentos_txt = ", ".join(itens) or "Equipamentos vinculados ao cadastro"
     url = (acesso_url or "").strip()
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto = (
         f"Olá, {nome_exibicao}.\n\n"
         "Seu acesso administrativo ao SolVoz foi criado.\n\n"
@@ -1054,6 +1054,7 @@ def enviar_email_solvoz_senha_provisoria(
         "No primeiro acesso será obrigatório criar uma nova senha. "
         "A senha definitiva ficará somente no SolVoz.\n\n"
         f"Acessar SolVoz: {url}\n\n"
+        f"{enderecos_txt}\n\n"
         "SolVoz • HUMIAT"
     )
     nome_h = html.escape(nome_exibicao)
@@ -1075,6 +1076,7 @@ def enviar_email_solvoz_senha_provisoria(
       <p style="margin:28px 0"><a href="{url_h}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Acessar SolVoz</a></p>
       <p style="font-size:13px;color:#475569">Este acesso é exclusivo do SolVoz e não libera acesso ao Organiza.</p>
       <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{url_h}</p>
+      {enderecos_html}
     </div>
     """
     _enviar_resend_humiat(
@@ -1099,10 +1101,12 @@ def enviar_email_solvoz_recuperacao(
     empresa_exibicao = (empresa_nome or "sua empresa").strip()
     url = (link or "").strip()
     minutos = max(1, int(validade_minutos or 30))
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto = (
         f"Olá, {nome_exibicao}.\n\n"
         f"Recebemos uma solicitação para redefinir sua senha do SolVoz ({empresa_exibicao}).\n"
         f"Use este link em até {minutos} minutos:\n{url}\n\n"
+        f"{enderecos_txt}\n\n"
         "Se você não solicitou a alteração, ignore esta mensagem.\n\n"
         "SolVoz • HUMIAT"
     )
@@ -1118,6 +1122,7 @@ def enviar_email_solvoz_recuperacao(
       <p style="margin:28px 0"><a href="{url_h}" style="background:#111827;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar nova senha</a></p>
       <p style="font-size:13px;color:#475569">Se você não solicitou a alteração, ignore este e-mail.</p>
       <p style="font-size:13px;color:#475569">Se o botão não abrir, copie este endereço:<br>{url_h}</p>
+      {enderecos_html}
     </div>
     """
     _enviar_resend_humiat(
@@ -2055,10 +2060,12 @@ def _email_migracao_lokafest_humiat(db: Session, cliente: dict | None, item_loka
 
 def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
     nome_exibicao = (nome or "cliente").strip()
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto_msg = (
         f"Olá, {nome_exibicao}.\n\n"
         "Seu acesso foi migrado para o Humiat ID. Por segurança, crie uma nova senha para continuar acessando seus sistemas.\n"
-        f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n"
+        f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n\n"
+        f"{enderecos_txt}\n"
     )
     html_msg = f"""
     <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
@@ -2067,19 +2074,22 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
       <p>Seu acesso foi migrado para o <strong>Humiat ID</strong>. Por segurança, crie uma nova senha única para continuar acessando seus sistemas.</p>
       <p style="margin:28px 0"><a href="{html.escape(link)}" style="background:#0b5bd3;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar minha nova senha</a></p>
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
+      {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.03")
+    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.20")
 
 
 def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> None:
     """Envia o primeiro acesso de um cliente criado diretamente pelo Organiza/Humiat."""
     nome_exibicao = (nome or "cliente").strip()
+    enderecos_txt, enderecos_html = _enderecos_sistemas_email()
     texto_msg = (
         f"Olá, {nome_exibicao}.\n\n"
         "Seu Humiat ID foi criado e seus acessos já estão preparados.\n"
-        "Crie sua senha única para acessar Organiza, LokaFest e SolVoz.\n"
-        f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n"
+        "Crie sua senha única para acessar os sistemas liberados no seu cadastro.\n"
+        f"Use este link em até {RESET_MINUTES} minutos:\n{link}\n\n"
+        f"{enderecos_txt}\n"
     )
     html_msg = f"""
     <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#0b1220">
@@ -2088,9 +2098,10 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       <p>Seu acesso foi criado com os dados já cadastrados no Organiza. Use uma única senha para acessar seus sistemas.</p>
       <p style="margin:28px 0"><a href="{html.escape(link)}" style="background:#0b5bd3;color:#fff;text-decoration:none;padding:13px 20px;border-radius:9px;font-weight:700">Criar minha senha</a></p>
       <p style="font-size:13px;color:#475569">O link é válido por {RESET_MINUTES} minutos e só pode ser usado uma vez.</p>
+      {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.12")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.20")
 
 
 def _aplicar_acessos_cliente_humiat(

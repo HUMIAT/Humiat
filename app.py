@@ -40,7 +40,7 @@ from humiat_id import (
     garantir_empresa_solvoz_humiat,
     permissoes_usuario_humiat, salvar_permissoes_usuario_humiat,
     usuario_humiat_interno, usuario_humiat_equipe_prioritaria, enviar_link_acesso_humiat, aplicar_rotinas_cliente_humiat,
-    enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao, _enviar_resend_humiat,
+    enviar_email_solvoz_senha_provisoria, enviar_email_solvoz_recuperacao, _enviar_resend_humiat, _solvoz_api,
 )
 
 from organiza_performance import (
@@ -52,6 +52,8 @@ from services.comunicacao import (
     ComunicacaoService, PAISES, formatar_telefone as formatar_telefone_internacional,
     normalizar_contato, numero_internacional, telefone_valido as telefone_internacional_valido,
 )
+
+from services.theme import HUMIAT_DEFAULT_THEME, normalize_theme
 
 app = FastAPI(title="Organiza | Karaokê RJ", version=ORGANIZA_VERSAO)
 app.add_middleware(PerformanceMiddleware)
@@ -310,6 +312,83 @@ def _solvoz_api_request(caminho: str, *, metodo: str = "GET", payload: dict | No
         raise RuntimeError(f"Não foi possível acessar o SolVoz: {exc.reason}")
 
 
+# ------------------------------------------------------------------
+# HUMIAT Design System v1 — identidade visual por empresa
+# ------------------------------------------------------------------
+ORGANIZA_THEME_SLUG = normalizar_slug_solvoz(os.getenv("ORGANIZA_THEME_EMPRESA_SLUG", "karaokerj")) or "karaokerj"
+_ORGANIZA_THEME_RUNTIME = normalize_theme(company_slug=ORGANIZA_THEME_SLUG)
+
+
+def _publicar_tema_visual_runtime(tema: dict | None) -> dict:
+    global _ORGANIZA_THEME_RUNTIME
+    _ORGANIZA_THEME_RUNTIME = dict(tema or normalize_theme(company_slug=ORGANIZA_THEME_SLUG))
+    templates.env.globals["HUMIAT_THEME"] = _ORGANIZA_THEME_RUNTIME
+    return _ORGANIZA_THEME_RUNTIME
+
+
+def _tema_visual_local(db: Session, slug: str) -> dict:
+    slug_n = normalizar_slug_solvoz(slug)
+    row = db.query(TemaVisualEmpresa).filter(TemaVisualEmpresa.slug == slug_n).first()
+    if not row or str(row.fonte or "").upper() != "SOLVOZ":
+        return normalize_theme(company_slug=slug_n)
+    return normalize_theme({
+        "tema": row.tema or "solvoz",
+        "brand": row.brand,
+        "brand_2": row.brand_2,
+        "accent": row.accent,
+        "bg": row.bg,
+        "surface": row.surface,
+        "text": row.text,
+    }, source="solvoz", company_slug=slug_n)
+
+
+def _carregar_tema_visual_runtime(db: Session) -> dict:
+    return _publicar_tema_visual_runtime(_tema_visual_local(db, ORGANIZA_THEME_SLUG))
+
+
+def _sincronizar_tema_visual_solvoz(db: Session, slug: str) -> dict:
+    """Sincroniza a paleta sem criar dependência externa na renderização.
+
+    É chamada apenas por rotinas administrativas/manuais. Depois disso as telas
+    usam exclusivamente o cache local.
+    """
+    slug_n = normalizar_slug_solvoz(slug)
+    if not slug_n:
+        raise ValueError("Slug SolVoz inválido para sincronizar tema")
+    dados = _solvoz_api(f"/_sv/api/humiat/empresa/{urllib.parse.quote(slug_n)}")
+    empresa = dados.get("empresa") or {}
+    cores = empresa.get("cores") or {}
+    tema = normalize_theme({
+        "tema": empresa.get("tema") or "solvoz",
+        "brand": cores.get("brand"),
+        "brand_2": cores.get("brand_2"),
+        "accent": cores.get("accent"),
+        "bg": cores.get("bg"),
+        "surface": cores.get("surface"),
+        "text": cores.get("text"),
+    }, source="solvoz", company_slug=slug_n)
+    row = db.query(TemaVisualEmpresa).filter(TemaVisualEmpresa.slug == slug_n).first()
+    if not row:
+        row = TemaVisualEmpresa(slug=slug_n)
+        db.add(row)
+    row.fonte = "SOLVOZ"
+    row.tema = str(tema.get("tema") or "solvoz")[:100]
+    row.brand = tema["brand"]
+    row.brand_2 = tema["brand_2"]
+    row.accent = tema["accent"]
+    row.bg = tema["bg"]
+    row.surface = tema["surface"]
+    row.text = tema["text"]
+    db.flush()
+    if slug_n == ORGANIZA_THEME_SLUG:
+        _publicar_tema_visual_runtime(tema)
+    return tema
+
+
+# Fallback imediato antes do startup carregar o cache do banco.
+_publicar_tema_visual_runtime(_ORGANIZA_THEME_RUNTIME)
+
+
 def _solvoz_grupos_cliente(cliente) -> list[dict]:
     """Agrupa equipamentos online do cliente pela empresa SolVoz."""
     grupos: dict[int, dict] = {}
@@ -536,6 +615,24 @@ class ConfiguracaoSistema(Base):
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class TemaVisualEmpresa(Base):
+    """Cache local da identidade visual mestre vinda do SolVoz.
+
+    Nenhuma tela consulta o SolVoz para renderizar. A identidade é sincronizada
+    manualmente e depois lida localmente; se não existir, o padrão HUMIAT assume.
+    """
+    __tablename__ = "temas_visuais_empresas"
+    id = Column(Integer, primary_key=True)
+    slug = Column(String(100), unique=True, nullable=False, index=True)
+    fonte = Column(String(20), nullable=False, default="HUMIAT")
+    tema = Column(String(100), nullable=True)
+    brand = Column(String(7), nullable=True)
+    brand_2 = Column(String(7), nullable=True)
+    accent = Column(String(7), nullable=True)
+    bg = Column(String(7), nullable=True)
+    surface = Column(String(7), nullable=True)
+    text = Column(String(7), nullable=True)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class Cliente(Base):
@@ -3992,6 +4089,8 @@ def iniciar_banco():
         if categorias_1175:
             print(f"[ESTOQUE] 1.1.75: categorias reorganizadas={categorias_1175}.")
         db.commit()
+        # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
+        _carregar_tema_visual_runtime(db)
     finally:
         db.close()
 
@@ -8595,6 +8694,7 @@ def solvoz_empresas_sincronizar_manual(
         dados = _solvoz_api_request("/_sv/api/organiza/empresas")
         itens = dados.get("empresas") or []
         criadas = atualizadas = inativadas_ausentes = 0
+        temas_sincronizados = temas_erro = 0
         ids_origem: set[int] = set()
         slugs_origem: set[str] = set()
         for item in itens:
@@ -8613,6 +8713,13 @@ def solvoz_empresas_sincronizar_manual(
             )
             criadas += int(criada)
             atualizadas += int(alterada and not criada)
+            if slug_item:
+                try:
+                    _sincronizar_tema_visual_solvoz(db, slug_item)
+                    temas_sincronizados += 1
+                except Exception as exc_tema:
+                    temas_erro += 1
+                    print(f"[TEMA HUMIAT] Não foi possível sincronizar {slug_item}: {exc_tema}")
         # Não apaga histórico local. Registros que não existem mais na lista mestre
         # ficam inativos até revisão manual.
         for local in db.query(SolVozEmpresa).all():
@@ -8622,7 +8729,12 @@ def solvoz_empresas_sincronizar_manual(
                 _sincronizar_humiat_empresa_solvoz(db, local, old_slug=local.slug)
                 inativadas_ausentes += 1
         db.commit()
-        msg = quote_plus(f"Sincronização concluída: {len(itens)} empresa(s), {criadas} nova(s), {atualizadas} atualizada(s), {inativadas_ausentes} ausente(s) inativada(s).")
+        _carregar_tema_visual_runtime(db)
+        msg = quote_plus(
+            f"Sincronização concluída: {len(itens)} empresa(s), {criadas} nova(s), {atualizadas} atualizada(s), "
+            f"{inativadas_ausentes} ausente(s) inativada(s), {temas_sincronizados} identidade(s) visual(is) sincronizada(s)"
+            + (f", {temas_erro} com falha de tema." if temas_erro else ".")
+        )
         return RedirectResponse(f"/organiza/configuracoes/solvoz-empresas?sucesso={msg}", status_code=303)
     except Exception as exc:
         db.rollback()

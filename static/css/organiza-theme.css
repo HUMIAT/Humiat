@@ -1,28 +1,30 @@
 /* =========================================================
-   ORGANIZA 1.1.56 — DESIGN SYSTEM GLOBAL
+   ORGANIZA 1.2.20 — HUMIAT DESIGN SYSTEM
    Camada final de padronização visual. Carregada depois das
    folhas históricas e dos estilos locais dos templates.
    ========================================================= */
 
-:root{
-  --ui-primary:#2563eb;
-  --ui-primary-hover:#1d4ed8;
-  --ui-primary-soft:#eff6ff;
-  --ui-text:#0f172a;
-  --ui-text-2:#334155;
-  --ui-muted:#64748b;
-  --ui-line:#dbe3ee;
-  --ui-line-soft:#e8edf4;
-  --ui-bg:#f4f7fb;
-  --ui-card:#ffffff;
-  --ui-success:#16a34a;
-  --ui-success-hover:#15803d;
-  --ui-warning:#d97706;
-  --ui-danger:#dc2626;
-  --ui-danger-hover:#b91c1c;
-  --ui-radius:12px;
-  --ui-radius-sm:9px;
-  --ui-shadow:0 8px 24px rgba(15,23,42,.06);
+/* Compatibilidade do Organiza com o contrato visual HUMIAT.
+   Daqui para frente os componentes usam --ui-* e a identidade vem de --h-*. */
+body.organiza-corpo{
+  --ui-primary:var(--h-primary);
+  --ui-primary-hover:var(--h-primary-hover);
+  --ui-primary-soft:var(--h-primary-soft);
+  --ui-text:var(--h-text);
+  --ui-text-2:var(--h-text-2);
+  --ui-muted:var(--h-muted);
+  --ui-line:var(--h-border);
+  --ui-line-soft:var(--h-border-soft);
+  --ui-bg:var(--h-page);
+  --ui-card:var(--h-surface);
+  --ui-success:var(--h-success);
+  --ui-success-hover:color-mix(in srgb,var(--h-success) 84%,#000 16%);
+  --ui-warning:var(--h-warning);
+  --ui-danger:var(--h-danger);
+  --ui-danger-hover:color-mix(in srgb,var(--h-danger) 84%,#000 16%);
+  --ui-radius:var(--h-radius-md);
+  --ui-radius-sm:var(--h-radius-sm);
+  --ui-shadow:var(--h-shadow);
 }
 
 /* Base e tipografia */
@@ -81,7 +83,7 @@ body.organiza-corpo .panel-card,
 body.organiza-corpo .form-card{padding:16px}
 body.organiza-corpo .tabela-cartao{overflow:visible}
 
-/* Botões: azul = ação, branco = secundário, verde = sucesso/WhatsApp, vermelho = perigo */
+/* Botões: identidade da empresa = ação; branco = secundário; estados mantêm cores semânticas. */
 body.organiza-corpo .botao,
 body.organiza-corpo .btn,
 body.organiza-corpo .btn-new,
@@ -91,11 +93,11 @@ body.organiza-corpo .item-botao,
 body.organiza-corpo a.botao,
 body.organiza-corpo button.botao{
   appearance:none;
-  min-height:38px;
+  min-height:var(--h-control-height);
   height:auto;
   padding:8px 13px;
   border:1px solid var(--ui-primary)!important;
-  border-radius:var(--ui-radius-sm)!important;
+  border-radius:var(--h-radius-sm)!important;
   background:var(--ui-primary)!important;
   background-image:none!important;
   color:#fff!important;
@@ -169,7 +171,7 @@ body.organiza-corpo .btn-danger:hover{
 }
 body.organiza-corpo .botao.pequeno,
 body.organiza-corpo .botao-compacto,
-body.organiza-corpo .btn-small{min-height:34px;padding:7px 10px;font-size:.76rem}
+body.organiza-corpo .btn-small{min-height:var(--h-control-height-sm);padding:7px 10px;font-size:.76rem}
 body.organiza-corpo button:disabled,
 body.organiza-corpo .botao:disabled,
 body.organiza-corpo .btn:disabled{opacity:.48;cursor:not-allowed;filter:none!important}
@@ -179,10 +181,10 @@ body.organiza-corpo .app-main input:not([type="checkbox"]):not([type="radio"]):n
 body.organiza-corpo .app-main select,
 body.organiza-corpo .app-main textarea{
   width:100%;
-  min-height:42px;
+  min-height:var(--h-control-height);
   padding:9px 11px;
   border:1px solid #cbd5e1!important;
-  border-radius:9px!important;
+  border-radius:var(--h-radius-sm)!important;
   background:#fff!important;
   color:var(--ui-text)!important;
   box-shadow:none!important;
@@ -195,8 +197,8 @@ body.organiza-corpo .app-main input:focus,
 body.organiza-corpo .app-main select:focus,
 body.organiza-corpo .app-main textarea:focus{
   outline:0;
-  border-color:#7aa7ff!important;
-  box-shadow:0 0 0 3px rgba(37,99,235,.09)!important;
+  border-color:var(--ui-primary)!important;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--ui-primary) 16%,transparent)!important;
 }
 body.organiza-corpo .app-main label{color:var(--ui-text-2);font-size:.8rem;font-weight:800}
 body.organiza-corpo .app-main label small{color:var(--ui-muted);font-weight:500}
@@ -282,7 +284,7 @@ body.organiza-corpo .cliente-card-clean{
   color:var(--ui-text)!important;
   box-shadow:none!important;
 }
-body.organiza-corpo .cliente-card-clean:hover{border-color:#9bb7e8!important;transform:none!important}
+body.organiza-corpo .cliente-card-clean:hover{border-color:var(--h-primary-border)!important;transform:none!important}
 body.organiza-corpo .cliente-card-clean strong{color:var(--ui-text)!important;font-size:.92rem}
 body.organiza-corpo .cliente-card-clean small{color:var(--ui-muted)!important}
 body.organiza-corpo .cliente-card-clean>span,
@@ -390,7 +392,11 @@ body.organiza-corpo .alerta{border-radius:10px!important;padding:10px 12px!impor
 body.organiza-corpo .alerta.sucesso{background:#f0fdf4!important;color:#166534!important;border:1px solid #bbf7d0!important}
 body.organiza-corpo .alerta.erro{background:#fff1f2!important;color:#be123c!important;border:1px solid #fecdd3!important}
 body.organiza-corpo .alerta.info,
-body.organiza-corpo .alerta.informacao{background:#eff6ff!important;color:#1d4ed8!important;border:1px solid #bfdbfe!important}
+body.organiza-corpo .alerta.informacao{
+  background:color-mix(in srgb,var(--h-info) 8%,#fff 92%)!important;
+  color:var(--h-info)!important;
+  border:1px solid color-mix(in srgb,var(--h-info) 28%,#fff 72%)!important
+}
 
 /* Desktop principal */
 @media(min-width:1101px){
@@ -596,6 +602,6 @@ body.organiza-corpo .carregar-estoque-equip{display:inline-block;margin-top:8px;
 
 /* 1.2.05 · padrão de ações compactas por ícone */
 body.organiza-corpo .acao-icone{display:inline-grid!important;place-items:center!important;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;border:1px solid var(--ui-line)!important;border-radius:8px!important;background:#fff!important;color:var(--ui-text-2)!important;text-decoration:none!important;font-size:.95rem!important;font-weight:900!important;line-height:1!important;cursor:pointer!important;box-shadow:none!important}
-body.organiza-corpo .acao-icone:hover{background:var(--ui-primary-soft)!important;border-color:#bfdbfe!important;color:var(--ui-primary)!important}
+body.organiza-corpo .acao-icone:hover{background:var(--ui-primary-soft)!important;border-color:var(--h-primary-border)!important;color:var(--ui-primary)!important}
 body.organiza-corpo .acao-icone.perigo:hover{background:#fef2f2!important;border-color:#fecaca!important;color:#b91c1c!important}
 body.organiza-corpo .acoes-compactas{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
