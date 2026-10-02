@@ -38,6 +38,7 @@
   {% if request.query_params.get('salvo_etapa2') %}<div class="alerta sucesso">Orçamento salvo. Revise e avance quando estiver pronto.</div>{% endif %}
   {% if request.query_params.get('erro_etapa4') %}<div class="alerta erro">{{ request.query_params.get('erro_etapa4') }}</div>{% endif %}
   {% if request.query_params.get('salvo_etapa4') %}<div class="alerta sucesso">Prazo do serviço salvo.</div>{% endif %}
+  {% if request.query_params.get('estoque_corrigido') %}<div class="alerta sucesso">Estoque desta manutenção recalculado conforme a aprovação atual.</div>{% endif %}
 
   <details class="cartao manutencao-cliente-resumo">
     <summary><strong>Dados do cliente</strong><span>Consultar cadastro completo</span></summary>
@@ -354,6 +355,12 @@ Karaokê RJ')|urlencode }}">Enviar orçamento no WhatsApp</a>
         </fieldset>
         <button class="botao" type="submit">{% if aprovacao_existente %}Salvar correção da aprovação{% else %}Confirmar aprovação manual{% endif %}</button>
       </form>
+      {% if aprovacao_existente %}
+      <form method="post" action="/organiza/manutencoes/{{ m.id }}/estoque/ressincronizar" class="manutencao-estoque-correcao" onsubmit="return confirm('Recalcular a baixa de estoque desta manutenção conforme os itens aprovados? A operação não duplica saídas.');">
+        <button class="botao" type="submit">Recalcular estoque desta manutenção</button>
+        <small>Use para corrigir manutenções antigas. Itens aprovados viram saída física imediatamente.</small>
+      </form>
+      {% endif %}
     </div>
   </details>
 
@@ -666,6 +673,7 @@ function prepararItemOrcamento(form) {
 
 
 <style>
+.manutencao-estoque-correcao{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}.manutencao-estoque-correcao small{color:#64748b;max-width:560px}
 .estoque-cor-manutencao{margin:10px 0;padding:10px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}.estoque-cor-manutencao-topo{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px}.estoque-cor-manutencao-topo small{color:#64748b}.estoque-cor-manutencao-grid{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:7px;margin-bottom:7px}.estoque-cor-manutencao-grid>div{display:grid;grid-template-columns:1fr 64px;gap:5px}.estoque-cor-manutencao-grid input{min-width:0}.estoque-cor-disponiveis{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 8px}.estoque-cor-disponiveis span{font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid #dbe3ee;background:#fff}.estoque-cor-disponiveis span.negativo{color:#b42318;border-color:#f2b8b5}@media(max-width:760px){.estoque-cor-manutencao-grid{grid-template-columns:1fr}}
 </style>
 <script>

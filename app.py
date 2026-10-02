@@ -2098,43 +2098,52 @@ def _desejado_manutencao_estoque(m: Manutencao, o: Orcamento, db: Session, somen
 
 
 def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
-    """Somente manutenção APROVADA compromete estoque.
+    """Sincroniza a manutenção com o estoque sem depender do encerramento da OS.
 
-    Antes da aprovação não existe reserva. Após a aprovação, somente os itens aprovados
-    ficam reservados. Ao encerrar uma OS nova que já estava reservada, a reserva vira
-    saída física. Isso evita transformar orçamentos ainda em negociação em consumo de estoque.
+    Regra 1.2.33:
+    - orçamento pendente/em elaboração: reserva os materiais do orçamento;
+    - orçamento aprovado (cliente ou manual): baixa fisicamente apenas os itens aprovados;
+    - cancelado ou encerrado sem aprovação: libera a reserva e não cria saída;
+    - a sincronização é idempotente: editar quantidade/cor/aprovação corrige a mesma saída,
+      sem duplicar movimentações.
     """
     if not m or not m.id:
         return
+
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
     status = (m.status or "").strip()
     cancelada = status in ESTOQUE_MANUTENCAO_CANCELADA or (o and (o.status or "").strip() == "Cancelado")
-    aprovado = _orcamento_aprovado(o) if o else False
+    finalizada = status in ESTOQUE_MANUTENCAO_FINAL or bool(m.entregue_em)
 
-    # Sem orçamento aprovado: não reserva e não baixa estoque.
-    if not o or cancelada or not aprovado:
+    if not o or cancelada:
         _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
         return
 
-    desejado = _desejado_manutencao_estoque(m, o, db, somente_aprovados=True)
-    finalizada = status in ESTOQUE_MANUTENCAO_FINAL or bool(m.entregue_em)
-    if not finalizada:
-        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
-        _sincronizar_reservas_origem(
-            db, "MANUTENCAO", m.id, desejado,
-            observacao=f"Manutenção #{m.id} aprovada a fazer",
+    if _orcamento_aprovado(o):
+        # A aprovação é o momento de consumo: sai do físico imediatamente.
+        desejado_saida = _desejado_manutencao_estoque(m, o, db, somente_aprovados=True)
+        _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
+        _sincronizar_saidas_origem(
+            db, "MANUTENCAO", m.id, desejado_saida,
+            observacao=f"Manutenção #{m.id} aprovada · baixa física",
         )
         return
 
-    reservas_existentes = db.query(EstoqueReserva.id).filter(
-        EstoqueReserva.origem_tipo == "MANUTENCAO", EstoqueReserva.origem_id == m.id
-    ).first() is not None
-    _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
-    if reservas_existentes:
-        _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, desejado, observacao=f"Manutenção #{m.id} encerrada")
-    else:
+    # Uma OS encerrada sem aceite não pode continuar comprometendo estoque.
+    if finalizada:
+        _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
+        return
+
+    # Enquanto o orçamento está em elaboração/aguardando cliente, os materiais ficam
+    # apenas reservados. Inclui opcionais ainda não decididos para garantir disponibilidade.
+    desejado_reserva = _desejado_manutencao_estoque(m, o, db, somente_aprovados=False)
+    _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
+    _sincronizar_reservas_origem(
+        db, "MANUTENCAO", m.id, desejado_reserva,
+        observacao=f"Manutenção #{m.id} · orçamento pendente",
+    )
 
 
 def salvar_cores_manutencao(orcamento_item: OrcamentoItem, form: dict, db: Session) -> None:
@@ -2478,6 +2487,43 @@ def _migrar_reservas_manutencao_aprovada_1168(db: Session) -> int:
     db.commit()
     return int(removidas or 0)
 
+
+
+def _migrar_estoque_manutencao_aprovacao_1233(db: Session) -> tuple[int, int]:
+    """Aplica uma vez a regra 1.2.33 às manutenções existentes.
+
+    Corrige inclusive OS antigas já aprovadas manualmente que ficaram somente em reserva
+    (caso Jonathan e qualquer outro registro na mesma situação). A rotina usa as funções
+    idempotentes de sincronização, portanto não duplica saídas já existentes.
+    """
+    chave = "estoque_manutencao_aprovacao_baixa_1_2_33"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0, 0
+
+    manutencao_ids = [mid for (mid,) in db.query(Manutencao.id).all()]
+    aprovadas_corrigidas = 0
+    pendentes_recalculadas = 0
+    for manutencao_id in manutencao_ids:
+        manutencao = carregar_manutencao(db, manutencao_id)
+        if not manutencao:
+            continue
+        orcamento = sorted(manutencao.orcamentos, key=lambda x: x.versao)[-1] if manutencao.orcamentos else None
+        status = (manutencao.status or "").strip()
+        cancelada = status in ESTOQUE_MANUTENCAO_CANCELADA or (orcamento and (orcamento.status or "").strip() == "Cancelado")
+        finalizada = status in ESTOQUE_MANUTENCAO_FINAL or bool(manutencao.entregue_em)
+        if orcamento and not cancelada and _orcamento_aprovado(orcamento):
+            aprovadas_corrigidas += 1
+        elif orcamento and not cancelada and not finalizada:
+            pendentes_recalculadas += 1
+        sincronizar_estoque_manutencao(manutencao, db)
+
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.commit()
+    return aprovadas_corrigidas, pendentes_recalculadas
 
 def _migrar_itens_e_reservas_1174(db: Session) -> tuple[int, int]:
     """Padroniza categorias/controle de estoque e refaz reservas abertas de venda.
@@ -4226,6 +4272,12 @@ def iniciar_banco():
         fornecedores_1226, vinculos_1226 = _seed_fornecedores_itens_1226(db)
         if fornecedores_1226 or vinculos_1226:
             print(f"[ITENS] 1.2.26: fornecedores criados={fornecedores_1226}; vínculos iniciais={vinculos_1226}.")
+        manut_aprovadas_1233, manut_pendentes_1233 = _migrar_estoque_manutencao_aprovacao_1233(db)
+        if manut_aprovadas_1233 or manut_pendentes_1233:
+            print(
+                f"[ESTOQUE] 1.2.33: manutenções aprovadas corrigidas={manut_aprovadas_1233}; "
+                f"pendentes recalculadas={manut_pendentes_1233}."
+            )
         db.commit()
         # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
         _carregar_tema_visual_runtime(db)
@@ -14922,6 +14974,24 @@ async def aprovar_manual(
     db.commit()
     return RedirectResponse(f"/organiza/manutencoes/{manutencao_id}#etapa-3", status_code=303)
 
+
+
+@app.post("/organiza/manutencoes/{manutencao_id}/estoque/ressincronizar")
+def manutencao_estoque_ressincronizar(
+    manutencao_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Recalcula reserva/saída desta manutenção sem duplicar movimentos."""
+    m = carregar_manutencao(db, manutencao_id)
+    if not m:
+        raise HTTPException(404)
+    sincronizar_estoque_manutencao(m, db)
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/manutencoes/{manutencao_id}?estoque_corrigido=1#etapa-3",
+        status_code=303,
+    )
 
 @app.post("/organiza/manutencoes/{manutencao_id}/pagamento")
 async def pagamento_registrar(manutencao_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
