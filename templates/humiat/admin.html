@@ -13,17 +13,84 @@
     .admin-app-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;align-items:stretch}.admin-app-card{--accent:#0b74ff;position:relative;display:flex;flex-direction:column;min-height:310px;padding:22px;border-radius:23px;background:var(--panel);color:var(--ink);border:1px solid rgba(226,232,240,.95);box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden}.admin-app-card:before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--accent)}.admin-app-card.app-connect{--accent:#1578ff}.admin-app-card.app-lokafest{--accent:#f59e0b}.admin-app-card.app-organiza{--accent:#18a66a}.admin-app-card.app-solvoz{--accent:#7c4dff}.admin-app-card.app-identidade{--accent:#00a7c4}.admin-app-card.app-migracao{--accent:#f59e0b}.admin-app-card.is-disabled{opacity:.82}.admin-card-head{display:flex;gap:13px;align-items:flex-start;margin-bottom:16px}.admin-app-icon{flex:0 0 48px;width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:950;background:linear-gradient(145deg,#29d9f0,#725cff);color:#07111d}.admin-card-copy{min-width:0;flex:1}.admin-card-copy h3{font-size:22px;margin:6px 0 5px;letter-spacing:-.025em}.admin-card-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.admin-badges{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 14px}.admin-actions{margin-top:auto;display:grid;gap:9px;grid-template-columns:repeat(2,minmax(0,1fr))}.admin-actions.one{grid-template-columns:1fr}.admin-app-card .status-badge{background:#eaf8f1;color:#18714f;border-color:#ccebdd}.admin-app-card .muted-copy{color:#64748b}.admin-app-card small{color:#64748b}.admin-app-card .btn-secondary{background:#fff;color:#203047;border:1px solid #d5dfeb}.admin-app-card .btn-primary{color:#fff}.admin-app-card .btn-ghost{background:#f8fafc;color:#203047;border:1px solid #e2e8f0}.admin-app-card .error-inline{color:#b42318!important}
     @media(max-width:1050px){.admin-app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:680px){.admin-unified{padding:20px 16px 38px}.admin-unified-head{align-items:flex-start;flex-direction:column}.admin-app-grid{grid-template-columns:1fr}.admin-actions{grid-template-columns:1fr}}
   </style>
+  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v=1222">
 </head>
-<body class="portal-body admin-unified-body">
-<div id="humiat-loading" style="position:fixed;inset:0;z-index:9999;background:#050c18;display:flex;align-items:center;justify-content:center;color:#fff;font-family:Arial,sans-serif">
-  <div style="text-align:center"><div style="font-size:22px;font-weight:800;margin-bottom:8px">Humiat ID</div><div style="color:#aebdd0">Aguarde, carregando dados...</div></div>
+<body class="portal-body admin-unified-body humiat-adminator">
+<div id="humiat-loading" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center">
+  <div style="text-align:center"><div class="loading-title">Humiat ID</div><div class="loading-copy">Aguarde, carregando dados...</div></div>
 </div>
-<header class="portal-top">
-  <a class="portal-logo" href="/painel"><img src="/static/img/logo-humiat.svg" alt="Humiat"></a>
-  <div class="portal-user"><strong>Equipe interna</strong><span>{{ usuario.nome }}</span><a href="/sair">Sair</a></div>
-</header>
+<div class="h-shell">
+  <aside class="h-sidebar" id="h-sidebar" aria-label="Menu Humiat ID">
+    <a class="h-brand" href="/painel">
+      <span class="h-brand-logo"><img src="/static/icons/humiat/icon-192.png" alt=""></span>
+      <span class="h-brand-copy"><span class="h-brand-name">Humiat ID</span><span class="h-brand-tag">Central de sistemas</span></span>
+    </a>
 
-<main class="admin-unified">
+    <nav class="h-nav-section">
+      <div class="h-nav-label">Principal</div>
+      <a class="h-nav-link is-active" href="/painel" title="Painel">
+        <svg viewBox="0 0 24 24"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+        <span>Painel</span>
+      </a>
+    </nav>
+
+    <nav class="h-nav-section">
+      <div class="h-nav-label">Sistemas</div>
+      {% for p in produtos %}
+      <a class="h-nav-link" href="#sistema-{{ p.codigo|lower }}" title="{{ p.nome }}">
+        {% if p.codigo == 'CONNECT' %}<img class="h-product-icon" src="/static/img/produtos/icons/connect.png" alt="">
+        {% elif p.codigo == 'LOKAFEST' %}<img class="h-product-icon" src="/static/img/produtos/icons/lokafest.png" alt="">
+        {% elif p.codigo == 'ORGANIZA' %}<img class="h-product-icon" src="/static/img/produtos/icons/organiza.png" alt="">
+        {% elif p.codigo == 'SOLVOZ' %}<img class="h-product-icon" src="/static/img/produtos/icons/solvoz.svg" alt="">
+        {% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg>{% endif %}
+        <span>{{ p.nome }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <nav class="h-nav-section">
+      <div class="h-nav-label">Identidade</div>
+      <a class="h-nav-link" href="/painel?carregar=usuarios" data-loading-link title="Usuários">
+        <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Usuários</span><span class="h-nav-badge">{{ usuarios_total }}</span>
+      </a>
+      <a class="h-nav-link" href="/painel?carregar=novo-usuario" data-loading-link title="Novo usuário">
+        <svg viewBox="0 0 24 24"><path d="M15 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8" cy="7" r="4"/><path d="M19 8v6M16 11h6"/></svg>
+        <span>Novo usuário</span>
+      </a>
+      <a class="h-nav-link" href="/painel?carregar=novos" data-loading-link title="Usuários novos">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></svg>
+        <span>Usuários novos</span>
+      </a>
+      <a class="h-nav-link" href="/painel?carregar=pendencias" data-loading-link title="Pendências Humiat ID">
+        <svg viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.4 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.4a2 2 0 0 0-3.4 0Z"/></svg>
+        <span>Pendências</span>
+      </a>
+    </nav>
+
+    <div class="h-sidebar-footer">
+      <div class="h-workspace">
+        <div class="h-workspace-avatar">{{ usuario.nome[:1]|upper }}</div>
+        <div class="h-workspace-copy"><div class="h-workspace-name">{{ usuario.nome }}</div><div class="h-workspace-role">Equipe interna</div></div>
+        <a class="h-logout" href="/sair" title="Sair" aria-label="Sair"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/></svg></a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="h-main">
+    <header class="h-topbar">
+      <div class="h-topbar-left">
+        <button class="h-hamburger" type="button" data-drawer-toggle aria-label="Abrir menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <div class="h-crumbs"><span>Humiat ID</span><span class="sep">/</span><span class="current">Hub administrativo</span></div>
+      </div>
+      <div class="h-topbar-actions">
+        <a class="h-icon-btn is-primary" href="/painel?carregar=usuarios" data-loading-link title="Gerenciar usuários">
+          <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span class="h-action-label">Usuários</span>
+        </a>
+      </div>
+    </header>
+
+<main class="admin-unified h-content">
   <section class="admin-unified-head">
     <div>
       <p class="eyebrow">Humiat ID</p>
@@ -57,9 +124,9 @@
       {% for p in produtos %}
       {% set acc = meus_acessos.get(p.codigo, {}) %}
       {% set tem_solvoz = p.codigo == 'SOLVOZ' and (acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) or acc.get('adm', false)) %}
-      <article class="admin-app-card app-{{ p.codigo|lower }}{% if not (acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz) %} is-disabled{% endif %}">
+      <article id="sistema-{{ p.codigo|lower }}" class="admin-app-card app-{{ p.codigo|lower }}{% if not (acc.get('sistema', false) or acc.get('adm', false) or tem_solvoz) %} is-disabled{% endif %}">
         <div class="admin-card-head">
-          <div class="admin-app-icon">{{ p.nome[0] }}</div>
+          <div class="admin-app-icon">{% if p.codigo == 'CONNECT' %}<img src="/static/img/produtos/icons/connect.png" alt="Ícone Connect">{% elif p.codigo == 'LOKAFEST' %}<img src="/static/img/produtos/icons/lokafest.png" alt="Ícone LokaFest">{% elif p.codigo == 'ORGANIZA' %}<img src="/static/img/produtos/icons/organiza.png" alt="Ícone Organiza">{% elif p.codigo == 'SOLVOZ' %}<img src="/static/img/produtos/icons/solvoz.svg" alt="Ícone SolVoz">{% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>{% endif %}</div>
           <div class="admin-card-copy"><span class="card-kicker">{{ p.codigo }}</span><h3>{{ p.nome }}</h3><p>{{ p.descricao }}</p></div>
         </div>
         <div class="admin-badges">
@@ -92,20 +159,20 @@
       {% endfor %}
 
       <article class="admin-app-card app-identidade">
-        <div class="admin-card-head"><div class="admin-app-icon">U</div><div class="admin-card-copy"><span class="card-kicker">Identidade</span><h3>Usuários</h3><p>Cadastros centrais do Humiat ID e permissões independentes por produto.</p></div></div>
+        <div class="admin-card-head"><div class="admin-app-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></div><div class="admin-card-copy"><span class="card-kicker">Identidade</span><h3>Usuários</h3><p>Cadastros centrais do Humiat ID e permissões independentes por produto.</p></div></div>
         <div class="admin-badges"><span class="status-badge active">{{ usuarios_total }} usuários</span></div>
         <div class="admin-actions"><a class="btn-secondary" href="/painel?carregar=usuarios" data-loading-link>Gerenciar usuários</a><a class="btn-primary" href="/painel?carregar=novo-usuario" data-loading-link>+ Novo usuário</a></div>
       </article>
 
       <article class="admin-app-card app-identidade">
-        <div class="admin-card-head"><div class="admin-app-icon">N</div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Usuários novos</h3><p>Responsáveis de Empresas SolVoz sem Humiat ID ou com cadastro incompleto. A busca só roda quando você solicitar.</p></div></div>
+        <div class="admin-card-head"><div class="admin-app-icon"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></svg></div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Usuários novos</h3><p>Responsáveis de Empresas SolVoz sem Humiat ID ou com cadastro incompleto. A busca só roda quando você solicitar.</p></div></div>
         <div class="admin-badges">{% if carregar == 'novos' %}<span class="status-badge {% if novos_usuarios_lokafest|length > 0 %}active{% endif %}">{{ novos_usuarios_lokafest|length }} encontrado(s)</span>{% else %}<span class="status-badge">Sob demanda</span>{% endif %}</div>
         {% if novos_usuarios_lokafest_erro %}<small class="error-inline">{{ novos_usuarios_lokafest_erro }}</small>{% endif %}
         <div class="admin-actions one"><a class="btn-primary" href="/painel?carregar=novos" data-loading-link>Buscar novos usuários</a></div>
       </article>
 
       <article class="admin-app-card app-migracao">
-        <div class="admin-card-head"><div class="admin-app-icon">P</div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Pendências Humiat ID</h3><p>Usuários já existentes no LokaFest sem Empresa SolVoz, ou com Empresa SolVoz ainda sem responsável definido.</p></div></div>
+        <div class="admin-card-head"><div class="admin-app-icon"><svg viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.4 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.4a2 2 0 0 0-3.4 0Z"/></svg></div><div class="admin-card-copy"><span class="card-kicker">Consulta manual</span><h3>Pendências Humiat ID</h3><p>Usuários já existentes no LokaFest sem Empresa SolVoz, ou com Empresa SolVoz ainda sem responsável definido.</p></div></div>
         <div class="admin-badges">{% if carregar == 'pendencias' %}<span class="status-badge {% if pendencias_lokafest|length > 0 %}active{% endif %}">{{ pendencias_lokafest|length }} pendência(s)</span>{% else %}<span class="status-badge">Sob demanda</span>{% endif %}</div>
         {% if pendencias_lokafest_erro %}<small class="error-inline">Não foi possível consultar o LokaFest: {{ pendencias_lokafest_erro }}</small>{% endif %}
         <div class="admin-actions one"><a class="btn-primary" href="/painel?carregar=pendencias" data-loading-link>Consultar pendências</a></div>
@@ -114,6 +181,10 @@
   </section>
 
 </main>
+    <footer class="h-footer"><span><strong>Humiat ID</strong> · Central de identidade e acessos</span><span>Design System HUMIAT</span></footer>
+  </div>
+</div>
+<div class="h-drawer-backdrop" data-drawer-close></div>
 
 <dialog class="admin-dialog" id="novos-usuarios-lokafest">
   <div class="dialog-card dialog-wide">
@@ -293,6 +364,13 @@
 
 <script>
 (() => {
+  const drawerToggle = document.querySelector('[data-drawer-toggle]');
+  const drawerClose = document.querySelector('[data-drawer-close]');
+  const closeDrawer = () => document.body.classList.remove('has-drawer-open');
+  if (drawerToggle) drawerToggle.addEventListener('click', () => document.body.classList.toggle('has-drawer-open'));
+  if (drawerClose) drawerClose.addEventListener('click', closeDrawer);
+  document.querySelectorAll('.h-sidebar a').forEach(a => a.addEventListener('click', () => { if (window.innerWidth <= 720) closeDrawer(); }));
+  window.addEventListener('resize', () => { if (window.innerWidth > 720) closeDrawer(); });
   const loading = document.getElementById('humiat-loading');
   const hideLoading = () => { if (loading) loading.style.display = 'none'; };
   window.addEventListener('DOMContentLoaded', hideLoading);

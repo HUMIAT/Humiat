@@ -888,7 +888,7 @@ def _enviar_email_recuperacao(destino: str, nome: str, link: str) -> None:
         "Humiat ID - Redefinição de senha",
         texto,
         html,
-        user_agent="Humiat-ID/1.2.20",
+        user_agent="Humiat-ID/1.2.22",
     )
 
 
@@ -2077,7 +2077,7 @@ def _enviar_email_migracao_humiat(destino: str, nome: str, link: str) -> None:
       {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.20")
+    _enviar_resend_humiat(destino, "Humiat ID - Crie sua nova senha", texto_msg, html_msg, user_agent="Humiat-ID-Migracao/1.2.22")
 
 
 def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> None:
@@ -2101,7 +2101,7 @@ def _enviar_email_primeiro_acesso_humiat(destino: str, nome: str, link: str) -> 
       {enderecos_html}
     </div>
     """
-    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.20")
+    _enviar_resend_humiat(destino, "Humiat ID - Seu acesso está pronto", texto_msg, html_msg, user_agent="Humiat-ID-Primeiro-Acesso/1.2.22")
 
 
 def _aplicar_acessos_cliente_humiat(

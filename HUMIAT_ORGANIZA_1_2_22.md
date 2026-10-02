@@ -1,17 +1,13 @@
 # HUMIAT / Organiza 1.2.22
 
-## Organiza — novo padrão administrativo
-- Aplica ao Organiza a linguagem visual administrativa escolhida a partir do Adminator, adaptada à realidade atual do sistema.
-- Mantém intactos banco, rotas, regras de negócio, integrações e fluxos existentes.
-- Sidebar passa a usar fundo claro, grupos compactos, seleção com faixa da cor da empresa e hierarquia visual mais limpa.
-- Padroniza cartões, métricas, botões, botões secundários, ações por ícone, campos, selects, textareas, tabelas, filtros, chips, alertas e diálogos.
-- Mantém a cor principal dinâmica por empresa através das variáveis do HUMIAT Design System.
-- Preserva os ícones reais e a identidade já implementada no HUMIAT 1.2.21.
-- Mantém a densidade necessária às telas operacionais do Organiza, sem copiar espaçamentos excessivos de um dashboard demonstrativo.
-- Melhora foco, hover, disabled, bordas e estados semânticos de sucesso, alerta, erro e informação.
-- Preserva o comportamento responsivo e atualiza a aparência da barra e navegação mobile.
+## Humiat ID — padrão visual baseado no Adminator
 
-## Arquitetura visual
-- Nova camada: `static/css/organiza-adminator.css`.
-- A camada é carregada por último em `templates/organiza/base.html`, permitindo padronizar telas antigas sem reescrever templates nem CSS histórico agora.
-- Essa estratégia facilita migração gradual: os estilos legados podem ser eliminados tela a tela depois, sem risco para a operação.
+- Mantém todas as informações e textos do Humiat ID.
+- Adota o padrão escuro do componente de referência para menu, background, cards, botões, campos, badges e modais.
+- Menu lateral com ícone + nome; não transforma o hub em interface somente de ícones.
+- Ícones reais de Connect, LokaFest, Organiza e SolVoz no menu e nos cards dos sistemas.
+- Botões principais continuam com texto; ícones são complemento.
+- Responsividade baseada no componente: desktop completo, tablet com sidebar compacta e celular com drawer/hamburger.
+- Em celular, o menu volta a exibir ícone + nome dentro do drawer.
+- Mantém as rotinas, permissões, consultas manuais, pendências, QR, métricas e ações existentes.
+- Base pronta para posteriormente receber a paleta SolVoz por empresa sem alterar o contrato dos componentes.

@@ -1,0 +1,123 @@
+/* =========================================================
+   HUMIAT ID — Adminator-inspired shell v1
+   Base visual: dark, compacta, responsiva e consistente.
+   Mantém conteúdo e textos; ícones complementam a informação.
+   ========================================================= */
+
+.humiat-adminator{
+  --bg-body:#0b1120;
+  --bg-card:#141b2d;
+  --bg-sidebar:#141b2d;
+  --bg-hover:#1c2438;
+  --bg-muted:#1a2237;
+  --t-base:#f1f5f9;
+  --t-muted:#94a3b8;
+  --t-light:#64748b;
+  --t-inverse:#0b1120;
+  --border:#222c42;
+  --border-soft:#1a2237;
+  --primary:#60a5fa;
+  --primary-light:#93c5fd;
+  --primary-dark:#3b82f6;
+  --primary-soft:#0f2847;
+  --primary-ring:rgba(96,165,250,.24);
+  --success:#34d399;
+  --success-soft:#0f2a20;
+  --warning:#fbbf24;
+  --warning-soft:#2b1f08;
+  --danger:#f87171;
+  --danger-soft:#2b1414;
+  --info:#38bdf8;
+  --info-soft:#0d2232;
+  --purple:#a78bfa;
+  --purple-soft:#1e1a2c;
+  --shadow-sm:0 1px 2px 0 rgba(0,0,0,.4);
+  --shadow-card:0 1px 3px 0 rgba(0,0,0,.30),0 1px 2px -1px rgba(0,0,0,.25);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.5),0 4px 6px -4px rgba(0,0,0,.4);
+  --overlay:rgba(11,17,32,.78);
+  margin:0;
+  background:var(--bg-body)!important;
+  color:var(--t-base)!important;
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  font-size:14px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.humiat-adminator *{box-sizing:border-box}
+.humiat-adminator a{color:inherit;text-decoration:none}
+.humiat-adminator button{font:inherit}
+
+/* Shell / sidebar / topbar — mesmas proporções do componente de referência. */
+.h-shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+.h-sidebar{background:var(--bg-sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:22px;height:100vh;overflow-y:auto;padding:22px 16px 18px;position:sticky;top:0;z-index:40}
+.h-sidebar::-webkit-scrollbar{width:4px}.h-sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+.h-brand{align-items:center;border-bottom:1px solid var(--border-soft);display:flex;gap:10px;padding:4px 10px 20px;min-height:58px}
+.h-brand-logo{background:linear-gradient(145deg,#0b74ff,#00c8e8);border-radius:8px;display:grid;height:32px;place-items:center;width:32px;flex:0 0 32px;box-shadow:0 4px 12px rgba(11,116,255,.25);overflow:hidden}
+.h-brand-logo img{display:block;width:24px;height:24px;object-fit:contain}
+.h-brand-copy{min-width:0;line-height:1.1}.h-brand-name{font-size:15.5px;font-weight:750;letter-spacing:-.02em}.h-brand-tag{color:var(--t-light);font-size:9.5px;letter-spacing:.10em;text-transform:uppercase;margin-top:4px}
+.h-nav-section{display:flex;flex-direction:column;gap:2px}.h-nav-label{color:var(--t-light);font-size:10px;letter-spacing:.18em;padding:0 10px 6px;text-transform:uppercase;font-weight:700}
+.h-nav-link{align-items:center;border-radius:8px;color:var(--t-muted);display:flex;font-size:13px;font-weight:550;gap:12px;line-height:1.2;padding:9px 12px;transition:background-color .18s ease,color .18s ease,box-shadow .18s ease;min-height:38px}
+.h-nav-link:hover{background:var(--bg-hover);color:var(--t-base)}.h-nav-link.is-active{background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary);color:var(--primary)}
+.h-nav-link svg{display:block;fill:none;flex-shrink:0;height:17px;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.75;width:17px}
+.h-nav-link .h-product-icon{height:19px;width:19px;border-radius:5px;object-fit:contain;flex:0 0 19px;background:#fff;padding:1px}
+.h-nav-link>span:not(.h-nav-badge){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.h-nav-badge{border-radius:999px;background:var(--bg-muted);color:var(--t-muted);font-size:9px;font-weight:700;line-height:1.4;margin-left:auto;padding:2px 6px}
+.h-sidebar-footer{border-top:1px solid var(--border-soft);margin-top:auto;padding-top:16px}
+.h-workspace{align-items:center;border-radius:8px;display:flex;gap:10px;padding:6px 10px;min-height:44px}.h-workspace:hover{background:var(--bg-hover)}
+.h-workspace-avatar{background:linear-gradient(135deg,var(--primary),var(--purple));border-radius:50%;color:#fff;display:grid;flex:0 0 32px;font-size:12.5px;font-weight:700;height:32px;place-items:center;width:32px}
+.h-workspace-copy{line-height:1.2;min-width:0;flex:1}.h-workspace-name{font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.h-workspace-role{color:var(--t-light);font-size:11px;margin-top:3px}.h-logout{color:var(--t-muted);display:grid;place-items:center;border-radius:7px;width:30px;height:30px;flex:0 0 30px}.h-logout:hover{background:var(--bg-muted);color:var(--danger)}.h-logout svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}
+
+.h-main{display:flex;flex-direction:column;min-width:0;min-height:100vh}.h-topbar{align-items:center;backdrop-filter:saturate(140%) blur(10px);-webkit-backdrop-filter:saturate(140%) blur(10px);background:var(--overlay);border-bottom:1px solid var(--border);display:flex;height:60px;justify-content:space-between;padding:0 32px;position:sticky;top:0;z-index:30}
+.h-topbar-left,.h-topbar-actions{align-items:center;display:flex}.h-topbar-left{min-width:0;gap:6px}.h-topbar-actions{gap:6px;flex-shrink:0}.h-crumbs{align-items:center;color:var(--t-muted);display:flex;font-size:13px;font-weight:500;gap:10px;min-width:0}.h-crumbs .sep{color:var(--t-light)}.h-crumbs .current{color:var(--t-base);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.h-hamburger{align-items:center;border-radius:8px;color:var(--t-base);display:none;height:36px;justify-content:center;margin-right:4px;width:36px;border:0;background:transparent;cursor:pointer}.h-hamburger:hover{background:var(--bg-hover)}.h-hamburger svg{height:20px;width:20px;fill:none;stroke:currentColor;stroke-width:1.8}
+.h-icon-btn{align-items:center;border-radius:8px;color:var(--t-muted);display:inline-flex;height:36px;justify-content:center;gap:7px;padding:0 10px;position:relative;transition:background .18s,color .18s;border:0;background:transparent;font-weight:600;font-size:12.5px;cursor:pointer}.h-icon-btn:hover{background:var(--bg-hover);color:var(--t-base)}.h-icon-btn svg{fill:none;height:17px;stroke:currentColor;stroke-width:1.8;width:17px}.h-icon-btn.is-primary{background:var(--primary-soft);color:var(--primary)}.h-icon-btn.is-primary:hover{background:color-mix(in srgb,var(--primary-soft) 76%,var(--primary) 24%)}
+.h-content{width:100%!important;max-width:none!important;padding:32px!important;margin:0!important;flex:1}.h-footer{align-items:center;color:var(--t-muted);display:flex;font-size:12px;justify-content:space-between;padding:20px 32px 28px;border-top:1px solid transparent}.h-footer strong{color:var(--t-base)}
+.h-drawer-backdrop{backdrop-filter:blur(2px);background:rgba(0,0,0,.50);inset:0;opacity:0;position:fixed;transition:opacity .24s ease,visibility .24s;visibility:hidden;z-index:35}body.has-drawer-open .h-drawer-backdrop{opacity:1;visibility:visible}
+
+/* Tipografia e seções */
+.humiat-adminator .eyebrow,.humiat-adminator .section-kicker,.humiat-adminator .card-kicker{color:var(--primary)!important;font-size:10px!important;font-weight:750!important;letter-spacing:.16em!important;text-transform:uppercase!important}
+.humiat-adminator h1,.humiat-adminator h2,.humiat-adminator h3{color:var(--t-base)!important}.humiat-adminator h1{font-size:clamp(27px,3vw,36px)!important;letter-spacing:-.035em!important}.humiat-adminator h2{letter-spacing:-.025em!important}.humiat-adminator p{color:var(--t-muted)}
+.humiat-adminator .admin-unified-head{align-items:flex-end;margin-bottom:24px}.humiat-adminator .admin-unified-head p{color:var(--t-muted)!important}.humiat-adminator .section-head p,.humiat-adminator .section-title p{color:var(--t-muted)!important}
+
+/* Cards — preserva toda informação, muda somente o contrato visual. */
+.humiat-adminator .admin-app-grid,.humiat-adminator .app-grid{gap:16px!important}
+.humiat-adminator .admin-app-card,.humiat-adminator .app-card,.humiat-adminator .company-hero,.humiat-adminator .client-qr-card{background:var(--bg-card)!important;border:1px solid var(--border)!important;border-radius:14px!important;box-shadow:var(--shadow-card)!important;color:var(--t-base)!important}
+.humiat-adminator .admin-app-card,.humiat-adminator .app-card{padding:20px!important}.humiat-adminator .admin-app-card:before,.humiat-adminator .app-card:before{height:3px!important;background:var(--primary)!important}
+.humiat-adminator .admin-app-card:hover,.humiat-adminator .app-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)!important}
+.humiat-adminator .admin-card-copy h3,.humiat-adminator .card-copy h3{font-size:17px!important;margin:3px 0 4px!important}.humiat-adminator .admin-card-copy p,.humiat-adminator .card-copy p,.humiat-adminator .muted-copy{color:var(--t-muted)!important;font-size:12.5px!important}
+.humiat-adminator .admin-app-icon,.humiat-adminator .app-icon{width:42px!important;height:42px!important;flex:0 0 42px!important;border-radius:10px!important;background:var(--bg-muted)!important;border:1px solid var(--border)!important;box-shadow:none!important;color:var(--primary)!important;overflow:hidden;padding:6px!important}
+.humiat-adminator .admin-app-icon svg,.humiat-adminator .app-icon svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8}.humiat-adminator .admin-app-icon img,.humiat-adminator .app-icon img{width:100%;height:100%;object-fit:contain;border-radius:5px}
+.humiat-adminator .metric,.humiat-adminator .group-row,.humiat-adminator .message{background:var(--bg-muted)!important;border-color:var(--border)!important;color:var(--t-muted)!important;border-radius:10px!important}.humiat-adminator .metric strong,.humiat-adminator .group-row strong,.humiat-adminator .message strong{color:var(--t-base)!important}.humiat-adminator .metric small,.humiat-adminator .group-row span,.humiat-adminator .note,.humiat-adminator .micro-value{color:var(--t-muted)!important}
+.humiat-adminator .message.ok{background:var(--success-soft)!important;border-color:color-mix(in srgb,var(--success) 26%,var(--border))!important;color:var(--success)!important}.humiat-adminator .message.warn{background:var(--warning-soft)!important;border-color:color-mix(in srgb,var(--warning) 26%,var(--border))!important;color:var(--warning)!important}.humiat-adminator .message.danger{background:var(--danger-soft)!important;border-color:color-mix(in srgb,var(--danger) 26%,var(--border))!important;color:var(--danger)!important}
+.humiat-adminator .status-badge,.humiat-adminator .status{background:var(--bg-muted)!important;border:1px solid var(--border)!important;color:var(--t-muted)!important}.humiat-adminator .status-badge.active,.humiat-adminator .status.on{background:var(--success-soft)!important;border-color:color-mix(in srgb,var(--success) 25%,var(--border))!important;color:var(--success)!important}
+.humiat-adminator .qr-panel{background:var(--bg-card)!important;color:var(--t-base)!important;border:1px solid var(--border)!important;box-shadow:var(--shadow-card)!important}.humiat-adminator .qr-copy small{color:var(--t-muted)!important}
+.humiat-adminator .company-hero:after{background:radial-gradient(circle,color-mix(in srgb,var(--primary) 20%,transparent),transparent 68%)!important}
+
+/* Botões — padrão do componente: primary, secondary/outline e ghost. */
+.humiat-adminator .btn-primary,.humiat-adminator .btn-secondary,.humiat-adminator .btn-small,.humiat-adminator .btn-ghost,.humiat-adminator button.btn-primary,.humiat-adminator button.btn-secondary,.humiat-adminator button.btn-ghost{align-items:center!important;border-radius:8px!important;display:inline-flex!important;font-size:13px!important;font-weight:650!important;gap:8px!important;justify-content:center!important;min-height:38px!important;padding:8px 13px!important;transition:background .18s,border-color .18s,color .18s,transform .18s!important;box-shadow:none!important;text-decoration:none!important}
+.humiat-adminator .btn-primary{background:var(--primary)!important;border:1px solid var(--primary)!important;color:#07111d!important}.humiat-adminator .btn-primary:hover{background:var(--primary-light)!important;border-color:var(--primary-light)!important;transform:translateY(-1px)}
+.humiat-adminator .btn-secondary{background:transparent!important;border:1px solid var(--border)!important;color:var(--t-base)!important}.humiat-adminator .btn-secondary:hover{background:var(--bg-hover)!important;border-color:color-mix(in srgb,var(--primary) 50%,var(--border))!important;color:var(--primary)!important}
+.humiat-adminator .btn-ghost{background:transparent!important;border:1px solid transparent!important;color:var(--t-muted)!important}.humiat-adminator .btn-ghost:hover{background:var(--bg-hover)!important;color:var(--t-base)!important}.humiat-adminator .btn-small{min-height:32px!important;padding:6px 10px!important;font-size:12px!important}
+
+/* Campos, tabelas e modais. */
+.humiat-adminator input:not([type=checkbox]):not([type=radio]),.humiat-adminator select,.humiat-adminator textarea{background:var(--bg-card)!important;border:1px solid var(--border)!important;border-radius:8px!important;color:var(--t-base)!important;min-height:38px;padding:8px 11px!important;outline:none!important}.humiat-adminator input:focus,.humiat-adminator select:focus,.humiat-adminator textarea:focus{border-color:var(--primary)!important;box-shadow:0 0 0 3px var(--primary-ring)!important}.humiat-adminator label{color:var(--t-base)}
+.humiat-adminator .admin-dialog{border:1px solid var(--border)!important;border-radius:14px!important;color:var(--t-base)!important}.humiat-adminator .dialog-card{background:var(--bg-card)!important;border-radius:13px!important}.humiat-adminator .dialog-copy,.humiat-adminator .dialog-card small{color:var(--t-muted)!important}.humiat-adminator .dialog-close{background:var(--bg-muted)!important;border:1px solid var(--border)!important;color:var(--t-base)!important;border-radius:8px!important}.humiat-adminator .dialog-close:hover{background:var(--bg-hover)!important}
+.humiat-adminator .check-row{background:var(--bg-muted)!important;border-color:var(--border)!important}.humiat-adminator .check-row input{accent-color:var(--primary)!important}.humiat-adminator .all-user-row{border-bottom-color:var(--border)!important}
+.humiat-adminator .id-alert,.humiat-adminator .admin-alert{background:var(--danger-soft)!important;border:1px solid color-mix(in srgb,var(--danger) 35%,var(--border))!important;color:var(--danger)!important}.humiat-adminator .id-success{background:var(--success-soft)!important;border:1px solid color-mix(in srgb,var(--success) 35%,var(--border))!important;color:var(--success)!important}
+
+/* Loading */
+#humiat-loading{background:rgba(11,17,32,.96)!important;color:var(--t-base)!important;backdrop-filter:blur(8px)}#humiat-loading .loading-title{font-size:20px;font-weight:750}#humiat-loading .loading-copy{color:var(--t-muted);margin-top:6px}
+
+/* Responsividade do componente de referência:
+   <=1100: sidebar compacta em ícones.
+   <=720: drawer móvel com hamburger e textos completos.
+   <=480: ações/formulários empilhados. */
+@media(max-width:1100px){
+  .h-shell{grid-template-columns:72px minmax(0,1fr)}.h-sidebar{padding:20px 10px}.h-brand-copy,.h-nav-label,.h-nav-link>span:not(.h-nav-badge),.h-nav-badge,.h-workspace-copy,.h-logout{display:none}.h-brand{justify-content:center;padding:0 0 18px}.h-nav-link{justify-content:center;padding:10px}.h-workspace{justify-content:center;padding:6px}.h-content{padding:28px 24px!important}
+}
+@media(max-width:720px){
+  .h-shell{display:block}.h-sidebar{box-shadow:0 12px 40px -8px rgba(0,0,0,.55);height:100vh;left:0;padding:22px 16px 18px;position:fixed;top:0;transform:translateX(-100%);transition:transform .24s cubic-bezier(.2,.7,.2,1);width:280px;z-index:50}.h-brand-copy,.h-nav-label,.h-nav-link>span:not(.h-nav-badge),.h-nav-badge,.h-workspace-copy,.h-logout{display:revert}.h-brand{justify-content:flex-start;padding:4px 10px 20px}.h-nav-link{justify-content:flex-start;padding:9px 12px}.h-workspace{justify-content:flex-start;padding:6px 10px}body.has-drawer-open .h-sidebar{transform:translateX(0)}body.has-drawer-open{overflow:hidden}.h-hamburger{display:inline-flex}.h-topbar{padding:0 12px}.h-topbar-actions{gap:2px}.h-crumbs{flex:1;gap:6px}.h-crumbs .sep,.h-crumbs>span:not(.current){display:none}.h-content{padding:20px 16px 16px!important}.h-footer{gap:10px;padding:20px 16px;align-items:flex-start;flex-direction:column}.h-icon-btn .h-action-label{display:none}.h-icon-btn{width:36px;padding:0}.admin-unified-head{align-items:flex-start!important;flex-direction:column!important}.admin-head-actions{width:100%}.admin-head-actions>*{flex:1}.company-hero{padding:18px!important}.app-grid,.admin-app-grid{grid-template-columns:1fr!important}.card-head,.admin-card-head{gap:10px!important}.card{padding:18px}.qr-panel{min-width:0!important;width:100%!important}.section-head{align-items:flex-start!important;flex-direction:column!important}.actions.two,.admin-actions{grid-template-columns:1fr!important}
+}
+@media(max-width:480px){
+  .humiat-adminator .form-actions,.humiat-adminator .dialog-actions{align-items:stretch!important;flex-direction:column!important}.humiat-adminator .form-actions .btn-primary,.humiat-adminator .form-actions .btn-secondary,.humiat-adminator .dialog-actions .btn-primary,.humiat-adminator .dialog-actions .btn-secondary,.humiat-adminator .dialog-actions .btn-ghost{width:100%!important;justify-content:center!important}.humiat-adminator .metrics{grid-template-columns:1fr!important}.humiat-adminator .qr-panel{grid-template-columns:72px minmax(0,1fr)!important}.humiat-adminator .qr-panel img{width:72px!important;height:72px!important}.humiat-adminator .admin-app-card,.humiat-adminator .app-card{padding:17px!important}
+}

@@ -34,15 +34,69 @@
     @media(max-width:1050px){.app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.company-hero{grid-template-columns:1fr}.qr-panel{min-width:0;width:100%;max-width:520px}}
     @media(max-width:680px){.portal-main{padding:0 16px 38px}.portal-hello h1{font-size:31px}.company-hero{padding:20px}.company-hero h2{font-size:25px}.qr-panel{align-items:flex-start}.qr-panel img{width:78px;height:78px}.app-grid{grid-template-columns:1fr}.app-card{min-height:auto}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.actions.two{grid-template-columns:1fr}.section-head{align-items:flex-start}.group-row{align-items:flex-start;flex-direction:column}}
   </style>
+  <link rel="stylesheet" href="/static/css/humiat-adminator.css?v=1222">
 </head>
-<body class="portal-body">
-<header class="portal-top">
-  <a class="portal-logo" href="/painel"><img src="/static/img/logo-humiat.svg" alt="Humiat"></a>
-  <div class="portal-user"><span>{{ usuario.nome }}</span><a href="/sair">Sair</a></div>
-</header>
+<body class="portal-body humiat-adminator">
+<div class="h-shell">
+  <aside class="h-sidebar" id="h-sidebar" aria-label="Menu Humiat ID">
+    <a class="h-brand" href="/painel">
+      <span class="h-brand-logo"><img src="/static/icons/humiat/icon-192.png" alt=""></span>
+      <span class="h-brand-copy"><span class="h-brand-name">Humiat ID</span><span class="h-brand-tag">Central de sistemas</span></span>
+    </a>
 
-<main class="portal-main">
-  <form method="post" action="/painel/atualizar-dados" style="display:flex;justify-content:flex-end;padding-top:12px;margin-bottom:-8px"><button class="btn-small" type="submit">Atualizar dados</button></form>
+    <nav class="h-nav-section">
+      <div class="h-nav-label">Principal</div>
+      <a class="h-nav-link is-active" href="#inicio" title="Início">
+        <svg viewBox="0 0 24 24"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+        <span>Início</span>
+      </a>
+      {% if empresa and meus_acessos.get('SOLVOZ', {}).get('solvoz_catalogo', false) %}
+      <a class="h-nav-link" href="#empresa" title="Empresa e catálogo">
+        <svg viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M13 9h6v12"/></svg>
+        <span>{{ empresa.nome }}</span>
+      </a>
+      {% endif %}
+    </nav>
+
+    <nav class="h-nav-section">
+      <div class="h-nav-label">Sistemas</div>
+      {% for p in produtos %}
+      <a class="h-nav-link" href="#sistema-{{ p.codigo|lower }}" title="{{ p.nome }}">
+        {% if p.codigo == 'CONNECT' %}<img class="h-product-icon" src="/static/img/produtos/icons/connect.png" alt="">
+        {% elif p.codigo == 'LOKAFEST' %}<img class="h-product-icon" src="/static/img/produtos/icons/lokafest.png" alt="">
+        {% elif p.codigo == 'ORGANIZA' %}<img class="h-product-icon" src="/static/img/produtos/icons/organiza.png" alt="">
+        {% elif p.codigo == 'SOLVOZ' %}<img class="h-product-icon" src="/static/img/produtos/icons/solvoz.svg" alt="">
+        {% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg>{% endif %}
+        <span>{{ p.nome }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <div class="h-sidebar-footer">
+      <div class="h-workspace">
+        <div class="h-workspace-avatar">{{ usuario.nome[:1]|upper }}</div>
+        <div class="h-workspace-copy"><div class="h-workspace-name">{{ usuario.nome }}</div><div class="h-workspace-role">Humiat ID</div></div>
+        <a class="h-logout" href="/sair" title="Sair" aria-label="Sair"><svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/></svg></a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="h-main">
+    <header class="h-topbar">
+      <div class="h-topbar-left">
+        <button class="h-hamburger" type="button" data-drawer-toggle aria-label="Abrir menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <div class="h-crumbs"><span>Humiat ID</span><span class="sep">/</span><span class="current">Meu painel</span></div>
+      </div>
+      <div class="h-topbar-actions">
+        <form method="post" action="/painel/atualizar-dados">
+          <button class="h-icon-btn is-primary" type="submit" title="Atualizar dados">
+            <svg viewBox="0 0 24 24"><path d="M20 6v6h-6"/><path d="M4 18v-6h6"/><path d="M6.5 9a7 7 0 0 1 11.3-2.3L20 9"/><path d="M4 15l2.2 2.3A7 7 0 0 0 17.5 15"/></svg><span class="h-action-label">Atualizar dados</span>
+          </button>
+        </form>
+      </div>
+    </header>
+
+<main class="portal-main h-content" id="inicio">
   <section class="portal-hello">
     <p class="eyebrow">HUMIAT ID</p>
     <h1>Olá, {{ usuario.nome }}.</h1>
@@ -52,7 +106,7 @@
   {% if request.query_params.get('erro') %}<div class="id-alert" style="margin-bottom:16px">{{ request.query_params.get('erro') }}</div>{% endif %}
 
   {% if empresa %}
-  <section class="company-hero">
+  <section class="company-hero" id="empresa">
     <div>
       <span class="company-label">{{ empresa.nome }}</span>
       <h2>Seu ecossistema Humiat</h2>
@@ -85,9 +139,9 @@
       {% set acc = meus_acessos.get(p.codigo, {}) %}
       {% if p.codigo == 'SOLVOZ' %}{% set liberado = acc.get('solvoz_comprado', false) or acc.get('solvoz_catalogo', false) %}{% else %}{% set liberado = acc.get('sistema', false) %}{% endif %}
 
-      <article class="app-card app-{{ p.codigo|lower }}">
+      <article id="sistema-{{ p.codigo|lower }}" class="app-card app-{{ p.codigo|lower }}">
         <div class="card-head">
-          <div class="app-icon">{{ p.nome[0] }}</div>
+          <div class="app-icon">{% if p.codigo == 'CONNECT' %}<img src="/static/img/produtos/icons/connect.png" alt="Ícone Connect">{% elif p.codigo == 'LOKAFEST' %}<img src="/static/img/produtos/icons/lokafest.png" alt="Ícone LokaFest">{% elif p.codigo == 'ORGANIZA' %}<img src="/static/img/produtos/icons/organiza.png" alt="Ícone Organiza">{% elif p.codigo == 'SOLVOZ' %}<img src="/static/img/produtos/icons/solvoz.svg" alt="Ícone SolVoz">{% else %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>{% endif %}</div>
           <div class="card-copy">
             {% if p.codigo == 'LOKAFEST' and lokafest_resumo.ok and lokafest_resumo.usuario_existe %}
               <span class="status {{ 'on' if lokafest_resumo.apto_indicacoes else 'attn' }}">{{ 'Apto para indicações' if lokafest_resumo.apto_indicacoes else 'Atenção necessária' }}</span>
@@ -191,5 +245,20 @@
   </section>
   <div class="footer-note">Humiat • Tecnologia que conecta. Inovação que transforma.</div>
 </main>
+    <footer class="h-footer"><span><strong>Humiat ID</strong> · Seu ponto central de acesso</span><span>Humiat</span></footer>
+  </div>
+</div>
+<div class="h-drawer-backdrop" data-drawer-close></div>
+<script>
+(() => {
+  const toggle = document.querySelector('[data-drawer-toggle]');
+  const backdrop = document.querySelector('[data-drawer-close]');
+  const closeDrawer = () => document.body.classList.remove('has-drawer-open');
+  if (toggle) toggle.addEventListener('click', () => document.body.classList.toggle('has-drawer-open'));
+  if (backdrop) backdrop.addEventListener('click', closeDrawer);
+  document.querySelectorAll('.h-sidebar a').forEach(a => a.addEventListener('click', () => { if (window.innerWidth <= 720) closeDrawer(); }));
+  window.addEventListener('resize', () => { if (window.innerWidth > 720) closeDrawer(); });
+})();
+</script>
 </body>
 </html>
