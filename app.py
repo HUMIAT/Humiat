@@ -2300,7 +2300,10 @@ def _salvar_progresso_contagem(
         registro = EstoqueContagemProgresso(item_id=int(item_id), cor=cor_n)
         db.add(registro)
     registro.quantidade = max(float(quantidade or 0), 0)
-    registro.minimo = None if minimo is None else max(float(minimo or 0), 0)
+    # 1.2.36: a contagem física não edita o mínimo. Enquanto existir dado legado
+    # ainda não migrado, não apague esse valor ao salvar uma contagem parcial.
+    if minimo is not None:
+        registro.minimo = max(float(minimo or 0), 0)
     registro.observacao = (observacao or '').strip() or None
     registro.usuario_id = usuario_id
     registro.atualizado_em = datetime.now()
@@ -2456,6 +2459,66 @@ def _linhas_minimos_itens(db: Session) -> list[dict]:
         else:
             saida.append({"item": item, "cor": "", "minimo": float(linha.get("minimo") or 0), "controla_cor": False})
     return saida
+
+
+def _migrar_minimos_estoque_legado_1236(db: Session) -> int:
+    """Restaura os mínimos definidos na antiga planilha de contagem.
+
+    Até a 1.2.25 o estoque mínimo ficava em ``estoque_contagem_progresso.minimo``.
+    Na 1.2.26 ele foi separado da contagem e passou para ``estoque_minimos``, mas
+    os valores já existentes não foram copiados. O efeito era a posição mostrar
+    MÍNIMO=0 e, por consequência, o relatório de compras não sugerir reposição,
+    mesmo com saídas de manutenção e reservas de venda corretamente refletidas
+    no disponível.
+
+    A migração é conservadora: só preenche uma chave item/cor que ainda não tem
+    registro na tabela nova. Assim, qualquer mínimo já definido na tela de Itens
+    continua sendo a fonte oficial e nunca é sobrescrito.
+    """
+    chave_migracao = "estoque_minimos_legado_contagem_1_2_36"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave_migracao).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0
+
+    atuais = {
+        (int(m.item_id), normalizar_cor(m.cor))
+        for m in db.query(EstoqueMinimo).all()
+    }
+
+    # Mantém somente o registro legado mais recente de cada item/cor.
+    # Isso respeita inclusive um último valor 0/None, que significa não restaurar
+    # um mínimo antigo daquela chave.
+    legados_por_chave: dict[tuple[int, str], EstoqueContagemProgresso] = {}
+    legados = db.query(EstoqueContagemProgresso).order_by(
+        EstoqueContagemProgresso.atualizado_em.asc(),
+        EstoqueContagemProgresso.id.asc(),
+    ).all()
+    for legado in legados:
+        legados_por_chave[(int(legado.item_id), normalizar_cor(legado.cor))] = legado
+
+    migrados = 0
+    for (item_id, cor), legado in legados_por_chave.items():
+        if (item_id, cor) in atuais:
+            continue
+        try:
+            minimo = float(legado.minimo) if legado.minimo is not None else 0.0
+        except (TypeError, ValueError):
+            minimo = 0.0
+        if minimo <= 0:
+            continue
+        item = db.query(Item).filter(Item.id == item_id).first()
+        if not item or not item_controla_estoque(item):
+            continue
+        _salvar_minimo_estoque(db, item_id, cor, minimo)
+        atuais.add((item_id, cor))
+        migrados += 1
+
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave_migracao)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+    return migrados
 
 
 def _migrar_estoque_primeira_implantacao_1166(db: Session) -> int:
@@ -4330,6 +4393,9 @@ def iniciar_banco():
         fornecedores_1226, vinculos_1226 = _seed_fornecedores_itens_1226(db)
         if fornecedores_1226 or vinculos_1226:
             print(f"[ITENS] 1.2.26: fornecedores criados={fornecedores_1226}; vínculos iniciais={vinculos_1226}.")
+        minimos_restaurados_1236 = _migrar_minimos_estoque_legado_1236(db)
+        if minimos_restaurados_1236:
+            print(f"[ESTOQUE] 1.2.36: mínimos legados restaurados={minimos_restaurados_1236}.")
         manut_aprovadas_1233, manut_pendentes_1233 = _migrar_estoque_manutencao_aprovacao_1233(db)
         if manut_aprovadas_1233 or manut_pendentes_1233:
             print(
