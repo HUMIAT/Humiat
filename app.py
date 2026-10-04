@@ -2215,8 +2215,18 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
         if item_controla_estoque(i)
     ]
     movimentos = db.query(EstoqueMovimento).all()
-    # Reserva é exclusiva de venda. Qualquer registro legado de manutenção é ignorado.
+    # Reserva continua exclusiva de venda. Para a posição/compra, porém, também
+    # contamos a necessidade das MANUTENÇÕES APROVADAS que ainda estão abertas.
+    # Essas manutenções já baixam o físico, mas precisam aparecer na necessidade
+    # para que o relatório de compras não enxergue somente vendas.
     reservas = db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "VENDA").all()
+    manutencoes_ativas_ids = {
+        int(mid) for (mid,) in db.query(Manutencao.id).filter(
+            ~Manutencao.status.in_(tuple(ESTOQUE_MANUTENCAO_FINAL | ESTOQUE_MANUTENCAO_CANCELADA)),
+            Manutencao.entregue_em.is_(None),
+            Manutencao.descontar_estoque != 0,
+        ).all()
+    }
     minimos = _mapa_minimos_estoque(db)
     por_item: dict[int, dict] = {
         i.id: {"item": i, "fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0, "reservado": 0.0, "disponivel": 0.0}
@@ -2224,19 +2234,38 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
     }
     cores: dict[int, dict[str, dict]] = {}
     for mov in movimentos:
-        sinal = 1 if (mov.tipo or "").upper() == "ENTRADA" else -1
+        tipo_mov = (mov.tipo or "").upper()
+        origem_mov = (mov.origem_tipo or "").upper()
+        qtd_mov = float(mov.quantidade or 0)
+        sinal = 1 if tipo_mov == "ENTRADA" else -1
         if mov.item_id in por_item:
-            por_item[mov.item_id]["fisico"] += sinal * float(mov.quantidade or 0)
+            por_item[mov.item_id]["fisico"] += sinal * qtd_mov
         if mov.cor:
             c = cores.setdefault(mov.item_id, {}).setdefault(mov.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
-            c["fisico"] += sinal * float(mov.quantidade or 0)
+            c["fisico"] += sinal * qtd_mov
+
+        # Manutenção entra como necessidade somente enquanto estiver aberta e já
+        # tiver gerado a saída aprovada. Assim a posição e o relatório de compras
+        # consultam venda + manutenção, como a operação precisa.
+        manutencao_aberta = (
+            tipo_mov == "SAIDA"
+            and origem_mov == "MANUTENCAO"
+            and mov.origem_id
+            and int(mov.origem_id) in manutencoes_ativas_ids
+        )
+        if manutencao_aberta:
+            if mov.item_id in por_item:
+                por_item[mov.item_id]["manutencoes_a_fazer"] += qtd_mov
+            if mov.cor:
+                c = cores.setdefault(mov.item_id, {}).setdefault(mov.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
+                c["manutencoes_a_fazer"] += qtd_mov
+
     for res in reservas:
-        campo = "vendas_a_fazer"
         if res.item_id in por_item:
-            por_item[res.item_id][campo] += float(res.quantidade or 0)
+            por_item[res.item_id]["vendas_a_fazer"] += float(res.quantidade or 0)
         if res.cor:
             c = cores.setdefault(res.item_id, {}).setdefault(res.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0})
-            c[campo] += float(res.quantidade or 0)
+            c["vendas_a_fazer"] += float(res.quantidade or 0)
 
     # Cores cadastradas apenas no mínimo também precisam aparecer mesmo sem movimento.
     for (item_id, cor), qtd in minimos.items():
@@ -2250,8 +2279,7 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
         dados["fisico"] = round(dados["fisico"], 4)
         dados["vendas_a_fazer"] = round(dados["vendas_a_fazer"], 4)
         dados["manutencoes_a_fazer"] = round(dados["manutencoes_a_fazer"], 4)
-        dados["reservado"] = round(dados["vendas_a_fazer"], 4)
-        dados["manutencoes_a_fazer"] = 0.0
+        dados["reservado"] = round(dados["vendas_a_fazer"] + dados["manutencoes_a_fazer"], 4)
         dados["disponivel"] = round(dados["fisico"] - dados["reservado"], 4)
 
         linhas_cor = []
@@ -2259,10 +2287,10 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
             for cor, c in sorted(cores.get(item.id, {}).items(), key=lambda x: x[0]):
                 fisico = round(c["fisico"], 4)
                 vendas = round(c["vendas_a_fazer"], 4)
-                manut = 0.0
-                disponivel = round(fisico - vendas, 4)
+                manut = round(c["manutencoes_a_fazer"], 4)
+                disponivel = round(fisico - vendas - manut, 4)
                 minimo = round(float(minimos.get((item.id, cor), 0) or 0), 4)
-                comprar = round(max(minimo - disponivel, 0), 4) if minimo > 0 and cor != ESTOQUE_COR_PENDENTE else 0.0
+                comprar = round(max(minimo - disponivel, 0), 4) if cor != ESTOQUE_COR_PENDENTE else 0.0
                 linhas_cor.append({
                     "cor": cor, "fisico": fisico, "vendas_a_fazer": vendas, "manutencoes_a_fazer": manut,
                     "reservado": round(vendas + manut, 4), "disponivel": disponivel, "minimo": minimo,
@@ -2272,7 +2300,10 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
             comprar_total = round(sum(c["comprar"] for c in linhas_cor), 4)
         else:
             minimo_total = round(float(minimos.get((item.id, ""), 0) or 0), 4)
-            comprar_total = round(max(minimo_total - dados["disponivel"], 0), 4) if minimo_total > 0 else 0.0
+            # Mesmo com mínimo zero, uma necessidade maior que o físico deve ir
+            # para compras. Ex.: físico 1, venda 1, manutenção 2 => disponível -2
+            # e comprar 2.
+            comprar_total = round(max(minimo_total - dados["disponivel"], 0), 4)
         dados["minimo"] = minimo_total
         dados["comprar"] = comprar_total
         dados["custo_compra"] = round(comprar_total * float(item.preco_custo or 0), 2)
@@ -2375,9 +2406,21 @@ def relatorio_compras_estoque(db: Session) -> list[dict]:
             for c in cores.get(item.id, []):
                 if c["cor"] == ESTOQUE_COR_PENDENTE or c["comprar"] <= 0:
                     continue
-                compras.append({"item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor", "cor": c["cor"], "disponivel": c["disponivel"], "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": c["custo_compra"]})
+                compras.append({
+                    "item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor",
+                    "cor": c["cor"], "fisico": c["fisico"], "vendas_a_fazer": c["vendas_a_fazer"],
+                    "manutencoes_a_fazer": c["manutencoes_a_fazer"], "disponivel": c["disponivel"],
+                    "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0),
+                    "custo_total": c["custo_compra"],
+                })
         elif l["comprar"] > 0:
-            compras.append({"item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor", "cor": "", "disponivel": l["disponivel"], "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0), "custo_total": l["custo_compra"]})
+            compras.append({
+                "item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor",
+                "cor": "", "fisico": l["fisico"], "vendas_a_fazer": l["vendas_a_fazer"],
+                "manutencoes_a_fazer": l["manutencoes_a_fazer"], "disponivel": l["disponivel"],
+                "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0),
+                "custo_total": l["custo_compra"],
+            })
     return sorted(compras, key=lambda x: ((_texto_sem_acento(x["fornecedor_nome"])), (_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
 
 
