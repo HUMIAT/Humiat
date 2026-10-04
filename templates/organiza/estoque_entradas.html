@@ -1,0 +1,157 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<section class="pagina-clean entradas-pagina">
+  <div class="titulo-linha entradas-topo">
+    <div>
+      <p class="tag">Estoque</p>
+      <h1>Entradas de estoque</h1>
+      <p class="texto-suave">Registro e consulta das entradas físicas. A visão resumida consolida por item; a detalhada mostra cada lançamento.</p>
+    </div>
+    <div class="entradas-acoes">
+      <a class="botao" href="/organiza/estoque/movimentacoes">Movimentação completa</a>
+      <a class="botao secundario" href="/organiza/estoque">Voltar ao estoque</a>
+    </div>
+  </div>
+
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if ok %}<div class="alerta sucesso">{{ ok }}</div>{% endif %}
+
+  <section class="cartao bloco-entrada nova-entrada-card">
+    <div class="bloco-titulo">
+      <div>
+        <h2>Registrar entrada</h2>
+        <p class="texto-suave">Use para compra avulsa, reposição ou ajuste manual que realmente aumente o estoque físico.</p>
+      </div>
+      <span class="contador">Nova entrada</span>
+    </div>
+    <form method="post" action="/organiza/estoque/entrada" class="entrada-form" id="form-entrada-estoque">
+      <label class="campo-item">Item *
+        <select name="item_id" id="estoque-item" required>
+          <option value="">Selecione...</option>
+          {% for item in itens %}<option value="{{ item.id }}">{{ item.categoria }} · {{ item.nome }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Quantidade *<input name="quantidade" required inputmode="decimal" placeholder="1"></label>
+      <label id="campo-cor-estoque" hidden>Cor *<input name="cor" id="estoque-cor" placeholder="Ex.: AZUL"></label>
+      <label>Custo unitário<input name="custo_unitario" inputmode="decimal" placeholder="0,00"></label>
+      <label class="campo-observacao">Observação<input name="observacao" placeholder="Ex.: fornecedor / NF / motivo do ajuste"></label>
+      <div class="entrada-submit"><button class="botao primario" type="submit">Registrar entrada</button></div>
+    </form>
+  </section>
+
+  <section class="cartao filtros-entradas">
+    <form method="get" class="filtros-grid">
+      <label>De<input type="date" name="data_inicio" value="{{ data_inicio }}"></label>
+      <label>Até<input type="date" name="data_fim" value="{{ data_fim }}"></label>
+      <label class="filtro-item">Item
+        <select name="item_id">
+          <option value="">Todos</option>
+          {% for i in itens %}<option value="{{ i.id }}" {% if item_id == i.id %}selected{% endif %}>{{ i.categoria }} · {{ i.nome }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Origem
+        <select name="origem">
+          <option value="">Todas</option>
+          <option value="MANUAL" {% if origem=='MANUAL' %}selected{% endif %}>Entrada manual</option>
+          <option value="COMPRA" {% if origem=='COMPRA' %}selected{% endif %}>Compra recebida</option>
+          <option value="CONTAGEM" {% if origem=='CONTAGEM' %}selected{% endif %}>Contagem física</option>
+          <option value="ESTORNO" {% if origem=='ESTORNO' %}selected{% endif %}>Estorno</option>
+        </select>
+      </label>
+      <div class="filtro-botoes">
+        <button class="botao primario" type="submit">Consultar</button>
+        <a class="botao secundario" href="/organiza/estoque/entradas">Limpar</a>
+      </div>
+    </form>
+  </section>
+
+  <div class="indicadores-entrada">
+    <span><strong>{{ total_lancamentos }}</strong> lançamento(s)</span>
+    <span><strong>{{ '%g'|format(total_quantidade) }}</strong> unidade(s) recebida(s)</span>
+    <span><strong>{{ total_itens }}</strong> item(ns) no resumo</span>
+    {% if total_valor > 0 %}<span><strong>R$ {{ '%.2f'|format(total_valor)|replace('.', ',') }}</strong> em custos informados</span>{% endif %}
+  </div>
+
+  <section class="cartao bloco-entrada">
+    <div class="bloco-titulo">
+      <div>
+        <h2>Versão resumida</h2>
+        <p class="texto-suave">Consolidado do período por item e cor, sem repetir cada lançamento.</p>
+      </div>
+      <span class="contador">{{ total_itens }} item(ns)</span>
+    </div>
+    <div class="planilha-scroll">
+      <table class="entrada-table resumo-table">
+        <thead><tr><th>CATEGORIA</th><th>ITEM</th><th>UNID.</th><th>COR</th><th>LANÇAMENTOS</th><th>QTD. ENTRADA</th><th>CUSTO MÉDIO</th><th>VALOR</th></tr></thead>
+        <tbody>
+          {% for r in resumo %}
+          <tr>
+            <td>{{ r.item.categoria }}</td>
+            <td><strong>{{ r.item.nome }}</strong></td>
+            <td class="centro"><strong>{{ r.item.unidade or 'UN' }}</strong></td>
+            <td>{{ r.cor or '—' }}</td>
+            <td class="num">{{ r.lancamentos }}</td>
+            <td class="num entrada forte">{{ '%g'|format(r.quantidade) }}</td>
+            <td class="num">{% if r.custo_medio is not none %}R$ {{ '%.2f'|format(r.custo_medio)|replace('.', ',') }}{% else %}—{% endif %}</td>
+            <td class="num forte">{% if r.custo_medio is not none %}R$ {{ '%.2f'|format(r.valor_total)|replace('.', ',') }}{% else %}—{% endif %}</td>
+          </tr>
+          {% else %}<tr><td colspan="8" class="vazio">Nenhuma entrada encontrada para os filtros informados.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="cartao bloco-entrada">
+    <div class="bloco-titulo">
+      <div>
+        <h2>Versão detalhada</h2>
+        <p class="texto-suave">Cada entrada individual, incluindo origem, custo, responsável e observação.</p>
+      </div>
+      <div class="bloco-acoes">
+        <span class="contador">{{ total_lancamentos }} lançamento(s)</span>
+        <a class="botao pequeno" href="/organiza/estoque/entradas.csv?data_inicio={{ data_inicio|urlencode }}&data_fim={{ data_fim|urlencode }}&item_id={{ item_id or '' }}&origem={{ origem|urlencode }}">Exportar CSV</a>
+      </div>
+    </div>
+    <div class="planilha-scroll">
+      <table class="entrada-table detalhe-table">
+        <thead><tr><th>DATA</th><th>ORIGEM</th><th>CATEGORIA</th><th>ITEM</th><th>COR</th><th>QTD.</th><th>CUSTO UNIT.</th><th>VALOR</th><th>USUÁRIO</th><th>OBSERVAÇÃO</th></tr></thead>
+        <tbody>
+          {% for l in linhas %}
+          <tr>
+            <td>{{ l.data.strftime('%d/%m/%Y %H:%M') if l.data else '—' }}</td>
+            <td>{% if l.origem_url %}<a href="{{ l.origem_url }}">{{ l.origem }}</a>{% else %}<span class="origem origem-{{ l.origem_tipo|lower }}">{{ l.origem }}</span>{% endif %}</td>
+            <td>{{ l.item.categoria if l.item else '—' }}</td>
+            <td><strong>{{ l.item.nome if l.item else '—' }}</strong></td>
+            <td>{{ l.cor or '—' }}</td>
+            <td class="num entrada forte">{{ '%g'|format(l.quantidade) }}</td>
+            <td class="num">{% if l.custo_unitario is not none %}R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}{% else %}—{% endif %}</td>
+            <td class="num forte">{% if l.valor_total is not none %}R$ {{ '%.2f'|format(l.valor_total)|replace('.', ',') }}{% else %}—{% endif %}</td>
+            <td>{{ l.usuario or '—' }}</td>
+            <td class="observacao">{{ l.observacao or '—' }}</td>
+          </tr>
+          {% else %}<tr><td colspan="10" class="vazio">Nenhuma entrada encontrada para os filtros informados.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+<style>
+.entradas-topo{align-items:flex-end}.entradas-acoes{display:flex;gap:8px;flex-wrap:wrap}.bloco-entrada{padding:0;overflow:hidden}.bloco-titulo{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:14px 16px;border-bottom:1px solid #dbe3ee;flex-wrap:wrap}.bloco-titulo h2{margin:0 0 3px}.bloco-acoes{display:flex;align-items:center;gap:8px}.contador{font-size:12px;font-weight:900;color:#475467;background:#f2f4f7;border-radius:999px;padding:5px 9px}.entrada-form{padding:16px;display:grid;grid-template-columns:minmax(260px,2fr) repeat(3,minmax(130px,1fr));gap:10px;align-items:end}.entrada-form label,.filtros-grid label{display:grid;gap:5px;font-weight:800;font-size:12px}.entrada-form input,.entrada-form select,.filtros-grid input,.filtros-grid select{width:100%}.campo-observacao{grid-column:1/-2}.entrada-submit{display:flex;align-items:end}.entrada-submit .botao{width:100%}.filtros-grid{display:grid;grid-template-columns:160px 160px minmax(250px,1.7fr) minmax(170px,1fr) auto;gap:10px;align-items:end}.filtro-botoes{display:flex;gap:6px}.indicadores-entrada{display:flex;gap:8px;flex-wrap:wrap}.indicadores-entrada span{display:inline-flex;gap:4px;align-items:center;padding:8px 10px;border:1px solid #dbe3ee;background:#fff;border-radius:9px;color:#64748b;font-size:12px}.indicadores-entrada strong{color:#172033}.planilha-scroll{overflow:auto;max-width:100%}.entrada-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}.resumo-table{min-width:920px}.detalhe-table{min-width:1250px}.entrada-table th{position:sticky;top:0;background:#eef3f9;padding:8px 10px;text-align:left;border-bottom:1px solid #ccd7e5;white-space:nowrap;color:#5f7394;font-size:11px;letter-spacing:.03em}.entrada-table td{padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:middle;white-space:nowrap}.entrada-table tr:hover td{background:#f8fbff}.entrada-table .num{text-align:right;font-variant-numeric:tabular-nums}.entrada-table .centro{text-align:center}.entrada-table .entrada{color:#027a48}.entrada-table .forte{font-weight:900}.entrada-table a{font-weight:800;color:#2563eb}.observacao{max-width:320px;white-space:normal!important;color:#475569}.origem{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900;background:#f2f4f7;color:#475467}.origem-manual{background:#eef6ff;color:#174ea6}.origem-estorno{background:#fff1f0;color:#b42318}.vazio{text-align:center!important;color:#64748b;padding:24px!important}@media(max-width:1000px){.entradas-topo{align-items:flex-start;flex-direction:column}.entradas-acoes{width:100%}.entradas-acoes .botao{flex:1;text-align:center}.entrada-form{grid-template-columns:1fr 1fr}.campo-item,.campo-observacao{grid-column:1/-1}.entrada-submit{grid-column:1/-1}.filtros-grid{grid-template-columns:1fr 1fr}.filtro-item{grid-column:1/-1}.filtro-botoes{grid-column:1/-1}.bloco-titulo{align-items:flex-start}.bloco-acoes{width:100%;justify-content:space-between}}@media(max-width:620px){.entrada-form,.filtros-grid{grid-template-columns:1fr}.campo-item,.campo-observacao,.filtro-item,.filtro-botoes,.entrada-submit{grid-column:auto}.filtro-botoes .botao{flex:1;text-align:center}.indicadores-entrada{display:grid;grid-template-columns:1fr 1fr}.indicadores-entrada span{display:block}.entradas-acoes{display:grid;grid-template-columns:1fr}}
+</style>
+<script>
+(() => {
+  const item=document.getElementById('estoque-item');
+  const campo=document.getElementById('campo-cor-estoque');
+  const cor=document.getElementById('estoque-cor');
+  const comCor=new Set({{ itens_cor_ids|tojson }}.map(String));
+  function atualizar(){
+    const ativo=comCor.has(item.value);
+    campo.hidden=!ativo;
+    cor.required=ativo;
+    if(!ativo) cor.value='';
+  }
+  item.addEventListener('change',atualizar);
+  atualizar();
+})();
+</script>
+{% endblock %}

@@ -13748,6 +13748,181 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
     )
 
 
+
+def _entradas_estoque_linhas(db: Session, data_inicio=None, data_fim=None, item_id: int | None = None, origem: str = "") -> list[dict]:
+    origem = (origem or "").strip().upper()
+    inicio_dt = datetime.combine(data_inicio, time.min) if data_inicio else None
+    fim_dt = datetime.combine(data_fim, time.max) if data_fim else None
+    q = db.query(EstoqueMovimento).options(
+        selectinload(EstoqueMovimento.item),
+        selectinload(EstoqueMovimento.usuario),
+    ).filter(EstoqueMovimento.tipo == "ENTRADA")
+    if item_id:
+        q = q.filter(EstoqueMovimento.item_id == int(item_id))
+    if inicio_dt:
+        q = q.filter(EstoqueMovimento.criado_em >= inicio_dt)
+    if fim_dt:
+        q = q.filter(EstoqueMovimento.criado_em <= fim_dt)
+    if origem:
+        q = q.filter(EstoqueMovimento.origem_tipo == origem)
+
+    movimentos = [
+        m for m in q.order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).all()
+        if item_controla_estoque(m.item)
+    ]
+    linhas = []
+    for m in movimentos:
+        origem_tipo = (m.origem_tipo or "MANUAL").upper()
+        if origem_tipo == "COMPRA":
+            origem_rotulo = f"Compra #{m.origem_id}" if m.origem_id else "Compra"
+            origem_url = "/organiza/estoque/compras"
+        elif origem_tipo == "CONTAGEM":
+            origem_rotulo = "Contagem física"
+            origem_url = "/organiza/estoque/contagem"
+        elif origem_tipo == "ESTORNO":
+            origem_rotulo = f"Estorno #{m.origem_id}" if m.origem_id else "Estorno"
+            origem_url = ""
+        elif origem_tipo == "MANUAL":
+            origem_rotulo = "Entrada manual"
+            origem_url = ""
+        else:
+            origem_rotulo = origem_tipo.title() if origem_tipo else "Entrada"
+            origem_url = ""
+        custo = float(m.custo_unitario) if m.custo_unitario is not None else None
+        quantidade = float(m.quantidade or 0)
+        linhas.append({
+            "id": m.id,
+            "data": m.criado_em,
+            "item": m.item,
+            "cor": (m.cor or "").strip(),
+            "quantidade": quantidade,
+            "origem_tipo": origem_tipo,
+            "origem": origem_rotulo,
+            "origem_url": origem_url,
+            "custo_unitario": custo,
+            "valor_total": round(quantidade * custo, 2) if custo is not None else None,
+            "observacao": (m.observacao or "").strip(),
+            "usuario": m.usuario.nome if m.usuario else "",
+        })
+    return linhas
+
+
+def _resumo_entradas_estoque(linhas: list[dict]) -> list[dict]:
+    grupos: dict[tuple[int, str], dict] = {}
+    for l in linhas:
+        item = l.get("item")
+        if not item:
+            continue
+        cor = (l.get("cor") or "").strip().upper()
+        chave = (item.id, cor)
+        g = grupos.setdefault(chave, {
+            "item": item,
+            "cor": cor,
+            "quantidade": 0.0,
+            "lancamentos": 0,
+            "quantidade_com_custo": 0.0,
+            "valor_total": 0.0,
+        })
+        qtd = float(l.get("quantidade") or 0)
+        g["quantidade"] += qtd
+        g["lancamentos"] += 1
+        if l.get("custo_unitario") is not None:
+            g["quantidade_com_custo"] += qtd
+            g["valor_total"] += float(l.get("valor_total") or 0)
+    saida = []
+    for g in grupos.values():
+        qtd_custo = float(g.pop("quantidade_com_custo") or 0)
+        g["custo_medio"] = round(float(g["valor_total"]) / qtd_custo, 2) if qtd_custo > 0 else None
+        g["valor_total"] = round(float(g["valor_total"]), 2)
+        saida.append(g)
+    return sorted(saida, key=lambda x: ((_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
+
+
+@app.get("/organiza/estoque/entradas", response_class=HTMLResponse)
+def estoque_entradas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    inicio_txt = (request.query_params.get("data_inicio") or "").strip()
+    fim_txt = (request.query_params.get("data_fim") or "").strip()
+    origem = (request.query_params.get("origem") or "").strip().upper()
+    try:
+        item_id = int(request.query_params.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    linhas = _entradas_estoque_linhas(
+        db,
+        _data_filtro_estoque(inicio_txt),
+        _data_filtro_estoque(fim_txt),
+        item_id=item_id or None,
+        origem=origem,
+    )
+    resumo = _resumo_entradas_estoque(linhas)
+    itens = [
+        i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
+        if item_controla_estoque(i)
+    ]
+    itens_cor_ids = [i.id for i in itens if item_controla_cor(i)]
+    total_quantidade = round(sum(float(l.get("quantidade") or 0) for l in linhas), 4)
+    total_valor = round(sum(float(l.get("valor_total") or 0) for l in linhas if l.get("valor_total") is not None), 2)
+    return templates.TemplateResponse("organiza/estoque_entradas.html", {
+        "request": request,
+        "usuario": usuario,
+        "linhas": linhas,
+        "resumo": resumo,
+        "itens": itens,
+        "itens_cor_ids": itens_cor_ids,
+        "data_inicio": inicio_txt,
+        "data_fim": fim_txt,
+        "item_id": item_id,
+        "origem": origem,
+        "total_lancamentos": len(linhas),
+        "total_itens": len(resumo),
+        "total_quantidade": total_quantidade,
+        "total_valor": total_valor,
+        "erro": request.query_params.get("erro", ""),
+        "ok": request.query_params.get("ok", ""),
+    })
+
+
+@app.get("/organiza/estoque/entradas.csv")
+def estoque_entradas_csv(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    inicio_txt = (request.query_params.get("data_inicio") or "").strip()
+    fim_txt = (request.query_params.get("data_fim") or "").strip()
+    origem = (request.query_params.get("origem") or "").strip().upper()
+    try:
+        item_id = int(request.query_params.get("item_id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    linhas = _entradas_estoque_linhas(
+        db,
+        _data_filtro_estoque(inicio_txt),
+        _data_filtro_estoque(fim_txt),
+        item_id=item_id or None,
+        origem=origem,
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
+    writer.writerow(["DATA", "CATEGORIA", "ITEM", "UNIDADE", "COR", "ORIGEM", "QUANTIDADE", "CUSTO_UNITARIO", "VALOR_TOTAL", "USUARIO", "OBSERVACAO"])
+    for l in linhas:
+        writer.writerow([
+            l["data"].strftime("%d/%m/%Y %H:%M") if l.get("data") else "",
+            l["item"].categoria if l.get("item") else "",
+            l["item"].nome if l.get("item") else "",
+            _normalizar_unidade_item(getattr(l.get("item"), "unidade", "UN")) if l.get("item") else "UN",
+            l.get("cor") or "",
+            l.get("origem") or "",
+            f'{float(l.get("quantidade") or 0):g}',
+            f'{float(l["custo_unitario"]):.2f}' if l.get("custo_unitario") is not None else "",
+            f'{float(l["valor_total"]):.2f}' if l.get("valor_total") is not None else "",
+            l.get("usuario") or "",
+            l.get("observacao") or "",
+        ])
+    conteudo = "\ufeff" + buffer.getvalue()
+    return Response(
+        content=conteudo,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=entradas_estoque_detalhadas.csv"},
+    )
+
+
 @app.get("/organiza/estoque/contagem", response_class=HTMLResponse)
 def estoque_contagem(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     linhas = _linhas_contagem_estoque(db)
@@ -14047,10 +14222,10 @@ async def estoque_entrada(request: Request, usuario: Usuario = Depends(usuario_l
     except (TypeError, ValueError):
         quantidade = 0
     if not item or not item_controla_estoque(item) or quantidade <= 0:
-        return RedirectResponse("/organiza/estoque?erro=" + quote_plus("Informe um item de estoque e uma quantidade válida."), status_code=303)
+        return RedirectResponse("/organiza/estoque/entradas?erro=" + quote_plus("Informe um item de estoque e uma quantidade válida."), status_code=303)
     cor = normalizar_cor(form.get("cor")) if item_controla_cor(item) else ""
     if item_controla_cor(item) and not cor:
-        return RedirectResponse("/organiza/estoque?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
+        return RedirectResponse("/organiza/estoque/entradas?erro=" + quote_plus(f"Informe a cor para {item.nome}."), status_code=303)
     custo = moeda_num(form.get("custo_unitario")) if (form.get("custo_unitario") or "").strip() else None
     obs = (form.get("observacao") or "").strip() or None
     db.add(EstoqueMovimento(
@@ -14058,7 +14233,7 @@ async def estoque_entrada(request: Request, usuario: Usuario = Depends(usuario_l
         origem_tipo="MANUAL", custo_unitario=custo, observacao=obs, usuario_id=usuario.id,
     ))
     db.commit()
-    return RedirectResponse("/organiza/estoque?ok=" + quote_plus(f"Entrada registrada: {item.nome} × {quantidade:g}."), status_code=303)
+    return RedirectResponse("/organiza/estoque/entradas?ok=" + quote_plus(f"Entrada registrada: {item.nome} × {quantidade:g}."), status_code=303)
 
 
 @app.post("/organiza/estoque/movimentos/{movimento_id}/excluir")
