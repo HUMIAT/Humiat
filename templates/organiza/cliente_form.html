@@ -1,9 +1,11 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
 <section class="pagina-clean cliente-form-pagina">
-  <div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ 'Editar cliente' if cliente and cliente.id else 'Novo cliente' }}</h1><p class="texto-suave">Cadastro dividido em blocos para facilitar a conferência.</p></div><a class="botao" href="{{ '/organiza/clientes/' ~ cliente.id if cliente and cliente.id else '/organiza/clientes' }}">Voltar</a></div>
+  {% set voltar_url = '/organiza/vendas/nova' if retorno == 'venda' else ('/organiza/clientes/' ~ cliente.id if cliente and cliente.id else '/organiza/clientes') %}
+  <div class="titulo-linha"><div><p class="tag">Cliente</p><h1>{{ 'Editar cliente' if cliente and cliente.id else 'Novo cliente' }}</h1><p class="texto-suave">{{ 'Cadastre o cliente e volte direto para a nova venda.' if retorno == 'venda' else 'Cadastro dividido em blocos para facilitar a conferência.' }}</p></div><a class="botao" href="{{ voltar_url }}">Voltar</a></div>
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   <form method="post" class="cliente-form-organizado">
+    {% if retorno == 'venda' %}<input type="hidden" name="retorno" value="venda">{% endif %}
     <section class="cartao secao-form">
       <div class="secao-form-titulo"><span>1</span><div><h2>Identificação</h2><p>Dados principais e contato.</p></div></div>
       <div class="form-grid-organizada tres-colunas">
@@ -47,7 +49,7 @@
       </div>
     </section>
     <section class="cartao secao-form"><div class="secao-form-titulo"><span>3</span><div><h2>Observações</h2><p>Informações importantes sobre o cliente.</p></div></div><textarea name="observacao">{{ cliente.observacao if cliente and cliente.observacao else '' }}</textarea></section>
-    <button class="botao primario botao-cheio" type="submit">Salvar cliente</button>
+    <button class="botao primario botao-cheio" type="submit">{{ 'Salvar cliente e continuar venda' if retorno == 'venda' else 'Salvar cliente' }}</button>
   </form>
 </section>
 <script>

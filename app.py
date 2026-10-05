@@ -2819,6 +2819,33 @@ def formatar_telefone(valor: str, pais: str = "BR") -> str:
     return formatar_telefone_internacional(pais, valor)
 
 
+def localizar_cliente_por_contato(db: Session, pais: str = "BR", ddi: str = "55", telefone: str = "") -> Cliente | None:
+    """Localiza cliente pelo WhatsApp normalizado, inclusive cadastros legados formatados."""
+    pais_norm, ddi_norm, telefone_norm = normalizar_contato(pais, ddi, telefone)
+    if not telefone_norm or not telefone_valido(telefone_norm, pais_norm, ddi_norm):
+        return None
+
+    # Caminho rápido para os cadastros já normalizados.
+    cliente = db.query(Cliente).filter(
+        Cliente.ddi == ddi_norm,
+        Cliente.telefone == telefone_norm,
+    ).first()
+    if cliente:
+        return cliente
+
+    # Compatibilidade com registros antigos que podem conter máscara ou DDI
+    # gravado dentro do campo telefone.
+    for candidato in db.query(Cliente).all():
+        c_pais, c_ddi, c_telefone = normalizar_contato(
+            getattr(candidato, "pais", None) or pais_norm,
+            getattr(candidato, "ddi", None) or ddi_norm,
+            getattr(candidato, "telefone", "") or "",
+        )
+        if c_ddi == ddi_norm and c_telefone == telefone_norm:
+            return candidato
+    return None
+
+
 def formatar_data(valor):
     return valor.strftime("%d/%m/%Y") if valor else "-"
 
@@ -5227,28 +5254,37 @@ def preencher_cliente(cliente: Cliente, form: dict):
 
 
 @app.get("/organiza/clientes/novo", response_class=HTMLResponse)
-def cliente_novo(request: Request, usuario: Usuario = Depends(usuario_logado)):
-    return templates.TemplateResponse("organiza/cliente_form.html", {"request": request, "usuario": usuario, "cliente": None, "erro": ""})
+def cliente_novo(request: Request, retorno: str = "", usuario: Usuario = Depends(usuario_logado)):
+    retorno = "venda" if (retorno or "").strip().lower() == "venda" else ""
+    return templates.TemplateResponse("organiza/cliente_form.html", {
+        "request": request, "usuario": usuario, "cliente": None, "erro": "", "retorno": retorno,
+    })
 
 
 @app.post("/organiza/clientes/novo")
 async def cliente_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
+    retorno = "venda" if (form.get("retorno") or "").strip().lower() == "venda" else ""
     pais, ddi, telefone = normalizar_contato(form.get("pais"), form.get("ddi"), form.get("telefone"))
+    existente = localizar_cliente_por_contato(db, pais, ddi, telefone) if telefone else None
     erro = ""
     if not (form.get("nome") or "").strip():
         erro = "Informe o nome do cliente."
     elif not telefone_valido(telefone, pais, ddi):
         erro = "Informe um WhatsApp válido para o país selecionado."
-    elif db.query(Cliente).filter(Cliente.ddi == ddi, Cliente.telefone == telefone).first():
+    elif existente:
         erro = "Já existe um cliente com este WhatsApp."
     if erro:
         cliente = Cliente()
         preencher_cliente(cliente, form)
-        return templates.TemplateResponse("organiza/cliente_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "erro": erro}, status_code=400)
+        return templates.TemplateResponse("organiza/cliente_form.html", {
+            "request": request, "usuario": usuario, "cliente": cliente, "erro": erro, "retorno": retorno,
+        }, status_code=400)
     cliente = Cliente()
     preencher_cliente(cliente, form)
     db.add(cliente); db.commit(); db.refresh(cliente)
+    if retorno == "venda":
+        return RedirectResponse(f"/organiza/vendas/nova?cliente_id={cliente.id}", status_code=303)
     return RedirectResponse(f"/organiza/clientes/{cliente.id}", status_code=303)
 
 
@@ -5620,10 +5656,11 @@ async def cliente_salvar(cliente_id: int, request: Request, usuario: Usuario = D
     if not cliente: raise HTTPException(404)
     form = dict(await request.form())
     pais, ddi, telefone = normalizar_contato(form.get("pais"), form.get("ddi"), form.get("telefone"))
+    existente = localizar_cliente_por_contato(db, pais, ddi, telefone) if telefone else None
     erro = ""
     if not (form.get("nome") or "").strip(): erro = "Informe o nome do cliente."
     elif not telefone_valido(telefone, pais, ddi): erro = "Informe um WhatsApp válido para o país selecionado."
-    elif db.query(Cliente).filter(Cliente.ddi == ddi, Cliente.telefone == telefone, Cliente.id != cliente_id).first(): erro = "Já existe outro cliente com este WhatsApp."
+    elif existente and int(existente.id) != int(cliente_id): erro = "Já existe outro cliente com este WhatsApp."
     if erro:
         preencher_cliente(cliente, form)
         return templates.TemplateResponse("organiza/cliente_form.html", {"request": request, "usuario": usuario, "cliente": cliente, "erro": erro}, status_code=400)
@@ -12359,7 +12396,7 @@ def venda_nova(request: Request, cliente_id: int = 0, usuario: Usuario = Depends
 async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     form = dict(await request.form())
     contexto = contexto_configuracao_venda(db)
-    telefone = limpar_telefone(form.get("telefone") or "")
+    pais_telefone, ddi_telefone, telefone = normalizar_contato("BR", "55", form.get("telefone") or "")
     try:
         cliente_id_form = int(form.get("cliente_id") or 0)
     except (TypeError, ValueError):
@@ -12372,7 +12409,7 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
     produto = db.query(VendaModeloEquipamento).filter(VendaModeloEquipamento.id == produto_venda_id, VendaModeloEquipamento.ativo == 1).first() if produto_venda_id else None
     catalogo_venda = "PLUS" if (form.get("catalogo_venda") or "").strip().upper() == "PLUS" else "BASICO"
 
-    if not cliente and not telefone_valido(telefone):
+    if not cliente and not telefone_valido(telefone, pais_telefone, ddi_telefone):
         clientes = db.query(Cliente).order_by(Cliente.nome.asc()).all()
         return templates.TemplateResponse("organiza/venda_nova.html", {
             "request": request, "usuario": usuario, "clientes": clientes, "cliente_id": cliente_id_form,
@@ -12389,13 +12426,13 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
         }, status_code=400)
 
     if not cliente:
-        cliente = db.query(Cliente).filter(Cliente.telefone == telefone).first()
+        cliente = localizar_cliente_por_contato(db, pais_telefone, ddi_telefone, telefone)
     if not cliente:
         cliente = Cliente(
             nome=f"Cadastro pendente {telefone[-4:]}",
             telefone=telefone,
-            pais="BR",
-            ddi="55",
+            pais=pais_telefone,
+            ddi=ddi_telefone,
             token_ficha=secrets.token_urlsafe(24),
         )
         db.add(cliente)

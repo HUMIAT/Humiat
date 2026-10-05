@@ -3949,3 +3949,12 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .empresa-btn{box-sizing:border-box;display:inline-flex!important;align-items:center;justify-content:center;width:100%;min-width:0;min-height:42px;height:42px;padding:8px 12px!important;margin:0!important;line-height:1.1;text-align:center;white-space:normal;font-size:.82rem!important;font-weight:800}
 @media(max-width:900px){.empresa-integracao-card{grid-template-columns:1fr}.empresa-integracao-acoes{width:100%}}
 @media(max-width:650px){.empresa-form-grid,.empresa-slugs-grid{grid-template-columns:1fr}.empresa-integracao-acoes{grid-template-columns:1fr}.empresa-acesso-form{grid-column:auto;grid-template-columns:1fr}.empresa-btn{height:auto;min-height:44px}}
+
+/* Nova venda: seleção/cadastro de cliente sem sair do fluxo */
+.venda-cliente-campo{display:grid;gap:7px;min-width:0}
+.venda-cliente-campo>label{font-weight:800;font-size:.88rem;color:#25324a}
+.venda-cliente-seletor{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch}
+.venda-cliente-seletor select{min-width:0}
+.venda-adicionar-cliente{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;min-height:46px;padding-inline:14px}
+.venda-cliente-campo small{color:var(--org-muted);font-weight:500;line-height:1.35}
+@media(max-width:680px){.venda-cliente-seletor{grid-template-columns:1fr}.venda-adicionar-cliente{width:100%}}

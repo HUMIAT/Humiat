@@ -22,12 +22,17 @@
           <small>Venda vinculada diretamente a este cliente.</small>
         </label>
         {% else %}
-        <label>Cliente existente
-          <select name="cliente_id">
-            <option value="">Novo cliente / localizar pelo WhatsApp</option>
-            {% for c in clientes %}<option value="{{ c.id }}" {% if dados.get('cliente_id')|string == c.id|string %}selected{% endif %}>{{ c.nome }} · {{ c.telefone or '-' }}</option>{% endfor %}
-          </select>
-        </label>
+        <div class="venda-cliente-campo">
+          <label for="cliente-venda">Cliente existente</label>
+          <div class="venda-cliente-seletor">
+            <select name="cliente_id" id="cliente-venda">
+              <option value="">Novo cliente / localizar pelo WhatsApp</option>
+              {% for c in clientes %}<option value="{{ c.id }}" {% if dados.get('cliente_id')|string == c.id|string %}selected{% endif %}>{{ c.nome }} · {{ c.telefone or '-' }}</option>{% endfor %}
+            </select>
+            <a class="botao venda-adicionar-cliente" href="/organiza/clientes/novo?retorno=venda">+ Adicionar cliente</a>
+          </div>
+          <small>Se o cliente ainda não existir, cadastre aqui e volte automaticamente para esta venda.</small>
+        </div>
         <label>WhatsApp do cliente
           <input name="telefone" inputmode="numeric" maxlength="15" placeholder="21999999999" value="{{ dados.get('telefone','') }}">
           <small>Necessário apenas para cliente novo.</small>
