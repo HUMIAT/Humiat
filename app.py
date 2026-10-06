@@ -2206,26 +2206,21 @@ def _salvar_minimo_estoque(db: Session, item_id: int, cor: str | None, quantidad
 
 
 def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
-    """Posição única do estoque baseada somente no razão físico.
+    """Posição única do estoque baseada no mesmo razão usado na movimentação.
 
-    Regra 1.2.44: ENTRADA soma e SAÍDA reduz. Venda/manutenção não são abatidas
-    novamente como reserva/necessidade. As colunas de Venda e Manutenção são
-    apenas informativas: mostram quanto já saiu por cada origem.
+    Regra 1.2.46: somente ENTRADA soma e somente SAÍDA reduz. As colunas de
+    Venda e Manutenção mostram todas as SAÍDAS físicas existentes no razão,
+    exatamente como a tela de Movimentação completa, sem corte oculto pela
+    data da última contagem. Contagem física entra no próprio razão como ajuste.
     """
     itens = [
         i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
         if item_controla_estoque(i)
     ]
-    movimentos = db.query(EstoqueMovimento).all()
+    movimentos = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.tipo.in_(("ENTRADA", "SAIDA"))
+    ).all()
     minimos = _mapa_minimos_estoque(db)
-    # As colunas informativas de Venda/Manutenção mostram as saídas desde a
-    # última contagem física salva daquele item/cor. Isso transforma a posição
-    # em um extrato natural: contagem inicial -> saídas posteriores -> saldo atual.
-    ultimas_contagens = {}
-    for prog in db.query(EstoqueContagemProgresso).all():
-        chave_cont = (int(prog.item_id), normalizar_cor(prog.cor))
-        if prog.atualizado_em and (chave_cont not in ultimas_contagens or prog.atualizado_em > ultimas_contagens[chave_cont]):
-            ultimas_contagens[chave_cont] = prog.atualizado_em
     por_item: dict[int, dict] = {
         i.id: {
             "item": i,
@@ -2245,16 +2240,11 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
         qtd_mov = float(mov.quantidade or 0)
         sinal = 1 if tipo_mov == "ENTRADA" else -1
 
-        cor_mov = normalizar_cor(mov.cor)
-        chave_base = (int(mov.item_id), cor_mov)
-        data_base = ultimas_contagens.get(chave_base)
-        depois_da_contagem = not data_base or not mov.criado_em or mov.criado_em >= data_base
-
         if mov.item_id in por_item:
             por_item[mov.item_id]["fisico"] += sinal * qtd_mov
-            if depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "VENDA":
+            if tipo_mov == "SAIDA" and origem_mov == "VENDA":
                 por_item[mov.item_id]["vendas_a_fazer"] += qtd_mov
-            elif depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
+            elif tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
                 por_item[mov.item_id]["manutencoes_a_fazer"] += qtd_mov
 
         if mov.cor:
@@ -2263,9 +2253,9 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
                 {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0},
             )
             c["fisico"] += sinal * qtd_mov
-            if depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "VENDA":
+            if tipo_mov == "SAIDA" and origem_mov == "VENDA":
                 c["vendas_a_fazer"] += qtd_mov
-            elif depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
+            elif tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
                 c["manutencoes_a_fazer"] += qtd_mov
 
     # Cores cadastradas apenas no mínimo também precisam aparecer mesmo sem movimento.
@@ -2392,14 +2382,21 @@ def _linhas_contagem_estoque(db: Session) -> list[dict]:
 
 def _estoque_fisico_chave(db: Session, item_id: int, cor: str | None = None) -> float:
     cor_n = normalizar_cor(cor)
-    q = db.query(EstoqueMovimento).filter(EstoqueMovimento.item_id == int(item_id))
+    q = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.item_id == int(item_id),
+        EstoqueMovimento.tipo.in_(("ENTRADA", "SAIDA")),
+    )
     if cor_n:
         q = q.filter(EstoqueMovimento.cor == cor_n)
     else:
         q = q.filter(or_(EstoqueMovimento.cor.is_(None), EstoqueMovimento.cor == ""))
     total = 0.0
     for mov in q.all():
-        total += (1 if (mov.tipo or "").upper() == "ENTRADA" else -1) * float(mov.quantidade or 0)
+        tipo_mov = (mov.tipo or "").upper()
+        if tipo_mov == "ENTRADA":
+            total += float(mov.quantidade or 0)
+        elif tipo_mov == "SAIDA":
+            total -= float(mov.quantidade or 0)
     return round(total, 4)
 
 
@@ -13757,7 +13754,7 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
 
     q = db.query(EstoqueMovimento).options(
         selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario)
-    )
+    ).filter(EstoqueMovimento.tipo.in_(("ENTRADA", "SAIDA")))
     if item_id:
         q = q.filter(EstoqueMovimento.item_id == int(item_id))
     if inicio_dt:
@@ -13820,6 +13817,7 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
     for m in movimentos:
         rotulo, cliente, status, url = origem_info(m.origem_tipo, m.origem_id)
         saldo_antes, saldo_apos = saldo_mov.get(int(m.id), (0.0, 0.0))
+        origem_tipo_atual = (m.origem_tipo or "").upper()
         linhas.append({
             "id": m.id,
             "data": m.criado_em,
@@ -13827,14 +13825,17 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
             "item": m.item,
             "cor": m.cor or "",
             "quantidade": float(m.quantidade or 0),
-            "origem_tipo": (m.origem_tipo or "").upper(),
+            "origem_tipo": origem_tipo_atual,
             "origem": rotulo,
             "cliente": cliente,
             "status": status,
             "url": url,
             "observacao": m.observacao or "",
             "fisico": True,
-            "pode_estornar": (m.origem_tipo or "").upper() == "MANUAL",
+            "pode_estornar": origem_tipo_atual == "MANUAL",
+            # 1.2.47: contagem física pode ser desfeita sem criar outra contagem.
+            # Ao excluir, o saldo é apenas recalculado pelo razão existente.
+            "pode_desfazer_contagem": origem_tipo_atual == "CONTAGEM",
             "saldo_antes": saldo_antes,
             "saldo_apos": saldo_apos,
         })
@@ -13941,7 +13942,92 @@ def estoque_movimentacoes(request: Request, usuario: Usuario = Depends(usuario_l
         "grupos_clientes": grupos_clientes, "movimentos_itens": movimentos_itens,
         "data_inicio": inicio_txt, "data_fim": fim_txt, "tipo": tipo, "origem": origem,
         "item_id": item_id, "total_clientes": len(grupos_clientes), "total_itens": len(movimentos_itens),
+        "ok": request.query_params.get("ok", ""), "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/organiza/estoque/contagens/{movimento_id}/excluir-recalcular")
+def estoque_contagem_excluir_recalcular(
+    movimento_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Exclui somente um ajuste de contagem e recalcula o saldo pelo razão.
+
+    Esta ação NÃO cria uma nova contagem física. O saldo da posição do estoque é
+    derivado novamente das entradas/saídas restantes. Se existir uma contagem
+    anterior para o mesmo item/cor, restaura no progresso o valor daquela última
+    contagem válida; caso contrário, libera a linha da planilha de contagem.
+    """
+    mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
+    if not mov or (mov.origem_tipo or "").upper() != "CONTAGEM":
+        return RedirectResponse(
+            "/organiza/estoque/movimentacoes?erro=" + quote_plus("A movimentação informada não é uma contagem física."),
+            status_code=303,
+        )
+
+    item_id = int(mov.item_id)
+    cor = normalizar_cor(mov.cor)
+    data_mov = mov.criado_em or datetime.min
+    id_mov = int(mov.id)
+    item = db.query(Item).filter(Item.id == item_id).first()
+    nome_item = item.nome if item else f"Item #{item_id}"
+
+    # Procura a contagem válida imediatamente anterior antes de apagar a selecionada.
+    anterior = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.origem_tipo == "CONTAGEM",
+        EstoqueMovimento.item_id == item_id,
+        func.coalesce(EstoqueMovimento.cor, "") == cor,
+        or_(
+            EstoqueMovimento.criado_em < data_mov,
+            and_(EstoqueMovimento.criado_em == data_mov, EstoqueMovimento.id < id_mov),
+        ),
+    ).order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).first()
+
+    db.delete(mov)
+    db.flush()
+
+    progresso = db.query(EstoqueContagemProgresso).filter(
+        EstoqueContagemProgresso.item_id == item_id,
+        EstoqueContagemProgresso.cor == cor,
+    ).first()
+
+    if anterior:
+        # Reconstrói o saldo exatamente até a contagem anterior, sem gravar movimento novo.
+        movimentos_ate = db.query(EstoqueMovimento).filter(
+            EstoqueMovimento.item_id == item_id,
+            func.coalesce(EstoqueMovimento.cor, "") == cor,
+            or_(
+                EstoqueMovimento.criado_em < anterior.criado_em,
+                and_(EstoqueMovimento.criado_em == anterior.criado_em, EstoqueMovimento.id <= anterior.id),
+            ),
+            EstoqueMovimento.tipo.in_(("ENTRADA", "SAIDA")),
+        ).order_by(EstoqueMovimento.criado_em.asc(), EstoqueMovimento.id.asc()).all()
+        saldo_contagem_anterior = 0.0
+        for hist in movimentos_ate:
+            qtd = float(hist.quantidade or 0)
+            saldo_contagem_anterior += qtd if (hist.tipo or "").upper() == "ENTRADA" else -qtd
+        saldo_contagem_anterior = round(saldo_contagem_anterior, 4)
+        if not progresso:
+            progresso = EstoqueContagemProgresso(item_id=item_id, cor=cor)
+            db.add(progresso)
+        progresso.quantidade = max(saldo_contagem_anterior, 0)
+        progresso.observacao = "Contagem anterior restaurada após exclusão de ajuste incorreto."
+        progresso.usuario_id = anterior.usuario_id
+        progresso.atualizado_em = anterior.criado_em
+    elif progresso:
+        db.delete(progresso)
+
+    db.commit()
+    saldo_atual = _estoque_fisico_chave(db, item_id, cor)
+    msg = (
+        f"Contagem excluída. {nome_item}: saldo recalculado pelo histórico = {saldo_atual:g}. "
+        "Nenhuma nova contagem física foi criada."
+    )
+    return RedirectResponse(
+        "/organiza/estoque/movimentacoes?ok=" + quote_plus(msg),
+        status_code=303,
+    )
 
 
 @app.get("/organiza/estoque/movimentacoes.csv")
