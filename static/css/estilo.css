@@ -681,3 +681,15 @@ body.pagina-legal{
         justify-content:center;
     }
 }
+
+/* ======================================================
+   HUMIAT · VERIFICAÇÃO GOOGLE OAUTH 1.2.41
+   ====================================================== */
+.humiat-google-publico{background:#fff!important;border-top:1px solid var(--site-border)!important;border-bottom:1px solid var(--site-border)!important}
+.humiat-google-publico h2{color:var(--site-text)!important}
+.humiat-google-publico .introducao-produtos{max-width:900px!important}
+.humiat-google-publico a{color:var(--site-primary)!important;font-weight:800}
+.humiat-google-grid{align-items:stretch}
+.humiat-google-card{height:100%}
+.humiat-google-card .produto-conteudo{height:100%}
+@media(max-width:850px){.humiat-google-grid{grid-template-columns:1fr!important}}
