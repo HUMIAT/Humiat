@@ -2338,28 +2338,27 @@ def _salvar_progresso_contagem(
 
 
 def _linhas_contagem_estoque(db: Session) -> list[dict]:
+    """Monta uma folha de contagem sempre limpa.
+
+    A planilha de contagem não é uma segunda fonte de saldo. Cada conferência é
+    independente: o usuário informa o físico encontrado, o sistema gera somente
+    a diferença como ENTRADA ou SAÍDA no razão e, depois de salvar, os campos
+    voltam em branco para uma próxima contagem.
+    """
     linhas, cores = estoque_saldos(db)
-    progresso = _mapa_progresso_contagem(db)
     saida = []
     for l in linhas:
         item = l["item"]
         if item_controla_cor(item):
             por_cor = {c["cor"]: c for c in cores.get(item.id, []) if c["cor"] != ESTOQUE_COR_PENDENTE}
-            # Uma cor já contada precisa continuar aparecendo mesmo que seu saldo e mínimo sejam zero.
-            for (pid, pcor), prog in progresso.items():
-                if pid == item.id and pcor:
-                    por_cor.setdefault(pcor, {"cor": pcor, "fisico": _estoque_fisico_chave(db, item.id, pcor), "minimo": _mapa_minimos_estoque(db).get((item.id, pcor), 0)})
             conhecidas = [por_cor[k] for k in sorted(por_cor)]
             if conhecidas:
                 for c in conhecidas:
-                    prog = progresso.get((item.id, normalizar_cor(c["cor"])))
                     saida.append({
                         "item": item, "cor": c["cor"], "fisico": c["fisico"], "minimo": c["minimo"],
                         "custo_unitario": float(item.preco_custo or 0),
-                        "controla_cor": True, "salvo": bool(prog),
-                        "contagem_salva": float(prog.quantidade) if prog else None,
-                        "observacao_salva": (prog.observacao or "") if prog else "",
-                        "atualizado_em": prog.atualizado_em if prog else None,
+                        "controla_cor": True, "salvo": False,
+                        "contagem_salva": None, "observacao_salva": "", "atualizado_em": None,
                     })
             else:
                 saida.append({
@@ -2368,14 +2367,11 @@ def _linhas_contagem_estoque(db: Session) -> list[dict]:
                     "salvo": False, "contagem_salva": None, "observacao_salva": "", "atualizado_em": None,
                 })
         else:
-            prog = progresso.get((item.id, ""))
             saida.append({
                 "item": item, "cor": "", "fisico": l["fisico"], "minimo": l["minimo"],
                 "custo_unitario": float(item.preco_custo or 0),
-                "controla_cor": False, "salvo": bool(prog),
-                "contagem_salva": float(prog.quantidade) if prog else None,
-                "observacao_salva": (prog.observacao or "") if prog else "",
-                "atualizado_em": prog.atualizado_em if prog else None,
+                "controla_cor": False, "salvo": False,
+                "contagem_salva": None, "observacao_salva": "", "atualizado_em": None,
             })
     return saida
 
@@ -13832,10 +13828,10 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
             "url": url,
             "observacao": m.observacao or "",
             "fisico": True,
-            "pode_estornar": origem_tipo_atual == "MANUAL",
-            # 1.2.47: contagem física pode ser desfeita sem criar outra contagem.
-            # Ao excluir, o saldo é apenas recalculado pelo razão existente.
-            "pode_desfazer_contagem": origem_tipo_atual == "CONTAGEM",
+            # 1.2.48: só movimentos locais do estoque podem ser corrigidos aqui.
+            # Venda, manutenção e compra devem ser corrigidas na tela de origem.
+            "pode_corrigir_local": origem_tipo_atual == "CONTAGEM",
+            "corrigir_na_origem": origem_tipo_atual in {"VENDA", "MANUTENCAO", "COMPRA"} and bool(url),
             "saldo_antes": saldo_antes,
             "saldo_apos": saldo_apos,
         })
@@ -13952,80 +13948,101 @@ def estoque_contagem_excluir_recalcular(
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
-    """Exclui somente um ajuste de contagem e recalcula o saldo pelo razão.
+    """Compatibilidade: exclui somente o ajuste de contagem selecionado.
 
-    Esta ação NÃO cria uma nova contagem física. O saldo da posição do estoque é
-    derivado novamente das entradas/saídas restantes. Se existir uma contagem
-    anterior para o mesmo item/cor, restaura no progresso o valor daquela última
-    contagem válida; caso contrário, libera a linha da planilha de contagem.
+    Não restaura contagem anterior e não cria outro lançamento. Como o estoque é
+    um razão, o saldo é automaticamente recalculado pelos movimentos restantes.
     """
     mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
     if not mov or (mov.origem_tipo or "").upper() != "CONTAGEM":
         return RedirectResponse(
-            "/organiza/estoque/movimentacoes?erro=" + quote_plus("A movimentação informada não é uma contagem física."),
+            "/organiza/estoque/movimentacoes?erro=" + quote_plus("A movimentação informada não é um ajuste de contagem física."),
             status_code=303,
         )
-
     item_id = int(mov.item_id)
     cor = normalizar_cor(mov.cor)
-    data_mov = mov.criado_em or datetime.min
-    id_mov = int(mov.id)
-    item = db.query(Item).filter(Item.id == item_id).first()
+    item = mov.item or db.query(Item).filter(Item.id == item_id).first()
     nome_item = item.nome if item else f"Item #{item_id}"
-
-    # Procura a contagem válida imediatamente anterior antes de apagar a selecionada.
-    anterior = db.query(EstoqueMovimento).filter(
-        EstoqueMovimento.origem_tipo == "CONTAGEM",
-        EstoqueMovimento.item_id == item_id,
-        func.coalesce(EstoqueMovimento.cor, "") == cor,
-        or_(
-            EstoqueMovimento.criado_em < data_mov,
-            and_(EstoqueMovimento.criado_em == data_mov, EstoqueMovimento.id < id_mov),
-        ),
-    ).order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).first()
-
     db.delete(mov)
-    db.flush()
-
-    progresso = db.query(EstoqueContagemProgresso).filter(
-        EstoqueContagemProgresso.item_id == item_id,
-        EstoqueContagemProgresso.cor == cor,
-    ).first()
-
-    if anterior:
-        # Reconstrói o saldo exatamente até a contagem anterior, sem gravar movimento novo.
-        movimentos_ate = db.query(EstoqueMovimento).filter(
-            EstoqueMovimento.item_id == item_id,
-            func.coalesce(EstoqueMovimento.cor, "") == cor,
-            or_(
-                EstoqueMovimento.criado_em < anterior.criado_em,
-                and_(EstoqueMovimento.criado_em == anterior.criado_em, EstoqueMovimento.id <= anterior.id),
-            ),
-            EstoqueMovimento.tipo.in_(("ENTRADA", "SAIDA")),
-        ).order_by(EstoqueMovimento.criado_em.asc(), EstoqueMovimento.id.asc()).all()
-        saldo_contagem_anterior = 0.0
-        for hist in movimentos_ate:
-            qtd = float(hist.quantidade or 0)
-            saldo_contagem_anterior += qtd if (hist.tipo or "").upper() == "ENTRADA" else -qtd
-        saldo_contagem_anterior = round(saldo_contagem_anterior, 4)
-        if not progresso:
-            progresso = EstoqueContagemProgresso(item_id=item_id, cor=cor)
-            db.add(progresso)
-        progresso.quantidade = max(saldo_contagem_anterior, 0)
-        progresso.observacao = "Contagem anterior restaurada após exclusão de ajuste incorreto."
-        progresso.usuario_id = anterior.usuario_id
-        progresso.atualizado_em = anterior.criado_em
-    elif progresso:
-        db.delete(progresso)
-
     db.commit()
     saldo_atual = _estoque_fisico_chave(db, item_id, cor)
-    msg = (
-        f"Contagem excluída. {nome_item}: saldo recalculado pelo histórico = {saldo_atual:g}. "
-        "Nenhuma nova contagem física foi criada."
-    )
     return RedirectResponse(
-        "/organiza/estoque/movimentacoes?ok=" + quote_plus(msg),
+        "/organiza/estoque/movimentacoes?item_id=" + str(item_id) + "&ok=" + quote_plus(
+            f"Ajuste de contagem excluído. {nome_item}: saldo atual {saldo_atual:g}."
+        ),
+        status_code=303,
+    )
+
+
+@app.post("/organiza/estoque/movimentos/{movimento_id}/corrigir")
+async def estoque_movimento_corrigir(
+    movimento_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Corrige apenas movimentos cuja origem é local ao estoque.
+
+    Venda, manutenção e compra devem ser corrigidas na tela de origem para que o
+    sistema regenere o lançamento corretamente. Somente o ajuste gerado pela
+    contagem física pode ser editado diretamente no extrato.
+    """
+    mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
+    origem = (mov.origem_tipo or "").upper() if mov else ""
+    if not mov or origem != "CONTAGEM":
+        return RedirectResponse(
+            "/organiza/estoque/movimentacoes?erro=" + quote_plus("Esse lançamento deve ser corrigido na origem."),
+            status_code=303,
+        )
+    form = dict(await request.form())
+    tipo = (form.get("tipo") or mov.tipo or "").strip().upper()
+    if tipo not in {"ENTRADA", "SAIDA"}:
+        return RedirectResponse(
+            f"/organiza/estoque/movimentacoes?item_id={mov.item_id}&erro=" + quote_plus("Escolha Entrada ou Saída."),
+            status_code=303,
+        )
+    try:
+        quantidade = float(str(form.get("quantidade") or "0").replace(",", "."))
+    except (TypeError, ValueError):
+        quantidade = 0
+    if quantidade <= 0:
+        return RedirectResponse(
+            f"/organiza/estoque/movimentacoes?item_id={mov.item_id}&erro=" + quote_plus("Informe uma quantidade maior que zero."),
+            status_code=303,
+        )
+    mov.tipo = tipo
+    mov.quantidade = quantidade
+    obs = (form.get("observacao") or "").strip()
+    if obs:
+        mov.observacao = obs
+    mov.usuario_id = usuario.id
+    mov.atualizado_em = datetime.now()
+    item_id = int(mov.item_id)
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/estoque/movimentacoes?item_id={item_id}&ok=" + quote_plus("Movimentação corrigida. O saldo foi recalculado pelo histórico."),
+        status_code=303,
+    )
+
+
+@app.post("/organiza/estoque/movimentos/{movimento_id}/excluir-direto")
+def estoque_movimento_excluir_direto(
+    movimento_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
+    origem = (mov.origem_tipo or "").upper() if mov else ""
+    if not mov or origem != "CONTAGEM":
+        return RedirectResponse(
+            "/organiza/estoque/movimentacoes?erro=" + quote_plus("Esse lançamento deve ser corrigido na origem, não excluído aqui."),
+            status_code=303,
+        )
+    item_id = int(mov.item_id)
+    db.delete(mov)
+    db.commit()
+    return RedirectResponse(
+        f"/organiza/estoque/movimentacoes?item_id={item_id}&ok=" + quote_plus("Movimentação excluída. O saldo foi recalculado pelo histórico restante."),
         status_code=303,
     )
 
@@ -14099,7 +14116,7 @@ def _entradas_estoque_linhas(db: Session, data_inicio=None, data_fim=None, item_
             origem_url = "/organiza/estoque/compras"
         elif origem_tipo == "CONTAGEM":
             origem_rotulo = "Contagem física"
-            origem_url = "/organiza/estoque/contagem"
+            origem_url = f"/organiza/estoque/movimentacoes?item_id={m.item_id}&origem=CONTAGEM"
         elif origem_tipo == "ESTORNO":
             origem_rotulo = f"Estorno #{m.origem_id}" if m.origem_id else "Estorno"
             origem_url = ""
@@ -14247,40 +14264,37 @@ def estoque_entradas_csv(request: Request, usuario: Usuario = Depends(usuario_lo
 @app.get("/organiza/estoque/contagem", response_class=HTMLResponse)
 def estoque_contagem(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     linhas = _linhas_contagem_estoque(db)
-    total_salvos = sum(1 for l in linhas if l.get("salvo"))
-    valor_contado = round(sum(
-        float(l.get("contagem_salva") or 0) * float(l.get("custo_unitario") or 0)
-        for l in linhas if l.get("salvo")
-    ), 2)
     valor_fisico_atual = round(sum(
         float(l.get("fisico") or 0) * float(l.get("custo_unitario") or 0)
         for l in linhas
     ), 2)
     return templates.TemplateResponse("organiza/estoque_contagem.html", {
         "request": request, "usuario": usuario, "linhas": linhas,
-        "total_salvos": total_salvos, "total_pendentes": max(len(linhas) - total_salvos, 0),
-        "valor_contado": valor_contado, "valor_fisico_atual": valor_fisico_atual,
+        "total_itens": len(linhas), "valor_fisico_atual": valor_fisico_atual,
         "erro": request.query_params.get("erro", ""), "ok": request.query_params.get("ok", ""),
     })
 
 
 @app.post("/organiza/estoque/contagem")
 async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    """Aplica uma conferência física como ajuste de razão.
+
+    A contagem NÃO substitui o histórico e NÃO fica salva como novo saldo-base.
+    Para cada linha preenchida, compara o físico contado com o saldo atual:
+    diferença positiva = ENTRADA; diferença negativa = SAÍDA; diferença zero =
+    nenhuma movimentação. Depois do processamento a folha volta em branco.
+    """
     form = await request.form()
     item_ids = form.getlist("item_id")
     cores = form.getlist("cor")
     contagens = form.getlist("contagem")
     observacoes = form.getlist("observacao_linha")
-    salvos_originais = form.getlist("salvo_original")
     if not item_ids:
         return RedirectResponse("/organiza/estoque/contagem?erro=" + quote_plus("Nenhuma linha de contagem recebida."), status_code=303)
 
     desejados: dict[tuple[int, str], dict] = {}
     erros = []
     for idx, bruto_id in enumerate(item_ids):
-        if idx < len(salvos_originais) and str(salvos_originais[idx] or "0").strip() == "1":
-            # Linha já contada e não reaberta para correção: preserva o progresso sem reaplicar saldo antigo.
-            continue
         try:
             item_id = int(bruto_id or 0)
         except (TypeError, ValueError):
@@ -14292,66 +14306,86 @@ async def estoque_contagem_aplicar(request: Request, usuario: Usuario = Depends(
         contagem_txt = str(contagens[idx] if idx < len(contagens) else "").strip()
         observacao = str(observacoes[idx] if idx < len(observacoes) else "").strip()
 
-        # Linha totalmente em branco = ainda não contada. Estoque mínimo não é alterado nesta tela.
-        if item_controla_cor(item) and contagem_txt and not cor:
-            erros.append(f"Informe a cor de {item.nome} somente na linha que estiver contando.")
+        if not contagem_txt:
             continue
-        if not contagem_txt and not cor:
+        if item_controla_cor(item) and not cor:
+            erros.append(f"Informe a cor de {item.nome} na linha que estiver contando.")
+            continue
+        try:
+            contagem_valor = max(float(contagem_txt.replace(",", ".")), 0)
+        except ValueError:
+            erros.append(f"Contagem inválida para {item.nome} {cor}.".strip())
             continue
 
         chave = (item.id, cor)
-        registro = desejados.setdefault(chave, {"item": item, "cor": cor, "contagem": None, "observacao": observacao})
-        if contagem_txt != "":
-            try:
-                registro["contagem"] = max(float(contagem_txt.replace(",", ".")), 0)
-            except ValueError:
-                erros.append(f"Contagem inválida para {item.nome} {cor}.".strip())
+        desejados[chave] = {
+            "item": item,
+            "cor": cor,
+            "contagem": contagem_valor,
+            "observacao": observacao,
+        }
 
     if erros:
         db.rollback()
         return RedirectResponse("/organiza/estoque/contagem?erro=" + quote_plus(erros[0]), status_code=303)
 
-    ajustes = 0
-    salvos = 0
+    conferidos = 0
+    entradas = 0
+    saidas = 0
     agora = datetime.now().strftime("%d/%m/%Y %H:%M")
     for registro in desejados.values():
         item = registro["item"]
         cor = registro["cor"]
-        if registro["contagem"] is None:
-            continue
         atual = _estoque_fisico_chave(db, item.id, cor)
-        diferenca = round(float(registro["contagem"]) - atual, 4)
-        if abs(diferenca) > 0.0001:
-            db.add(EstoqueMovimento(
-                item_id=item.id,
-                tipo="ENTRADA" if diferenca > 0 else "SAIDA",
-                quantidade=abs(diferenca),
-                cor=cor or None,
-                origem_tipo="CONTAGEM",
-                custo_unitario=float(item.preco_custo or 0),
-                observacao=f"Ajuste por contagem física em {agora}",
-                usuario_id=usuario.id,
-            ))
-            ajustes += 1
-        _salvar_progresso_contagem(
-            db, item.id, cor, registro["contagem"], None,
-            registro.get("observacao"), usuario.id,
-        )
-        salvos += 1
+        contado = float(registro["contagem"])
+        diferenca = round(contado - atual, 4)
+        conferidos += 1
+        if abs(diferenca) <= 0.0001:
+            continue
+        tipo_ajuste = "ENTRADA" if diferenca > 0 else "SAIDA"
+        obs_usuario = (registro.get("observacao") or "").strip()
+        detalhe = f"Contagem física: sistema {atual:g}, contado {contado:g}, ajuste {diferenca:+g} em {agora}"
+        if obs_usuario:
+            detalhe += f" · {obs_usuario}"
+        db.add(EstoqueMovimento(
+            item_id=item.id,
+            tipo=tipo_ajuste,
+            quantidade=abs(diferenca),
+            cor=cor or None,
+            origem_tipo="CONTAGEM",
+            custo_unitario=float(item.preco_custo or 0),
+            observacao=detalhe,
+            usuario_id=usuario.id,
+        ))
+        if tipo_ajuste == "ENTRADA":
+            entradas += 1
+        else:
+            saidas += 1
+
+    # Qualquer progresso legado é descartado. A próxima abertura da planilha é
+    # sempre uma nova conferência, com os campos físicos em branco.
+    db.query(EstoqueContagemProgresso).delete(synchronize_session=False)
     db.commit()
-    if salvos == 0:
-        msg = "Nenhuma nova contagem preenchida. Os campos em branco foram mantidos pendentes."
+
+    if conferidos == 0:
+        msg = "Nenhuma contagem preenchida. Nenhuma movimentação foi criada."
     else:
-        msg = f"Progresso salvo: {salvos} linha(s) contada(s); {ajustes} ajuste(s) de estoque realizado(s)."
+        msg = (
+            f"Contagem processada: {conferidos} linha(s) conferida(s), "
+            f"{entradas} entrada(s) e {saidas} saída(s) de ajuste. "
+            "A planilha foi zerada para a próxima contagem."
+        )
     return RedirectResponse("/organiza/estoque/contagem?ok=" + quote_plus(msg), status_code=303)
 
 
 @app.post("/organiza/estoque/contagem/nova")
 def estoque_contagem_nova(usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    qtd = db.query(EstoqueContagemProgresso).delete(synchronize_session=False)
+    # Compatibilidade com versões antigas que guardavam progresso da contagem.
+    # Não altera nenhuma entrada/saída nem o saldo físico.
+    db.query(EstoqueContagemProgresso).delete(synchronize_session=False)
     db.commit()
     return RedirectResponse(
-        "/organiza/estoque/contagem?ok=" + quote_plus(f"Nova contagem iniciada. {int(qtd or 0)} marcação(ões) de progresso foram liberadas; o estoque físico não foi alterado."),
+        "/organiza/estoque/contagem?ok=" + quote_plus("Planilha limpa para uma nova contagem. O estoque não foi alterado."),
         status_code=303,
     )
 

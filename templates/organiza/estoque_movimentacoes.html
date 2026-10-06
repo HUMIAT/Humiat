@@ -5,7 +5,7 @@
     <div>
       <p class="tag">Estoque</p>
       <h1>Movimentações por período</h1>
-      <p class="texto-suave">Extrato do estoque: entradas somam e saídas de venda/manutenção reduzem o saldo, como um histórico bancário.</p>
+      <p class="texto-suave">Extrato do estoque como histórico bancário. Contagem e lançamentos manuais podem ser corrigidos aqui; Venda, Manutenção e Compra devem ser corrigidas na origem.</p>
     </div>
     <div class="mov-acoes"><a class="botao" href="/organiza/estoque">Voltar ao estoque</a></div>
   </div>
@@ -67,10 +67,28 @@
             <td class="num">{{ '%g'|format(h.saldo_antes) }}</td>
             <td class="num forte {% if h.saldo_apos < 0 %}negativo{% endif %}">{{ '%g'|format(h.saldo_apos) }}</td>
             <td class="no-print acao-extrato">
-              {% if h.pode_desfazer_contagem %}
-                <form method="post" action="/organiza/estoque/contagens/{{ h.id }}/excluir-recalcular" onsubmit="return confirm('Excluir esta contagem física e recalcular o saldo somente pelo histórico? Nenhuma nova contagem será criada.')">
-                  <button class="botao pequeno perigo" type="submit">Excluir e recalcular</button>
-                </form>
+              {% if h.pode_corrigir_local %}
+                <details class="corrigir-mov">
+                  <summary class="botao pequeno secundario">Corrigir</summary>
+                  <div class="corrigir-caixa">
+                    <form method="post" action="/organiza/estoque/movimentos/{{ h.id }}/corrigir" class="corrigir-form">
+                      <label>Tipo
+                        <select name="tipo">
+                          <option value="ENTRADA" {% if h.tipo == 'ENTRADA' %}selected{% endif %}>Entrada</option>
+                          <option value="SAIDA" {% if h.tipo == 'SAIDA' %}selected{% endif %}>Saída</option>
+                        </select>
+                      </label>
+                      <label>Quantidade<input name="quantidade" inputmode="decimal" value="{{ '%g'|format(h.quantidade) }}" required></label>
+                      <label>Observação<input name="observacao" value="{{ h.observacao }}"></label>
+                      <button class="botao pequeno primario" type="submit">Salvar correção</button>
+                    </form>
+                    <form method="post" action="/organiza/estoque/movimentos/{{ h.id }}/excluir-direto" onsubmit="return confirm('Excluir esta movimentação? O saldo será recalculado pelo histórico restante.')">
+                      <button class="botao pequeno perigo" type="submit">Excluir lançamento</button>
+                    </form>
+                  </div>
+                </details>
+              {% elif h.corrigir_na_origem %}
+                <a class="botao pequeno secundario" href="{{ h.url }}">Corrigir na origem</a>
               {% else %}—{% endif %}
             </td>
           </tr>{% else %}<tr><td colspan="10" class="vazio">Nenhuma movimentação encontrada para os filtros informados.</td></tr>{% endfor %}
@@ -79,6 +97,6 @@
     </div>
   </section>
 <style>
-.mov-topo{align-items:flex-end}.mov-acoes{display:flex;gap:8px}.filtros-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr)) auto;gap:10px;align-items:end}.filtros-grid label{display:grid;gap:5px;font-weight:800;font-size:12px}.filtros-grid input,.filtros-grid select{width:100%}.filtro-botoes{display:flex;gap:6px}.bloco-mov{padding:0;overflow:hidden}.bloco-titulo{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:14px 16px;border-bottom:1px solid #dbe3ee;flex-wrap:wrap}.bloco-titulo h2{margin:0 0 3px}.bloco-acoes{display:flex;align-items:center;gap:8px}.contador{font-size:12px;font-weight:900;color:#475467;background:#f2f4f7;border-radius:999px;padding:5px 9px}.planilha-scroll{overflow:auto;max-width:100%}.mov-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}.cliente-table{min-width:900px}.item-table{min-width:760px}.extrato-table{min-width:1050px}.extrato-categoria{display:block;color:#64748b;font-size:10px;margin-top:2px}.mov-table th{position:sticky;top:0;background:#eef3f9;padding:8px 10px;text-align:left;border-bottom:1px solid #ccd7e5;white-space:nowrap}.mov-table td{padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:middle;white-space:nowrap}.mov-table .num{text-align:right;font-variant-numeric:tabular-nums}.mov-table a{font-weight:800;color:#2563eb}.mov-tipo{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900}.mov-reserva{background:#eef2ff;color:#4338ca}.mov-entrada{background:#ecfdf3;color:#027a48}.mov-saida{background:#fff1f0;color:#b42318}.entrada{color:#027a48}.saida{color:#b42318}.reserva{color:#4338ca}.forte{font-weight:900}.negativo{color:#b42318}.acao-extrato form{margin:0}.botao.perigo{background:#fff;color:#b42318;border:1px solid #f0b8b3}.botao.perigo:hover{background:#fff1f0}.vazio{text-align:center!important;color:#64748b;padding:24px!important}@media(max-width:1000px){.filtros-grid{grid-template-columns:1fr 1fr}.filtro-botoes{grid-column:1/-1}.mov-topo{align-items:flex-start;flex-direction:column}.mov-acoes{width:100%}.mov-acoes .botao{width:100%;text-align:center}.bloco-titulo{align-items:flex-start}.bloco-acoes{width:100%;justify-content:space-between}}
+.mov-topo{align-items:flex-end}.mov-acoes{display:flex;gap:8px}.filtros-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr)) auto;gap:10px;align-items:end}.filtros-grid label{display:grid;gap:5px;font-weight:800;font-size:12px}.filtros-grid input,.filtros-grid select{width:100%}.filtro-botoes{display:flex;gap:6px}.bloco-mov{padding:0;overflow:hidden}.bloco-titulo{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:14px 16px;border-bottom:1px solid #dbe3ee;flex-wrap:wrap}.bloco-titulo h2{margin:0 0 3px}.bloco-acoes{display:flex;align-items:center;gap:8px}.contador{font-size:12px;font-weight:900;color:#475467;background:#f2f4f7;border-radius:999px;padding:5px 9px}.planilha-scroll{overflow:auto;max-width:100%}.mov-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}.cliente-table{min-width:900px}.item-table{min-width:760px}.extrato-table{min-width:1050px}.extrato-categoria{display:block;color:#64748b;font-size:10px;margin-top:2px}.mov-table th{position:sticky;top:0;background:#eef3f9;padding:8px 10px;text-align:left;border-bottom:1px solid #ccd7e5;white-space:nowrap}.mov-table td{padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:middle;white-space:nowrap}.mov-table .num{text-align:right;font-variant-numeric:tabular-nums}.mov-table a{font-weight:800;color:#2563eb}.mov-tipo{display:inline-flex;padding:3px 7px;border-radius:999px;font-size:10px;font-weight:900}.mov-reserva{background:#eef2ff;color:#4338ca}.mov-entrada{background:#ecfdf3;color:#027a48}.mov-saida{background:#fff1f0;color:#b42318}.entrada{color:#027a48}.saida{color:#b42318}.reserva{color:#4338ca}.forte{font-weight:900}.negativo{color:#b42318}.acao-extrato form{margin:0}.corrigir-mov{position:relative}.corrigir-mov summary{cursor:pointer;list-style:none;white-space:nowrap}.corrigir-mov summary::-webkit-details-marker{display:none}.corrigir-caixa{margin-top:6px;padding:9px;border:1px solid #dbe3ee;border-radius:9px;background:#fff;min-width:250px;box-shadow:0 8px 20px rgba(15,23,42,.10)}.corrigir-form{display:grid;gap:6px;margin-bottom:7px!important}.corrigir-form label{display:grid;gap:3px;font-size:10px;font-weight:800;color:#475569}.corrigir-form input,.corrigir-form select{width:100%;min-width:0;padding:6px 7px;border:1px solid #dbe3ee;border-radius:7px;background:#fff}.botao.perigo{background:#fff;color:#b42318;border:1px solid #f0b8b3}.botao.perigo:hover{background:#fff1f0}.vazio{text-align:center!important;color:#64748b;padding:24px!important}@media(max-width:1000px){.filtros-grid{grid-template-columns:1fr 1fr}.filtro-botoes{grid-column:1/-1}.mov-topo{align-items:flex-start;flex-direction:column}.mov-acoes{width:100%}.mov-acoes .botao{width:100%;text-align:center}.bloco-titulo{align-items:flex-start}.bloco-acoes{width:100%;justify-content:space-between}}
 </style>
 {% endblock %}
