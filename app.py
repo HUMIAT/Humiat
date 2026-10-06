@@ -4490,6 +4490,18 @@ def inicio_publico(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/privacidade", response_class=HTMLResponse)
+def politica_privacidade(request: Request):
+    """Política pública usada também na configuração OAuth das integrações HUMIAT."""
+    return templates.TemplateResponse("privacidade.html", {"request": request})
+
+
+@app.get("/termos", response_class=HTMLResponse)
+def termos_servico(request: Request):
+    """Termos públicos de uso das plataformas HUMIAT."""
+    return templates.TemplateResponse("termos.html", {"request": request})
+
+
 @app.get("/saude")
 def saude():
     return {"status": "ok", "versao": ORGANIZA_VERSAO}
