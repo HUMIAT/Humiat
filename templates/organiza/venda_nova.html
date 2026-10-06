@@ -1,5 +1,6 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
+<style>.venda-pagina .estoque-regra-venda{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid #dbe3ee;border-radius:10px;background:#fbfdff}.venda-pagina .estoque-regra-venda input{width:20px;height:20px;margin-top:2px}.venda-pagina .estoque-regra-venda span{display:grid;gap:2px}.venda-pagina .estoque-regra-venda small{color:#64748b;font-weight:500}</style>
 <section class="pagina-clean venda-pagina">
   <div class="titulo-linha">
     <div>
@@ -58,6 +59,11 @@
         </label>
         <label>Desconto manual (R$)<input name="desconto_manual" id="desconto-manual" inputmode="decimal" value="{{ dados.get('desconto_manual','0,00') }}"></label>
         <label>Frete / entrega (R$)<input name="frete_venda" id="frete-venda" inputmode="decimal" value="{{ dados.get('frete_venda','0,00') }}"><small>Somado depois dos descontos.</small></label>
+        <input type="hidden" name="descontar_estoque_presente" value="1">
+        <label class="estoque-regra-venda">
+          <input type="checkbox" name="descontar_estoque" value="1" {% if not dados.get('descontar_estoque_presente') or dados.get('descontar_estoque') %}checked{% endif %}>
+          <span><strong>Descontar materiais desta venda do estoque</strong><small>Esta opção é a regra do estoque. O status Solicitar gabinete, Montagem, Pronto ou Entregue não altera a baixa. Cancelada remove a saída.</small></span>
+        </label>
       </div>
       <div class="venda-opcionais" style="margin-top:18px">
         <h3>Opcionais da proposta</h3>

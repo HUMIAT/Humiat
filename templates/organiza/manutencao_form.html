@@ -10,6 +10,13 @@
 <div class="aviso-horario" id="aviso-horario"><strong>Atendimento na loja:</strong> segunda a sexta-feira, das <strong>14:00 às 17:00</strong>. Cada horário fica reservado por 30 minutos.</div>
 <label id="rotulo-agendamento">Quando o cliente pretende trazer o equipamento?<input type="datetime-local" name="entrega_prevista_em" id="agendamento" required step="1800"></label>
 <label>Observação interna<textarea name="observacao"></textarea></label>
+<label>Movimentação do estoque
+  <select name="descontar_estoque">
+    <option value="1" selected>Descontar do estoque</option>
+    <option value="">Não descontar do estoque</option>
+  </select>
+  <small>Esta opção é a regra. A etapa da manutenção não ativa nem desativa a baixa; cancelamento remove a saída.</small>
+</label>
 <button class="botao primario">Criar manutenção</button></form></section>
 <script>
 const busca=document.querySelector('#busca-cliente'),c=document.querySelector('#cliente'),e=document.querySelector('#equipamento');

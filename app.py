@@ -835,7 +835,7 @@ class Equipamento(Base):
     # Quando manual=0, o consumo continua acompanhando composição + Opcionais.
     estoque_uso_override = Column(Text, nullable=True)
     estoque_uso_manual = Column(Integer, nullable=False, default=0)
-    # 1.2.44: marcado = venda gera saída física; desmarcado = não movimenta estoque.
+    # 1.2.35: permite excluir a venda do estoque sem deixar reserva/saída no histórico.
     descontar_estoque = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente", back_populates="equipamentos")
@@ -1202,7 +1202,7 @@ class Manutencao(Base):
     comunicado = Column(Integer, nullable=False, default=0)
     ultima_comunicacao_em = Column(DateTime, nullable=True)
     ultima_comunicacao_tipo = Column(String(30), nullable=True)
-    # 1.2.44: quando 0, a manutenção não gera saída física; quando 1, orçamento aprovado desconta.
+    # 1.2.35: quando 0, a manutenção não cria reserva nem saída e qualquer movimento existente é removido.
     descontar_estoque = Column(Integer, nullable=False, default=1)
     criado_em = Column(DateTime, server_default=func.now())
     cliente = relationship("Cliente")
@@ -1748,8 +1748,17 @@ ESTOQUE_CATEGORIAS_SEM_CONTROLE = {"SISTEMA", "MANUTENCAO", "MANUTENCOES"}
 ESTOQUE_ITENS_SEM_CONTROLE = {"ATUALIZACAO", "CATALOGO ENCARDENADO"}
 ESTOQUE_COR_PENDENTE = "SEM COR DEFINIDA"
 ESTOQUE_VENDA_A_FAZER = {"Solicitar gabinete", "Montagem", "Pronto para entrega"}
+ESTOQUE_VENDA_CANCELADA = {"Cancelada", "Cancelado"}
 ESTOQUE_MANUTENCAO_FINAL = {"Encerrada"}
 ESTOQUE_MANUTENCAO_CANCELADA = {"Cancelada", "Cancelado"}
+
+def _venda_cancelada(eq: "Equipamento | None") -> bool:
+    return bool(eq and (eq.status or "").strip() in ESTOQUE_VENDA_CANCELADA)
+
+def _manutencao_cancelada(m: "Manutencao | None", o: "Orcamento | None" = None) -> bool:
+    if not m:
+        return False
+    return (m.status or "").strip() in ESTOQUE_MANUTENCAO_CANCELADA or bool(o and (o.status or "").strip() == "Cancelado")
 
 
 def _texto_sem_acento(valor: str) -> str:
@@ -2023,39 +2032,34 @@ def _desejado_venda_estoque(eq: Equipamento, db: Session) -> dict[tuple[int, str
 
 
 def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
-    """Regra única: venda marcada para descontar gera SAÍDA física imediatamente.
+    """Regra única de venda: se "descontar estoque" está ativo, é SAÍDA física.
 
-    Não existe mais reserva de venda na posição oficial do estoque. A composição
-    efetivamente usada é baixada do físico assim que a venda é registrada/salva,
-    independentemente da etapa comercial. Editar a venda atualiza a mesma saída,
-    sem duplicar. Ao marcar "não descontar", a saída automática é removida.
+    Não existe mais etapa intermediária de reserva para venda. O estoque funciona
+    como razão bancário: entrada soma; venda desconta no momento em que a venda
+    está configurada para movimentar estoque. Se o usuário desmarcar o parâmetro,
+    a saída automática daquela venda é removida da origem, sem criar estorno lixo.
     """
     if not eq or not eq.id:
         return
 
-    # Limpa qualquer reserva legada. A fonte oficial passa a ser estoque_movimentos.
+    # Reserva de venda foi abolida. Limpa qualquer legado desta origem.
     _sincronizar_reservas_origem(db, "VENDA", eq.id, {})
+
+    # 1.2.45: status operacional nunca decide a baixa. A única exceção é
+    # cancelamento, que desfaz a saída automática desta origem.
+    if _venda_cancelada(eq):
+        _sincronizar_saidas_origem(db, "VENDA", eq.id, {})
+        return
 
     if int(getattr(eq, "descontar_estoque", 1) or 0) == 0:
         _sincronizar_saidas_origem(db, "VENDA", eq.id, {})
         return
 
     desejado = _desejado_venda_estoque(eq, db)
-    ids_antes = {int(mid) for (mid,) in db.query(EstoqueMovimento.id).filter(
-        EstoqueMovimento.tipo == "SAIDA", EstoqueMovimento.origem_tipo == "VENDA", EstoqueMovimento.origem_id == eq.id
-    ).all()}
     _sincronizar_saidas_origem(
         db, "VENDA", eq.id, desejado,
         observacao=f"Venda #{eq.id} · baixa física · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
     )
-    db.flush()
-    # No extrato, a primeira baixa usa a data da venda quando ela foi informada.
-    if eq.data_compra:
-        for mov in db.query(EstoqueMovimento).filter(
-            EstoqueMovimento.tipo == "SAIDA", EstoqueMovimento.origem_tipo == "VENDA", EstoqueMovimento.origem_id == eq.id
-        ).all():
-            if int(mov.id or 0) not in ids_antes:
-                mov.criado_em = datetime.combine(eq.data_compra, time(hour=12))
 
 
 def salvar_cores_venda(eq: Equipamento, form: dict, db: Session) -> None:
@@ -2111,21 +2115,19 @@ def _desejado_manutencao_estoque(m: Manutencao, o: Orcamento, db: Session, somen
 def resumo_estoque_manutencao(m: Manutencao | None, o: Orcamento | None, db: Session) -> list[dict]:
     """Resumo operacional: mostra o que realmente desconta do estoque.
 
-    Manutenção não reserva mais material. Antes da aprovação, ou quando a própria
-    manutenção estiver marcada como "não descontar", o item aparece como
-    NÃO DESCONTA e não existe em estoque_reservas/estoque_movimentos.
+    Manutenção não reserva material. Se a manutenção estiver marcada para descontar,
+    cada item aprovado da versão atual aparece como DESCONTA e deve existir como SAÍDA.
     """
     if not o:
         return []
     item_ids = [oi.item_id for oi in o.itens if oi.item_id]
     itens = {i.id: i for i in db.query(Item).filter(Item.id.in_(item_ids)).all()} if item_ids else {}
-    aprovado = _orcamento_aprovado(o)
-    manut_desconta = bool(m and int(getattr(m, "descontar_estoque", 1) or 0) != 0)
+    manut_desconta = bool(m and int(getattr(m, "descontar_estoque", 1) or 0) != 0 and not _manutencao_cancelada(m, o))
     linhas = []
     for oi in o.itens:
         item = itens.get(oi.item_id) if oi.item_id else None
         controla = item_controla_estoque(item)
-        desconta = bool(controla and manut_desconta and aprovado and bool(oi.aprovado))
+        desconta = bool(controla and manut_desconta and bool(oi.aprovado))
         linhas.append({
             "item_id": oi.item_id,
             "descricao": oi.descricao,
@@ -2139,18 +2141,16 @@ def resumo_estoque_manutencao(m: Manutencao | None, o: Orcamento | None, db: Ses
 
 
 def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
-    """Sincroniza a manutenção com uma regra única de estoque (1.2.35).
+    """Regra única de manutenção: "descontar estoque" ativo gera SAÍDA física.
 
-    - manutenção pendente/não aprovada: não reserva e não movimenta;
-    - manutenção aprovada: baixa fisicamente os itens aprovados;
-    - "não descontar estoque": exclui reservas/saídas automáticas da manutenção;
-    - cancelada/encerrada sem aprovação: não movimenta;
-    - nunca cria linha de estorno para corrigir: remove a própria movimentação automática.
+    Não existe reserva. Enquanto a manutenção não estiver cancelada, os materiais
+    marcados como aprovados na versão atual do orçamento são baixados fisicamente.
+    O status geral do orçamento não bloqueia a baixa quando a própria manutenção
+    está configurada para descontar. Desmarcar o parâmetro remove a saída da origem.
     """
     if not m or not m.id:
         return
 
-    # Reserva é exclusiva de VENDA. Remove qualquer legado da manutenção sempre.
     _sincronizar_reservas_origem(db, "MANUTENCAO", m.id, {})
 
     if int(getattr(m, "descontar_estoque", 1) or 0) == 0:
@@ -2158,16 +2158,14 @@ def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
         return
 
     o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
-    status = (m.status or "").strip()
-    cancelada = status in ESTOQUE_MANUTENCAO_CANCELADA or (o and (o.status or "").strip() == "Cancelado")
-    if not o or cancelada or not _orcamento_aprovado(o):
+    if not o or _manutencao_cancelada(m, o):
         _sincronizar_saidas_origem(db, "MANUTENCAO", m.id, {})
         return
 
     desejado_saida = _desejado_manutencao_estoque(m, o, db, somente_aprovados=True)
     _sincronizar_saidas_origem(
         db, "MANUTENCAO", m.id, desejado_saida,
-        observacao=f"Manutenção #{m.id} aprovada · baixa física",
+        observacao=f"Manutenção #{m.id} · baixa física",
     )
 
 
@@ -2208,16 +2206,11 @@ def _salvar_minimo_estoque(db: Session, item_id: int, cor: str | None, quantidad
 
 
 def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
-    """Posição única de estoque baseada exclusivamente em movimentos físicos.
+    """Posição única do estoque baseada somente no razão físico.
 
-    Regra 1.2.44:
-    - ENTRADA soma;
-    - SAÍDA de VENDA reduz o físico no momento em que a venda está marcada para descontar;
-    - SAÍDA de MANUTENÇÃO reduz o físico quando o orçamento aprovado deve descontar;
-    - não existe segunda subtração por reserva/necessidade.
-
-    As colunas Vendas e Manutenções apenas abrem as saídas já incluídas no saldo
-    físico. ``disponivel`` é o próprio saldo físico atual.
+    Regra 1.2.44: ENTRADA soma e SAÍDA reduz. Venda/manutenção não são abatidas
+    novamente como reserva/necessidade. As colunas de Venda e Manutenção são
+    apenas informativas: mostram quanto já saiu por cada origem.
     """
     itens = [
         i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
@@ -2225,38 +2218,58 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
     ]
     movimentos = db.query(EstoqueMovimento).all()
     minimos = _mapa_minimos_estoque(db)
+    # As colunas informativas de Venda/Manutenção mostram as saídas desde a
+    # última contagem física salva daquele item/cor. Isso transforma a posição
+    # em um extrato natural: contagem inicial -> saídas posteriores -> saldo atual.
+    ultimas_contagens = {}
+    for prog in db.query(EstoqueContagemProgresso).all():
+        chave_cont = (int(prog.item_id), normalizar_cor(prog.cor))
+        if prog.atualizado_em and (chave_cont not in ultimas_contagens or prog.atualizado_em > ultimas_contagens[chave_cont]):
+            ultimas_contagens[chave_cont] = prog.atualizado_em
     por_item: dict[int, dict] = {
         i.id: {
-            "item": i, "fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0,
-            "reservado": 0.0, "disponivel": 0.0,
-        } for i in itens
+            "item": i,
+            "fisico": 0.0,
+            "vendas_a_fazer": 0.0,       # compatibilidade: agora = saídas de venda
+            "manutencoes_a_fazer": 0.0,  # compatibilidade: agora = saídas de manutenção
+            "reservado": 0.0,
+            "disponivel": 0.0,
+        }
+        for i in itens
     }
     cores: dict[int, dict[str, dict]] = {}
 
     for mov in movimentos:
-        if mov.item_id not in por_item:
-            continue
         tipo_mov = (mov.tipo or "").upper()
         origem_mov = (mov.origem_tipo or "").upper()
         qtd_mov = float(mov.quantidade or 0)
         sinal = 1 if tipo_mov == "ENTRADA" else -1
-        por_item[mov.item_id]["fisico"] += sinal * qtd_mov
-        if tipo_mov == "SAIDA" and origem_mov == "VENDA":
-            por_item[mov.item_id]["vendas_a_fazer"] += qtd_mov
-        elif tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
-            por_item[mov.item_id]["manutencoes_a_fazer"] += qtd_mov
+
+        cor_mov = normalizar_cor(mov.cor)
+        chave_base = (int(mov.item_id), cor_mov)
+        data_base = ultimas_contagens.get(chave_base)
+        depois_da_contagem = not data_base or not mov.criado_em or mov.criado_em >= data_base
+
+        if mov.item_id in por_item:
+            por_item[mov.item_id]["fisico"] += sinal * qtd_mov
+            if depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "VENDA":
+                por_item[mov.item_id]["vendas_a_fazer"] += qtd_mov
+            elif depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
+                por_item[mov.item_id]["manutencoes_a_fazer"] += qtd_mov
 
         if mov.cor:
             c = cores.setdefault(mov.item_id, {}).setdefault(
-                mov.cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0}
+                mov.cor,
+                {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0},
             )
             c["fisico"] += sinal * qtd_mov
-            if tipo_mov == "SAIDA" and origem_mov == "VENDA":
+            if depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "VENDA":
                 c["vendas_a_fazer"] += qtd_mov
-            elif tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
+            elif depois_da_contagem and tipo_mov == "SAIDA" and origem_mov == "MANUTENCAO":
                 c["manutencoes_a_fazer"] += qtd_mov
 
-    for (item_id, cor), _qtd in minimos.items():
+    # Cores cadastradas apenas no mínimo também precisam aparecer mesmo sem movimento.
+    for (item_id, cor), qtd in minimos.items():
         if cor:
             cores.setdefault(item_id, {}).setdefault(
                 cor, {"fisico": 0.0, "vendas_a_fazer": 0.0, "manutencoes_a_fazer": 0.0}
@@ -2270,6 +2283,7 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
         dados["vendas_a_fazer"] = round(dados["vendas_a_fazer"], 4)
         dados["manutencoes_a_fazer"] = round(dados["manutencoes_a_fazer"], 4)
         dados["reservado"] = 0.0
+        # O disponível é o próprio físico: venda/manutenção já estão dentro das SAÍDAS.
         dados["disponivel"] = dados["fisico"]
 
         linhas_cor = []
@@ -2282,22 +2296,27 @@ def estoque_saldos(db: Session) -> tuple[list[dict], dict[int, list[dict]]]:
                 minimo = round(float(minimos.get((item.id, cor), 0) or 0), 4)
                 comprar = round(max(minimo - disponivel, 0), 4) if cor != ESTOQUE_COR_PENDENTE else 0.0
                 linhas_cor.append({
-                    "cor": cor, "fisico": fisico, "vendas_a_fazer": vendas, "manutencoes_a_fazer": manut,
-                    "reservado": 0.0, "disponivel": disponivel, "minimo": minimo,
-                    "comprar": comprar, "custo_compra": round(comprar * float(item.preco_custo or 0), 2),
+                    "cor": cor,
+                    "fisico": fisico,
+                    "vendas_a_fazer": vendas,
+                    "manutencoes_a_fazer": manut,
+                    "reservado": 0.0,
+                    "disponivel": disponivel,
+                    "minimo": minimo,
+                    "comprar": comprar,
+                    "custo_compra": round(comprar * float(item.preco_custo or 0), 2),
                 })
             minimo_total = round(sum(c["minimo"] for c in linhas_cor if c["cor"] != ESTOQUE_COR_PENDENTE), 4)
             comprar_total = round(sum(c["comprar"] for c in linhas_cor), 4)
         else:
             minimo_total = round(float(minimos.get((item.id, ""), 0) or 0), 4)
-            comprar_total = round(max(minimo_total - dados["fisico"], 0), 4)
+            comprar_total = round(max(minimo_total - dados["disponivel"], 0), 4)
         dados["minimo"] = minimo_total
         dados["comprar"] = comprar_total
         dados["custo_compra"] = round(comprar_total * float(item.preco_custo or 0), 2)
         linhas.append(dados)
         cores_saida[item.id] = linhas_cor
     return linhas, cores_saida
-
 
 def _mapa_progresso_contagem(db: Session) -> dict[tuple[int, str], EstoqueContagemProgresso]:
     return {
@@ -2672,59 +2691,163 @@ def _migrar_estoque_regra_unica_1235(db: Session) -> tuple[int, int]:
     db.flush()
     return int(reservas_removidas or 0), revisadas
 
-def _migrar_estoque_baixa_imediata_1244(db: Session) -> tuple[int, int, int]:
-    """Converte a regra antiga de reserva para baixa física única.
+def _migrar_estoque_razao_unico_1244(db: Session) -> tuple[int, int, int]:
+    """1.2.44: elimina reservas e recalcula venda/manutenção como saídas físicas.
 
-    Reservas de venda existentes viram saídas físicas, vendas do fluxo comercial
-    são ressincronizadas e manutenções aprovadas são conferidas. No fim não resta
-    reserva operacional: todos os relatórios leem somente estoque_movimentos.
+    Venda com ``descontar_estoque=1`` sempre gera SAÍDA dos materiais da composição.
+    Manutenção com ``descontar_estoque=1`` gera SAÍDA dos itens aprovados da versão atual,
+    salvo quando cancelada. O histórico passa a ser um razão simples: entrada soma, saída reduz.
     """
-    chave = "estoque_baixa_imediata_vendas_extrato_1_2_44"
+    chave = "estoque_razao_unico_sem_reserva_1_2_44"
     marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
     if marcador and (marcador.valor or "").strip().lower() == "ok":
         return 0, 0, 0
 
-    reservas_venda = db.query(EstoqueReserva).filter(EstoqueReserva.origem_tipo == "VENDA").all()
-    datas_reserva: dict[tuple[int, int, str, int | None], datetime] = {}
-    for r in reservas_venda:
-        if r.origem_id:
-            datas_reserva[(int(r.origem_id), int(r.item_id), r.cor or "", r.origem_item_id or None)] = r.criado_em or datetime.now()
+    venda_ids_reservados = {
+        int(v) for (v,) in db.query(EstoqueReserva.origem_id).filter(
+            EstoqueReserva.origem_tipo == "VENDA", EstoqueReserva.origem_id.isnot(None)
+        ).all()
+    }
+    reservas_removidas = db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo.in_(("VENDA", "MANUTENCAO"))
+    ).delete(synchronize_session=False)
 
-    venda_ids = {int(r.origem_id) for r in reservas_venda if r.origem_id}
-    venda_ids.update(int(x) for (x,) in db.query(Equipamento.id).filter(
+    ultima_contagem = db.query(func.max(EstoqueContagemProgresso.atualizado_em)).scalar()
+    if not ultima_contagem:
+        ultima_contagem = db.query(func.max(EstoqueMovimento.criado_em)).filter(
+            EstoqueMovimento.origem_tipo == "CONTAGEM"
+        ).scalar()
+    # Evita rebaixar vendas históricas que já estavam embutidas em uma contagem física.
+    # Sem marco de contagem, limita a correção automática aos últimos 120 dias.
+    data_corte = ultima_contagem or (datetime.now() - timedelta(days=120))
+    venda_ids_com_saida = {
+        int(v) for (v,) in db.query(EstoqueMovimento.origem_id).filter(
+            EstoqueMovimento.tipo == "SAIDA",
+            EstoqueMovimento.origem_tipo == "VENDA",
+            EstoqueMovimento.origem_id.isnot(None),
+        ).all()
+    }
+    ids_venda_recalcular = venda_ids_reservados | venda_ids_com_saida
+    vendas = db.query(Equipamento).filter(
         Equipamento.produto_venda_id.isnot(None),
-        Equipamento.status.in_(("Solicitar gabinete", "Montagem", "Pronto para entrega", "Entregue")),
-        Equipamento.descontar_estoque != 0,
-    ).all())
-
-    vendas = db.query(Equipamento).filter(Equipamento.id.in_(list(venda_ids) or [-1])).all()
-    vendas_revisadas = 0
+        or_(Equipamento.id.in_(ids_venda_recalcular or {-1}), Equipamento.criado_em >= data_corte),
+    ).all()
+    vendas_recalculadas = 0
     for eq in vendas:
+        tinha_saida = db.query(EstoqueMovimento.id).filter(
+            EstoqueMovimento.tipo == "SAIDA",
+            EstoqueMovimento.origem_tipo == "VENDA",
+            EstoqueMovimento.origem_id == eq.id,
+        ).first() is not None
         sincronizar_estoque_venda(eq, db)
         db.flush()
-        for mov in db.query(EstoqueMovimento).filter(
-            EstoqueMovimento.tipo == "SAIDA", EstoqueMovimento.origem_tipo == "VENDA", EstoqueMovimento.origem_id == eq.id
-        ).all():
-            antiga = datas_reserva.get((eq.id, mov.item_id, mov.cor or "", mov.origem_item_id or None))
-            if antiga:
-                mov.criado_em = antiga
-            elif eq.data_compra and mov.criado_em and mov.criado_em.date() == date.today():
-                mov.criado_em = datetime.combine(eq.data_compra, time(hour=12))
-        vendas_revisadas += 1
+        if not tinha_saida:
+            novos = db.query(EstoqueMovimento).filter(
+                EstoqueMovimento.tipo == "SAIDA",
+                EstoqueMovimento.origem_tipo == "VENDA",
+                EstoqueMovimento.origem_id == eq.id,
+            ).all()
+            for mov in novos:
+                if eq.criado_em:
+                    mov.criado_em = eq.criado_em
+        vendas_recalculadas += 1
 
-    manut_revisadas = 0
-    for mid, in db.query(Manutencao.id).all():
-        m = carregar_manutencao(db, int(mid))
-        if m:
-            sincronizar_estoque_manutencao(m, db)
-            manut_revisadas += 1
+    manut_ids_com_saida = {
+        int(v) for (v,) in db.query(EstoqueMovimento.origem_id).filter(
+            EstoqueMovimento.tipo == "SAIDA",
+            EstoqueMovimento.origem_tipo == "MANUTENCAO",
+            EstoqueMovimento.origem_id.isnot(None),
+        ).all()
+    }
+    manutencoes = db.query(Manutencao).options(
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens)
+    ).filter(or_(Manutencao.id.in_(manut_ids_com_saida or {-1}), Manutencao.criado_em >= data_corte)).all()
+    manut_recalculadas = 0
+    for m in manutencoes:
+        tinha_saida = db.query(EstoqueMovimento.id).filter(
+            EstoqueMovimento.tipo == "SAIDA",
+            EstoqueMovimento.origem_tipo == "MANUTENCAO",
+            EstoqueMovimento.origem_id == m.id,
+        ).first() is not None
+        sincronizar_estoque_manutencao(m, db)
+        db.flush()
+        if not tinha_saida:
+            o = sorted(m.orcamentos, key=lambda x: x.versao)[-1] if m.orcamentos else None
+            data_ref = (o.aprovado_em if o and o.aprovado_em else m.criado_em)
+            novos = db.query(EstoqueMovimento).filter(
+                EstoqueMovimento.tipo == "SAIDA",
+                EstoqueMovimento.origem_tipo == "MANUTENCAO",
+                EstoqueMovimento.origem_id == m.id,
+            ).all()
+            for mov in novos:
+                if data_ref:
+                    mov.criado_em = data_ref
+        manut_recalculadas += 1
 
-    reservas_removidas = db.query(EstoqueReserva).delete(synchronize_session=False)
     if not marcador:
-        marcador = ConfiguracaoSistema(chave=chave); db.add(marcador)
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
     marcador.valor = "ok"
     db.flush()
-    return int(reservas_removidas or 0), vendas_revisadas, manut_revisadas
+    return int(reservas_removidas or 0), vendas_recalculadas, manut_recalculadas
+
+
+def _migrar_estoque_parametro_explicito_1245(db: Session) -> tuple[int, int, int]:
+    """1.2.45: reconcilia estoque pela regra explícita, nunca pela etapa/status.
+
+    Venda: ``descontar_estoque=1`` gera saída em qualquer etapa, exceto Cancelada.
+    Manutenção: ``descontar_estoque=1`` gera saída dos itens aprovados, exceto Cancelada.
+    A janela respeita a última contagem física para não rebaixar histórico já consolidado.
+    """
+    chave = "estoque_parametro_explicito_status_neutro_1_2_45"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0, 0, 0
+
+    reservas_removidas = db.query(EstoqueReserva).filter(
+        EstoqueReserva.origem_tipo.in_(("VENDA", "MANUTENCAO"))
+    ).delete(synchronize_session=False)
+
+    ultima_contagem = db.query(func.max(EstoqueContagemProgresso.atualizado_em)).scalar()
+    if not ultima_contagem:
+        ultima_contagem = db.query(func.max(EstoqueMovimento.criado_em)).filter(
+            EstoqueMovimento.origem_tipo == "CONTAGEM"
+        ).scalar()
+    data_corte = ultima_contagem or (datetime.now() - timedelta(days=120))
+
+    venda_ids_mov = {
+        int(v) for (v,) in db.query(EstoqueMovimento.origem_id).filter(
+            EstoqueMovimento.origem_tipo == "VENDA", EstoqueMovimento.origem_id.isnot(None)
+        ).all()
+    }
+    vendas = db.query(Equipamento).filter(
+        Equipamento.produto_venda_id.isnot(None),
+        or_(Equipamento.id.in_(venda_ids_mov or {-1}), Equipamento.criado_em >= data_corte),
+    ).all()
+    vendas_recalculadas = 0
+    for eq in vendas:
+        sincronizar_estoque_venda(eq, db)
+        vendas_recalculadas += 1
+
+    manut_ids_mov = {
+        int(v) for (v,) in db.query(EstoqueMovimento.origem_id).filter(
+            EstoqueMovimento.origem_tipo == "MANUTENCAO", EstoqueMovimento.origem_id.isnot(None)
+        ).all()
+    }
+    manutencoes = db.query(Manutencao).options(
+        selectinload(Manutencao.orcamentos).selectinload(Orcamento.itens)
+    ).filter(or_(Manutencao.id.in_(manut_ids_mov or {-1}), Manutencao.criado_em >= data_corte)).all()
+    manut_recalculadas = 0
+    for m in manutencoes:
+        sincronizar_estoque_manutencao(m, db)
+        manut_recalculadas += 1
+
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+    return int(reservas_removidas or 0), vendas_recalculadas, manut_recalculadas
 
 
 def _migrar_itens_e_reservas_1174(db: Session) -> tuple[int, int]:
@@ -4520,11 +4643,17 @@ def iniciar_banco():
                 f"[ESTOQUE] 1.2.35: reservas de manutenção removidas={reservas_manut_1235}; "
                 f"manutenções revisadas={manut_revisadas_1235}."
             )
-        reservas_1244, vendas_1244, manut_1244 = _migrar_estoque_baixa_imediata_1244(db)
+        reservas_1244, vendas_1244, manut_1244 = _migrar_estoque_razao_unico_1244(db)
         if reservas_1244 or vendas_1244 or manut_1244:
             print(
                 f"[ESTOQUE] 1.2.44: reservas removidas={reservas_1244}; "
-                f"vendas revisadas={vendas_1244}; manutenções revisadas={manut_1244}."
+                f"vendas recalculadas={vendas_1244}; manutenções recalculadas={manut_1244}."
+            )
+        reservas_1245, vendas_1245, manut_1245 = _migrar_estoque_parametro_explicito_1245(db)
+        if reservas_1245 or vendas_1245 or manut_1245:
+            print(
+                f"[ESTOQUE] 1.2.45: reservas removidas={reservas_1245}; "
+                f"vendas reconciliadas={vendas_1245}; manutenções reconciliadas={manut_1245}."
             )
         db.commit()
         # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
@@ -8527,7 +8656,12 @@ def preencher_equipamento(eq: Equipamento, form: dict, db: Session):
         pass
     eq.numero_hd = re.sub(r"[^A-Z0-9]", "", (form.get("numero_hd") or "").strip().upper()) or None
     eq.numero_serie = None
-    eq.status = (form.get("status") or "Ativo").strip()
+    # Status só muda quando o formulário envia o campo. Rotinas auxiliares e
+    # cadastro público não podem transformar a etapa em "Ativo" implicitamente.
+    if "status" in form:
+        eq.status = (form.get("status") or eq.status or "Ativo").strip()
+    elif not eq.status:
+        eq.status = "Ativo"
     eq.observacao = (form.get("observacao") or "").strip() or None
     fabricante = (form.get("fabricante") or "KARAOKERJ").strip().upper()
     eq.fabricante = fabricante if fabricante in ("KARAOKERJ", "OUTROS") else "KARAOKERJ"
@@ -11658,7 +11792,7 @@ async def equipamento_transferir(cliente_id: int, equipamento_id: int, request: 
 # Uma venda cria (ou reutiliza) o cliente e já cadastra o equipamento.
 # ---------------------------------------------------------
 
-STATUS_VENDA = ("Solicitar gabinete", "Montagem", "Pronto para entrega", "Entregue")
+STATUS_VENDA = ("Solicitar gabinete", "Montagem", "Pronto para entrega", "Entregue", "Cancelada")
 
 
 def equipamento_eh_venda(eq: Equipamento) -> bool:
@@ -12255,6 +12389,12 @@ def _venda_pode_excluir(db: Session, eq: Equipamento) -> tuple[bool, str]:
     ).first()
     if cobranca_paga:
         return False, "Esta venda possui cobrança InfinitePay paga/confirmada. Não é permitido apagar o histórico."
+    if db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.origem_tipo == "VENDA",
+        EstoqueMovimento.origem_id == eq.id,
+        EstoqueMovimento.tipo == "SAIDA",
+    ).first():
+        return False, "Esta venda já possui saída definitiva de estoque. Cancele/estorne antes de excluir."
     if db.query(Manutencao).filter(Manutencao.equipamento_id == eq.id).first():
         return False, "Este equipamento já possui manutenção vinculada e não pode ser apagado como venda desistida."
     if db.query(TransferenciaEquipamento).filter(TransferenciaEquipamento.equipamento_id == eq.id).first():
@@ -12263,13 +12403,9 @@ def _venda_pode_excluir(db: Session, eq: Equipamento) -> tuple[bool, str]:
 
 
 def _excluir_venda_desistida(db: Session, eq: Equipamento) -> None:
-    # Venda sem pagamento/histórico bloqueante pode ser desfeita; remove a própria
-    # saída automática para devolver o material ao saldo sem criar lançamento lixo.
+    # Somente registros ainda operacionais/pendentes da venda.
     db.query(EstoqueReserva).filter(
         EstoqueReserva.origem_tipo == "VENDA", EstoqueReserva.origem_id == eq.id
-    ).delete(synchronize_session=False)
-    db.query(EstoqueMovimento).filter(
-        EstoqueMovimento.origem_tipo == "VENDA", EstoqueMovimento.origem_id == eq.id, EstoqueMovimento.tipo == "SAIDA"
     ).delete(synchronize_session=False)
     db.query(EstoqueCorUso).filter(
         EstoqueCorUso.origem_tipo == "VENDA", EstoqueCorUso.origem_id == eq.id
@@ -12519,6 +12655,9 @@ async def venda_criar(request: Request, usuario: Usuario = Depends(usuario_logad
         "teclado_bluetooth": "NA",
         "sistema_credito": "NA",
         "catalogo_impresso": "NA",
+        # A baixa nasce da escolha explícita da venda, nunca do status.
+        "descontar_estoque_presente": "1",
+        "descontar_estoque": "1" if form.get("descontar_estoque") else "",
     }
     for campo, _grupo in contexto.get("grupos_opcionais", []):
         if f"opcional__{campo}" in form:
@@ -13610,29 +13749,27 @@ def _data_filtro_estoque(valor: str | None):
 
 def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: int | None = None,
                        tipo: str = "", origem: str = "") -> list[dict]:
-    """Histórico oficial do estoque: somente movimentos físicos.
-
-    Todos os relatórios usam ``estoque_movimentos`` como fonte única. Reserva não
-    entra mais na posição, compras ou extrato.
-    """
+    """Razão físico do estoque: somente ENTRADA e SAÍDA, sem reservas."""
     tipo = (tipo or "").strip().upper()
     origem = (origem or "").strip().upper()
     inicio_dt = datetime.combine(data_inicio, time.min) if data_inicio else None
     fim_dt = datetime.combine(data_fim, time.max) if data_fim else None
 
-    q_mov = db.query(EstoqueMovimento).options(selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario))
+    q = db.query(EstoqueMovimento).options(
+        selectinload(EstoqueMovimento.item), selectinload(EstoqueMovimento.usuario)
+    )
     if item_id:
-        q_mov = q_mov.filter(EstoqueMovimento.item_id == int(item_id))
+        q = q.filter(EstoqueMovimento.item_id == int(item_id))
     if inicio_dt:
-        q_mov = q_mov.filter(EstoqueMovimento.criado_em >= inicio_dt)
+        q = q.filter(EstoqueMovimento.criado_em >= inicio_dt)
     if fim_dt:
-        q_mov = q_mov.filter(EstoqueMovimento.criado_em <= fim_dt)
+        q = q.filter(EstoqueMovimento.criado_em <= fim_dt)
     if tipo in {"ENTRADA", "SAIDA"}:
-        q_mov = q_mov.filter(EstoqueMovimento.tipo == tipo)
+        q = q.filter(EstoqueMovimento.tipo == tipo)
     if origem:
-        q_mov = q_mov.filter(EstoqueMovimento.origem_tipo == origem)
+        q = q.filter(EstoqueMovimento.origem_tipo == origem)
     movimentos = [
-        m for m in q_mov.order_by(EstoqueMovimento.criado_em.desc(), EstoqueMovimento.id.desc()).all()
+        m for m in q.order_by(EstoqueMovimento.criado_em.asc(), EstoqueMovimento.id.asc()).all()
         if item_controla_estoque(m.item)
     ]
 
@@ -13646,89 +13783,61 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
         oid = int(origem_id) if origem_id else None
         if ot == "VENDA" and oid:
             eq = vendas.get(oid)
-            return f"Venda #{oid}", (eq.cliente.nome if eq and eq.cliente else ""), (eq.status if eq else ""), (f"/organiza/clientes/{eq.cliente_id}/equipamentos/{eq.id}/editar" if eq else "")
+            cliente = eq.cliente.nome if eq and eq.cliente else ""
+            status = eq.status if eq else ""
+            url = f"/organiza/clientes/{eq.cliente_id}/equipamentos/{eq.id}/editar" if eq else ""
+            return f"Venda #{oid}", cliente, status, url
         if ot == "MANUTENCAO" and oid:
             m = manutencoes.get(oid)
-            return f"Manutenção #{oid}", (m.cliente.nome if m and m.cliente else ""), (m.status if m else ""), f"/organiza/manutencoes/{oid}"
-        if ot == "CONTAGEM": return "Contagem física", "", "", ""
-        if ot == "COMPRA": return (f"Compra #{oid}" if oid else "Compra"), "", "", ""
-        if ot == "ESTORNO": return (f"Estorno #{oid}" if oid else "Estorno"), "", "", ""
-        return ("Entrada manual" if ot == "MANUAL" else (ot or "Manual")), "", "", ""
+            cliente = m.cliente.nome if m and m.cliente else ""
+            status = m.status if m else ""
+            return f"Manutenção #{oid}", cliente, status, f"/organiza/manutencoes/{oid}"
+        if ot == "CONTAGEM":
+            return "Contagem física", "", "", ""
+        if ot == "ESTORNO":
+            return f"Estorno #{oid}" if oid else "Estorno", "", "", ""
+        if ot == "COMPRA":
+            return f"Compra #{oid}" if oid else "Compra", "", "", "/organiza/estoque/compras"
+        return "Entrada manual" if ot == "MANUAL" else (ot or "Manual"), "", "", ""
+
+    # Saldo real após cada movimento, independente dos filtros de origem/tipo.
+    ids_itens = {m.item_id for m in movimentos}
+    saldos: dict[tuple[int, str], float] = {}
+    saldo_mov: dict[int, tuple[float, float]] = {}
+    if ids_itens:
+        todos = db.query(EstoqueMovimento).filter(EstoqueMovimento.item_id.in_(ids_itens)).order_by(
+            EstoqueMovimento.criado_em.asc(), EstoqueMovimento.id.asc()
+        ).all()
+        for mov in todos:
+            chave = (int(mov.item_id), normalizar_cor(mov.cor))
+            antes = saldos.get(chave, 0.0)
+            qtd = float(mov.quantidade or 0)
+            depois = antes + (qtd if (mov.tipo or "").upper() == "ENTRADA" else -qtd)
+            saldos[chave] = round(depois, 4)
+            saldo_mov[int(mov.id)] = (round(antes, 4), round(depois, 4))
 
     linhas = []
     for m in movimentos:
         rotulo, cliente, status, url = origem_info(m.origem_tipo, m.origem_id)
+        saldo_antes, saldo_apos = saldo_mov.get(int(m.id), (0.0, 0.0))
         linhas.append({
-            "id": m.id, "data": m.criado_em, "tipo": (m.tipo or "").upper(), "item": m.item,
-            "cor": m.cor or "", "quantidade": float(m.quantidade or 0), "origem_tipo": (m.origem_tipo or "").upper(),
-            "origem": rotulo, "cliente": cliente, "status": status, "url": url,
-            "observacao": m.observacao or "", "fisico": True, "pode_estornar": (m.origem_tipo or "").upper() == "MANUAL",
+            "id": m.id,
+            "data": m.criado_em,
+            "tipo": (m.tipo or "").upper(),
+            "item": m.item,
+            "cor": m.cor or "",
+            "quantidade": float(m.quantidade or 0),
+            "origem_tipo": (m.origem_tipo or "").upper(),
+            "origem": rotulo,
+            "cliente": cliente,
+            "status": status,
+            "url": url,
+            "observacao": m.observacao or "",
+            "fisico": True,
+            "pode_estornar": (m.origem_tipo or "").upper() == "MANUAL",
+            "saldo_antes": saldo_antes,
+            "saldo_apos": saldo_apos,
         })
-    linhas.sort(key=lambda x: (x["data"] or datetime.min, x["id"] or 0), reverse=True)
-    return linhas
-
-
-def _extrato_estoque(db: Session, data_inicio=None, data_fim=None, item_id: int | None = None,
-                     tipo: str = "", origem: str = "") -> list[dict]:
-    """Extrato estilo conta-corrente com saldo real após cada movimento."""
-    tipo = (tipo or "").strip().upper()
-    origem = (origem or "").strip().upper()
-    inicio_dt = datetime.combine(data_inicio, time.min) if data_inicio else None
-    fim_dt = datetime.combine(data_fim, time.max) if data_fim else None
-
-    q = db.query(EstoqueMovimento).options(selectinload(EstoqueMovimento.item))
-    if item_id:
-        q = q.filter(EstoqueMovimento.item_id == int(item_id))
-    if fim_dt:
-        q = q.filter(EstoqueMovimento.criado_em <= fim_dt)
-    todos = [m for m in q.order_by(EstoqueMovimento.criado_em.asc(), EstoqueMovimento.id.asc()).all() if item_controla_estoque(m.item)]
-
-    venda_ids = {int(m.origem_id) for m in todos if (m.origem_tipo or "").upper() == "VENDA" and m.origem_id}
-    manut_ids = {int(m.origem_id) for m in todos if (m.origem_tipo or "").upper() == "MANUTENCAO" and m.origem_id}
-    vendas = {e.id: e for e in db.query(Equipamento).options(selectinload(Equipamento.cliente)).filter(Equipamento.id.in_(venda_ids)).all()} if venda_ids else {}
-    manutencoes = {m.id: m for m in db.query(Manutencao).options(selectinload(Manutencao.cliente)).filter(Manutencao.id.in_(manut_ids)).all()} if manut_ids else {}
-
-    def info_origem(m):
-        ot = (m.origem_tipo or "").upper(); oid = int(m.origem_id) if m.origem_id else None
-        if ot == "VENDA" and oid:
-            eq = vendas.get(oid); return f"Venda #{oid}", (eq.cliente.nome if eq and eq.cliente else ""), (f"/organiza/clientes/{eq.cliente_id}/equipamentos/{eq.id}/editar" if eq else "")
-        if ot == "MANUTENCAO" and oid:
-            man = manutencoes.get(oid); return f"Manutenção #{oid}", (man.cliente.nome if man and man.cliente else ""), f"/organiza/manutencoes/{oid}"
-        if ot == "CONTAGEM": return "Contagem física", "", ""
-        if ot == "COMPRA": return (f"Compra #{oid}" if oid else "Compra"), "", ""
-        if ot == "ESTORNO": return (f"Estorno #{oid}" if oid else "Estorno"), "", ""
-        return ("Entrada manual" if ot == "MANUAL" else (ot or "Manual")), "", ""
-
-    def chave(m): return (int(m.item_id), (m.cor or "").strip().upper())
-    saldos = {}
-    for m in todos:
-        if inicio_dt and m.criado_em and m.criado_em >= inicio_dt: break
-        k=chave(m); sinal=1 if (m.tipo or "").upper()=="ENTRADA" else -1
-        saldos[k]=round(saldos.get(k,0.0)+sinal*float(m.quantidade or 0),4)
-    saldos_iniciais=dict(saldos)
-
-    linhas=[]; chaves_exibidas=set()
-    for m in [x for x in todos if not inicio_dt or (x.criado_em and x.criado_em >= inicio_dt)]:
-        k=chave(m); sinal=1 if (m.tipo or "").upper()=="ENTRADA" else -1
-        saldo_depois=round(saldos.get(k,0.0)+sinal*float(m.quantidade or 0),4); saldos[k]=saldo_depois
-        tipo_ok = not tipo or tipo not in {"ENTRADA","SAIDA"} or (m.tipo or "").upper()==tipo
-        origem_ok = not origem or (m.origem_tipo or "").upper()==origem
-        if not (tipo_ok and origem_ok): continue
-        chaves_exibidas.add(k); rotulo,cliente,url=info_origem(m)
-        linhas.append({
-            "data":m.criado_em,"tipo":(m.tipo or "").upper(),"item":m.item,"cor":m.cor or "",
-            "entrada":float(m.quantidade or 0) if (m.tipo or "").upper()=="ENTRADA" else 0.0,
-            "saida":float(m.quantidade or 0) if (m.tipo or "").upper()=="SAIDA" else 0.0,
-            "saldo":saldo_depois,"origem":rotulo,"cliente":cliente,"url":url,"observacao":m.observacao or "","linha_inicial":False,
-        })
-    if data_inicio and chaves_exibidas:
-        itens_map={i.id:i for i in db.query(Item).filter(Item.id.in_([k[0] for k in chaves_exibidas])).all()}
-        iniciais=[]
-        for k in sorted(chaves_exibidas,key=lambda x:((_texto_sem_acento(itens_map.get(x[0]).categoria if itens_map.get(x[0]) else "")),(_texto_sem_acento(itens_map.get(x[0]).nome if itens_map.get(x[0]) else "")),x[1])):
-            item=itens_map.get(k[0])
-            if not item: continue
-            iniciais.append({"data":inicio_dt,"tipo":"SALDO","item":item,"cor":k[1],"entrada":0.0,"saida":0.0,"saldo":round(saldos_iniciais.get(k,0.0),4),"origem":"Saldo inicial","cliente":"","url":"","observacao":f"Saldo no início de {data_inicio.strftime('%d/%m/%Y')}","linha_inicial":True})
-        linhas=iniciais+linhas
     return linhas
 
 
@@ -13786,7 +13895,7 @@ def _agrupar_movimentacoes_cliente(linhas: list[dict]) -> list[dict]:
 
 
 def _agrupar_movimentacoes_item(linhas: list[dict]) -> list[dict]:
-    """Resumo físico por item/cor do período, sem conceito de reserva."""
+    """Resumo por item/cor do período: somente entradas e saídas físicas."""
     grupos: dict[tuple[int, str], dict] = {}
     for l in linhas:
         item = l.get("item")
@@ -13794,10 +13903,12 @@ def _agrupar_movimentacoes_item(linhas: list[dict]) -> list[dict]:
             continue
         cor = (l.get("cor") or "").strip().upper()
         chave = (item.id, cor)
-        g = grupos.setdefault(chave, {"item": item, "cor": cor, "entradas": 0.0, "saidas": 0.0, "reservas": 0.0})
+        g = grupos.setdefault(chave, {"item": item, "cor": cor, "entradas": 0.0, "saidas": 0.0})
         qtd = float(l.get("quantidade") or 0)
-        if l["tipo"] == "ENTRADA": g["entradas"] += qtd
-        elif l["tipo"] == "SAIDA": g["saidas"] += qtd
+        if l["tipo"] == "ENTRADA":
+            g["entradas"] += qtd
+        elif l["tipo"] == "SAIDA":
+            g["saidas"] += qtd
     saida = []
     for g in grupos.values():
         g["movimento_liquido"] = round(g["entradas"] - g["saidas"], 4)
@@ -13821,20 +13932,15 @@ def estoque_movimentacoes(request: Request, usuario: Usuario = Depends(usuario_l
     )
     grupos_clientes = _agrupar_movimentacoes_cliente(linhas)
     movimentos_itens = _agrupar_movimentacoes_item(linhas)
-    extrato = _extrato_estoque(
-        db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt),
-        item_id=item_id or None, tipo=tipo, origem=origem,
-    )
     itens = [
         i for i in db.query(Item).filter(Item.ativo == 1).order_by(func.upper(Item.categoria).asc(), func.upper(Item.nome).asc()).all()
         if item_controla_estoque(i)
     ]
     return templates.TemplateResponse("organiza/estoque_movimentacoes.html", {
         "request": request, "usuario": usuario, "linhas": linhas, "itens": itens,
-        "grupos_clientes": grupos_clientes, "movimentos_itens": movimentos_itens, "extrato": extrato,
+        "grupos_clientes": grupos_clientes, "movimentos_itens": movimentos_itens,
         "data_inicio": inicio_txt, "data_fim": fim_txt, "tipo": tipo, "origem": origem,
         "item_id": item_id, "total_clientes": len(grupos_clientes), "total_itens": len(movimentos_itens),
-        "total_extrato": len(extrato),
     })
 
 
@@ -13848,22 +13954,34 @@ def estoque_movimentacoes_csv(request: Request, usuario: Usuario = Depends(usuar
         item_id = int(request.query_params.get("item_id") or 0)
     except (TypeError, ValueError):
         item_id = 0
-    extrato = _extrato_estoque(db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt), item_id=item_id or None, tipo=tipo, origem=origem)
-    buffer = io.StringIO(); writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerow(["DATA", "CATEGORIA", "ITEM", "UNIDADE", "COR", "ORIGEM", "CLIENTE", "ENTRADA", "SAIDA", "SALDO", "OBSERVACAO"])
-    for l in extrato:
+    linhas = _historico_estoque(
+        db, _data_filtro_estoque(inicio_txt), _data_filtro_estoque(fim_txt),
+        item_id=item_id or None, tipo=tipo, origem=origem,
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
+    writer.writerow(["DATA", "CATEGORIA", "ITEM", "UNIDADE", "COR", "ORIGEM", "CLIENTE", "ENTRADA", "SAIDA", "SALDO_ANTES", "SALDO_APOS"])
+    for l in linhas:
+        item = l.get("item")
         writer.writerow([
             l["data"].strftime("%d/%m/%Y %H:%M") if l.get("data") else "",
-            l["item"].categoria if l.get("item") else "", l["item"].nome if l.get("item") else "",
-            _normalizar_unidade_item(getattr(l.get("item"), "unidade", "UN")) if l.get("item") else "UN",
-            l.get("cor") or "", l.get("origem") or "", l.get("cliente") or "",
-            f'{float(l.get("entrada") or 0):g}' if l.get("entrada") else "",
-            f'{float(l.get("saida") or 0):g}' if l.get("saida") else "",
-            f'{float(l.get("saldo") or 0):g}', l.get("observacao") or "",
+            item.categoria if item else "",
+            item.nome if item else "",
+            _normalizar_unidade_item(getattr(item, "unidade", "UN")) if item else "UN",
+            l.get("cor") or "",
+            l.get("origem") or "",
+            l.get("cliente") or "",
+            f'{float(l["quantidade"]):g}' if l.get("tipo") == "ENTRADA" else "",
+            f'{float(l["quantidade"]):g}' if l.get("tipo") == "SAIDA" else "",
+            f'{float(l.get("saldo_antes") or 0):g}',
+            f'{float(l.get("saldo_apos") or 0):g}',
         ])
     conteudo = "\ufeff" + buffer.getvalue()
-    return Response(content=conteudo, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=extrato_estoque.csv"})
-
+    return Response(
+        content=conteudo,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=extrato_estoque.csv"},
+    )
 
 
 def _entradas_estoque_linhas(db: Session, data_inicio=None, data_fim=None, item_id: int | None = None, origem: str = "") -> list[dict]:
@@ -14505,7 +14623,7 @@ async def itens_salvar_planilha(request: Request, usuario: Usuario = Depends(usu
             db.query(EstoqueReserva).filter(EstoqueReserva.item_id == item.id).delete(synchronize_session=False)
         alterados += 1
 
-    # Recalcula movimentos das vendas em produção quando a participação no estoque mudou.
+    # Só recalcula reservas abertas quando a própria participação no estoque mudou.
     if estoque_alterado:
         for eq_aberto in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
             sincronizar_estoque_venda(eq_aberto, db)
@@ -14639,10 +14757,10 @@ async def item_editar(item_id: int, request: Request, usuario: Usuario = Depends
         item.fornecedor_id = fornecedor_id
         item.preco_custo = moeda_num(form.get("preco_custo"))
         item.preco_venda = moeda_num(form.get("preco_venda"))
-        # Se o item saiu do controle, remove resíduos de reserva legada. Movimentos físicos históricos permanecem.
+        # Se o item saiu do controle, remove somente reservas futuras. Movimentos físicos históricos permanecem.
         if not item_controla_estoque(item):
             db.query(EstoqueReserva).filter(EstoqueReserva.item_id == item.id).delete(synchronize_session=False)
-        # Reaplica a regra aos trabalhos em produção, sem tocar em histórico concluído.
+        # Reaplica a regra aos trabalhos ainda abertos, sem tocar em histórico concluído.
         for eq_aberto in db.query(Equipamento).filter(Equipamento.status.in_(tuple(ESTOQUE_VENDA_A_FAZER))).all():
             sincronizar_estoque_venda(eq_aberto, db)
         manut_ids = [mid for (mid,) in db.query(Manutencao.id).filter(~Manutencao.status.in_(tuple(ESTOQUE_MANUTENCAO_FINAL | ESTOQUE_MANUTENCAO_CANCELADA))).all()]
@@ -14746,7 +14864,12 @@ async def manutencao_criar(request: Request, usuario: Usuario = Depends(usuario_
     if horario_atendimento_ocupado(db, agendamento):
         return RedirectResponse(f"/organiza/manutencoes/nova?cliente_id={cliente_id}&equipamento_id={equipamento_id}&erro=ocupado", status_code=303)
     status_inicial = "Aguardando equipamento"
-    m = Manutencao(cliente_id=cliente_id, equipamento_id=equipamento_id, defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None, entrega_prevista_em=agendamento, tipo_atendimento=tipo_atendimento, status=status_inicial)
+    m = Manutencao(
+        cliente_id=cliente_id, equipamento_id=equipamento_id,
+        defeito=form.get("defeito").strip(), observacao=(form.get("observacao") or "").strip() or None,
+        entrega_prevista_em=agendamento, tipo_atendimento=tipo_atendimento, status=status_inicial,
+        descontar_estoque=1 if form.get("descontar_estoque") else 0,
+    )
     db.add(m); db.commit(); db.refresh(m)
     o = Orcamento(manutencao_id=m.id, versao=1, token=secrets.token_urlsafe(24), status="Rascunho")
     db.add(o); db.commit()
@@ -18286,6 +18409,7 @@ async def agendamento_cliente_publico_salvar(
     if acao == "cancelar":
         m.status = "Cancelada"
         m.entrega_prevista_em = None
+        sincronizar_estoque_manutencao(m, db)
         db.commit()
         return RedirectResponse(f"/agendamento/{token}/{manutencao_id}?ok=cancelado", status_code=303)
 
@@ -18448,6 +18572,7 @@ def agenda_manutencao_excluir(manutencao_id: int, usuario: Usuario = Depends(usu
         # Cliente não trouxe o equipamento: encerra a pendência sem apagar o histórico.
         m.status = "Cancelada"
         m.entrega_prevista_em = None
+        sincronizar_estoque_manutencao(m, db)
     elif etapa_manutencao(m) == 6:
         # Remove apenas a retirada agendada; a manutenção continua pronta para retirada.
         m.retirada_em = None

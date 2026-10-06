@@ -1,26 +1,13 @@
-# HUMIAT Organiza 1.2.44 — regra única de estoque e extrato
+# HUMIAT Organiza 1.2.44
 
-## Regra única
-- Venda com **Descontar materiais desta venda do estoque** marcada gera saída física imediatamente, inclusive em Solicitar gabinete, Montagem e Pronto para entrega.
-- A venda deixa de usar reserva como fonte de saldo. Edição da composição atualiza a mesma saída, sem duplicar.
-- Venda marcada como **não descontar** remove sua saída automática.
-- Manutenção mantém a regra operacional: orçamento aprovado + **Descontar do estoque** gera saída física; não aprovada não baixa; **Não descontar** remove a saída automática.
-- Posição, compras, movimentações e CSV passam a usar `estoque_movimentos` como única fonte de verdade.
+## Estoque — razão único, sem reservas
 
-## Posição de estoque
-- **Físico** já é o saldo real após entradas e saídas.
-- **Saídas Vendas** mostra quanto foi baixado por vendas.
-- **Saídas Manut.** mostra quanto foi baixado por manutenções.
-- **Disponível = Físico**; vendas/manutenções não são subtraídas uma segunda vez.
-- **Comprar = max(Mínimo - Físico, 0)**.
-
-## Extrato
-- A antiga seção “Movimentações por item” foi substituída por **Extrato por movimento**.
-- Com data inicial, mostra **Saldo inicial**, depois cada Entrada/Saída em ordem cronológica e o **Saldo** após cada lançamento.
-- Venda e manutenção aparecem com origem e cliente.
-- CSV segue o mesmo formato de extrato.
-
-## Correção de dados existentes
-- Migração 1.2.44 converte reservas de venda existentes em saídas físicas preservando a data da reserva quando possível.
-- Ressincroniza vendas do fluxo comercial e manutenções para corrigir registros que não tinham sido refletidos.
-- Remove reservas de estoque legadas após a conversão.
+- Venda com **Descontar estoque** marcado gera **SAÍDA física imediatamente** dos materiais usados na máquina.
+- Manutenção com **Descontar do estoque** marcada gera **SAÍDA física** dos materiais aprovados, exceto quando cancelada.
+- Reservas de venda/manutenção deixam de participar do estoque e são removidas na migração 1.2.44.
+- Posição do estoque passa a usar uma única conta: **Entradas − Saídas = Saldo físico/Disponível**.
+- Colunas de Venda e Manutenção passam a ser informativas e mostram as saídas já registradas por origem; não são abatidas novamente.
+- Relatório de compras usa apenas o saldo físico atual e o estoque mínimo, evitando desconto duplo.
+- Movimentação completa vira um **extrato cronológico**, estilo conta bancária, com saldo antes e saldo após cada lançamento.
+- CSV de movimentação segue o mesmo extrato e a mesma regra.
+- Migração recalcula vendas e manutenções existentes para corrigir operações que estavam como reserva ou fora dos relatórios.

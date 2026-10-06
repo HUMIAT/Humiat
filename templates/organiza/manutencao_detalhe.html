@@ -66,7 +66,7 @@
         </select>
       </label>
       <button class="botao pequeno" type="submit">Salvar regra</button>
-      <small>Ao marcar “Não descontar”, a saída automática desta manutenção é excluída da movimentação.</small>
+      <small>Ao marcar “Não descontar”, qualquer reserva/saída automática desta manutenção é excluída da movimentação.</small>
     </form>
     {% if resumo_estoque_manutencao %}
       <div class="estoque-resumo-lista">
@@ -84,7 +84,7 @@
     {% else %}
       <p class="texto-suave estoque-resumo-vazio">Nenhum material nesta manutenção. Não desconta nada do estoque.</p>
     {% endif %}
-    <p class="estoque-resumo-regra"><strong>Regra simples:</strong> manutenção não aprovada não reserva nada. Após a aprovação, os materiais aprovados descontam do físico. Se a manutenção estiver em “Não descontar”, ela não aparece na movimentação.</p>
+    <p class="estoque-resumo-regra"><strong>Regra simples:</strong> se esta manutenção estiver em “Descontar do estoque”, os materiais aprovados saem do saldo físico. Não existe reserva. Em “Não descontar”, a manutenção não aparece na movimentação.</p>
   </section>
 
   <nav class="manutencao-etapas" aria-label="Etapas da manutenção">
