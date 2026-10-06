@@ -17758,6 +17758,8 @@ AGENDA_MESES_PT = {
     7: "Julho", 8: "Agosto", 9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
 }
 AGENDA_RESUMO_CATEGORIAS = {
+    "CONNECT": {"singular": "Connect", "plural": "Connect", "classe": "connect"},
+    "GOOGLE": {"singular": "evento Google", "plural": "eventos Google", "classe": "google"},
     "ATUALIZACAO": {"singular": "atualização", "plural": "atualizações", "classe": "atualizacao"},
     "MANUTENCAO": {"singular": "manutenção", "plural": "manutenções", "classe": "manutencao"},
     "VENDA": {"singular": "venda", "plural": "vendas", "classe": "venda"},
@@ -17786,6 +17788,154 @@ def _agenda_somar_meses(referencia: date, quantidade: int) -> date:
 def _agenda_retorno_seguro(valor: str | None, padrao: str = "/organiza/agenda") -> str:
     retorno = (valor or "").strip()
     return retorno if retorno.startswith("/organiza/agenda") else padrao
+
+
+def _google_calendar_data_hora_local(evento_google: dict) -> tuple[datetime | None, bool]:
+    """Converte o início retornado pelo Google para horário local sem timezone.
+
+    A agenda interna do Organiza trabalha com datetimes sem timezone. Normalizamos
+    aqui para America/Sao_Paulo para permitir ordenação conjunta sem misturar
+    objetos aware/naive. Eventos de dia inteiro retornam meia-noite apenas para
+    agrupamento e são identificados pelo booleano retornado.
+    """
+    inicio = evento_google.get("start") or {}
+    texto = str(inicio.get("dateTime") or "").strip()
+    if texto:
+        try:
+            dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(ZoneInfo(ORGANIZA_GOOGLE_TZ)).replace(tzinfo=None)
+            return dt, False
+        except (TypeError, ValueError):
+            return None, False
+    dia = str(inicio.get("date") or "").strip()
+    if dia:
+        try:
+            return datetime.combine(date.fromisoformat(dia), time.min), True
+        except (TypeError, ValueError):
+            return None, True
+    return None, False
+
+
+def _google_calendar_evento_connect(evento_google: dict) -> bool:
+    """Identifica eventos que chegaram ao Google com o padrão atual do Connect.
+
+    A classificação usa somente os dados devolvidos pelo Google. Nenhuma consulta
+    a contrato, cliente ou banco do Connect é realizada.
+    """
+    titulo = str(evento_google.get("summary") or "").strip()
+    descricao = str(evento_google.get("description") or "").strip()
+    texto = f"{titulo}\n{descricao}".lower()
+    if "conect.humiat.com.br" in texto:
+        return True
+    if re.match(r"^\s*contrato\s*#\d+", titulo, flags=re.IGNORECASE):
+        return True
+    return "etapa:" in texto and "itens:" in texto and "contrato #" in texto
+
+
+def _google_calendar_listar_mes(db: Session, inicio_mes: datetime, fim_mes: datetime) -> tuple[list[dict], str]:
+    """Lê diretamente do Google os compromissos do calendário conectado.
+
+    Retorna apenas o que existe no Google no momento da consulta. Eventos criados
+    pelo próprio Organiza são removidos desta lista para não aparecerem duas vezes,
+    pois já fazem parte das categorias locais da agenda.
+    """
+    integ = _google_integracao(db)
+    if not integ or not (integ.refresh_token or integ.access_token):
+        return [], ""
+
+    try:
+        token = _google_access_token(db)
+        calendar_id = urllib.parse.quote((integ.calendar_id or ORGANIZA_GOOGLE_CALENDAR_ID), safe="")
+        tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
+        inicio_api = inicio_mes.replace(tzinfo=tz).isoformat()
+        fim_api = fim_mes.replace(tzinfo=tz).isoformat()
+
+        # IDs que o próprio Organiza já mostra nas categorias locais.
+        ids_locais = {
+            str(x[0]).strip()
+            for x in db.query(AgendaManual.google_event_id)
+            .filter(
+                AgendaManual.google_event_id.isnot(None), AgendaManual.google_event_id != "",
+                AgendaManual.data_hora >= inicio_mes, AgendaManual.data_hora < fim_mes,
+            )
+            .all()
+            if x and x[0]
+        }
+        ids_locais.update({
+            str(x[0]).strip()
+            for x in db.query(AtualizacaoAgendamento.google_event_id)
+            .filter(
+                AtualizacaoAgendamento.google_event_id.isnot(None), AtualizacaoAgendamento.google_event_id != "",
+                AtualizacaoAgendamento.data_hora >= inicio_mes, AtualizacaoAgendamento.data_hora < fim_mes,
+            )
+            .all()
+            if x and x[0]
+        })
+
+        saida: list[dict] = []
+        page_token = ""
+        paginas = 0
+        while paginas < 10:
+            parametros = {
+                "timeMin": inicio_api,
+                "timeMax": fim_api,
+                "singleEvents": "true",
+                "orderBy": "startTime",
+                "showDeleted": "false",
+                "maxResults": "2500",
+                "timeZone": ORGANIZA_GOOGLE_TZ,
+                "fields": "items(id,status,summary,description,location,htmlLink,start,end,creator,organizer),nextPageToken",
+            }
+            if page_token:
+                parametros["pageToken"] = page_token
+            url = (
+                f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events?"
+                + urllib.parse.urlencode(parametros)
+            )
+            dados = _google_http_json(url, token=token, timeout=12)
+            for item in dados.get("items") or []:
+                if str(item.get("status") or "").lower() == "cancelled":
+                    continue
+                event_id = str(item.get("id") or "").strip()
+                if not event_id or event_id in ids_locais:
+                    continue
+                data_hora, dia_inteiro = _google_calendar_data_hora_local(item)
+                if not data_hora or not (inicio_mes <= data_hora < fim_mes):
+                    continue
+                connect = _google_calendar_evento_connect(item)
+                descricao = str(item.get("description") or "").strip()
+                local = str(item.get("location") or "").strip()
+                detalhes = []
+                if local:
+                    detalhes.append(local)
+                if descricao:
+                    detalhes.append(descricao)
+                saida.append({
+                    "tipo": "connect" if connect else "google",
+                    "categoria_resumo": "CONNECT" if connect else "GOOGLE",
+                    "titulo": "Connect" if connect else "Google Agenda",
+                    "data_hora": data_hora,
+                    "dia_inteiro": dia_inteiro,
+                    "cliente": str(item.get("summary") or "(Sem título)").strip() or "(Sem título)",
+                    "equipamento": "\n".join(detalhes),
+                    "descricao_google": descricao,
+                    "local_google": local,
+                    "link": str(item.get("htmlLink") or "").strip() or "#",
+                    "editar_link": None,
+                    "manual": False,
+                    "google_externo": True,
+                    "google_event_id": event_id,
+                    "atualizar_data_action": None,
+                    "excluir_action": None,
+                })
+            page_token = str(dados.get("nextPageToken") or "").strip()
+            paginas += 1
+            if not page_token:
+                break
+        return saida, ""
+    except Exception as exc:
+        return [], str(exc)[:700]
 
 
 @app.get("/organiza/agenda", response_class=HTMLResponse)
@@ -17935,7 +18085,12 @@ def agenda(
             "excluir_action": None,
         })
 
-    eventos.sort(key=lambda e: (e["data_hora"], e["titulo"]))
+    # Lê diretamente a agenda Google da empresa. A fonte é o próprio Google:
+    # nenhuma informação adicional de contratos do Connect é consultada.
+    eventos_google, google_consulta_erro = _google_calendar_listar_mes(db, inicio_mes, fim_mes)
+    eventos.extend(eventos_google)
+
+    eventos.sort(key=lambda e: (e["data_hora"], e["titulo"], e.get("cliente") or ""))
 
     # Contadores diários por categoria: a visão mensal mostra somente quantidades.
     contagens_por_dia: dict[date, dict[str, int]] = {}
@@ -17953,7 +18108,7 @@ def agenda(
             dentro_mes = dia.month == mes_ref.month
             contagens = contagens_por_dia.get(dia, {}) if dentro_mes else {}
             resumos = []
-            for chave in ("ATUALIZACAO", "MANUTENCAO", "VENDA", "VISITA", "OUTRO"):
+            for chave in ("CONNECT", "GOOGLE", "ATUALIZACAO", "MANUTENCAO", "VENDA", "VISITA", "OUTRO"):
                 qtd = int(contagens.get(chave, 0) or 0)
                 if not qtd:
                     continue
@@ -18008,6 +18163,8 @@ def agenda(
         "retorno_agenda": retorno_base,
         "google": google,
         "google_configurado": _google_configurado(),
+        "google_consulta_erro": google_consulta_erro,
+        "google_eventos_mes": len(eventos_google),
         "mensagem": request.query_params.get("mensagem", ""),
         "erro": request.query_params.get("erro", ""),
     })

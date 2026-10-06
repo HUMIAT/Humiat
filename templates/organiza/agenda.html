@@ -12,12 +12,14 @@
 
   {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if google_consulta_erro %}<div class="alerta erro"><strong>Google Agenda:</strong> não foi possível consultar os compromissos do calendário agora. {{ google_consulta_erro }}</div>{% endif %}
 
   <div class="cartao agenda-google-status">
     <div>
       <strong>Google Agenda</strong>
       {% if google and google.account_email %}
-        <div class="texto-suave">Conectado como {{ google.account_email }}. Compromissos vinculados continuam sendo atualizados no mesmo evento.</div>
+        <div class="texto-suave">Conectado como {{ google.account_email }}. A visão mensal consulta diretamente o Google Agenda e mostra o que realmente está no calendário da empresa.</div>
+        {% if not google_consulta_erro %}<div class="texto-suave">{{ google_eventos_mes }} compromisso(s) externo(s) lido(s) do Google neste mês, sem duplicar os eventos já conhecidos pelo Organiza.</div>{% endif %}
       {% else %}
         <div class="texto-suave">A Agenda do Organiza continua funcionando, mas a sincronização com o Google está desconectada.</div>
       {% endif %}
@@ -34,6 +36,8 @@
   </div>
 
   <div class="agenda-legenda agenda-legenda-padrao agenda-mes-legenda">
+    <span class="agenda-chip connect">Connect</span>
+    <span class="agenda-chip google">Google Agenda</span>
     <span class="agenda-chip atualizacao-loja">Atualização</span>
     <span class="agenda-chip manutencao">Manutenção</span>
     <span class="agenda-chip venda">Venda</span>
@@ -94,39 +98,56 @@
         <div class="agenda-lista-simples">
           {% for e in eventos_detalhe %}
             <div class="agenda-linha {{ e.tipo }}">
-              <time>{{ e.data_hora.strftime('%H:%M') }}</time>
-              <a href="{{ e.link }}" class="agenda-detalhe-link">
-                <div>
-                  <small>{{ e.titulo|upper }}</small>
-                  <strong>{{ e.cliente }}</strong>
-                  {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
-                  {% if e.google_sync_erro %}<span class="agenda-google-erro">Google: {{ e.google_sync_erro }}</span>{% endif %}
+              <time>{% if e.dia_inteiro %}Dia todo{% else %}{{ e.data_hora.strftime('%H:%M') }}{% endif %}</time>
+              {% if e.google_externo %}
+                <div class="agenda-detalhe-link agenda-google-detalhe">
+                  <div>
+                    <small>{{ e.titulo|upper }}</small>
+                    <strong>{{ e.cliente }}</strong>
+                    {% if e.local_google %}<span class="agenda-google-local">📍 {{ e.local_google }}</span>{% endif %}
+                    {% if e.descricao_google %}<span class="agenda-google-descricao">{{ e.descricao_google }}</span>{% endif %}
+                  </div>
                 </div>
-              </a>
+              {% else %}
+                <a href="{{ e.link }}" class="agenda-detalhe-link">
+                  <div>
+                    <small>{{ e.titulo|upper }}</small>
+                    <strong>{{ e.cliente }}</strong>
+                    {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
+                    {% if e.google_sync_erro %}<span class="agenda-google-erro">Google: {{ e.google_sync_erro }}</span>{% endif %}
+                  </div>
+                </a>
+              {% endif %}
               <div class="agenda-detalhe-acoes">
-                {% if e.editar_link %}
-                  <a class="botao pequeno" href="{{ e.editar_link }}">{% if e.manual %}Editar{% else %}Abrir{% endif %}</a>
+                {% if e.google_externo %}
+                  {% if e.link and e.link != '#' %}<a class="botao pequeno" href="{{ e.link }}" target="_blank" rel="noopener">Abrir no Google</a>{% endif %}
                 {% else %}
-                  <a class="botao pequeno" href="{{ e.link }}">Abrir</a>
-                {% endif %}
+                  {% if e.editar_link %}
+                    <a class="botao pequeno" href="{{ e.editar_link }}">{% if e.manual %}Editar{% else %}Abrir{% endif %}</a>
+                  {% else %}
+                    <a class="botao pequeno" href="{{ e.link }}">Abrir</a>
+                  {% endif %}
 
-                <details class="agenda-atualizar-data">
-                  <summary class="botao pequeno">Atualizar data</summary>
-                  <form method="post" action="{{ e.atualizar_data_action }}" class="agenda-atualizar-data-form">
-                    <input type="hidden" name="retorno" value="{{ retorno_agenda }}">
-                    {% if e.agendamento_tipo %}<input type="hidden" name="tipo" value="{{ e.agendamento_tipo }}">{% endif %}
-                    <label>Nova data e hora
-                      <input type="datetime-local" name="data_hora" required value="{{ e.data_hora.strftime('%Y-%m-%dT%H:%M') }}">
-                    </label>
-                    <small>O mesmo registro será atualizado. Não será criado um novo.</small>
-                    <button class="botao primario pequeno" type="submit">Atualizar data</button>
-                  </form>
-                </details>
+                  {% if e.atualizar_data_action %}
+                    <details class="agenda-atualizar-data">
+                      <summary class="botao pequeno">Atualizar data</summary>
+                      <form method="post" action="{{ e.atualizar_data_action }}" class="agenda-atualizar-data-form">
+                        <input type="hidden" name="retorno" value="{{ retorno_agenda }}">
+                        {% if e.agendamento_tipo %}<input type="hidden" name="tipo" value="{{ e.agendamento_tipo }}">{% endif %}
+                        <label>Nova data e hora
+                          <input type="datetime-local" name="data_hora" required value="{{ e.data_hora.strftime('%Y-%m-%dT%H:%M') }}">
+                        </label>
+                        <small>O mesmo registro será atualizado. Não será criado um novo.</small>
+                        <button class="botao primario pequeno" type="submit">Atualizar data</button>
+                      </form>
+                    </details>
+                  {% endif %}
 
-                {% if e.excluir_action %}
-                  <form method="post" action="{{ e.excluir_action }}" onsubmit="return confirm('Remover este agendamento? O histórico será preservado quando aplicável.')">
-                    <button class="botao pequeno" type="submit">Excluir</button>
-                  </form>
+                  {% if e.excluir_action %}
+                    <form method="post" action="{{ e.excluir_action }}" onsubmit="return confirm('Remover este agendamento? O histórico será preservado quando aplicável.')">
+                      <button class="botao pequeno" type="submit">Excluir</button>
+                    </form>
+                  {% endif %}
                 {% endif %}
               </div>
             </div>
