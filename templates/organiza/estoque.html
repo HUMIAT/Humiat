@@ -5,7 +5,7 @@
     <div>
       <p class="tag">Estoque</p>
       <h1>Estoque de itens</h1>
-      <p class="texto-suave">Físico − Vendas − Manutenções aprovadas em aberto = disponível. Comprar considera também o estoque mínimo.</p>
+      <p class="texto-suave">O saldo físico já desconta vendas e manutenções. As colunas Vendas e Manutenções mostram de onde saíram os materiais. Comprar considera o saldo físico e o estoque mínimo.</p>
     </div>
     <div class="acoes-topo-estoque">
       <a class="botao primario" href="/organiza/estoque/entradas">Entradas de estoque</a>
@@ -45,7 +45,7 @@
     <div class="planilha-barra">
       <div>
         <h2>Posição do estoque</h2>
-        <p class="texto-suave">Organizado por categoria e item. A posição considera as vendas reservadas e as manutenções aprovadas em aberto para calcular a necessidade de compra.</p>
+        <p class="texto-suave">Organizado por categoria e item. Uma única regra: entradas somam; vendas e manutenções que descontam geram saídas físicas. Disponível = saldo físico atual.</p>
       </div>
       <div class="planilha-acoes">
         <div class="filtros-linha">
@@ -56,7 +56,7 @@
             <button class="filtro-chip" type="button" data-filtro-rapido="comprar">Comprar</button>
             <button class="filtro-chip" type="button" data-filtro-rapido="sem_estoque">Sem estoque</button>
             <button class="filtro-chip" type="button" data-filtro-rapido="abaixo_minimo">Abaixo do mínimo</button>
-            <button class="filtro-chip" type="button" data-filtro-rapido="com_reserva">Com necessidade</button>
+            <button class="filtro-chip" type="button" data-filtro-rapido="com_reserva">Com saídas</button>
           </div>
           <div class="filtro-numerico">
             <select id="filtro-campo" aria-label="Campo para filtrar"><option value="fisico">Físico</option><option value="vendas">Vendas</option><option value="manutencoes">Manutenções</option><option value="disponivel" selected>Disponível</option><option value="minimo">Mínimo</option><option value="comprar">Comprar</option></select>
@@ -77,8 +77,8 @@
             <th class="col-item">ITEM</th>
             <th>UNID.</th>
             <th>FÍSICO</th>
-            <th>VENDAS</th>
-            <th>MANUTENÇÕES</th>
+            <th>SAÍDAS VENDAS</th>
+            <th>SAÍDAS MANUT.</th>
             <th>DISPONÍVEL</th>
             <th>MÍNIMO</th>
             <th>COMPRAR</th>
@@ -102,7 +102,7 @@
             </td>
             <td class="unidade">{{ l.item.unidade or 'UN' }}</td>
             <td class="num">{{ '%g'|format(l.fisico) }}</td>
-            <td class="num reserva-venda">{% if l.vendas_a_fazer > 0 %}<a href="/organiza/estoque/movimentacoes?item_id={{ l.item.id }}&tipo=RESERVA&origem=VENDA">{{ '%g'|format(l.vendas_a_fazer) }}</a>{% else %}0{% endif %}</td>
+            <td class="num reserva-venda">{% if l.vendas_a_fazer > 0 %}<a href="/organiza/estoque/movimentacoes?item_id={{ l.item.id }}&tipo=SAIDA&origem=VENDA">{{ '%g'|format(l.vendas_a_fazer) }}</a>{% else %}0{% endif %}</td>
             <td class="num necessidade-manutencao">{% if l.manutencoes_a_fazer > 0 %}<a href="/organiza/estoque/movimentacoes?item_id={{ l.item.id }}&tipo=SAIDA&origem=MANUTENCAO">{{ '%g'|format(l.manutencoes_a_fazer) }}</a>{% else %}0{% endif %}</td>
             <td class="num forte {% if l.disponivel < 0 %}negativo{% endif %}">{{ '%g'|format(l.disponivel) }}</td>
             <td class="num">{{ '%g'|format(l.minimo) }}</td>
@@ -114,7 +114,7 @@
             <td colspan="10">
               {% if cores_estoque.get(l.item.id) %}
               <table class="subplanilha">
-                <thead><tr><th>COR</th><th>FÍSICO</th><th>VENDAS</th><th>MANUTENÇÕES</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th></tr></thead>
+                <thead><tr><th>COR</th><th>FÍSICO</th><th>SAÍDAS VENDAS</th><th>SAÍDAS MANUT.</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>COMPRAR</th></tr></thead>
                 <tbody>
                 {% for c in cores_estoque.get(l.item.id) %}
                   <tr class="{% if c.disponivel < 0 %}linha-negativa{% endif %}"><td><strong>{{ c.cor }}</strong></td><td class="num">{{ '%g'|format(c.fisico) }}</td><td class="num">{{ '%g'|format(c.vendas_a_fazer) }}</td><td class="num">{{ '%g'|format(c.manutencoes_a_fazer) }}</td><td class="num {% if c.disponivel < 0 %}negativo{% endif %}">{{ '%g'|format(c.disponivel) }}</td><td class="num">{{ '%g'|format(c.minimo) }}</td><td class="num {% if c.comprar > 0 %}comprar{% endif %}">{{ '%g'|format(c.comprar) }}</td></tr>

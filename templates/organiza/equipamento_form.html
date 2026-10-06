@@ -94,7 +94,7 @@
         <input type="hidden" name="descontar_estoque_presente" value="1">
         <label class="estoque-regra-venda">
           <input type="checkbox" name="descontar_estoque" value="1" {% if equipamento.descontar_estoque != 0 %}checked{% endif %}>
-          <span><strong>Descontar / reservar materiais desta venda no estoque</strong><small>Desmarque para excluir esta venda da movimentação de estoque. Nenhuma reserva ou saída ficará no histórico.</small></span>
+          <span><strong>Descontar materiais desta venda do estoque</strong><small>Marcado = os materiais desta venda viram saída física imediatamente. Desmarque somente quando esta venda não deve movimentar estoque.</small></span>
         </label>
         <div class="estoque-utilizado-cabecalho">
           <div><h3>Estoque utilizado nesta máquina</h3><p class="texto-suave">Confira os materiais vinculados à composição e aos Opcionais. Se algo estiver diferente do que foi realmente usado, corrija aqui.</p></div>

@@ -2,14 +2,14 @@
 {% block conteudo %}
 <section class="pagina-clean compras-estoque">
   <div class="titulo-linha compras-topo">
-    <div><p class="tag">Estoque</p><h1>Compras</h1><p class="texto-suave">As necessidades de compra consideram vendas, manutenções aprovadas em aberto e estoque mínimo, agrupadas por fornecedor.</p></div>
+    <div><p class="tag">Estoque</p><h1>Compras</h1><p class="texto-suave">As necessidades de compra usam o saldo físico real, que já contém as saídas de vendas e manutenções, mais o estoque mínimo.</p></div>
     <div class="acoes"><a class="botao secundario" href="/organiza/estoque">Voltar ao estoque</a><button class="botao" type="button" onclick="window.print()">Imprimir</button></div>
   </div>
 
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   {% if ok %}<div class="alerta sucesso">{{ ok }}</div>{% endif %}
 
-  <section class="cartao resumo-compra"><span>Total estimado para atender vendas, manutenções e mínimo</span><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></section>
+  <section class="cartao resumo-compra"><span>Total estimado para recompor o saldo até o mínimo</span><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></section>
 
   <section class="cartao compra-selecionada">
     <div class="secao-cabecalho">
@@ -48,9 +48,9 @@
   </section>
 
   <section class="cartao planilha-card">
-    <div class="planilha-titulo"><h2>Relatório de reposição</h2><p class="texto-suave">Cálculo: Físico − Vendas − Manutenções aprovadas em aberto = Disponível. Comprar = máximo(Mínimo − Disponível, 0).</p></div>
+    <div class="planilha-titulo"><h2>Relatório de reposição</h2><p class="texto-suave">Cálculo único: Disponível = Físico atual. As vendas e manutenções já foram descontadas como saídas. Comprar = máximo(Mínimo − Físico, 0).</p></div>
     <div class="planilha-scroll"><table class="planilha-compras reposicao" id="tabela-reposicao">
-      <thead><tr><th class="col-marcar">COMPRAR?</th><th>FORNECEDOR</th><th>CATEGORIA</th><th>ITEM</th><th>UNID.</th><th>COR</th><th>FÍSICO</th><th>VENDAS</th><th>MANUTENÇÕES</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>QTD. COMPRA</th><th>CUSTO UNIT.</th><th>TOTAL</th></tr></thead>
+      <thead><tr><th class="col-marcar">COMPRAR?</th><th>FORNECEDOR</th><th>CATEGORIA</th><th>ITEM</th><th>UNID.</th><th>COR</th><th>FÍSICO</th><th>SAÍDAS VENDAS</th><th>SAÍDAS MANUT.</th><th>DISPONÍVEL</th><th>MÍNIMO</th><th>QTD. COMPRA</th><th>CUSTO UNIT.</th><th>TOTAL</th></tr></thead>
       <tbody>{% set grupo = namespace(nome='') %}{% for l in compras %}
       {% if l.fornecedor_nome != grupo.nome %}<tr class="fornecedor-grupo"><td colspan="14"><strong>Fornecedor · {{ l.fornecedor_nome }}</strong></td></tr>{% set grupo.nome = l.fornecedor_nome %}{% endif %}
       <tr class="linha-reposicao" data-item="{{ l.item.id }}" data-fornecedor="{{ l.fornecedor_nome }}" data-categoria="{{ l.item.categoria }}" data-nome="{{ l.item.nome }}" data-unidade="{{ l.item.unidade or 'UN' }}" data-cor="{{ l.cor or '' }}" data-custo="{{ '%.4f'|format(l.custo_unitario or 0) }}">
@@ -60,7 +60,7 @@
         <td class="num"><input class="qtd-compra" type="number" min="0.01" step="0.01" value="{{ '%g'|format(l.comprar) }}"></td>
         <td class="num">R$ {{ '%.2f'|format(l.custo_unitario)|replace('.', ',') }}</td><td class="num total-linha">R$ {{ '%.2f'|format(l.custo_total)|replace('.', ',') }}</td>
       </tr>
-      {% else %}<tr><td colspan="14" class="vazio">Nenhuma compra necessária. O estoque atende vendas, manutenções e mínimo.</td></tr>{% endfor %}</tbody>
+      {% else %}<tr><td colspan="14" class="vazio">Nenhuma compra necessária. O saldo físico atende ao estoque mínimo.</td></tr>{% endfor %}</tbody>
       <tfoot><tr><td colspan="13"><strong>TOTAL SUGERIDO</strong></td><td class="num"><strong>R$ {{ '%.2f'|format(total)|replace('.', ',') }}</strong></td></tr></tfoot>
     </table></div>
   </section>
