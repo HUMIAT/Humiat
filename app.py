@@ -1,5 +1,6 @@
 from urllib.parse import quote_plus, urlencode, urlparse, parse_qs
 import base64
+import calendar
 import hashlib
 import csv
 import html
@@ -17752,8 +17753,55 @@ async def organiza_infinitepay_webhook(request: Request, db: Session = Depends(g
     return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao registrar pagamento"}, status_code=200 if ok else 500)
 
 
+AGENDA_MESES_PT = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril", 5: "Maio", 6: "Junho",
+    7: "Julho", 8: "Agosto", 9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
+}
+AGENDA_RESUMO_CATEGORIAS = {
+    "ATUALIZACAO": {"singular": "atualização", "plural": "atualizações", "classe": "atualizacao"},
+    "MANUTENCAO": {"singular": "manutenção", "plural": "manutenções", "classe": "manutencao"},
+    "VENDA": {"singular": "venda", "plural": "vendas", "classe": "venda"},
+    "VISITA": {"singular": "atendimento", "plural": "atendimentos", "classe": "visita"},
+    "OUTRO": {"singular": "outro", "plural": "outros", "classe": "outro"},
+}
+
+
+def _agenda_mes_referencia(valor: str | None) -> date:
+    hoje = date.today()
+    texto_mes = (valor or "").strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}", texto_mes):
+            ano, mes = [int(x) for x in texto_mes.split("-", 1)]
+            return date(ano, mes, 1)
+    except (TypeError, ValueError):
+        pass
+    return hoje.replace(day=1)
+
+
+def _agenda_somar_meses(referencia: date, quantidade: int) -> date:
+    indice = referencia.year * 12 + (referencia.month - 1) + quantidade
+    return date(indice // 12, (indice % 12) + 1, 1)
+
+
+def _agenda_retorno_seguro(valor: str | None, padrao: str = "/organiza/agenda") -> str:
+    retorno = (valor or "").strip()
+    return retorno if retorno.startswith("/organiza/agenda") else padrao
+
+
 @app.get("/organiza/agenda", response_class=HTMLResponse)
-def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+def agenda(
+    request: Request,
+    mes: str = "",
+    data: str = "",
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    mes_ref = _agenda_mes_referencia(mes)
+    proximo_mes = _agenda_somar_meses(mes_ref, 1)
+    mes_anterior = _agenda_somar_meses(mes_ref, -1)
+    inicio_mes = datetime.combine(mes_ref, time.min)
+    fim_mes = datetime.combine(proximo_mes, time.min)
+
     manutencoes = (
         db.query(Manutencao)
         .options(
@@ -17765,10 +17813,9 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             Manutencao.entregue_em.is_(None),
             ~Manutencao.status.in_(("Encerrada", "Cancelada")),
             or_(
-                Manutencao.entrega_prevista_em.isnot(None),
-                Manutencao.retirada_em.isnot(None),
-                Manutencao.pronto_em.isnot(None),
-                Manutencao.status.in_(("Pronto para retirada", "Retirada agendada")),
+                Manutencao.entrega_prevista_em.between(inicio_mes, fim_mes - timedelta(microseconds=1)),
+                Manutencao.retirada_em.between(inicio_mes, fim_mes - timedelta(microseconds=1)),
+                Manutencao.pronto_em.between(inicio_mes, fim_mes - timedelta(microseconds=1)),
             ),
         )
         .all()
@@ -17777,34 +17824,47 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
     eventos = []
     for m in manutencoes:
         etapa = etapa_manutencao(m)
-        if etapa == 1 and m.entrega_prevista_em:
+        if etapa == 1 and m.entrega_prevista_em and inicio_mes <= m.entrega_prevista_em < fim_mes:
             online = (m.tipo_atendimento or "loja") == "online"
             eventos.append({
                 "tipo": "online" if online else "entrada",
+                "categoria_resumo": "MANUTENCAO",
                 "titulo": "Atendimento online" if online else "Cliente vai trazer",
                 "data_hora": m.entrega_prevista_em,
                 "cliente": m.cliente.nome,
                 "equipamento": descricao_equipamento(m.equipamento),
                 "link": f"/organiza/manutencoes/{m.id}#etapa-1",
+                "editar_link": None,
                 "manual": False,
                 "manutencao_id": m.id,
                 "agendamento_tipo": "entrada",
+                "atualizar_data_action": f"/organiza/agenda/manutencao/{m.id}/atualizar-data",
+                "excluir_action": f"/organiza/agenda/manutencao/{m.id}/excluir",
             })
-        elif etapa == 6 and m.retirada_em:
+        elif etapa == 6 and m.retirada_em and inicio_mes <= m.retirada_em < fim_mes:
             eventos.append({
                 "tipo": "retirada",
+                "categoria_resumo": "MANUTENCAO",
                 "titulo": "Cliente vem buscar",
                 "data_hora": m.retirada_em,
                 "cliente": m.cliente.nome,
                 "equipamento": descricao_equipamento(m.equipamento),
                 "link": f"/organiza/manutencoes/{m.id}#etapa-6",
+                "editar_link": None,
                 "manual": False,
                 "manutencao_id": m.id,
                 "agendamento_tipo": "retirada",
+                "atualizar_data_action": f"/organiza/agenda/manutencao/{m.id}/atualizar-data",
+                "excluir_action": f"/organiza/agenda/manutencao/{m.id}/excluir",
             })
 
-    # Agenda manual: carrega clientes em lote para evitar N+1.
-    agenda_manuais = db.query(AgendaManual).order_by(AgendaManual.data_hora.asc()).all()
+    # Agenda manual limitada ao mês exibido; clientes são resolvidos em lote.
+    agenda_manuais = (
+        db.query(AgendaManual)
+        .filter(AgendaManual.data_hora >= inicio_mes, AgendaManual.data_hora < fim_mes)
+        .order_by(AgendaManual.data_hora.asc())
+        .all()
+    )
     cliente_ids_manuais = {e.cliente_id for e in agenda_manuais if e.cliente_id}
     clientes_manuais = {
         c.id: c
@@ -17816,6 +17876,7 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         local_manual = _agenda_local_evento(e)
         eventos.append({
             "tipo": _agenda_tipo_visual(categoria_manual, local_manual),
+            "categoria_resumo": categoria_manual,
             "titulo": f"{AGENDA_CATEGORIAS[categoria_manual]} · {AGENDA_LOCAIS[local_manual]}",
             "data_hora": e.data_hora,
             "cliente": cliente_manual.nome if cliente_manual else (e.contato or "Compromisso manual"),
@@ -17826,12 +17887,18 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
             "evento_id": e.id,
             "google_sync_status": e.google_sync_status,
             "google_sync_erro": e.google_sync_erro,
+            "atualizar_data_action": f"/organiza/agenda/manual/{e.id}/atualizar-data",
+            "excluir_action": f"/organiza/agenda/manual/{e.id}/excluir",
         })
 
-    # Atualizações agendadas: compras e clientes também são resolvidos em lote.
+    # Atualizações agendadas do mês: compra/cliente também em lote.
     atualizacoes_agendadas = (
         db.query(AtualizacaoAgendamento)
-        .filter(AtualizacaoAgendamento.status == "RESERVADO")
+        .filter(
+            AtualizacaoAgendamento.status == "RESERVADO",
+            AtualizacaoAgendamento.data_hora >= inicio_mes,
+            AtualizacaoAgendamento.data_hora < fim_mes,
+        )
         .order_by(AtualizacaoAgendamento.data_hora.asc())
         .all()
     )
@@ -17851,23 +17918,98 @@ def agenda(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         if not compra or not cliente_at:
             continue
         eventos.append({
-            "tipo": "atualizacao-casa" if a.tipo == "CASA" else "atualizacao-loja",
-            "titulo": "Atualização · Online" if a.tipo == "CASA" else "Atualização · Loja",
+            "tipo": "atualizacao-casa" if a.tipo == "CASA" else ("atualizacao-cliente" if a.tipo == "CLIENTE" else "atualizacao-loja"),
+            "categoria_resumo": "ATUALIZACAO",
+            "titulo": "Atualização · Online" if a.tipo == "CASA" else ("Atualização · Cliente" if a.tipo == "CLIENTE" else "Atualização · Loja"),
             "data_hora": a.data_hora,
             "cliente": cliente_at.nome,
             "equipamento": f"Pacotes {compra.pacote_inicio} a {compra.pacote_fim} · Google {a.google_sync_status or 'aguardando'}",
             "link": f"/organiza/clientes/{cliente_at.id}#atualizacoes",
-            "manual": True,
+            "editar_link": f"/organiza/clientes/{cliente_at.id}#atualizacoes",
+            "manual": False,
             "evento_id": a.id,
             "atualizacao": True,
+            "google_sync_status": a.google_sync_status,
+            "google_sync_erro": a.google_sync_erro,
+            "atualizar_data_action": f"/organiza/agenda/atualizacao/{a.id}/atualizar-data",
+            "excluir_action": None,
         })
 
     eventos.sort(key=lambda e: (e["data_hora"], e["titulo"]))
+
+    # Contadores diários por categoria: a visão mensal mostra somente quantidades.
+    contagens_por_dia: dict[date, dict[str, int]] = {}
+    for evento in eventos:
+        dia = evento["data_hora"].date()
+        categoria = evento.get("categoria_resumo") or "OUTRO"
+        por_categoria = contagens_por_dia.setdefault(dia, {})
+        por_categoria[categoria] = por_categoria.get(categoria, 0) + 1
+
+    semanas = []
+    cal = calendar.Calendar(firstweekday=0)  # segunda-feira
+    for semana in cal.monthdatescalendar(mes_ref.year, mes_ref.month):
+        dias_semana = []
+        for dia in semana:
+            dentro_mes = dia.month == mes_ref.month
+            contagens = contagens_por_dia.get(dia, {}) if dentro_mes else {}
+            resumos = []
+            for chave in ("ATUALIZACAO", "MANUTENCAO", "VENDA", "VISITA", "OUTRO"):
+                qtd = int(contagens.get(chave, 0) or 0)
+                if not qtd:
+                    continue
+                meta = AGENDA_RESUMO_CATEGORIAS[chave]
+                resumos.append({
+                    "categoria": chave,
+                    "quantidade": qtd,
+                    "rotulo": meta["singular"] if qtd == 1 else meta["plural"],
+                    "classe": meta["classe"],
+                })
+            dias_semana.append({
+                "data": dia,
+                "iso": dia.isoformat(),
+                "numero": dia.day,
+                "dentro_mes": dentro_mes,
+                "resumos": resumos,
+                "total": sum(contagens.values()) if contagens else 0,
+            })
+        semanas.append(dias_semana)
+
+    data_selecionada = None
+    try:
+        if data:
+            candidata = datetime.strptime(data, "%Y-%m-%d").date()
+            if candidata.year == mes_ref.year and candidata.month == mes_ref.month:
+                data_selecionada = candidata
+    except ValueError:
+        data_selecionada = None
+    eventos_detalhe = [e for e in eventos if data_selecionada and e["data_hora"].date() == data_selecionada]
+
     google = _google_integracao(db)
+    mes_chave = mes_ref.strftime("%Y-%m")
+    total_mes = len(eventos)
+    retorno_base = f"/organiza/agenda?mes={mes_chave}"
+    if data_selecionada:
+        retorno_base += f"&data={data_selecionada.isoformat()}#agenda-detalhe"
+
     return templates.TemplateResponse("organiza/agenda.html", {
-        "request": request, "usuario": usuario, "eventos": eventos,
-        "google": google, "google_configurado": _google_configurado(),
-        "mensagem": request.query_params.get("mensagem", ""), "erro": request.query_params.get("erro", ""),
+        "request": request,
+        "usuario": usuario,
+        "eventos": eventos,
+        "eventos_detalhe": eventos_detalhe,
+        "semanas": semanas,
+        "mes_ref": mes_ref,
+        "mes_chave": mes_chave,
+        "mes_titulo": f"{AGENDA_MESES_PT[mes_ref.month]} {mes_ref.year}",
+        "mes_anterior": mes_anterior.strftime("%Y-%m"),
+        "proximo_mes": proximo_mes.strftime("%Y-%m"),
+        "data_selecionada": data_selecionada,
+        "data_selecionada_titulo": data_selecionada.strftime("%d/%m/%Y") if data_selecionada else "",
+        "total_mes": total_mes,
+        "retorno_agenda": retorno_base,
+        "google": google,
+        "google_configurado": _google_configurado(),
+        "mensagem": request.query_params.get("mensagem", ""),
+        "erro": request.query_params.get("erro", ""),
     })
 
 
@@ -17989,6 +18131,88 @@ async def agenda_manutencao_reagendar(manutencao_id: int, request: Request, usua
             m.status = "Aguardando equipamento"
     db.commit()
     return RedirectResponse("/organiza/agenda", status_code=303)
+
+
+
+@app.post("/organiza/agenda/{origem}/{registro_id}/atualizar-data")
+async def agenda_atualizar_data_existente(
+    origem: str,
+    registro_id: int,
+    request: Request,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Altera somente a data/hora do compromisso existente.
+
+    Não cria uma nova linha no Organiza. Quando o compromisso possui vínculo com
+    o Google Agenda, o mesmo google_event_id é atualizado via PUT.
+    """
+    form = await request.form()
+    nova_data = datetime_form(form.get("data_hora") or "")
+    retorno = _agenda_retorno_seguro(form.get("retorno"))
+    if not nova_data:
+        separador = "&" if "?" in retorno else "?"
+        return RedirectResponse(retorno.replace("#agenda-detalhe", "") + separador + "erro=" + quote_plus("Informe uma nova data e horário.") + "#agenda-detalhe", status_code=303)
+
+    origem = (origem or "").strip().lower()
+    mensagem = "Data atualizada no mesmo compromisso. Nenhum novo registro foi criado."
+
+    if origem == "manual":
+        evento = db.get(AgendaManual, registro_id)
+        if not evento:
+            raise HTTPException(404)
+        evento.data_hora = nova_data
+        _google_calendar_manual_sincronizar(db, evento)
+        if evento.google_sync_status != "SINCRONIZADO":
+            mensagem = "Data atualizada no mesmo compromisso do Organiza; a sincronização com o Google Agenda ficou pendente."
+
+    elif origem == "atualizacao":
+        ag = db.get(AtualizacaoAgendamento, registro_id)
+        if not ag or ag.status != "RESERVADO":
+            raise HTTPException(404)
+        tipo = (ag.tipo or "LOJA").strip().upper()
+        if not _atualizacao_horario_valido(tipo, nova_data):
+            if tipo == "CLIENTE":
+                erro = "Escolha um horário futuro para a visita do técnico."
+            else:
+                horario = "10:00 às 20:00" if tipo == "CASA" else "14:00 às 18:00"
+                erro = f"Horário inválido. Segunda a sexta, {horario}, de 1 em 1 hora."
+            separador = "&" if "?" in retorno else "?"
+            return RedirectResponse(retorno.replace("#agenda-detalhe", "") + separador + "erro=" + quote_plus(erro) + "#agenda-detalhe", status_code=303)
+        if _atualizacao_horario_ocupado(db, nova_data, ag.id):
+            separador = "&" if "?" in retorno else "?"
+            return RedirectResponse(retorno.replace("#agenda-detalhe", "") + separador + "erro=" + quote_plus("Esse horário conflita com outro compromisso do Organiza.") + "#agenda-detalhe", status_code=303)
+        compra = db.get(AtualizacaoCompra, ag.compra_id)
+        cliente = db.get(Cliente, ag.cliente_id)
+        if not compra or not cliente:
+            raise HTTPException(404)
+        ag.data_hora = nova_data
+        _google_calendar_sincronizar(db, ag, cliente, compra)
+        if ag.google_sync_status != "SINCRONIZADO":
+            mensagem = "Data atualizada no mesmo agendamento; a sincronização com o Google Agenda ficou pendente."
+
+    elif origem == "manutencao":
+        m = db.get(Manutencao, registro_id)
+        if not m:
+            raise HTTPException(404)
+        tipo = (form.get("tipo") or "entrada").strip().lower()
+        if tipo == "retirada":
+            m.retirada_em = nova_data
+            m.status = "Retirada agendada"
+        else:
+            if horario_atendimento_ocupado(db, nova_data, m.id):
+                separador = "&" if "?" in retorno else "?"
+                return RedirectResponse(retorno.replace("#agenda-detalhe", "") + separador + "erro=" + quote_plus("Este horário já está ocupado.") + "#agenda-detalhe", status_code=303)
+            m.entrega_prevista_em = nova_data
+            if not m.recebido_em:
+                m.status = "Aguardando equipamento"
+    else:
+        raise HTTPException(404)
+
+    db.commit()
+    # Se a nova data mudou de mês/dia, leva o usuário diretamente ao compromisso atualizado.
+    destino = f"/organiza/agenda?mes={nova_data.strftime('%Y-%m')}&data={nova_data.strftime('%Y-%m-%d')}&mensagem={quote_plus(mensagem)}#agenda-detalhe"
+    return RedirectResponse(destino, status_code=303)
 
 
 @app.post("/organiza/agenda/manutencao/{manutencao_id}/excluir")

@@ -1,11 +1,11 @@
 {% extends "organiza/base.html" %}
 {% block conteudo %}
-<section class="pagina-clean agenda-simples">
-  <div class="titulo-linha">
+<section class="pagina-clean agenda-simples agenda-mensal-pagina">
+  <div class="titulo-linha agenda-topo">
     <div>
       <p class="tag">AGENDA</p>
-      <h1>Compromissos</h1>
-      <p class="texto-suave">Compromissos organizados por categoria e local, para clientes cadastrados ou visitantes.</p>
+      <h1>Agenda mensal</h1>
+      <p class="texto-suave">Visão geral do mês com a quantidade de compromissos por categoria. Clique em um dia para abrir os detalhes.</p>
     </div>
     <a class="botao primario" href="/organiza/agenda/manual/novo">+ Adicionar compromisso</a>
   </div>
@@ -13,16 +13,16 @@
   {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
 
-  <div class="cartao" style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+  <div class="cartao agenda-google-status">
     <div>
       <strong>Google Agenda</strong>
       {% if google and google.account_email %}
-        <div class="texto-suave">Conectado como {{ google.account_email }}. Novos compromissos manuais e atualizações são sincronizados automaticamente.</div>
+        <div class="texto-suave">Conectado como {{ google.account_email }}. Compromissos vinculados continuam sendo atualizados no mesmo evento.</div>
       {% else %}
         <div class="texto-suave">A Agenda do Organiza continua funcionando, mas a sincronização com o Google está desconectada.</div>
       {% endif %}
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <div class="agenda-google-acoes">
       {% if google and google.refresh_token %}
         <span class="agenda-chip entrada">Conectado</span>
         {% if usuario.is_admin %}<form method="post" action="/organiza/agenda/google/sincronizar"><button class="botao pequeno" type="submit">Sincronizar pendentes</button></form>{% endif %}
@@ -33,56 +33,117 @@
     </div>
   </div>
 
-  <div class="agenda-legenda agenda-legenda-padrao">
+  <div class="agenda-legenda agenda-legenda-padrao agenda-mes-legenda">
     <span class="agenda-chip atualizacao-loja">Atualização</span>
     <span class="agenda-chip manutencao">Manutenção</span>
     <span class="agenda-chip venda">Venda</span>
-    <span class="agenda-chip loja">Visita / Atendimento</span>
-    <span class="agenda-chip cliente">Local: Cliente</span>
-    <span class="agenda-chip online">Local: Online</span>
-    <span class="agenda-chip loja">Local: Loja</span>
+    <span class="agenda-chip visita">Visita / Atendimento</span>
+    <span class="agenda-chip outro">Outro</span>
   </div>
 
-  {% if eventos %}
-    <div class="agenda-lista-simples">
-      {% set ns = namespace(data='') %}
-      {% for e in eventos %}
-        {% set data_atual = e.data_hora.strftime('%d/%m/%Y') %}
-        {% if data_atual != ns.data %}
-          {% set ns.data = data_atual %}
-          <h2 class="agenda-dia">{{ data_atual }}</h2>
-        {% endif %}
-        <div class="agenda-linha {{ e.tipo }}" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center">
-          <time>{{ e.data_hora.strftime('%H:%M') }}</time>
-          <a href="{{ e.link }}" style="color:inherit;text-decoration:none;min-width:0">
-            <div>
-              <small>{{ e.titulo|upper }}</small>
-              <strong>{{ e.cliente }}</strong>
-              {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
-            </div>
-          </a>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-            {% if e.manual %}
-              <a class="botao pequeno" href="{{ e.editar_link or e.link }}">Editar</a>
-            {% else %}
-              <details style="position:relative">
-                <summary class="botao pequeno" style="cursor:pointer;list-style:none">Reagendar</summary>
-                <form method="post" action="/organiza/agenda/manutencao/{{ e.manutencao_id }}/reagendar" class="cartao" style="position:absolute;right:0;z-index:10;min-width:290px;padding:12px">
-                  <input type="hidden" name="tipo" value="{{ e.agendamento_tipo }}">
-                  <label>Nova data e hora<input type="datetime-local" name="data_hora" required value="{{ e.data_hora.strftime('%Y-%m-%dT%H:%M') }}"></label>
-                  <button class="botao primario pequeno" type="submit">Salvar reagendamento</button>
-                </form>
-              </details>
-              <form method="post" action="/organiza/agenda/manutencao/{{ e.manutencao_id }}/excluir" onsubmit="return confirm('Remover este agendamento? O histórico será preservado.')">
-                <button class="botao pequeno" type="submit">Excluir</button>
-              </form>
-            {% endif %}
-          </div>
-        </div>
+  <div class="agenda-mes-cabecalho">
+    <a class="agenda-mes-seta" href="/organiza/agenda?mes={{ mes_anterior }}" aria-label="Mês anterior">‹</a>
+    <div>
+      <h2>{{ mes_titulo }}</h2>
+      <span>{{ total_mes }} compromisso{% if total_mes != 1 %}s{% endif %} no mês</span>
+    </div>
+    <a class="agenda-mes-seta" href="/organiza/agenda?mes={{ proximo_mes }}" aria-label="Próximo mês">›</a>
+  </div>
+
+  <div class="agenda-mes-scroll">
+    <div class="agenda-mes-grade">
+      {% for nome_dia in ['SEG','TER','QUA','QUI','SEX','SÁB','DOM'] %}
+        <div class="agenda-mes-semana">{{ nome_dia }}</div>
+      {% endfor %}
+
+      {% for semana in semanas %}
+        {% for dia in semana %}
+          {% if dia.dentro_mes %}
+            <a class="agenda-mes-dia {% if data_selecionada and dia.data == data_selecionada %}selecionado{% endif %} {% if dia.total %}com-registros{% endif %}"
+               href="/organiza/agenda?mes={{ mes_chave }}&data={{ dia.iso }}#agenda-detalhe">
+              <strong class="agenda-mes-numero">{{ dia.numero }}</strong>
+              <div class="agenda-mes-contadores">
+                {% for resumo in dia.resumos %}
+                  <span class="agenda-mes-contador {{ resumo.classe }}">
+                    <b>{{ resumo.quantidade }}</b> {{ resumo.rotulo }}
+                  </span>
+                {% endfor %}
+                {% if not dia.resumos %}<small>Sem registros</small>{% endif %}
+              </div>
+            </a>
+          {% else %}
+            <div class="agenda-mes-dia fora-mes" aria-hidden="true"></div>
+          {% endif %}
+        {% endfor %}
       {% endfor %}
     </div>
-  {% else %}
-    <div class="agenda-vazia"><h2>Nenhum compromisso agendado</h2><p>Adicione manualmente uma visita ou aguarde novos agendamentos.</p></div>
-  {% endif %}
+  </div>
+
+  <section id="agenda-detalhe" class="agenda-detalhe">
+    {% if data_selecionada %}
+      <div class="agenda-detalhe-titulo">
+        <div>
+          <p class="tag">DETALHE DA AGENDA</p>
+          <h2>{{ data_selecionada_titulo }}</h2>
+          <p class="texto-suave">Altere a data diretamente aqui quando necessário. A alteração atualiza o registro existente; não cria outro compromisso.</p>
+        </div>
+        <a class="botao pequeno" href="/organiza/agenda?mes={{ mes_chave }}">Fechar detalhe</a>
+      </div>
+
+      {% if eventos_detalhe %}
+        <div class="agenda-lista-simples">
+          {% for e in eventos_detalhe %}
+            <div class="agenda-linha {{ e.tipo }}">
+              <time>{{ e.data_hora.strftime('%H:%M') }}</time>
+              <a href="{{ e.link }}" class="agenda-detalhe-link">
+                <div>
+                  <small>{{ e.titulo|upper }}</small>
+                  <strong>{{ e.cliente }}</strong>
+                  {% if e.equipamento %}<span>{{ e.equipamento }}</span>{% endif %}
+                  {% if e.google_sync_erro %}<span class="agenda-google-erro">Google: {{ e.google_sync_erro }}</span>{% endif %}
+                </div>
+              </a>
+              <div class="agenda-detalhe-acoes">
+                {% if e.editar_link %}
+                  <a class="botao pequeno" href="{{ e.editar_link }}">{% if e.manual %}Editar{% else %}Abrir{% endif %}</a>
+                {% else %}
+                  <a class="botao pequeno" href="{{ e.link }}">Abrir</a>
+                {% endif %}
+
+                <details class="agenda-atualizar-data">
+                  <summary class="botao pequeno">Atualizar data</summary>
+                  <form method="post" action="{{ e.atualizar_data_action }}" class="agenda-atualizar-data-form">
+                    <input type="hidden" name="retorno" value="{{ retorno_agenda }}">
+                    {% if e.agendamento_tipo %}<input type="hidden" name="tipo" value="{{ e.agendamento_tipo }}">{% endif %}
+                    <label>Nova data e hora
+                      <input type="datetime-local" name="data_hora" required value="{{ e.data_hora.strftime('%Y-%m-%dT%H:%M') }}">
+                    </label>
+                    <small>O mesmo registro será atualizado. Não será criado um novo.</small>
+                    <button class="botao primario pequeno" type="submit">Atualizar data</button>
+                  </form>
+                </details>
+
+                {% if e.excluir_action %}
+                  <form method="post" action="{{ e.excluir_action }}" onsubmit="return confirm('Remover este agendamento? O histórico será preservado quando aplicável.')">
+                    <button class="botao pequeno" type="submit">Excluir</button>
+                  </form>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="agenda-vazia">
+          <h2>Nenhum compromisso neste dia</h2>
+          <p>Selecione outro dia ou adicione um compromisso.</p>
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="agenda-vazia agenda-detalhe-vazio">
+        <h2>Detalhe da agenda</h2>
+        <p>Clique em um dia do calendário para visualizar os registros e atualizar datas sem criar duplicidade.</p>
+      </div>
+    {% endif %}
+  </section>
 </section>
 {% endblock %}

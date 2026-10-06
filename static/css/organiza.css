@@ -3958,3 +3958,72 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .venda-adicionar-cliente{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;min-height:46px;padding-inline:14px}
 .venda-cliente-campo small{color:var(--org-muted);font-weight:500;line-height:1.35}
 @media(max-width:680px){.venda-cliente-seletor{grid-template-columns:1fr}.venda-adicionar-cliente{width:100%}}
+
+/* ============================================================
+   ORGANIZA 1.2.42 · Agenda mensal no padrão do Connect
+   ============================================================ */
+.agenda-mensal-pagina{max-width:1280px!important}
+.agenda-topo{margin-bottom:14px}
+.agenda-google-status{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.agenda-google-acoes{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.agenda-mes-legenda{margin:12px 0 16px}
+.agenda-chip.outro{background:#f2f4f7;color:#475467}
+
+.agenda-mes-cabecalho{display:grid;grid-template-columns:54px 1fr 54px;align-items:center;gap:12px;margin:8px 0 14px}
+.agenda-mes-cabecalho>div{text-align:center}
+.agenda-mes-cabecalho h2{margin:0;font-size:22px;color:#101828}
+.agenda-mes-cabecalho span{display:block;margin-top:3px;color:#667085;font-size:12px}
+.agenda-mes-seta{height:44px;border:1px solid #cfd8e6;border-radius:11px;background:#fff;color:#101828;text-decoration:none;display:grid;place-items:center;font-size:28px;line-height:1;font-weight:700}
+.agenda-mes-seta:hover{background:#f8fafc;border-color:#98a2b3}
+
+.agenda-mes-scroll{width:100%;overflow-x:auto;padding-bottom:4px}
+.agenda-mes-grade{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;min-width:840px}
+.agenda-mes-semana{text-align:center;padding:7px 4px;color:#52637a;font-size:12px;font-weight:900;letter-spacing:.02em}
+.agenda-mes-dia{min-height:126px;background:#fff;border:1px solid #d7e0ec;border-radius:15px;padding:10px;text-decoration:none;color:#101828;display:flex;flex-direction:column;gap:9px;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
+.agenda-mes-dia:hover{border-color:#84a9ff;box-shadow:0 5px 18px rgba(37,99,235,.08);transform:translateY(-1px)}
+.agenda-mes-dia.selecionado{border:2px solid #2563eb;padding:9px;box-shadow:0 0 0 2px rgba(37,99,235,.08)}
+.agenda-mes-dia.fora-mes{background:transparent;border-color:transparent;box-shadow:none;pointer-events:none}
+.agenda-mes-numero{font-size:17px;line-height:1}
+.agenda-mes-contadores{display:flex!important;flex-direction:column!important;align-items:flex-start!important;gap:5px!important;min-width:0}
+.agenda-mes-contadores small{margin-top:auto;color:#98a2b3;font-size:11px}
+.agenda-mes-contador{display:inline-flex;align-items:center;gap:4px;max-width:100%;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#eef2f6;color:#475467}
+.agenda-mes-contador b{font-size:11px}
+.agenda-mes-contador.atualizacao{background:#eef2ff;color:#3730a3}
+.agenda-mes-contador.manutencao{background:#fff7ed;color:#c2410c}
+.agenda-mes-contador.venda{background:#f5f3ff;color:#6d28d9}
+.agenda-mes-contador.visita{background:#ecfdf5;color:#047857}
+.agenda-mes-contador.outro{background:#f2f4f7;color:#475467}
+
+.agenda-detalhe{margin-top:22px;scroll-margin-top:86px}
+.agenda-detalhe-titulo{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.agenda-detalhe-titulo h2{margin:2px 0 0}
+.agenda-detalhe .agenda-lista-simples{overflow:visible;border:0;background:transparent}
+.agenda-detalhe .agenda-linha{grid-template-columns:72px minmax(0,1fr) auto!important;overflow:visible}
+.agenda-detalhe-link{color:inherit;text-decoration:none;min-width:0}
+.agenda-detalhe-acoes{display:flex!important;flex-direction:row!important;gap:6px!important;align-items:center!important;justify-content:flex-end;flex-wrap:wrap;position:relative}
+.agenda-detalhe-acoes form{margin:0}
+.agenda-atualizar-data{position:relative}
+.agenda-atualizar-data>summary{cursor:pointer;list-style:none;white-space:nowrap}
+.agenda-atualizar-data>summary::-webkit-details-marker{display:none}
+.agenda-atualizar-data-form{position:absolute;right:0;top:calc(100% + 7px);z-index:40;width:310px;background:#fff;border:1px solid #d7e0ec;border-radius:13px;padding:13px;box-shadow:0 16px 34px rgba(15,23,42,.16);display:grid!important;gap:9px!important}
+.agenda-atualizar-data-form label{display:grid!important;gap:6px!important;font-weight:800;font-size:12px}
+.agenda-atualizar-data-form input{width:100%;border:1px solid #cfd8e6;border-radius:9px;padding:9px;font:inherit}
+.agenda-atualizar-data-form small{color:#667085;font-size:11px;line-height:1.35}
+.agenda-google-erro{color:#b42318!important}
+.agenda-detalhe-vazio{margin-top:0}
+
+@media(max-width:800px){
+  .agenda-mes-cabecalho{grid-template-columns:44px 1fr 44px}
+  .agenda-mes-cabecalho h2{font-size:19px}
+  .agenda-mes-grade{min-width:760px;gap:6px}
+  .agenda-mes-dia{min-height:112px;padding:8px;border-radius:12px}
+  .agenda-mes-dia.selecionado{padding:7px}
+  .agenda-mes-contador{font-size:10px;padding:4px 6px}
+  .agenda-detalhe .agenda-linha{grid-template-columns:1fr!important;gap:8px!important}
+  .agenda-detalhe-acoes{justify-content:flex-start!important;width:100%}
+  .agenda-detalhe-acoes>.botao,.agenda-detalhe-acoes>form{flex:1 1 auto}
+  .agenda-detalhe-acoes>form .botao{width:100%}
+  .agenda-atualizar-data{flex:1 1 auto}
+  .agenda-atualizar-data>summary{text-align:center}
+  .agenda-atualizar-data-form{position:fixed;left:14px;right:14px;bottom:14px;top:auto;width:auto;max-width:none}
+}
