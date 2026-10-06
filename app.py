@@ -2433,30 +2433,56 @@ def _estoque_fisico_chave(db: Session, item_id: int, cor: str | None = None) -> 
     return round(total, 4)
 
 
+def _compras_aguardando_mapa(db: Session) -> dict[tuple[int, str], float]:
+    """Quantidade já comprada e ainda aguardando chegada, por item/cor.
+
+    Essa quantidade reduz somente a necessidade do relatório de compras.
+    Ela NÃO entra no estoque físico antes da confirmação de chegada.
+    """
+    mapa: dict[tuple[int, str], float] = {}
+    pedidos = db.query(EstoqueCompraPedido).filter(
+        func.upper(EstoqueCompraPedido.status) == "AGUARDANDO"
+    ).all()
+    for pedido in pedidos:
+        chave = (int(pedido.item_id), normalizar_cor(pedido.cor))
+        mapa[chave] = round(mapa.get(chave, 0.0) + float(pedido.quantidade or 0), 4)
+    return mapa
+
+
 def relatorio_compras_estoque(db: Session) -> list[dict]:
     linhas, cores = estoque_saldos(db)
+    aguardando = _compras_aguardando_mapa(db)
     compras = []
     for l in linhas:
         item = l["item"]
         if item_controla_cor(item):
             for c in cores.get(item.id, []):
-                if c["cor"] == ESTOQUE_COR_PENDENTE or c["comprar"] <= 0:
+                if c["cor"] == ESTOQUE_COR_PENDENTE:
                     continue
+                em_compra = round(float(aguardando.get((int(item.id), normalizar_cor(c["cor"])), 0) or 0), 4)
+                comprar_restante = round(max(float(c["comprar"] or 0) - em_compra, 0), 4)
+                if comprar_restante <= 0:
+                    continue
+                custo_unitario = float(item.preco_custo or 0)
                 compras.append({
                     "item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor",
                     "cor": c["cor"], "fisico": c["fisico"], "vendas_a_fazer": c["vendas_a_fazer"],
                     "manutencoes_a_fazer": c["manutencoes_a_fazer"], "disponivel": c["disponivel"],
-                    "minimo": c["minimo"], "comprar": c["comprar"], "custo_unitario": float(item.preco_custo or 0),
-                    "custo_total": c["custo_compra"],
+                    "minimo": c["minimo"], "em_compra": em_compra, "comprar": comprar_restante,
+                    "custo_unitario": custo_unitario, "custo_total": round(comprar_restante * custo_unitario, 2),
                 })
-        elif l["comprar"] > 0:
-            compras.append({
-                "item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor",
-                "cor": "", "fisico": l["fisico"], "vendas_a_fazer": l["vendas_a_fazer"],
-                "manutencoes_a_fazer": l["manutencoes_a_fazer"], "disponivel": l["disponivel"],
-                "minimo": l["minimo"], "comprar": l["comprar"], "custo_unitario": float(item.preco_custo or 0),
-                "custo_total": l["custo_compra"],
-            })
+        else:
+            em_compra = round(float(aguardando.get((int(item.id), ""), 0) or 0), 4)
+            comprar_restante = round(max(float(l["comprar"] or 0) - em_compra, 0), 4)
+            if comprar_restante > 0:
+                custo_unitario = float(item.preco_custo or 0)
+                compras.append({
+                    "item": item, "fornecedor_nome": item.fornecedor.nome if item.fornecedor else "Sem fornecedor",
+                    "cor": "", "fisico": l["fisico"], "vendas_a_fazer": l["vendas_a_fazer"],
+                    "manutencoes_a_fazer": l["manutencoes_a_fazer"], "disponivel": l["disponivel"],
+                    "minimo": l["minimo"], "em_compra": em_compra, "comprar": comprar_restante,
+                    "custo_unitario": custo_unitario, "custo_total": round(comprar_restante * custo_unitario, 2),
+                })
     return sorted(compras, key=lambda x: ((_texto_sem_acento(x["fornecedor_nome"])), (_texto_sem_acento(x["item"].categoria)), (_texto_sem_acento(x["item"].nome)), x["cor"]))
 
 
@@ -14634,16 +14660,76 @@ async def estoque_compra_lote(request: Request, usuario: Usuario = Depends(usuar
     )
 
 
+@app.post("/organiza/estoque/compras/{pedido_id}/editar")
+async def estoque_compra_editar(pedido_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    pedido = db.query(EstoqueCompraPedido).options(selectinload(EstoqueCompraPedido.item)).filter(EstoqueCompraPedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(404)
+    if (pedido.status or "").upper() == "RECEBIDA":
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Compra já recebida não pode ser alterada por esta tela."), status_code=303)
+    form = dict(await request.form())
+    try:
+        quantidade = float(str(form.get("quantidade") or "0").replace(",", "."))
+    except (TypeError, ValueError):
+        quantidade = 0
+    if quantidade <= 0:
+        return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe uma quantidade maior que zero."), status_code=303)
+    previsao = None
+    previsao_txt = (form.get("previsao_entrega") or "").strip()
+    if previsao_txt:
+        try:
+            previsao = date.fromisoformat(previsao_txt)
+        except ValueError:
+            return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe uma data de chegada válida."), status_code=303)
+    qtd_antiga = float(pedido.quantidade or 0)
+    custo_unitario = (float(pedido.valor_total or 0) / qtd_antiga) if qtd_antiga > 0 else float(pedido.item.preco_custo or 0)
+    pedido.quantidade = quantidade
+    pedido.valor_total = round(custo_unitario * quantidade, 2)
+    pedido.previsao_entrega = previsao
+    db.commit()
+    return RedirectResponse(
+        "/organiza/estoque/compras?ok=" + quote_plus(f"Compra atualizada: {pedido.item.nome} × {quantidade:g}."),
+        status_code=303,
+    )
+
+
 @app.post("/organiza/estoque/compras/{pedido_id}/receber")
-def estoque_compra_receber(pedido_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+async def estoque_compra_receber(pedido_id: int, request: Request, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
     pedido = db.query(EstoqueCompraPedido).options(selectinload(EstoqueCompraPedido.item)).filter(EstoqueCompraPedido.id == pedido_id).first()
     if not pedido:
         raise HTTPException(404)
     if (pedido.status or "").upper() == "RECEBIDA":
         return RedirectResponse("/organiza/estoque/compras?ok=" + quote_plus("Esta compra já foi recebida."), status_code=303)
+
+    # Usa os valores atualmente exibidos na linha, mesmo se o usuário alterou
+    # quantidade/data e clicou direto em "Confirmar chegada" sem salvar antes.
+    form = dict(await request.form())
+    if form:
+        try:
+            quantidade_form = float(str(form.get("quantidade") or pedido.quantidade or "0").replace(",", "."))
+        except (TypeError, ValueError):
+            quantidade_form = 0
+        if quantidade_form <= 0:
+            return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe uma quantidade maior que zero antes de confirmar a chegada."), status_code=303)
+        previsao = pedido.previsao_entrega
+        previsao_txt = (form.get("previsao_entrega") or "").strip()
+        if previsao_txt:
+            try:
+                previsao = date.fromisoformat(previsao_txt)
+            except ValueError:
+                return RedirectResponse("/organiza/estoque/compras?erro=" + quote_plus("Informe uma data de chegada válida."), status_code=303)
+        elif "previsao_entrega" in form:
+            previsao = None
+        qtd_antiga = float(pedido.quantidade or 0)
+        custo_unitario_atual = (float(pedido.valor_total or 0) / qtd_antiga) if qtd_antiga > 0 else float(pedido.item.preco_custo or 0)
+        pedido.quantidade = quantidade_form
+        pedido.valor_total = round(custo_unitario_atual * quantidade_form, 2)
+        pedido.previsao_entrega = previsao
+
     existente = db.query(EstoqueMovimento.id).filter(
         EstoqueMovimento.origem_tipo == "COMPRA", EstoqueMovimento.origem_id == pedido.id, EstoqueMovimento.tipo == "ENTRADA"
     ).first()
+    agora = datetime.now()
     if not existente:
         qtd = float(pedido.quantidade or 0)
         custo_unitario = (float(pedido.valor_total or 0) / qtd) if qtd > 0 else None
@@ -14651,10 +14737,10 @@ def estoque_compra_receber(pedido_id: int, usuario: Usuario = Depends(usuario_lo
             item_id=pedido.item_id, tipo="ENTRADA", quantidade=qtd, cor=pedido.cor,
             origem_tipo="COMPRA", origem_id=pedido.id, custo_unitario=custo_unitario,
             observacao=f"Compra #{pedido.id} recebida" + (f" · {pedido.observacao}" if pedido.observacao else ""),
-            usuario_id=usuario.id,
+            usuario_id=usuario.id, criado_em=agora,
         ))
     pedido.status = "RECEBIDA"
-    pedido.recebido_em = datetime.now()
+    pedido.recebido_em = agora
     db.commit()
     return RedirectResponse("/organiza/estoque/compras?ok=" + quote_plus(f"Chegada confirmada. Estoque de {pedido.item.nome} aumentado em {float(pedido.quantidade or 0):g}."), status_code=303)
 
