@@ -1956,8 +1956,17 @@ def _distribuir_por_cor(db: Session, origem_tipo: str, origem_id: int, item: Ite
     return {k: round(v, 4) for k, v in resultado.items() if v > 0}
 
 
-def _sincronizar_saidas_origem(db: Session, origem_tipo: str, origem_id: int, desejado: dict[tuple[int, str | None, int | None], float], observacao: str = "") -> None:
-    """Mantém uma saída atual por item/cor/origem sem duplicar em novas edições."""
+def _sincronizar_saidas_origem(
+    db: Session, origem_tipo: str, origem_id: int,
+    desejado: dict[tuple[int, str | None, int | None], float],
+    observacao: str = "", data_movimento: datetime | None = None,
+) -> None:
+    """Mantém uma saída atual por item/cor/origem sem duplicar em novas edições.
+
+    A data do razão deve vir da operação de origem, nunca do momento em que o
+    sistema foi recalculado. Assim, editar uma venda/manutenção dias depois não
+    desloca artificialmente a saída para ``hoje`` no histórico do estoque.
+    """
     atuais = db.query(EstoqueMovimento).filter(
         EstoqueMovimento.tipo == "SAIDA",
         EstoqueMovimento.origem_tipo == origem_tipo,
@@ -1976,12 +1985,14 @@ def _sincronizar_saidas_origem(db: Session, origem_tipo: str, origem_id: int, de
             mov = EstoqueMovimento(
                 item_id=item_id, tipo="SAIDA", quantidade=quantidade, cor=cor,
                 origem_tipo=origem_tipo, origem_id=int(origem_id), origem_item_id=origem_item_id,
-                observacao=observacao or None,
+                observacao=observacao or None, criado_em=data_movimento,
             )
             db.add(mov)
         else:
             mov.quantidade = quantidade
             mov.observacao = observacao or mov.observacao
+            if data_movimento is not None:
+                mov.criado_em = data_movimento
     for chave, mov in mapa.items():
         if chave not in chaves:
             db.delete(mov)
@@ -2031,6 +2042,30 @@ def _desejado_venda_estoque(eq: Equipamento, db: Session) -> dict[tuple[int, str
     return desejado
 
 
+def _data_estoque_venda(eq: Equipamento | None) -> datetime | None:
+    """Data contábil da saída da venda no razão do estoque.
+
+    A fonte principal é ``data_compra`` da própria venda. Como esse campo guarda
+    apenas a data, preservamos o horário original quando a venda foi criada no
+    mesmo dia; caso contrário usamos meio-dia apenas para manter ordenação estável.
+    """
+    if not eq:
+        return None
+    if eq.data_compra:
+        criado = getattr(eq, "criado_em", None)
+        if criado and criado.date() == eq.data_compra:
+            return datetime.combine(eq.data_compra, criado.time().replace(tzinfo=None))
+        return datetime.combine(eq.data_compra, time(12, 0))
+    return getattr(eq, "criado_em", None)
+
+
+def _data_estoque_manutencao(m: Manutencao | None) -> datetime | None:
+    """Data da manutenção usada no razão: entrada/recebimento da OS."""
+    if not m:
+        return None
+    return getattr(m, "recebido_em", None) or getattr(m, "criado_em", None)
+
+
 def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
     """Regra única de venda: se "descontar estoque" está ativo, é SAÍDA física.
 
@@ -2059,6 +2094,7 @@ def sincronizar_estoque_venda(eq: Equipamento, db: Session) -> None:
     _sincronizar_saidas_origem(
         db, "VENDA", eq.id, desejado,
         observacao=f"Venda #{eq.id} · baixa física · {eq.modelo or eq.produto_venda_nome_snapshot or ''}".strip(),
+        data_movimento=_data_estoque_venda(eq),
     )
 
 
@@ -2166,6 +2202,7 @@ def sincronizar_estoque_manutencao(m: Manutencao, db: Session) -> None:
     _sincronizar_saidas_origem(
         db, "MANUTENCAO", m.id, desejado_saida,
         observacao=f"Manutenção #{m.id} · baixa física",
+        data_movimento=_data_estoque_manutencao(m),
     )
 
 
@@ -2841,6 +2878,58 @@ def _migrar_estoque_parametro_explicito_1245(db: Session) -> tuple[int, int, int
     marcador.valor = "ok"
     db.flush()
     return int(reservas_removidas or 0), vendas_recalculadas, manut_recalculadas
+
+
+def _migrar_datas_movimentos_origem_1250(db: Session) -> tuple[int, int]:
+    """1.2.50: corrige somente a DATA dos movimentos automáticos existentes.
+
+    - VENDA usa a Data da compra da venda (fallback: criação da venda).
+    - MANUTENÇÃO usa a data de recebimento/entrada da manutenção (fallback: criação).
+
+    Não cria, exclui nem altera quantidade de movimento; apenas reposiciona o
+    lançamento no dia correto do extrato.
+    """
+    chave = "estoque_datas_origem_venda_manutencao_1_2_50"
+    marcador = db.query(ConfiguracaoSistema).filter(ConfiguracaoSistema.chave == chave).first()
+    if marcador and (marcador.valor or "").strip().lower() == "ok":
+        return 0, 0
+
+    vendas_corrigidas = 0
+    movs_venda = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.origem_tipo == "VENDA",
+        EstoqueMovimento.origem_id.isnot(None),
+        EstoqueMovimento.tipo == "SAIDA",
+    ).all()
+    venda_ids = {int(m.origem_id) for m in movs_venda if m.origem_id is not None}
+    vendas = {e.id: e for e in db.query(Equipamento).filter(Equipamento.id.in_(venda_ids or {-1})).all()}
+    for mov in movs_venda:
+        eq = vendas.get(int(mov.origem_id or 0))
+        data_ref = _data_estoque_venda(eq)
+        if data_ref is not None and mov.criado_em != data_ref:
+            mov.criado_em = data_ref
+            vendas_corrigidas += 1
+
+    manut_corrigidas = 0
+    movs_manut = db.query(EstoqueMovimento).filter(
+        EstoqueMovimento.origem_tipo == "MANUTENCAO",
+        EstoqueMovimento.origem_id.isnot(None),
+        EstoqueMovimento.tipo == "SAIDA",
+    ).all()
+    manut_ids = {int(m.origem_id) for m in movs_manut if m.origem_id is not None}
+    manutencoes = {m.id: m for m in db.query(Manutencao).filter(Manutencao.id.in_(manut_ids or {-1})).all()}
+    for mov in movs_manut:
+        m = manutencoes.get(int(mov.origem_id or 0))
+        data_ref = _data_estoque_manutencao(m)
+        if data_ref is not None and mov.criado_em != data_ref:
+            mov.criado_em = data_ref
+            manut_corrigidas += 1
+
+    if not marcador:
+        marcador = ConfiguracaoSistema(chave=chave)
+        db.add(marcador)
+    marcador.valor = "ok"
+    db.flush()
+    return vendas_corrigidas, manut_corrigidas
 
 
 def _migrar_itens_e_reservas_1174(db: Session) -> tuple[int, int]:
@@ -4647,6 +4736,12 @@ def iniciar_banco():
             print(
                 f"[ESTOQUE] 1.2.45: reservas removidas={reservas_1245}; "
                 f"vendas reconciliadas={vendas_1245}; manutenções reconciliadas={manut_1245}."
+            )
+        datas_venda_1250, datas_manut_1250 = _migrar_datas_movimentos_origem_1250(db)
+        if datas_venda_1250 or datas_manut_1250:
+            print(
+                f"[ESTOQUE] 1.2.50: datas de origem corrigidas: "
+                f"vendas={datas_venda_1250}; manutenções={datas_manut_1250}."
             )
         db.commit()
         # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
@@ -13828,9 +13923,9 @@ def _historico_estoque(db: Session, data_inicio=None, data_fim=None, item_id: in
             "url": url,
             "observacao": m.observacao or "",
             "fisico": True,
-            # 1.2.48: só movimentos locais do estoque podem ser corrigidos aqui.
+            # 1.2.49: movimentos criados localmente no estoque podem ser corrigidos aqui.
             # Venda, manutenção e compra devem ser corrigidas na tela de origem.
-            "pode_corrigir_local": origem_tipo_atual == "CONTAGEM",
+            "pode_corrigir_local": origem_tipo_atual in {"CONTAGEM", "MANUAL"},
             "corrigir_na_origem": origem_tipo_atual in {"VENDA", "MANUTENCAO", "COMPRA"} and bool(url),
             "saldo_antes": saldo_antes,
             "saldo_apos": saldo_apos,
@@ -13981,17 +14076,17 @@ async def estoque_movimento_corrigir(
     usuario: Usuario = Depends(usuario_logado),
     db: Session = Depends(get_db),
 ):
-    """Corrige apenas movimentos cuja origem é local ao estoque.
+    """Corrige movimentos locais do estoque (manual ou contagem).
 
     Venda, manutenção e compra devem ser corrigidas na tela de origem para que o
-    sistema regenere o lançamento corretamente. Somente o ajuste gerado pela
-    contagem física pode ser editado diretamente no extrato.
+    sistema regenere o lançamento corretamente. Entradas manuais e ajustes de
+    contagem física podem ser editados diretamente no extrato.
     """
     mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
     origem = (mov.origem_tipo or "").upper() if mov else ""
-    if not mov or origem != "CONTAGEM":
+    if not mov or origem not in {"CONTAGEM", "MANUAL"}:
         return RedirectResponse(
-            "/organiza/estoque/movimentacoes?erro=" + quote_plus("Esse lançamento deve ser corrigido na origem."),
+            "/organiza/estoque/movimentacoes?erro=" + quote_plus("Esse lançamento veio do sistema e deve ser corrigido na origem."),
             status_code=303,
         )
     form = dict(await request.form())
@@ -14033,9 +14128,9 @@ def estoque_movimento_excluir_direto(
 ):
     mov = db.query(EstoqueMovimento).filter(EstoqueMovimento.id == movimento_id).first()
     origem = (mov.origem_tipo or "").upper() if mov else ""
-    if not mov or origem != "CONTAGEM":
+    if not mov or origem not in {"CONTAGEM", "MANUAL"}:
         return RedirectResponse(
-            "/organiza/estoque/movimentacoes?erro=" + quote_plus("Esse lançamento deve ser corrigido na origem, não excluído aqui."),
+            "/organiza/estoque/movimentacoes?erro=" + quote_plus("Esse lançamento veio do sistema e deve ser corrigido na origem, não excluído aqui."),
             status_code=303,
         )
     item_id = int(mov.item_id)
