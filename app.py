@@ -6181,7 +6181,7 @@ def _valores_atualizacao_cliente(pacotes: list[str], promo_override: dict | None
     # consultamos o SolVoz novamente a cada cliente.
     promo = dict(promo_override or _solvoz_atualizacao_promocao_config())
     # Extensão especial do mês de aniversário solicitada para as campanhas atuais.
-    # Mantém os mesmos valores promocionais e estende somente o prazo até 10/10/2026.
+    # Mantém os mesmos valores promocionais e estende somente o prazo até 31/10/2026.
     if date.today() <= CAMPANHA_ANIVERSARIO_VALIDA_ATE:
         promo["ativo"] = True
         promo["vigente"] = True
@@ -6545,11 +6545,11 @@ def _rotulo_lista_campanha(campanha: Campanha | None) -> str:
     return "Clientes de Aluguel" if campanha and (campanha.lista_tipo or "").upper() == "ALUGUEL" else "Clientes de Atualização"
 
 
-CAMPANHA_ANIVERSARIO_VALIDA_ATE = date(2026, 10, 10)
+CAMPANHA_ANIVERSARIO_VALIDA_ATE = date(2026, 10, 31)
 CAMPANHA_ANIVERSARIO_SITE = "www.karaokerj.com.br"
 CAMPANHA_ANIVERSARIO_DESTAQUE = (
     "🎉 NOVIDADE! PRORROGAMOS A PROMOÇÃO!\n"
-    "Agora você pode aproveitar as condições especiais da Karaokê RJ até 10/10/2026.\n"
+    "Agora você pode aproveitar as condições especiais da Karaokê RJ até 31/10/2026.\n"
     "🎤 Mês de aniversário Karaokê RJ: o Karaokê Plus sai pelo preço do Básico!\n"
     f"{CAMPANHA_ANIVERSARIO_SITE}"
 )
@@ -6558,12 +6558,15 @@ CAMPANHA_ANIVERSARIO_DESTAQUE = (
 def _campanha_mensagem_base_promocional(campanha: Campanha) -> str:
     """Mantém a mensagem original, retirando o prazo antigo e adicionando o aviso novo acima."""
     mensagem = (campanha.mensagem or "").strip()
-    # Remove somente referências ao encerramento antigo. O restante do anúncio é preservado.
+    # Normaliza prazos antigos da mesma promoção. Assim uma campanha já
+    # iniciada também pode ser corrigida sem deixar 30/09, 05/10 ou 10/10
+    # perdidos dentro do texto salvo pelo usuário.
     for padrao in (
-        r"(?i)\b30/09/2026\b", r"(?i)\b30/09/26\b", r"(?i)\b30/09\b",
-        r"(?i)\b30-09-2026\b", r"(?i)\b2026-09-30\b",
+        r"(?i)\b30/09/2026\b", r"(?i)\b30/09/26\b", r"(?i)\b30-09-2026\b", r"(?i)\b2026-09-30\b",
+        r"(?i)\b05/10/2026\b", r"(?i)\b05/10/26\b", r"(?i)\b05-10-2026\b", r"(?i)\b2026-10-05\b",
+        r"(?i)\b10/10/2026\b", r"(?i)\b10/10/26\b", r"(?i)\b10-10-2026\b", r"(?i)\b2026-10-10\b",
     ):
-        mensagem = re.sub(padrao, "", mensagem)
+        mensagem = re.sub(padrao, "31/10/2026", mensagem)
     mensagem = re.sub(r"[ \t]+\n", "\n", mensagem)
     mensagem = re.sub(r"\n{3,}", "\n\n", mensagem).strip()
     return f"{CAMPANHA_ANIVERSARIO_DESTAQUE}\n\n{mensagem}".strip()
@@ -6884,6 +6887,51 @@ def _resumo_lotes_campanha(db: Session, campanha: Campanha) -> list[dict]:
             "pendentes": _lote_pendentes(db, campanha, lote.numero),
         })
     return saida
+
+
+def _recalcular_snapshots_abertos_campanha(db: Session, campanha: Campanha) -> int:
+    """Atualiza a mensagem dos contatos ainda não concluídos sem zerar a campanha.
+
+    Útil quando texto, promoção ou link precisam ser corrigidos depois que a
+    campanha já começou. Mantém lote, reserva e status; somente PROCESSADO,
+    ENVIADO e IGNORADO ficam preservados exatamente como foram enviados.
+    """
+    if not campanha:
+        return 0
+    statuses = ["PENDENTE", "EM_ENVIO"]
+    total = 0
+    lista_tipo = (campanha.lista_tipo or "ATUALIZACAO").upper()
+    if lista_tipo == "ALUGUEL":
+        destinos = db.query(CampanhaAluguelDestinatario).options(
+            selectinload(CampanhaAluguelDestinatario.contato)
+        ).filter(
+            CampanhaAluguelDestinatario.campanha_id == campanha.id,
+            CampanhaAluguelDestinatario.status.in_(statuses),
+        ).all()
+        for dest in destinos:
+            if dest.contato:
+                _preparar_snapshot_destinatario(campanha, dest, dest.contato)
+                total += 1
+    else:
+        promo_snapshot = _solvoz_atualizacao_promocao_config()
+        pacotes_disponiveis = [
+            str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()
+        ]
+        destinos = db.query(CampanhaDestinatario).options(
+            selectinload(CampanhaDestinatario.cliente).selectinload(Cliente.equipamentos)
+        ).filter(
+            CampanhaDestinatario.campanha_id == campanha.id,
+            CampanhaDestinatario.status.in_(statuses),
+        ).all()
+        for dest in destinos:
+            if dest.cliente:
+                _preparar_snapshot_destinatario(
+                    campanha, dest, dest.cliente, promo_snapshot=promo_snapshot,
+                    pacotes_disponiveis=pacotes_disponiveis,
+                )
+                total += 1
+    db.commit()
+    return total
 
 
 def _preparar_campanha_com_lotes(db: Session, campanha: Campanha) -> int:
@@ -8000,7 +8048,15 @@ def campanha_salvar_edicao(
         total_preparado = _preparar_campanha_com_lotes(db, campanha)
         sufixo = "?erro=nenhum_cliente" if total_preparado == 0 else ""
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}{sufixo}", status_code=303)
-    return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
+
+    # 1.2.55: campanhas em andamento/finalizadas também podem ter o texto
+    # corrigido. Recalcula somente quem ainda não foi concluído, sem apagar
+    # lotes, reservas ou o histórico de quem já recebeu a mensagem.
+    atualizados = _recalcular_snapshots_abertos_campanha(db, campanha)
+    return RedirectResponse(
+        f"/organiza/campanhas/{campanha.id}?editada=1&mensagens_atualizadas={int(atualizados or 0)}",
+        status_code=303,
+    )
 
 
 @app.post("/organiza/campanhas/{campanha_id}/iniciar")

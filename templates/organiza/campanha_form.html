@@ -60,7 +60,7 @@
 
     <div class="campanha-form-acoes campanha-acao-principal-mobile">
       <div class="campanha-criacao-lotes-aviso">
-        <small>{% if modo_edicao %}Ao salvar o rascunho, os lotes e mensagens serão recalculados.{% else %}Ao salvar, o Organiza já prepara todos os contatos, mensagens e lotes de até 100 antes do primeiro envio.{% endif %}</small>
+        <small>{% if modo_edicao and campanha and campanha.status != 'RASCUNHO' %}Você pode corrigir nome, mensagem e link sem reiniciar a campanha. Ao salvar, o Organiza atualiza somente as mensagens ainda pendentes/em envio; quem já recebeu não é alterado.{% elif modo_edicao %}Ao salvar o rascunho, os lotes e mensagens serão recalculados.{% else %}Ao salvar, o Organiza já prepara todos os contatos, mensagens e lotes de até 100 antes do primeiro envio.{% endif %}</small>
       </div>
       <button class="botao primario campanha-botao-grande" type="submit" id="salvarCampanhaBtn">{% if modo_edicao %}Salvar alterações{% else %}Salvar campanha e criar lotes{% endif %}</button>
     </div>
@@ -83,7 +83,7 @@
   const form = document.querySelector('.campanha-form');
   const salvar = document.getElementById('salvarCampanhaBtn');
   form?.addEventListener('submit', () => {
-    if (salvar) { salvar.disabled = true; salvar.textContent = 'Preparando lotes...'; }
+    if (salvar) { salvar.disabled = true; salvar.textContent = {{ "'Salvando e atualizando mensagens...'" if modo_edicao and campanha and campanha.status != 'RASCUNHO' else "'Preparando lotes...'" }}; }
   });
 })();
 </script>

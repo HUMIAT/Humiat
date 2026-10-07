@@ -8,7 +8,7 @@
       <p class="texto-suave">{{ rotulo_lista }}{% if campanha.lista_tipo != 'ALUGUEL' %} · pacote {{ campanha.pacote_alvo }}{% elif campanha.aluguel_mes %} · último aluguel em {{ meses_aluguel.get(campanha.aluguel_mes, '') }}{% else %} · todos os meses{% endif %}</p>
     </div>
     <div class="campanha-detalhe-acoes">
-      {% if campanha.status == 'RASCUNHO' %}<a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">Editar campanha</a>{% endif %}
+      <a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">{% if campanha.status == 'RASCUNHO' %}Editar campanha{% else %}Editar mensagem{% endif %}</a>
       <form method="post" action="/organiza/campanhas/{{ campanha.id }}/clonar" onsubmit="return confirm('Clonar esta campanha? Será criada uma nova campanha em rascunho, com novos lotes e todos os envios zerados.');">
         <button class="botao secundario" type="submit">Clonar campanha</button>
       </form>
@@ -17,6 +17,7 @@
   </div>
 
   {% if request.query_params.get('clonada_de') %}<div class="alerta sucesso">Campanha clonada com sucesso. Esta é uma nova campanha, com {{ request.query_params.get('preparados') or 0 }} contato(s) preparado(s), novos lotes e nenhum envio reaproveitado da campanha anterior.</div>{% endif %}
+  {% if request.query_params.get('editada') %}<div class="alerta sucesso">Campanha atualizada. A nova mensagem foi aplicada a {{ request.query_params.get('mensagens_atualizadas') or 0 }} contato(s) ainda pendente(s)/em envio. Quem já recebeu permanece no histórico sem alteração.</div>{% endif %}
   {% if erro == 'nenhum_cliente' %}<div class="alerta erro">Não há clientes ativos para esta campanha.</div>{% endif %}
   {% if erro == 'lote_ocupado' %}<div class="alerta erro">Esse lote acabou de ser escolhido por outro atendente ou você já possui outro lote em andamento. Escolha um lote livre.</div>{% endif %}
   {% if erro == 'selecione_lote' %}<div class="alerta info">Escolha um lote antes de iniciar o envio.</div>{% endif %}
