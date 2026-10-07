@@ -42,6 +42,16 @@
       <strong>{{ valor_nomes.get(valor_filtro, valor_filtro) }}</strong>
     </div>
     <div>
+      <small>Período da venda</small>
+      <strong>
+        {% if data_inicial or data_final %}
+          {{ data_inicial_br if data_inicial else 'Início' }} até {{ data_final_br if data_final else 'Hoje' }}
+        {% else %}
+          Todas as datas
+        {% endif %}
+      </strong>
+    </div>
+    <div>
       <small>Status</small>
       <strong>
         {% if status_filtros %}

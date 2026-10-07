@@ -12099,6 +12099,18 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
     q = (request.query_params.get("q") or "").strip().lower()
     pagamento = (request.query_params.get("pagamento") or "todos").strip()
     valor_filtro = (request.query_params.get("valor") or "todos").strip()
+
+    # Período da venda: usa a data da compra, que é a mesma referência usada
+    # na Evolução de Vendas. Isso permite conferir exatamente um mês, trimestre
+    # ou qualquer intervalo sem misturar vendas de outros períodos.
+    data_inicial_texto = (request.query_params.get("data_inicial") or "").strip()
+    data_final_texto = (request.query_params.get("data_final") or "").strip()
+    data_inicial = data_form(data_inicial_texto)
+    data_final = data_form(data_final_texto)
+    if data_inicial and data_final and data_inicial > data_final:
+        data_inicial, data_final = data_final, data_inicial
+        data_inicial_texto = data_inicial.isoformat()
+        data_final_texto = data_final.isoformat()
     status_filtros = [
         valor.strip()
         for valor in request.query_params.getlist("status")
@@ -12134,6 +12146,17 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
 
     if valor_filtro == "acima_5000":
         equipamentos = [eq for eq in equipamentos if eq.total_calculado > 5000]
+
+    if data_inicial:
+        equipamentos = [
+            eq for eq in equipamentos
+            if eq.data_compra and eq.data_compra >= data_inicial
+        ]
+    if data_final:
+        equipamentos = [
+            eq for eq in equipamentos
+            if eq.data_compra and eq.data_compra <= data_final
+        ]
 
     if status_filtros:
         status_selecionados = set(status_filtros)
@@ -12189,6 +12212,8 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         ("q", request.query_params.get("q", "")),
         ("pagamento", pagamento),
         ("valor", valor_filtro),
+        ("data_inicial", data_inicial_texto),
+        ("data_final", data_final_texto),
         *[("status", item) for item in status_filtros],
         ("campanha_id", str(campanha_id or "")),
         ("campanha_envio", campanha_envio),
@@ -12201,6 +12226,10 @@ def _vendas_filtradas(request: Request, db: Session) -> dict:
         "q": request.query_params.get("q", ""),
         "pagamento_filtro": pagamento,
         "valor_filtro": valor_filtro,
+        "data_inicial": data_inicial_texto,
+        "data_final": data_final_texto,
+        "data_inicial_br": data_inicial.strftime("%d/%m/%Y") if data_inicial else "",
+        "data_final_br": data_final.strftime("%d/%m/%Y") if data_final else "",
         "status_filtros": status_filtros,
         "ordem": ordem,
         "status_opcoes": status_opcoes,
@@ -12684,6 +12713,10 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         "q": dados["q"],
         "pagamento_filtro": dados["pagamento_filtro"],
         "valor_filtro": dados["valor_filtro"],
+        "data_inicial": dados["data_inicial"],
+        "data_final": dados["data_final"],
+        "data_inicial_br": dados["data_inicial_br"],
+        "data_final_br": dados["data_final_br"],
         "status_filtros": dados["status_filtros"],
         "ordem": dados["ordem"],
         "status_opcoes": dados["status_opcoes"],
@@ -13008,6 +13041,10 @@ def vendas_relatorio(
         "q": dados["q"],
         "pagamento_filtro": dados["pagamento_filtro"],
         "valor_filtro": dados["valor_filtro"],
+        "data_inicial": dados["data_inicial"],
+        "data_final": dados["data_final"],
+        "data_inicial_br": dados["data_inicial_br"],
+        "data_final_br": dados["data_final_br"],
         "status_filtros": dados["status_filtros"],
         "ordem": dados["ordem"],
         "filtro_query": dados["filtro_query"],

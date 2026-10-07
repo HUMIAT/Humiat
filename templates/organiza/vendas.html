@@ -47,6 +47,12 @@
         <option value="acima_5000" {% if valor_filtro == 'acima_5000' %}selected{% endif %}>Acima de R$ 5.000,00</option>
       </select>
     </label>
+    <label class="filtro-campo">Data inicial
+      <input type="date" name="data_inicial" value="{{ data_inicial }}">
+    </label>
+    <label class="filtro-campo">Data final
+      <input type="date" name="data_final" value="{{ data_final }}">
+    </label>
     <label class="filtro-campo filtro-campanha">Campanha de atualização
       <select name="campanha_id" {% if not campanhas_atualizacao %}disabled{% endif %}>
         {% if not campanhas_atualizacao %}<option value="">Nenhuma campanha</option>{% endif %}
