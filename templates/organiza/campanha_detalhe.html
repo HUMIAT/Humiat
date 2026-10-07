@@ -9,10 +9,14 @@
     </div>
     <div class="campanha-detalhe-acoes">
       {% if campanha.status == 'RASCUNHO' %}<a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">Editar campanha</a>{% endif %}
+      <form method="post" action="/organiza/campanhas/{{ campanha.id }}/clonar" onsubmit="return confirm('Clonar esta campanha? Será criada uma nova campanha em rascunho, com novos lotes e todos os envios zerados.');">
+        <button class="botao secundario" type="submit">Clonar campanha</button>
+      </form>
       <a class="botao fantasma" href="/organiza/campanhas">Voltar</a>
     </div>
   </div>
 
+  {% if request.query_params.get('clonada_de') %}<div class="alerta sucesso">Campanha clonada com sucesso. Esta é uma nova campanha, com {{ request.query_params.get('preparados') or 0 }} contato(s) preparado(s), novos lotes e nenhum envio reaproveitado da campanha anterior.</div>{% endif %}
   {% if erro == 'nenhum_cliente' %}<div class="alerta erro">Não há clientes ativos para esta campanha.</div>{% endif %}
   {% if erro == 'lote_ocupado' %}<div class="alerta erro">Esse lote acabou de ser escolhido por outro atendente ou você já possui outro lote em andamento. Escolha um lote livre.</div>{% endif %}
   {% if erro == 'selecione_lote' %}<div class="alerta info">Escolha um lote antes de iniciar o envio.</div>{% endif %}

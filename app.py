@@ -7860,6 +7860,58 @@ def campanha_criar(
     return RedirectResponse(f"/organiza/campanhas/{campanha.id}{sufixo}", status_code=303)
 
 
+
+@app.post("/organiza/campanhas/{campanha_id}/clonar")
+def campanha_clonar(
+    campanha_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Cria uma nova campanha independente usando a configuração da original.
+
+    A nova campanha nunca reaproveita status, reservas ou lotes da anterior:
+    os destinatários são consultados novamente e recebem uma fila totalmente
+    nova, permitindo um novo ciclo de envio pelo WhatsApp.
+    """
+    origem = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not origem:
+        raise HTTPException(404)
+
+    nova = Campanha(
+        nome=f"{(origem.nome or 'Campanha').strip()} - Cópia",
+        lista_tipo=(origem.lista_tipo or "ATUALIZACAO").upper(),
+        mensagem=origem.mensagem or "",
+        link=origem.link,
+        pacote_alvo=origem.pacote_alvo,
+        aluguel_mes=origem.aluguel_mes,
+        status="RASCUNHO",
+        criado_por_id=usuario.id,
+        imagem_nome=origem.imagem_nome,
+        imagem_mime=origem.imagem_mime,
+        imagem_bytes=bytes(origem.imagem_bytes) if origem.imagem_bytes else None,
+        imagem_token=secrets.token_urlsafe(24) if origem.imagem_bytes else None,
+    )
+    db.add(nova)
+    db.commit()
+    db.refresh(nova)
+
+    try:
+        total_preparado = _preparar_campanha_com_lotes(db, nova)
+    except Exception:
+        db.rollback()
+        # A campanha copiada continua salva como rascunho e poderá ser
+        # reprocessada automaticamente ao abrir a tela de detalhe.
+        total_preparado = 0
+
+    params = [f"clonada_de={origem.id}", f"preparados={int(total_preparado or 0)}"]
+    if total_preparado == 0:
+        params.append("erro=nenhum_cliente")
+    return RedirectResponse(
+        f"/organiza/campanhas/{nova.id}?" + "&".join(params),
+        status_code=303,
+    )
+
+
 @app.get("/organiza/campanhas/{campanha_id}/editar", response_class=HTMLResponse)
 def campanha_editar(
     campanha_id: int,
@@ -12645,6 +12697,282 @@ def vendas(request: Request, usuario: Usuario = Depends(usuario_logado), db: Ses
         "total_paginas": total_paginas,
         "filtro_query": dados["filtro_query"],
     })
+
+
+
+def _dados_evolucao_vendas_organiza(db: Session, anos: list[int]) -> tuple[dict, dict]:
+    """Consolida as vendas do próprio Organiza por trimestre.
+
+    Uma venda é um equipamento com data de compra. Vendas canceladas não entram
+    no faturamento. O valor usado é o valor total salvo na venda, e o saldo a
+    receber considera pagamentos detalhados e o campo legado `pago`.
+    """
+    dados = {
+        int(ano): {
+            trimestre: {
+                "quantidade": 0,
+                "valor": 0.0,
+                "falta_receber": 0.0,
+                "origem": "sem_dados",
+            }
+            for trimestre in range(1, 5)
+        }
+        for ano in anos
+    }
+    if not anos:
+        return dados, {"vendas_organiza": 0, "anos_com_dados": []}
+
+    inicio = date(min(anos), 1, 1)
+    fim = date(max(anos), 12, 31)
+    # Busca apenas os campos usados pelo relatório. Além de ser mais leve, isso
+    # evita carregar colunas de venda/estoque que não participam desta análise.
+    vendas = (
+        db.query(
+            Equipamento.id,
+            Equipamento.data_compra,
+            Equipamento.valor,
+            Equipamento.pago,
+            Equipamento.status,
+        )
+        .filter(
+            Equipamento.data_compra.isnot(None),
+            Equipamento.data_compra >= inicio,
+            Equipamento.data_compra <= fim,
+        )
+        .order_by(Equipamento.data_compra.asc(), Equipamento.id.asc())
+        .all()
+    )
+    vendas = [
+        eq for eq in vendas
+        if (eq.status or "").strip().lower() not in {"cancelada", "cancelado"}
+    ]
+
+    ids = [eq.id for eq in vendas]
+    pagos_por_venda = {}
+    if ids:
+        pagos_por_venda = {
+            int(equipamento_id): float(total or 0)
+            for equipamento_id, total in db.query(
+                PagamentoVenda.equipamento_id,
+                func.coalesce(func.sum(PagamentoVenda.valor), 0),
+            )
+            .filter(PagamentoVenda.equipamento_id.in_(ids))
+            .group_by(PagamentoVenda.equipamento_id)
+            .all()
+        }
+
+    for eq in vendas:
+        data_venda = eq.data_compra
+        if not data_venda or data_venda.year not in dados:
+            continue
+        trimestre = ((int(data_venda.month) - 1) // 3) + 1
+        total = max(float(moeda_num(eq.valor)), 0.0)
+        recebido_detalhado = max(float(pagos_por_venda.get(eq.id, 0.0)), 0.0)
+        recebido_legado = max(float(moeda_num(eq.pago)), 0.0)
+        recebido = max(recebido_detalhado, recebido_legado)
+        celula = dados[data_venda.year][trimestre]
+        celula["quantidade"] += 1
+        celula["valor"] += total
+        celula["falta_receber"] += max(total - recebido, 0.0)
+        celula["origem"] = "organiza"
+
+    anos_com_dados = sorted({
+        eq.data_compra.year for eq in vendas if eq.data_compra
+    })
+    return dados, {
+        "vendas_organiza": len(vendas),
+        "anos_com_dados": anos_com_dados,
+    }
+
+
+def _contexto_evolucao_vendas_organiza(db: Session, ano_final: int) -> dict:
+    ano_atual = _hoje_organiza().year
+    ano_final = int(ano_final or max(ano_atual, 2026))
+    ano_final = max(2026, min(ano_final, 2100))
+    anos = [ano_final - 2, ano_final - 1, ano_final]
+    dados, meta = _dados_evolucao_vendas_organiza(db, anos)
+
+    trimestres = [
+        {"numero": 1, "nome": "1º trimestre", "curto": "JAN/FEV/MAR"},
+        {"numero": 2, "nome": "2º trimestre", "curto": "ABR/MAI/JUN"},
+        {"numero": 3, "nome": "3º trimestre", "curto": "JUL/AGO/SET"},
+        {"numero": 4, "nome": "4º trimestre", "curto": "OUT/NOV/DEZ"},
+    ]
+    linhas = [{
+        **tri,
+        "anos": {ano: dados[ano][tri["numero"]] for ano in anos},
+    } for tri in trimestres]
+
+    totais = {}
+    for ano in anos:
+        quantidade = sum(int(dados[ano][t]["quantidade"] or 0) for t in range(1, 5))
+        valor = round(sum(float(dados[ano][t]["valor"] or 0) for t in range(1, 5)), 2)
+        falta_receber = round(sum(float(dados[ano][t]["falta_receber"] or 0) for t in range(1, 5)), 2)
+        periodos_com_dados = sum(1 for t in range(1, 5) if dados[ano][t]["origem"] != "sem_dados")
+        totais[ano] = {
+            "quantidade": quantidade,
+            "valor": valor,
+            "falta_receber": falta_receber,
+            "ticket": round((valor / quantidade) if quantidade else 0.0, 2),
+            "periodos_com_dados": periodos_com_dados,
+        }
+    for pos, ano in enumerate(anos):
+        anterior = anos[pos - 1] if pos > 0 else None
+        if anterior and totais[anterior]["valor"]:
+            totais[ano]["crescimento"] = ((totais[ano]["valor"] / totais[anterior]["valor"]) - 1) * 100
+        else:
+            totais[ano]["crescimento"] = None
+
+    grafico = {
+        "periodos": [t["curto"] for t in trimestres],
+        "series": [{
+            "ano": ano,
+            "valores": [dados[ano][t]["valor"] for t in range(1, 5)],
+            "quantidades": [dados[ano][t]["quantidade"] for t in range(1, 5)],
+        } for ano in anos],
+    }
+
+    dados_final = dados[ano_final]
+    periodos_ativos = [t for t in range(1, 5) if dados_final[t]["origem"] != "sem_dados"]
+    periodos_movimento = [t for t in range(1, 5) if dados_final[t]["quantidade"] or dados_final[t]["valor"]]
+    melhor_tri = max(periodos_movimento, key=lambda t: dados_final[t]["valor"]) if periodos_movimento else None
+    destaques = {
+        "melhor_trimestre": trimestres[melhor_tri - 1]["nome"] if melhor_tri else "—",
+        "melhor_trimestre_valor": dados_final[melhor_tri]["valor"] if melhor_tri else 0.0,
+        "media_trimestral": round((totais[ano_final]["valor"] / len(periodos_ativos)) if periodos_ativos else 0.0, 2),
+        "ticket_atual": totais[ano_final]["ticket"],
+    }
+
+    anos_banco = sorted({
+        data_venda.year for (data_venda,) in db.query(Equipamento.data_compra)
+        .filter(Equipamento.data_compra.isnot(None)).all()
+        if data_venda
+    }, reverse=True)
+    if not anos_banco:
+        anos_banco = [ano_final]
+    return {
+        "anos": anos,
+        "ano_final": ano_final,
+        "dados": dados,
+        "linhas": linhas,
+        "totais": totais,
+        "grafico": grafico,
+        "destaques": destaques,
+        "meta": meta,
+        "anos_sync": anos_banco,
+    }
+
+
+def _enviar_evolucao_vendas_connect(ano: int, dados_ano: dict) -> dict:
+    base = _connect_base_url()
+    if not base:
+        raise RuntimeError("CONNECT_API_URL não configurada.")
+    chave = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    if not chave:
+        raise RuntimeError("CONNECT_API_KEY/ORGANIZA_API_KEY não configurada.")
+
+    payload = {
+        "empresa_slug": "karaokerj",
+        "ano": int(ano),
+        "trimestres": [
+            {
+                "trimestre": trimestre,
+                "quantidade_vendas": int(dados_ano[trimestre]["quantidade"] or 0),
+                "valor_total": round(float(dados_ano[trimestre]["valor"] or 0), 2),
+            }
+            for trimestre in range(1, 5)
+        ],
+    }
+    req = urllib.request.Request(
+        base + "/api/integracoes/organiza/evolucao-vendas",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-API-Key": chave,
+            "User-Agent": f"HUMIAT-Organiza/{ORGANIZA_VERSAO}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            corpo = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Connect respondeu HTTP {exc.code}: {detalhe[:500]}")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Não foi possível acessar o Connect: {exc.reason}")
+
+    try:
+        resposta = json.loads(corpo or "{}")
+    except Exception:
+        raise RuntimeError("Resposta inválida do Connect.")
+    if not resposta.get("ok"):
+        raise RuntimeError(str(resposta.get("detail") or "O Connect não confirmou a atualização."))
+    return resposta
+
+
+@app.get("/organiza/relatorios/evolucao-vendas", response_class=HTMLResponse)
+def evolucao_vendas_organiza(
+    request: Request,
+    ano_final: int = 0,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    contexto = _contexto_evolucao_vendas_organiza(db, ano_final)
+    chave_connect = (os.getenv("CONNECT_API_KEY") or os.getenv("ORGANIZA_API_KEY") or "").strip()
+    return templates.TemplateResponse("organiza/evolucao_vendas.html", {
+        "request": request,
+        "usuario": usuario,
+        "titulo": "Evolução de Vendas",
+        "hoje": _hoje_organiza(),
+        "connect_configurado": bool(_connect_base_url() and chave_connect),
+        "connect_sucesso": request.query_params.get("connect_sucesso", ""),
+        "connect_erro": request.query_params.get("connect_erro", ""),
+        **contexto,
+    })
+
+
+@app.post("/organiza/relatorios/evolucao-vendas/atualizar-connect")
+def evolucao_vendas_organiza_atualizar_connect(
+    ano: int = Form(...),
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    if ano < 2000 or ano > 2100:
+        return RedirectResponse(
+            "/organiza/relatorios/evolucao-vendas?connect_erro=" + quote_plus("Ano inválido."),
+            status_code=303,
+        )
+
+    dados, _meta = _dados_evolucao_vendas_organiza(db, [ano])
+    total_qtd = sum(int(dados[ano][t]["quantidade"] or 0) for t in range(1, 5))
+    total_valor = round(sum(float(dados[ano][t]["valor"] or 0) for t in range(1, 5)), 2)
+    if total_qtd <= 0:
+        return RedirectResponse(
+            f"/organiza/relatorios/evolucao-vendas?ano_final={max(2026, ano)}&connect_erro=" +
+            quote_plus(f"Nenhuma venda encontrada no Organiza para {ano}. O Connect não foi alterado."),
+            status_code=303,
+        )
+
+    try:
+        resposta = _enviar_evolucao_vendas_connect(ano, dados[ano])
+    except Exception as exc:
+        return RedirectResponse(
+            f"/organiza/relatorios/evolucao-vendas?ano_final={max(2026, ano)}&connect_erro=" +
+            quote_plus(str(exc)),
+            status_code=303,
+        )
+
+    mensagem = (
+        f"Connect atualizado para {ano}: {int(resposta.get('quantidade_total') or total_qtd)} venda(s), "
+        f"{formatar_moeda(resposta.get('valor_total') or total_valor)}."
+    )
+    return RedirectResponse(
+        f"/organiza/relatorios/evolucao-vendas?ano_final={max(2026, ano)}&connect_sucesso=" +
+        quote_plus(mensagem),
+        status_code=303,
+    )
 
 
 @app.get("/organiza/relatorios/vendas", response_class=HTMLResponse)

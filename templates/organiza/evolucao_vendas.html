@@ -1,0 +1,203 @@
+{% extends "organiza/base.html" %}
+{% block conteudo %}
+<link rel="stylesheet" href="/static/css/evolucao_vendas.css?v={{ ORGANIZA_VERSION }}">
+<section class="evolucao-financeira">
+  <header class="evolucao-cabecalho">
+    <div class="evolucao-titulo">
+      <a href="/organiza/vendas" class="voltar-financeiro">← Vendas</a>
+      <div>
+        <h1>Evolução de Vendas</h1>
+        <p>Comparativo trimestral de vendas, faturamento, ticket médio e saldo a receber</p>
+      </div>
+    </div>
+    <form method="get" class="seletor-ano-comparacao">
+      <label for="ano-final">Comparar até</label>
+      <div>
+        <a href="?ano_final={{ ano_final - 1 }}" title="Anos anteriores">‹</a>
+        <input id="ano-final" type="number" name="ano_final" min="2026" max="2100" value="{{ ano_final }}" onchange="this.form.submit()">
+        <a href="?ano_final={{ ano_final + 1 }}" title="Anos seguintes">›</a>
+      </div>
+    </form>
+  </header>
+
+  {% if connect_sucesso %}<div class="alerta sucesso evolucao-alerta">{{ connect_sucesso }}</div>{% endif %}
+  {% if connect_erro %}<div class="alerta erro evolucao-alerta">{{ connect_erro }}</div>{% endif %}
+
+  <div class="fonte-resumo">
+    <span><b>O = Organiza:</b> cada equipamento vendido conta uma vez pela data da compra</span>
+    <span>Vendas canceladas não entram no faturamento</span>
+    {% if ano_final == hoje.year %}<span><b>{{ ano_final }} é parcial:</b> acumulado até {{ hoje.strftime('%d/%m/%Y') }}</span>{% endif %}
+  </div>
+
+  <section class="sync-connect-box">
+    <div>
+      <strong>Atualizar relatório do Connect</strong>
+      <small>Escolha o ano. O Organiza enviará os quatro trimestres e substituirá esse ano no relatório de vendas do Connect.</small>
+    </div>
+    <form method="post" action="/organiza/relatorios/evolucao-vendas/atualizar-connect" class="sync-connect-form" onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='Atualizando...'; return true;">
+      <label>Ano
+        <select name="ano" {% if not connect_configurado %}disabled{% endif %}>
+          {% for ano in anos_sync %}<option value="{{ ano }}" {% if ano == ano_final %}selected{% endif %}>{{ ano }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="botao primario" type="submit" {% if not connect_configurado %}disabled title="Configure CONNECT_API_URL e a chave de integração"{% endif %}>Atualizar Connect</button>
+    </form>
+  </section>
+
+  <div class="dashboard-kpis" aria-label="Indicadores de vendas do ano {{ ano_final }}">
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone">R$</span>
+      <div><small>Faturamento {{ ano_final }}</small><strong>{{ totais[ano_final].valor|moeda }}</strong><em>{{ totais[ano_final].quantidade }} venda(s)</em></div>
+    </article>
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone">Qtd</span>
+      <div><small>Quantidade de vendas</small><strong>{{ totais[ano_final].quantidade }}</strong><em>{{ totais[ano_final].periodos_com_dados }} trimestre(s) com dados</em></div>
+    </article>
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone">TM</span>
+      <div><small>Ticket médio</small><strong>{{ totais[ano_final].ticket|moeda }}</strong><em>média por venda</em></div>
+    </article>
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone">AR</span>
+      <div><small>A receber</small><strong>{{ totais[ano_final].falta_receber|moeda }}</strong><em>saldo atual das vendas desse ano</em></div>
+    </article>
+  </div>
+
+  <div class="dashboard-secao-cabecalho">
+    <div><h2>Visão anual</h2><p>Comparação consolidada dos três anos exibidos</p></div>
+  </div>
+  <div class="cards-anos">
+    {% for ano in anos %}
+    <article class="card-ano">
+      <div class="card-ano-topo">
+        <strong>{{ ano }}</strong>
+        {% if totais[ano].crescimento is not none %}
+          <span class="variacao {% if totais[ano].crescimento >= 0 %}positiva{% else %}negativa{% endif %}">
+            {% if totais[ano].crescimento >= 0 %}↗{% else %}↘{% endif %}
+            {{ '%.1f'|format(totais[ano].crescimento)|replace('.', ',') }}%
+          </span>
+        {% endif %}
+      </div>
+      <div class="card-ano-destaque">{{ totais[ano].valor|moeda }}</div>
+      <div class="card-ano-metricas">
+        <span><small>Vendas</small><b>{{ totais[ano].quantidade }}</b></span>
+        <span><small>Ticket médio</small><b>{{ totais[ano].ticket|moeda }}</b></span>
+        <span><small>A receber</small><b>{{ totais[ano].falta_receber|moeda }}</b></span>
+        <span><small>Trimestres com dados</small><b>{{ totais[ano].periodos_com_dados }}/4</b></span>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+
+  <section class="painel-grafico box-evolucao">
+    <div class="secao-titulo">
+      <div>
+        <h2>{{ anos|join(' × ') }}</h2>
+        <p>Comparativo trimestral de vendas</p>
+      </div>
+      <div class="grafico-tipo" role="group" aria-label="Métrica do gráfico">
+        <button type="button" class="ativo" data-grafico-tipo="quantidade">Quantidade</button>
+        <button type="button" data-grafico-tipo="valor">Faturamento</button>
+      </div>
+    </div>
+    <div class="grafico-area"><div id="grafico-vendas" class="grafico-evolucao quatro-periodos" aria-label="Gráfico comparativo trimestral de vendas"></div></div>
+    <div class="legenda-grafico">
+      {% for ano in anos %}<span><i class="cor-serie cor-serie-{{ loop.index }}"></i>{{ ano }}</span>{% endfor %}
+    </div>
+  </section>
+
+  <section class="box-evolucao tabela-evolucao-box">
+    <div class="secao-titulo">
+      <div>
+        <h2>Comparativo por trimestre</h2>
+        <p>Quantidade de vendas e faturamento registrados no Organiza</p>
+      </div>
+    </div>
+    <div class="tabela-evolucao-scroll">
+      <table class="tabela-evolucao">
+        <thead>
+          <tr>
+            <th rowspan="2">Trimestre</th>
+            {% for ano in anos %}<th colspan="2">{{ ano }}</th>{% endfor %}
+          </tr>
+          <tr>
+            {% for ano in anos %}<th>Qtd.</th><th>Faturamento</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for linha in linhas %}
+          <tr>
+            <th>{{ linha.curto }}<br><small>{{ linha.nome }}</small></th>
+            {% for ano in anos %}
+              {% set dado = linha.anos[ano] %}
+              <td>{{ dado.quantidade }}{% if dado.origem == 'organiza' %}<small class="fonte-tag organiza" title="Organiza">O</small>{% endif %}</td>
+              <td>{{ dado.valor|moeda }}{% if dado.origem == 'organiza' %}<small class="fonte-tag organiza" title="Organiza">O</small>{% endif %}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total</th>
+            {% for ano in anos %}<td>{{ totais[ano].quantidade }}</td><td>{{ totais[ano].valor|moeda }}</td>{% endfor %}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="fonte-legenda"><span><b>O</b> venda registrada no Organiza</span></div>
+  </section>
+
+  <section class="box-evolucao">
+    <div class="secao-titulo">
+      <div>
+        <h2>Destaques de {{ ano_final }}</h2>
+        <p>Leitura rápida do desempenho de vendas</p>
+      </div>
+    </div>
+    <div class="dashboard-kpis vendas-destaques">
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone">★</span><div><small>Melhor trimestre</small><strong>{{ destaques.melhor_trimestre }}</strong><em>{{ destaques.melhor_trimestre_valor|moeda }}</em></div></article>
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone">M</span><div><small>Média trimestral</small><strong>{{ destaques.media_trimestral|moeda }}</strong><em>considera trimestres com vendas</em></div></article>
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone">O</span><div><small>Vendas identificadas</small><strong>{{ totais[ano_final].quantidade }}</strong><em>cadastros de venda no Organiza em {{ ano_final }}</em></div></article>
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone">TM</span><div><small>Ticket do ano</small><strong>{{ destaques.ticket_atual|moeda }}</strong><em>faturamento ÷ vendas</em></div></article>
+    </div>
+  </section>
+</section>
+
+<script>
+(() => {
+  const dados = {{ grafico|tojson }};
+  const alvo = document.getElementById('grafico-vendas');
+  const botoes = document.querySelectorAll('[data-grafico-tipo]');
+  const formatarMoeda = valor => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0}).format(valor || 0);
+  const formatarNumero = valor => new Intl.NumberFormat('pt-BR').format(valor || 0);
+  const formatarCompacto = valor => {
+    valor = Number(valor || 0);
+    if(valor >= 1000000) return (valor/1000000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mi';
+    if(valor >= 1000) return (valor/1000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mil';
+    return formatarNumero(valor);
+  };
+  function desenhar(tipo) {
+    alvo.innerHTML = '';
+    const chave = tipo === 'quantidade' ? 'quantidades' : 'valores';
+    const maximo = Math.max(1, ...dados.series.flatMap(s => s[chave]));
+    dados.periodos.forEach((periodo, indicePeriodo) => {
+      const grupo = document.createElement('div'); grupo.className = 'grupo-mes';
+      const barras = document.createElement('div'); barras.className = 'barras-mes';
+      dados.series.forEach((serie, indiceSerie) => {
+        const valor = Number(serie[chave][indicePeriodo] || 0);
+        const barra = document.createElement('div'); barra.className = `barra serie-${indiceSerie + 1}`;
+        barra.style.height = `${Math.max(valor > 0 ? 5 : 0, (valor / maximo) * 100)}%`;
+        const texto = tipo === 'quantidade' ? `${formatarNumero(valor)} venda(s)` : formatarMoeda(valor);
+        barra.title = `${periodo} ${serie.ano}: ${texto}`; barra.setAttribute('aria-label', barra.title);
+        if (valor > 0) { const rotulo = document.createElement('span'); rotulo.textContent = tipo === 'quantidade' ? formatarNumero(valor) : formatarCompacto(valor); barra.appendChild(rotulo); }
+        barras.appendChild(barra);
+      });
+      const nome = document.createElement('small'); nome.textContent = periodo;
+      grupo.appendChild(barras); grupo.appendChild(nome); alvo.appendChild(grupo);
+    });
+  }
+  botoes.forEach(botao => botao.addEventListener('click', () => { botoes.forEach(b => b.classList.remove('ativo')); botao.classList.add('ativo'); desenhar(botao.dataset.graficoTipo); }));
+  desenhar('quantidade');
+})();
+</script>
+{% endblock %}
