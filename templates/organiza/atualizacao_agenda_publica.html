@@ -2,8 +2,8 @@
 {% block conteudo_publico %}
 <section class="orcamento-publico"><div class="publico-card atualizacao-agenda-publica">
   <p class="tag">KARAOKÊ RJ · AGENDAMENTO</p>
-  <h1>{{ 'Atualização online / AnyDesk' if tipo == 'CASA' else 'Atualização · Loja' }}</h1>
-  <p class="texto-suave">{% if tipo == 'CASA' %}Agende somente depois de baixar todos os arquivos no PC/notebook.{% else %}Escolha quando você levará o equipamento até a loja.{% endif %}</p>
+  <h1>{{ 'Atualização online / RustDesk' if tipo == 'CASA' else 'Atualização · Loja' }}</h1>
+  <p class="texto-suave">{% if tipo == 'CASA' %}Agende somente depois de baixar todos os arquivos no PC/notebook e instalar o RustDesk. Não copie os arquivos para o pendrive. Se o equipamento for portátil, no dia do atendimento deixe-o conectado a uma TV.{% else %}Escolha quando você levará o equipamento até a loja.{% endif %}</p>
   <div class="alerta informacao">Segunda a sexta · {{ '10:00 às 20:00' if tipo == 'CASA' else '14:00 às 18:00' }} · horários de 1 em 1 hora.</div>
   {% if mensagem %}<div class="alerta sucesso">{{ mensagem }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
@@ -12,7 +12,7 @@
     <input type="hidden" name="tipo" value="{{ tipo }}">
     <label>Dia<input type="date" id="agenda-data" name="data" min="{{ hoje }}" required></label>
     <label>Horário<select id="agenda-hora" name="hora" required disabled><option value="">Escolha primeiro o dia</option></select></label>
-    <button class="botao primario botao-cheio" type="submit">{{ 'Reservar atendimento pelo AnyDesk' if tipo == 'CASA' else 'Reservar horário na loja' }}</button>
+    <button class="botao primario botao-cheio" type="submit">{{ 'Reservar atendimento pelo RustDesk' if tipo == 'CASA' else 'Reservar horário na loja' }}</button>
   </form>
   <a class="botao botao-cheio" href="/atualizacao/{{ cliente.token_ficha }}/{{ compra.id }}">Voltar</a>
 </div></section>

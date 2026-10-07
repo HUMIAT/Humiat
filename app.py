@@ -10161,7 +10161,7 @@ def _google_calendar_event_payload(cliente: Cliente, compra: AtualizacaoCompra, 
     tz = ZoneInfo(ORGANIZA_GOOGLE_TZ)
     inicio = ag.data_hora.replace(tzinfo=tz) if ag.data_hora.tzinfo is None else ag.data_hora.astimezone(tz)
     fim = inicio + timedelta(minutes=int(ag.duracao_minutos or ATUALIZACAO_DURACAO_MINUTOS))
-    tipo_rotulo = "Online / AnyDesk" if ag.tipo == "CASA" else ("Casa do cliente" if ag.tipo == "CLIENTE" else "Loja")
+    tipo_rotulo = "Online / RustDesk" if ag.tipo == "CASA" else ("Casa do cliente" if ag.tipo == "CLIENTE" else "Loja")
     pacotes = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
     descricao = (
         f"Atualização Karaokê RJ\nCliente: {cliente.nome}\n"
@@ -10398,6 +10398,7 @@ def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: Atuali
     if not cliente.token_ficha:
         cliente.token_ficha = secrets.token_urlsafe(24)
     agenda_url = f"{PUBLIC_BASE_URL.rstrip('/')}/atualizacao/{cliente.token_ficha}/{compra.id}/agenda?tipo=CASA"
+    rustdesk_url = "https://github.com/rustdesk/rustdesk/releases/download/1.5.0/rustdesk-1.5.0-x86_64.exe"
     pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
     links_email = [dict(x, email_url=_atualizacao_email_link(x)[0], email_acao=_atualizacao_email_link(x)[1]) for x in links]
     lista_texto = "\n".join(f"- {x['nome']}: {x['email_url']}" for x in links_email)
@@ -10408,26 +10409,73 @@ def _atualizacao_enviar_email_casa(db: Session, cliente: Cliente, compra: Atuali
     texto = (
         f"Olá, {cliente.nome}!\n\nSua atualização Karaokê RJ está pronta.\n"
         f"Pacotes: {pacotes_txt}\nGmail liberado: {gmail}\n\n"
-        "IMPORTANTE: abra este e-mail no PC ou notebook que será utilizado pelo técnico via AnyDesk. Não faça o download pelo celular.\n\n"
-        "Como baixar:\n1. Entre no Google com o mesmo Gmail acima.\n2. Abra cada link abaixo.\n3. Clique em Baixar e aguarde o download terminar completamente.\n4. Não altere nem mova os arquivos antes do atendimento.\n"
-        f"\n{lista_texto}\n\nDepois que TODOS os arquivos estiverem baixados no computador, agende o atendimento pelo AnyDesk:\n{agenda_url}\n\n"
-        "Atendimentos online / AnyDesk: segunda a sexta, das 10:00 às 20:00, com horários de 1 em 1 hora.\n\nKaraokê RJ"
+        "NÃO SE PREOCUPE: nesta etapa você só precisa baixar todos os arquivos no PC ou notebook. "
+        "A preparação do pendrive e o restante da atualização ficam por nossa conta.\n\n"
+        "EQUIPAMENTOS / PREPARAÇÃO NECESSÁRIA:\n"
+        "- PC ou notebook com acesso à internet.\n"
+        f"- Instale o RustDesk antes do atendimento: {rustdesk_url}\n"
+        "- Se esta for a primeira atualização: tenha teclado USB, mouse USB e um pendrive de no mínimo 32 GB.\n"
+        "- No dia do atendimento, deixe o equipamento de karaokê ligado e pronto para uso.\n"
+        "- Se o equipamento for portátil, ele deverá estar conectado a uma TV.\n\n"
+        "COMO BAIXAR:\n"
+        "1. Abra este e-mail no PC ou notebook que será utilizado no atendimento. Não faça os downloads pelo celular.\n"
+        "2. Entre no Google com o mesmo Gmail informado acima.\n"
+        "3. Abra cada link abaixo e clique em Baixar. Aguarde todos os downloads terminarem completamente.\n"
+        "4. NÃO copie os arquivos para o pendrive e não altere os arquivos baixados. Deixe tudo no computador.\n"
+        f"\nARQUIVOS DA ATUALIZAÇÃO:\n{lista_texto}\n\n"
+        "Depois que TODOS os arquivos estiverem baixados, solicite/agende o atendimento com nosso suporte técnico:\n"
+        f"{agenda_url}\n\n"
+        "A partir daí, o restante é conosco. Nosso técnico fará a preparação do pendrive e orientará a atualização.\n\n"
+        "Se preferir realizar a atualização em nossa loja, desconsidere o procedimento online acima e entre em contato conosco para combinar o atendimento.\n\n"
+        "Atendimentos online / RustDesk: segunda a sexta, das 10:00 às 20:00, com horários de 1 em 1 hora.\n\nKaraokê RJ"
     )
     corpo = f"""
-    <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#20242a">
-      <h2 style="color:#e6003c">Sua atualização Karaokê RJ está pronta</h2>
-      <p>Pacotes adquiridos: <strong>{html.escape(pacotes_txt)}</strong></p>
-      <p>Acesso liberado para: <strong>{html.escape(gmail)}</strong></p>
-      <div style="padding:14px;border-radius:10px;background:#fff3f6;border:1px solid #ffd0dc"><strong>Abra este e-mail no PC ou notebook que será utilizado pelo técnico via AnyDesk.</strong><br>Não faça o download pelo celular.</div>
+    <div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#20242a;line-height:1.5">
+      <h2 style="color:#e6003c;margin-bottom:6px">Sua atualização Karaokê RJ está pronta</h2>
+      <p style="margin-top:0">Pacotes adquiridos: <strong>{html.escape(pacotes_txt)}</strong><br>Acesso liberado para: <strong>{html.escape(gmail)}</strong></p>
+
+      <div style="padding:16px;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;margin:18px 0">
+        <strong style="display:block;color:#166534;font-size:16px;margin-bottom:5px">Não se preocupe: basta baixar os arquivos.</strong>
+        <span>A preparação do pendrive e o restante da atualização ficam por nossa conta. Nosso suporte técnico fará o procedimento com você.</span>
+      </div>
+
+      <h3 style="margin-bottom:8px">Equipamentos e preparação necessários</h3>
+      <ul style="padding-left:20px;margin-top:0">
+        <li>PC ou notebook com acesso à internet.</li>
+        <li>Instale o <strong>RustDesk</strong> no computador que será utilizado no atendimento.</li>
+        <li>Se esta for a <strong>primeira atualização</strong>: tenha teclado USB, mouse USB e um pendrive de <strong>no mínimo 32 GB</strong>.</li>
+        <li>No dia do atendimento, deixe o equipamento de karaokê <strong>ligado e pronto para uso</strong>.</li>
+        <li>Se o equipamento for <strong>portátil</strong>, ele deverá estar <strong>conectado a uma TV</strong>.</li>
+      </ul>
+      <p><a href="{html.escape(rustdesk_url)}" style="display:inline-block;padding:11px 16px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Baixar RustDesk</a></p>
+
+      <div style="padding:14px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;margin:18px 0">
+        <strong style="display:block;color:#9a3412;margin-bottom:4px">Importante: não copie os arquivos para o pendrive.</strong>
+        <span>Baixe tudo no PC/notebook e deixe os arquivos no computador. Nosso técnico fará a preparação correta do pendrive.</span>
+      </div>
+
       <h3>Como baixar</h3>
-      <ol><li>Entre no Google com o mesmo Gmail acima.</li><li>Abra cada pacote.</li><li>Clique em <strong>Baixar</strong> e aguarde terminar completamente.</li><li>Não altere nem mova os arquivos antes do atendimento.</li></ol>
+      <ol>
+        <li>Abra este e-mail no <strong>PC ou notebook</strong> que será usado no atendimento. Não faça os downloads pelo celular.</li>
+        <li>Entre no Google com o mesmo Gmail informado acima.</li>
+        <li>Abra cada link abaixo, clique em <strong>Baixar</strong> e aguarde o download terminar completamente.</li>
+        <li>Não altere, mova ou copie os arquivos para o pendrive.</li>
+      </ol>
+
+      <h3 style="margin-top:22px">Arquivos da atualização</h3>
       {lista_html}
-      <h3>Depois de baixar todos os arquivos</h3>
-      <p>Somente depois que os arquivos estiverem no computador, marque o atendimento do técnico.</p>
-      <p><a href="{html.escape(agenda_url)}" style="display:inline-block;padding:12px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Agendar atendimento pelo AnyDesk</a></p>
-      <p style="color:#687180;font-size:13px">Segunda a sexta, das 10:00 às 20:00. Os horários são reservados de 1 em 1 hora.</p>
+
+      <h3>Terminou de baixar todos os arquivos?</h3>
+      <p>Solicite/agende o atendimento com nosso suporte técnico. <strong>A partir daí, o restante é conosco.</strong></p>
+      <p><a href="{html.escape(agenda_url)}" style="display:inline-block;padding:12px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Solicitar / agendar suporte técnico</a></p>
+      <p style="color:#687180;font-size:13px">Atendimento online / RustDesk: segunda a sexta, das 10:00 às 20:00. Os horários são reservados de 1 em 1 hora.</p>
+
+      <div style="margin-top:18px;padding:13px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0">
+        <strong>Prefere fazer na loja?</strong><br>
+        Você pode levar o equipamento até nossa loja para realizarmos a atualização. Nesse caso, desconsidere o procedimento online acima e entre em contato conosco para combinar o atendimento.
+      </div>
     </div>"""
-    _enviar_resend_humiat(gmail, "Sua atualização Karaokê RJ está pronta", texto, corpo, user_agent=f"Organiza/{ORGANIZA_VERSION}")
+    _enviar_resend_humiat(gmail, "Arquivos da sua atualização Karaokê RJ", texto, corpo, user_agent=f"Organiza/{ORGANIZA_VERSION}")
     compra.arquivos_liberados_em = compra.arquivos_liberados_em or datetime.now()
     compra.email_arquivos_enviado_em = datetime.now()
     compra.email_erro = None
@@ -10438,11 +10486,11 @@ def _atualizacao_enviar_email_agendamento(db: Session, cliente: Cliente, compra:
     gmail = (cliente.email or "").strip().lower()
     if not _gmail_valido(gmail):
         return
-    tipo_rotulo = "Atualização · Online / AnyDesk" if ag.tipo == "CASA" else ("Atualização · Casa do cliente" if ag.tipo == "CLIENTE" else "Atualização · Loja")
+    tipo_rotulo = "Atualização · Online / RustDesk" if ag.tipo == "CASA" else ("Atualização · Casa do cliente" if ag.tipo == "CLIENTE" else "Atualização · Loja")
     data_txt = ag.data_hora.strftime("%d/%m/%Y às %H:%M")
     pacotes_txt = " / ".join(_atualizacao_pacotes_lista(compra.pacotes))
     if ag.tipo == "CASA":
-        lembrete = "Os arquivos devem estar completamente baixados no PC/notebook antes do horário marcado."
+        lembrete = "Antes do horário, deixe todos os arquivos completamente baixados no PC/notebook e o RustDesk instalado. Não copie os arquivos para o pendrive. Deixe o karaokê ligado; se for portátil, conecte-o a uma TV."
     elif ag.tipo == "CLIENTE":
         lembrete = "Atendimento na casa do cliente, em horário combinado conforme disponibilidade do técnico."
     else:
@@ -10869,13 +10917,13 @@ def _atualizacao_meta_compra(db: Session, compra: AtualizacaoCompra, agendamento
     local_rotulo = 'Atendimento a definir'
     if ag:
         if ag.tipo == 'CASA':
-            local, local_rotulo = 'online', 'Online / AnyDesk'
+            local, local_rotulo = 'online', 'Online / RustDesk'
         elif ag.tipo == 'CLIENTE':
             local, local_rotulo = 'casa', 'Casa do cliente'
         else:
             local, local_rotulo = 'loja', 'Loja'
     elif compra.email_arquivos_enviado_em or compra.arquivos_liberados_em:
-        local, local_rotulo = 'online', 'Online / AnyDesk'
+        local, local_rotulo = 'online', 'Online / RustDesk'
     total = int(compra.valor_a_pagar_centavos or 0) + int(compra.frete_centavos or 0)
     pago = int(compra.valor_pago_centavos or 0)
     return {
@@ -11422,7 +11470,7 @@ async def atualizacao_publica_agenda_salvar(token: str, compra_id: int, request:
     form = dict(await request.form())
     tipo = (form.get("tipo") or "LOJA").strip().upper()
     if tipo == "CASA" and not compra.email_arquivos_enviado_em:
-        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?erro=" + quote_plus("Baixe os arquivos antes de marcar o AnyDesk."), status_code=303)
+        return RedirectResponse(_atualizacao_fluxo_url(cliente, compra) + "?erro=" + quote_plus("Baixe todos os arquivos no PC/notebook antes de marcar o atendimento pelo RustDesk. Não copie os arquivos para o pendrive."), status_code=303)
     try:
         momento = datetime.strptime(f"{form.get('data') or ''} {form.get('hora') or ''}", "%Y-%m-%d %H:%M")
     except Exception:

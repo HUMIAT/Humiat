@@ -201,7 +201,7 @@
       <select name="local_atendimento">
         <option value="CLIENTE">Casa do cliente</option>
         <option value="LOJA" selected>Loja</option>
-        <option value="ONLINE">Online / AnyDesk</option>
+        <option value="ONLINE">Online / RustDesk</option>
       </select>
     </label>
     <label>Dia e hora<input type="datetime-local" name="data_hora" required></label>
@@ -259,7 +259,7 @@
   <div class="atualizacao-etapas-resumo">
     <div class="etapa-item ok"><span>1</span><div><strong>Compra</strong><small>Registre a contratação. Pode ficar PAGO ou A PAGAR.</small></div></div>
     <div class="etapa-item {% if atualizacoes_ctx.gmail_ok %}ok{% else %}pendente{% endif %}"><span>2</span><div><strong>Cadastro</strong><small>{{ 'Gmail pronto para envio dos arquivos.' if atualizacoes_ctx.gmail_ok else 'Atualize o cadastro / Gmail do cliente.' }}</small></div></div>
-    <div class="etapa-item"><span>3</span><div><strong>Entrega / atendimento</strong><small>Online: arquivos + AnyDesk. Loja: agendamento direto. Casa do cliente: horário combinado com o técnico.</small></div></div>
+    <div class="etapa-item"><span>3</span><div><strong>Entrega / atendimento</strong><small>Online: arquivos + RustDesk. Loja: agendamento direto. Casa do cliente: horário combinado com o técnico.</small></div></div>
   </div>
   <div class="atualizacao-manual-grid">
     <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/compra" class="cartao atualizacao-form-interno">
@@ -313,7 +313,7 @@
           {% set loja_agendada = ag and ag.status == 'RESERVADO' and ag.tipo == 'LOJA' %}
           {% set online_agendado = ag and ag.status == 'RESERVADO' and ag.tipo == 'CASA' %}
           {% set cliente_agendado = ag and ag.status == 'RESERVADO' and ag.tipo == 'CLIENTE' %}
-          <div class="etapa-chip {% if loja_agendada or cliente_agendado or (online_agendado and compra.email_arquivos_enviado_em) %}ok{% elif compra.email_arquivos_enviado_em or online_agendado %}andamento{% else %}pendente{% endif %}">3. {% if loja_agendada %}Loja agendada{% elif cliente_agendado %}Casa do cliente agendada{% elif online_agendado and compra.email_arquivos_enviado_em %}Arquivos enviados + AnyDesk agendado{% elif compra.email_arquivos_enviado_em %}Arquivos enviados · falta agendar{% elif online_agendado %}AnyDesk agendado · confira os arquivos{% else %}Escolher Loja, Casa do cliente ou Online{% endif %}</div>
+          <div class="etapa-chip {% if loja_agendada or cliente_agendado or (online_agendado and compra.email_arquivos_enviado_em) %}ok{% elif compra.email_arquivos_enviado_em or online_agendado %}andamento{% else %}pendente{% endif %}">3. {% if loja_agendada %}Loja agendada{% elif cliente_agendado %}Casa do cliente agendada{% elif online_agendado and compra.email_arquivos_enviado_em %}Arquivos enviados + RustDesk agendado{% elif compra.email_arquivos_enviado_em %}Arquivos enviados · falta agendar{% elif online_agendado %}RustDesk agendado · confira os arquivos{% else %}Escolher Loja, Casa do cliente ou Online{% endif %}</div>
         </div>
         <div class="atualizacao-status-grid">
           <div><small>Gmail</small><strong>{{ cliente.email or '-' }}</strong></div>
@@ -344,7 +344,7 @@
         </form>
         {% endif %}
         <form method="post" action="/organiza/clientes/{{ cliente.id }}/atualizacoes/{{ compra.id }}/agendar" class="atualizacao-agendar-admin">
-          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CLIENTE" {% if ag and ag.tipo=='CLIENTE' %}selected{% endif %}>Casa do cliente · horário combinado</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Online / AnyDesk · 10:00 às 20:00</option></select></label>
+          <label>Atendimento<select name="tipo"><option value="LOJA" {% if ag and ag.tipo=='LOJA' %}selected{% endif %}>Na loja · 14:00 às 18:00</option><option value="CLIENTE" {% if ag and ag.tipo=='CLIENTE' %}selected{% endif %}>Casa do cliente · horário combinado</option><option value="CASA" {% if ag and ag.tipo=='CASA' %}selected{% endif %}>Online / RustDesk · 10:00 às 20:00</option></select></label>
           <label>Dia e hora<input type="datetime-local" name="data_hora" required value="{{ ag.data_hora.strftime('%Y-%m-%dT%H:%M') if ag and ag.status == 'RESERVADO' else '' }}"></label>
           <button class="botao primario pequeno" type="submit">{% if ag and ag.status == 'RESERVADO' %}Reagendar{% else %}Reservar horário{% endif %}</button>
         </form>

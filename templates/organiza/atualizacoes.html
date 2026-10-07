@@ -89,7 +89,7 @@
   </section>
 
   <section class="cartao tabela-cartao">
-    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Online/AnyDesk: 10:00–20:00. Loja: 14:00–18:00. Casa do cliente: horário combinado conforme disponibilidade do técnico.</p></div><a class="acao-icone" href="/organiza/agenda" title="Abrir agenda completa" aria-label="Abrir agenda completa">▣</a></div>
+    <div class="titulo-linha compacto"><div><h2>Próximos atendimentos</h2><p class="texto-suave">Online/RustDesk: 10:00–20:00. Loja: 14:00–18:00. Casa do cliente: horário combinado conforme disponibilidade do técnico.</p></div><a class="acao-icone" href="/organiza/agenda" title="Abrir agenda completa" aria-label="Abrir agenda completa">▣</a></div>
     <div class="lista-cards-mobile">
       {% for a in agendamentos %}
         <a class="cliente-card-clean" href="/organiza/clientes/{{ a.cliente_id }}#atualizacoes"><div><strong>{{ a.data_hora.strftime('%d/%m/%Y %H:%M') }} · {{ 'Atualização · Online' if a.tipo == 'CASA' else ('Atualização · Casa do cliente' if a.tipo == 'CLIENTE' else 'Atualização · Loja') }}</strong><small>Compra #{{ a.compra_id }} · Google: {{ a.google_sync_status or 'Aguardando' }}</small></div><span>Reservado</span></a>
