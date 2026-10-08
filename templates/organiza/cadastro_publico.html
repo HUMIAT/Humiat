@@ -14,9 +14,9 @@
 <label>Nome / contato *<input name="nome" required value="{{ cliente.nome if cliente.nome and not cliente.nome.startswith('Cadastro pendente ') else '' }}"></label>
 <label>WhatsApp *<input name="telefone" required inputmode="numeric" value="{{ cliente.telefone or '' }}"></label>
 <label>CPF/CNPJ *
-  <div style="display:flex;gap:8px;align-items:center">
-    <input id="documento" name="documento" required inputmode="numeric" value="{{ cliente.documento or '' }}" style="flex:1">
-    <button class="botao pequeno" type="button" id="consultar-cnpj" style="display:none">Validar CNPJ</button>
+  <div class="cadastro-documento-campo">
+    <input id="documento" name="documento" required inputmode="numeric" autocomplete="off" maxlength="18" value="{{ cliente.documento or '' }}">
+    <button class="botao pequeno" type="button" id="consultar-cnpj" hidden>Validar CNPJ</button>
   </div>
   <small class="texto-suave" id="cnpj-msg"></small>
 </label>
@@ -78,6 +78,14 @@
 <input type="hidden" name="observacao" value="{{ cliente.observacao or '' }}">
 <button class="botao primario botao-cheio">Salvar meus dados</button>
 </form></div></section>
+<style>
+/* Formulário público: preservar área de digitação do CPF/CNPJ no celular. */
+.cadastro-publico-card .cadastro-documento-campo{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;min-width:0}
+.cadastro-publico-card .cadastro-documento-campo #documento{flex:1 1 190px;min-width:0;width:100%;box-sizing:border-box}
+.cadastro-publico-card #consultar-cnpj[hidden]{display:none!important}
+.cadastro-publico-card #consultar-cnpj{flex:0 0 auto;max-width:100%}
+@media(max-width:600px){.cadastro-publico-card .cadastro-documento-campo{flex-direction:column}.cadastro-publico-card #consultar-cnpj{width:100%}}
+</style>
 
 <script>
 (() => {
@@ -136,7 +144,7 @@
 
   function atualizarModoDocumento(){
     const cnpj=ehCnpj();
-    btn.style.display=cnpj?'':'none';
+    btn.hidden=!cnpj;
     box.style.display=cnpj?'':'none';
     const razao=document.getElementById('razao_social');
     if(razao) razao.required=cnpj;
