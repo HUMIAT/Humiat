@@ -13,7 +13,7 @@
 <div class="form-grid-organizada duas-colunas">
 <label>Nome / contato *<input name="nome" required value="{{ cliente.nome if cliente.nome and not cliente.nome.startswith('Cadastro pendente ') else '' }}"></label>
 <label>WhatsApp *<input name="telefone" required inputmode="numeric" value="{{ cliente.telefone or '' }}"></label>
-<label>CPF/CNPJ *
+<label class="cadastro-documento-label">CPF/CNPJ *
   <div class="cadastro-documento-campo">
     <input id="documento" name="documento" required inputmode="numeric" autocomplete="off" maxlength="18" value="{{ cliente.documento or '' }}">
     <button class="botao pequeno" type="button" id="consultar-cnpj" hidden>Validar CNPJ</button>
@@ -79,12 +79,36 @@
 <button class="botao primario botao-cheio">Salvar meus dados</button>
 </form></div></section>
 <style>
-/* Formulário público: preservar área de digitação do CPF/CNPJ no celular. */
-.cadastro-publico-card .cadastro-documento-campo{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;min-width:0}
-.cadastro-publico-card .cadastro-documento-campo #documento{flex:1 1 190px;min-width:0;width:100%;box-sizing:border-box}
-.cadastro-publico-card #consultar-cnpj[hidden]{display:none!important}
-.cadastro-publico-card #consultar-cnpj{flex:0 0 auto;max-width:100%}
-@media(max-width:600px){.cadastro-publico-card .cadastro-documento-campo{flex-direction:column}.cadastro-publico-card #consultar-cnpj{width:100%}}
+/* CPF/CNPJ: manter a mesma altura dos outros inputs, inclusive no Safari/iPhone.
+   O label externo usa display:grid e não deve esticar o campo interno. */
+.cadastro-publico-card .cadastro-documento-label {
+  align-content: start;
+  grid-template-rows: repeat(3, max-content);
+}
+.cadastro-publico-card .cadastro-documento-campo {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+}
+.cadastro-publico-card .cadastro-documento-campo #documento {
+  display: block;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  box-sizing: border-box;
+}
+.cadastro-publico-card #consultar-cnpj[hidden] { display: none !important; }
+.cadastro-publico-card #consultar-cnpj { align-self: flex-start; max-width: 100%; }
+@media(max-width:600px) {
+  .cadastro-publico-card #consultar-cnpj { width: 100%; }
+}
 </style>
 
 <script>
