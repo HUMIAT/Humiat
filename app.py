@@ -6180,13 +6180,6 @@ def _valores_atualizacao_cliente(pacotes: list[str], promo_override: dict | None
     # Durante uma campanha preparada usamos o snapshot congelado e não
     # consultamos o SolVoz novamente a cada cliente.
     promo = dict(promo_override or _solvoz_atualizacao_promocao_config())
-    # Extensão especial do mês de aniversário solicitada para as campanhas atuais.
-    # Mantém os mesmos valores promocionais e estende somente o prazo até 31/10/2026.
-    if date.today() <= CAMPANHA_ANIVERSARIO_VALIDA_ATE:
-        promo["ativo"] = True
-        promo["vigente"] = True
-        promo["valida_ate"] = CAMPANHA_ANIVERSARIO_VALIDA_ATE.isoformat()
-        promo["valida_ate_br"] = CAMPANHA_ANIVERSARIO_VALIDA_ATE.strftime("%d/%m/%Y")
     quantidade = max(1, len(pacotes or []))
     preco_pacote = max(1, int(promo.get("preco_pacote_centavos") or ATUALIZACAO_PRECO_PACOTE_CENTAVOS))
     normal = quantidade * preco_pacote
@@ -6889,7 +6882,7 @@ def _resumo_lotes_campanha(db: Session, campanha: Campanha) -> list[dict]:
     return saida
 
 
-def _recalcular_snapshots_abertos_campanha(db: Session, campanha: Campanha) -> int:
+def _recalcular_snapshots_abertos_campanha(db: Session, campanha: Campanha, promo_snapshot: dict | None = None) -> int:
     """Atualiza a mensagem dos contatos ainda não concluídos sem zerar a campanha.
 
     Útil quando texto, promoção ou link precisam ser corrigidos depois que a
@@ -6913,7 +6906,7 @@ def _recalcular_snapshots_abertos_campanha(db: Session, campanha: Campanha) -> i
                 _preparar_snapshot_destinatario(campanha, dest, dest.contato)
                 total += 1
     else:
-        promo_snapshot = _solvoz_atualizacao_promocao_config()
+        promo_snapshot = promo_snapshot if promo_snapshot is not None else _solvoz_atualizacao_promocao_config()
         pacotes_disponiveis = [
             str(x).strip() for x in (promo_snapshot.get("pacotes_disponiveis") or []) if str(x).strip()
         ]
@@ -8056,6 +8049,39 @@ def campanha_salvar_edicao(
     return RedirectResponse(
         f"/organiza/campanhas/{campanha.id}?editada=1&mensagens_atualizadas={int(atualizados or 0)}",
         status_code=303,
+    )
+
+
+@app.post("/organiza/campanhas/{campanha_id}/atualizar-mensagens")
+def campanha_atualizar_mensagens(
+    campanha_id: int,
+    usuario: Usuario = Depends(usuario_logado),
+    db: Session = Depends(get_db),
+):
+    """Atualiza snapshots pendentes usando a promoção vigente obtida do SolVoz.
+
+    Não altera destinatários já processados e não usa fallback quando a API falha.
+    """
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    if not campanha:
+        raise HTTPException(404)
+    if (campanha.lista_tipo or "").upper() != "ATUALIZACAO":
+        return RedirectResponse(f"/organiza/campanhas/{campanha.id}?atualizacao_erro=tipo", status_code=303)
+    try:
+        dados = _solvoz_api_request("/api/integracoes/organiza/atualizacao-promocao")
+        if not isinstance(dados, dict) or not dados.get("ok"):
+            raise ValueError("Resposta inválida da API SolVoz")
+        if not dados.get("valida_ate") and not dados.get("valida_ate_br"):
+            raise ValueError("Validade da promoção não informada pelo SolVoz")
+        _ATUALIZACAO_PROMO_CACHE["dados"] = dict(dados)
+        _ATUALIZACAO_PROMO_CACHE["expira_em"] = datetime.now() + timedelta(seconds=60)
+        total = _recalcular_snapshots_abertos_campanha(db, campanha, promo_snapshot=dict(dados))
+    except Exception as exc:
+        db.rollback()
+        print("WARN atualizar mensagens campanha SolVoz:", repr(exc))
+        return RedirectResponse(f"/organiza/campanhas/{campanha.id}?atualizacao_erro=solvoz", status_code=303)
+    return RedirectResponse(
+        f"/organiza/campanhas/{campanha.id}?mensagens_sincronizadas={total}", status_code=303
     )
 
 
