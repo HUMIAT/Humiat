@@ -5060,27 +5060,33 @@ def _lokafest_cliente_por_identificador(
         if cliente:
             return cliente
 
-    candidatos = db.query(Cliente).options(selectinload(Cliente.equipamentos)).all()
+    # Consultar o banco diretamente. Carregar TODOS os clientes e TODOS os
+    # equipamentos aqui causava timeouts em bases maiores.
+    def somente_digitos_sql(coluna):
+        expr = func.coalesce(coluna, "")
+        for caractere in (" ", "-", "(", ")", "+", ".", "/"):
+            expr = func.replace(expr, caractere, "")
+        return expr
 
-    # WhatsApp é a chave principal entre LokaFest e Organiza. O LokaFest pode
-    # ter CPF da pessoa enquanto o Organiza guarda o CNPJ da empresa; nesses
-    # casos o telefone continua identificando corretamente o mesmo cadastro.
+    def buscar_cliente(filtro):
+        return (db.query(Cliente)
+                .options(selectinload(Cliente.equipamentos))
+                .filter(filtro).order_by(Cliente.id.asc()).first())
+
+    # Telefone primeiro, como no fluxo anterior; considera DDI 55 opcional.
     if whats_limpo:
-        # Aceita número com/sem DDI 55, mas exige os últimos 10/11 dígitos iguais.
         alvo = whats_limpo[-11:] if len(whats_limpo) >= 11 else whats_limpo
-        for cliente in candidatos:
-            telefone = _lokafest_digitos(cliente.telefone)
-            completo = _lokafest_digitos(cliente.whatsapp_completo())
-            comparaveis = {telefone, completo}
-            comparaveis |= {x[-11:] for x in list(comparaveis) if len(x) >= 11}
-            if alvo in comparaveis or whats_limpo in comparaveis:
+        if len(alvo) >= 10:
+            telefone_sql = somente_digitos_sql(Cliente.telefone)
+            # Os últimos 11 dígitos igualam números locais e com DDI.
+            cliente = buscar_cliente(func.substr(telefone_sql, -len(alvo)) == alvo)
+            if cliente:
                 return cliente
 
-    # CPF/CNPJ fica como fallback para cadastros sem telefone utilizável.
     if cpf_limpo:
-        for cliente in candidatos:
-            if _lokafest_digitos(cliente.documento) == cpf_limpo:
-                return cliente
+        cliente = buscar_cliente(somente_digitos_sql(Cliente.documento) == cpf_limpo)
+        if cliente:
+            return cliente
 
     return None
 

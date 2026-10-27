@@ -2090,7 +2090,7 @@ def _lokafest_humiat_request(path: str, *, form: dict | None = None, method: str
             "User-Agent": "Humiat-ID-LokaFest/1.2.15",
         })
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detalhe = exc.read().decode("utf-8", errors="replace")
