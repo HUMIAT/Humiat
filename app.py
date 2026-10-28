@@ -12473,7 +12473,13 @@ def nfse_importar_connect(request: Request, usuario: Usuario = Depends(usuario_l
         cliente_id=cliente.id,
         origem="connect",
         referencia_externa=referencia or None,
-        origem_url=str(request.url),
+        # Não grave a URL de importação completa: os dados enviados pelo Connect
+        # podem ultrapassar VARCHAR(500) e gerar erro 500 no PostgreSQL.
+        # Os dados fiscais já são armazenados nos campos próprios do rascunho.
+        origem_url=(
+            str(request.url).split("?", 1)[0]
+            + (f"?connect_empresa_id={empresa_id}&connect_contrato_id={contrato_id}" if referencia else "")
+        )[:500],
         competencia=data_inicio,
         codigo_servico=nfse_codigo_por_tipo(NFSE_TIPO_ALUGUEL),
         municipio_prestacao=municipio_evento,
