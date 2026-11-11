@@ -5794,6 +5794,8 @@ def cliente_campanha_confirmar_reenvio(
     ).first()
     if not dest:
         raise HTTPException(404)
+    if dest.campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     dest.status = "ENVIADO"
     dest.enviado_por_id = usuario.id
     dest.enviado_em = datetime.now()
@@ -6428,14 +6430,36 @@ def _equipamento_tem_atualizacao(
     return bool(falta is not None and falta > 0)
 
 
+def _compradores_ate_pacote(db: Session, pacote_alvo: str, cliente_id: int | None = None) -> set[int]:
+    alvo = _pacote_release_num(pacote_alvo)
+    if alvo is None:
+        return set()
+    compras = db.query(AtualizacaoCompra.cliente_id, AtualizacaoCompra.pacote_fim).filter(
+        AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR"))
+    )
+    if cliente_id is not None:
+        compras = compras.filter(AtualizacaoCompra.cliente_id == cliente_id)
+    return {cid for cid, fim in compras.distinct() if (_pacote_release_num(fim) or 0) >= alvo}
+
+
+def _atualizacao_ja_coberta(cliente: Cliente, equipamento, alvo: int | None, compradores: set[int]) -> bool:
+    instalado = max(_pacote_release_num(cliente.pacote) or 0,
+                    _pacote_release_num(getattr(equipamento, "pacote", None)) or 0)
+    return cliente.id in compradores or (alvo is not None and instalado >= alvo)
+
+
 def _clientes_lista_atualizacao(
     db: Session, pacote_alvo: str | None = None, pacotes_disponiveis: list[str] | None = None
 ) -> list[dict]:
     pacote_alvo = pacote_alvo or obter_pacote_atual(db)
     clientes = db.query(Cliente).options(selectinload(Cliente.equipamentos)).order_by(Cliente.nome.asc()).all()
+    compradores = _compradores_ate_pacote(db, pacote_alvo)
+    alvo = _pacote_release_num(pacote_alvo)
     lista = []
     for cliente in clientes:
         eq_referencia = _equipamento_ativo_mais_antigo(cliente)
+        if _atualizacao_ja_coberta(cliente, eq_referencia, alvo, compradores):
+            continue
         if not eq_referencia or not _equipamento_tem_atualizacao(eq_referencia, pacote_alvo, pacotes_disponiveis):
             continue
         # Um cliente com várias máquinas entra uma única vez e sempre pela
@@ -6707,7 +6731,7 @@ def _contagens_campanha(db: Session, campanha_id: int) -> dict:
     return {"total": total, "enviados": processados, "processados": processados, "ignorados": ignorados, "pendentes": pendentes, **contagens}
 
 
-def _garantir_lotes_campanha(db: Session, campanha: Campanha) -> list[CampanhaLote]:
+def _garantir_lotes_campanha(db: Session, campanha: Campanha, *, commit: bool = True) -> list[CampanhaLote]:
     """Garante lotes sem renumerar destinatários já atribuídos.
 
     Isso preserva lotes complementares criados depois da campanha original.
@@ -6745,7 +6769,10 @@ def _garantir_lotes_campanha(db: Session, campanha: Campanha) -> list[CampanhaLo
             lote.total = 0
             alterou = True
     if alterou:
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     return db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha.id, CampanhaLote.total > 0).order_by(CampanhaLote.numero.asc()).all()
 
 
@@ -7094,7 +7121,7 @@ def _criar_lote_nao_enviados(db: Session, campanha: Campanha) -> tuple[int, list
         if numero not in numeros:
             numeros.append(numero)
     db.flush()
-    _garantir_lotes_campanha(db, campanha)
+    _garantir_lotes_campanha(db, campanha, commit=False)
     for numero in numeros:
         lote = db.query(CampanhaLote).filter(
             CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == numero
@@ -7112,9 +7139,11 @@ def _criar_lote_nao_enviados(db: Session, campanha: Campanha) -> tuple[int, list
 
 @app.post("/organiza/campanhas/{campanha_id}/lote-nao-enviados")
 def campanha_criar_lote_nao_enviados(campanha_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     total, numeros = _criar_lote_nao_enviados(db, campanha)
     if not total:
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}?recuperacao=nenhum", status_code=303)
@@ -7131,10 +7160,13 @@ def _ids_fechados_campanha(db: Session, campanha: Campanha) -> set[int]:
             q = q.filter(CampanhaAluguelContato.ultimo_aluguel_em >= inicio.date())
         return {int(x[0]) for x in q.all()}
 
-    q = db.query(AtualizacaoCompra.cliente_id).filter(AtualizacaoCompra.status.in_(("PAGO", "A_PAGAR")))
-    if inicio:
-        q = q.filter(AtualizacaoCompra.criado_em >= inicio)
-    return {int(x[0]) for x in q.distinct().all() if x[0] is not None}
+    alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+    elegiveis = {item["cliente"].id for item in _clientes_lista_atualizacao(db, alvo, [alvo])
+                 if item["cliente"].campanhas_ativo}
+    participantes = db.query(CampanhaDestinatario.cliente_id).filter(
+        CampanhaDestinatario.campanha_id == campanha.id
+    )
+    return {cid for (cid,) in participantes if cid not in elegiveis}
 
 
 def _quantidade_nao_fechados_campanha(db: Session, campanha: Campanha) -> int:
@@ -7191,7 +7223,7 @@ def _criar_lotes_reenvio_nao_fechados(db: Session, campanha: Campanha) -> tuple[
         )
 
     db.flush()
-    _garantir_lotes_campanha(db, campanha)
+    _garantir_lotes_campanha(db, campanha, commit=False)
     for numero in numeros:
         lote = db.query(CampanhaLote).filter(
             CampanhaLote.campanha_id == campanha.id, CampanhaLote.numero == numero
@@ -7208,9 +7240,11 @@ def _criar_lotes_reenvio_nao_fechados(db: Session, campanha: Campanha) -> tuple[
 
 @app.post("/organiza/campanhas/{campanha_id}/reenvio-nao-fechados")
 def campanha_reenvio_nao_fechados(campanha_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     total, numeros = _criar_lotes_reenvio_nao_fechados(db, campanha)
     if not total:
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}?reenvio=nenhum", status_code=303)
@@ -8091,6 +8125,26 @@ def campanha_atualizar_mensagens(
     )
 
 
+@app.post("/organiza/campanhas/{campanha_id}/finalizar")
+def campanha_finalizar(campanha_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
+    if not campanha:
+        raise HTTPException(404)
+    if campanha.status != "ENCERRADA":
+        modelo = _modelo_destinatario_campanha(campanha)
+        db.query(modelo).filter(modelo.campanha_id == campanha_id, modelo.status == "EM_ENVIO").update(
+            {modelo.status: "PENDENTE", modelo.reservado_por_id: None, modelo.reservado_em: None},
+            synchronize_session=False,
+        )
+        db.query(CampanhaLote).filter(CampanhaLote.campanha_id == campanha_id).update(
+            {CampanhaLote.reservado_por_id: None, CampanhaLote.reservado_em: None}, synchronize_session=False,
+        )
+        campanha.status = "ENCERRADA"
+        campanha.finalizado_em = datetime.now()
+        db.commit()
+    return RedirectResponse(f"/organiza/campanhas/{campanha_id}", status_code=303)
+
+
 @app.post("/organiza/campanhas/{campanha_id}/iniciar")
 def campanha_iniciar(
     campanha_id: int,
@@ -8116,8 +8170,10 @@ def campanha_iniciar(
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}?erro=lote_ocupado", status_code=303)
 
     if campanha.status == "RASCUNHO":
-        campanha.status = "ATIVA"
-        campanha.iniciado_em = campanha.iniciado_em or datetime.now()
+        db.query(Campanha).filter(Campanha.id == campanha.id, Campanha.status == "RASCUNHO").update(
+            {Campanha.status: "ATIVA", Campanha.iniciado_em: campanha.iniciado_em or datetime.now()},
+            synchronize_session=False,
+        )
         db.commit()
     return RedirectResponse(f"/organiza/campanhas/{campanha.id}/proximo?lote={lote.numero}", status_code=303)
 
@@ -8143,8 +8199,8 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
     contagens = _contagens_campanha(db, campanha.id)
     total_previsto = contagens["total"]
     lotes = _resumo_lotes_campanha(db, campanha) if total_previsto else []
-    nao_enviados_disponiveis = _quantidade_nao_enviados_campanha(db, campanha) if campanha.status != "RASCUNHO" else 0
-    nao_fechados_disponiveis = _quantidade_nao_fechados_campanha(db, campanha) if campanha.status != "RASCUNHO" else 0
+    nao_enviados_disponiveis = _quantidade_nao_enviados_campanha(db, campanha) if campanha.status in {"ATIVA", "FINALIZADA"} else 0
+    nao_fechados_disponiveis = _quantidade_nao_fechados_campanha(db, campanha) if campanha.status in {"ATIVA", "FINALIZADA"} else 0
     return templates.TemplateResponse("organiza/campanha_detalhe.html", {
         "request": request, "usuario": usuario, "campanha": campanha,
         "rotulo_lista": _rotulo_lista_campanha(campanha),
@@ -8194,8 +8250,9 @@ def campanha_proximo(
         lote_obj.concluido_em = lote_obj.concluido_em or datetime.now()
         db.commit()
         if contagens["pendentes"] == 0:
-            campanha.status = "FINALIZADA"
-            campanha.finalizado_em = datetime.now()
+            db.query(Campanha).filter(Campanha.id == campanha.id, Campanha.status == "ATIVA").update(
+                {Campanha.status: "FINALIZADA", Campanha.finalizado_em: datetime.now()}, synchronize_session=False
+            )
             db.commit()
         return RedirectResponse(f"/organiza/campanhas/{campanha.id}", status_code=303)
 
@@ -8217,8 +8274,9 @@ def _fechar_lote_se_concluido(db: Session, campanha: Campanha, lote_numero: int)
     if lote and not lote.concluido_em:
         lote.concluido_em = datetime.now()
     if _contagens_campanha(db, campanha.id)["pendentes"] == 0:
-        campanha.status = "FINALIZADA"
-        campanha.finalizado_em = campanha.finalizado_em or datetime.now()
+        db.query(Campanha).filter(Campanha.id == campanha.id, Campanha.status == "ATIVA").update(
+            {Campanha.status: "FINALIZADA", Campanha.finalizado_em: datetime.now()}, synchronize_session=False
+        )
     db.commit()
 
 
@@ -8229,9 +8287,11 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
     Não monta mensagem, não consulta SolVoz, não abre página-ponte e não
     espera qualquer retorno do WhatsApp.
     """
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     modelo = _modelo_destinatario_campanha(campanha)
     destinatario = db.query(modelo).filter(
         modelo.id == destinatario_id,
@@ -8240,7 +8300,17 @@ def campanha_whatsapp_proximo(campanha_id: int, destinatario_id: int, usuario: U
         modelo.reservado_por_id == usuario.id,
     ).first()
     if not destinatario:
-        return Response(status_code=204)
+        return Response(status_code=409)
+    if modelo is CampanhaDestinatario:
+        cliente = destinatario.cliente
+        alvo = campanha.pacote_alvo or obter_pacote_atual(db)
+        compradores = _compradores_ate_pacote(db, alvo, cliente.id)
+        if _atualizacao_ja_coberta(cliente, _equipamento_ativo_mais_antigo(cliente), _pacote_release_num(alvo), compradores):
+            destinatario.status = "IGNORADO"
+            lote_numero = destinatario.lote_numero
+            db.commit()
+            _fechar_lote_se_concluido(db, campanha, lote_numero)
+            return Response(status_code=409)
     destinatario.status = "PROCESSADO"
     destinatario.enviado_por_id = usuario.id
     destinatario.enviado_em = datetime.now()
@@ -8283,9 +8353,11 @@ async def campanha_manual_marcar_enviado(
     campanha = db.query(Campanha).filter(
         Campanha.id == campanha_id,
         func.upper(Campanha.lista_tipo) == "ATUALIZACAO",
-    ).first()
+    ).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     destinatario = db.query(CampanhaDestinatario).options(
         selectinload(CampanhaDestinatario.cliente)
     ).filter(
@@ -8333,9 +8405,11 @@ async def campanha_manual_marcar_enviado(
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular-rapido")
 def campanha_pular_rapido(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     modelo = _modelo_destinatario_campanha(campanha)
     destinatario = db.query(modelo).filter(
         modelo.id == destinatario_id, modelo.campanha_id == campanha_id,
@@ -8356,9 +8430,11 @@ def campanha_pular_rapido(campanha_id: int, destinatario_id: int, usuario: Usuar
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/pular")
 def campanha_pular(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     modelo = _modelo_destinatario_campanha(campanha)
     destinatario = db.query(modelo).filter(modelo.id == destinatario_id, modelo.campanha_id == campanha_id).first()
     if not destinatario:
@@ -8371,9 +8447,11 @@ def campanha_pular(campanha_id: int, destinatario_id: int, usuario: Usuario = De
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/enviado")
 def campanha_marcar_enviado(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     modelo = _modelo_destinatario_campanha(campanha)
     destinatario = db.query(modelo).filter(modelo.id == destinatario_id, modelo.campanha_id == campanha_id).first()
     if not destinatario:
@@ -8390,9 +8468,11 @@ def campanha_marcar_enviado(campanha_id: int, destinatario_id: int, usuario: Usu
 
 @app.post("/organiza/campanhas/{campanha_id}/destinatarios/{destinatario_id}/nao-receber")
 def campanha_nao_receber(campanha_id: int, destinatario_id: int, usuario: Usuario = Depends(usuario_logado), db: Session = Depends(get_db)):
-    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).first()
+    campanha = db.query(Campanha).filter(Campanha.id == campanha_id).with_for_update().first()
     if not campanha:
         raise HTTPException(404)
+    if campanha.status == "ENCERRADA":
+        raise HTTPException(410, "Campanha encerrada.")
     if (campanha.lista_tipo or "").upper() == "ALUGUEL":
         destinatario = db.query(CampanhaAluguelDestinatario).options(selectinload(CampanhaAluguelDestinatario.contato)).filter(
             CampanhaAluguelDestinatario.id == destinatario_id,

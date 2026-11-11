@@ -14,6 +14,11 @@
       </form>
       {% endif %}
       <a class="botao fantasma" href="/organiza/campanhas/{{ campanha.id }}/editar">{% if campanha.status == 'RASCUNHO' %}Editar campanha{% else %}Editar mensagem{% endif %}</a>
+      {% if campanha.status != 'ENCERRADA' %}
+      <form method="post" action="/organiza/campanhas/{{ campanha.id }}/finalizar" onsubmit="return confirm('Finalizar esta campanha e encerrar os envios e a criação de lotes?');">
+        <button class="botao secundario" type="submit">Finalizar campanha</button>
+      </form>
+      {% endif %}
       <form method="post" action="/organiza/campanhas/{{ campanha.id }}/clonar" onsubmit="return confirm('Clonar esta campanha? Será criada uma nova campanha em rascunho, com novos lotes e todos os envios zerados.');">
         <button class="botao secundario" type="submit">Clonar campanha</button>
       </form>
@@ -62,7 +67,7 @@
         <button class="botao primario" type="submit">Refazer lotes para quem não fechou</button>
       </form>
     </div>
-    <p class="texto-suave">Cria novos lotes de reenvio sem apagar os lotes anteriores. Atualização exclui compras PAGO/A_PAGAR; Aluguel exclui contatos com novo aluguel registrado no Connect desde o início da campanha.</p>
+    <p class="texto-suave">Cria novos lotes de reenvio sem apagar os lotes anteriores. Atualização exclui quem já instalou ou comprou até o pacote-alvo, inclusive em campanhas anteriores; Aluguel exclui contatos com novo aluguel registrado no Connect desde o início da campanha.</p>
   </section>
   {% endif %}
 
@@ -139,7 +144,7 @@
       });
     })();
     </script>
-  {% elif campanha.status == 'FINALIZADA' %}
+  {% elif campanha.status in ['FINALIZADA', 'ENCERRADA'] %}
     <div class="alerta sucesso">Campanha finalizada. {{ contagens.processados }} clientes foram processados na fila.</div>
   {% elif not lotes %}
     <div class="alerta info">Esta campanha ainda não possui contatos preparados.</div>
