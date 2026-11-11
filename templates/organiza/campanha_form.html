@@ -42,7 +42,7 @@
 
     <label class="campo-form">
       <span>Mensagem</span>
-      <textarea name="mensagem" rows="7" placeholder="Digite a mensagem que será aberta no WhatsApp..." required>{{ form_mensagem or '' }}</textarea>
+      <textarea name="mensagem" rows="{{ 22 if modo_edicao else 7 }}" placeholder="Digite a mensagem que será aberta no WhatsApp..." required>{{ form_mensagem or '' }}</textarea>
       <small>Opcional: use <b>{nome}</b> para inserir o nome do cliente.</small>
     </label>
 

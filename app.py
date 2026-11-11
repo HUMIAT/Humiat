@@ -4769,6 +4769,7 @@ def iniciar_banco():
                 f"[ESTOQUE] 1.2.50: datas de origem corrigidas: "
                 f"vendas={datas_venda_1250}; manutenções={datas_manut_1250}."
             )
+        _migrar_mensagens_campanha_1261(db)
         db.commit()
         # Tema é carregado apenas do cache local; nenhuma tela faz consulta externa.
         _carregar_tema_visual_runtime(db)
@@ -6568,7 +6569,6 @@ def _rotulo_lista_campanha(campanha: Campanha | None) -> str:
     return "Clientes de Aluguel" if campanha and (campanha.lista_tipo or "").upper() == "ALUGUEL" else "Clientes de Atualização"
 
 
-CAMPANHA_ANIVERSARIO_VALIDA_ATE = date(2026, 10, 31)
 CAMPANHA_ANIVERSARIO_SITE = "www.karaokerj.com.br"
 CAMPANHA_ANIVERSARIO_DESTAQUE = (
     "🎉 NOVIDADE! PRORROGAMOS A PROMOÇÃO!\n"
@@ -6578,12 +6578,9 @@ CAMPANHA_ANIVERSARIO_DESTAQUE = (
 )
 
 
-def _campanha_mensagem_base_promocional(campanha: Campanha) -> str:
-    """Mantém a mensagem original, retirando o prazo antigo e adicionando o aviso novo acima."""
-    mensagem = (campanha.mensagem or "").strip()
-    # Normaliza prazos antigos da mesma promoção. Assim uma campanha já
-    # iniciada também pode ser corrigida sem deixar 30/09, 05/10 ou 10/10
-    # perdidos dentro do texto salvo pelo usuário.
+def _mensagem_legada_campanha(mensagem: str) -> str:
+    """Reproduz o texto que a versão 1.2.60 exibia nas campanhas existentes."""
+    mensagem = (mensagem or "").strip()
     for padrao in (
         r"(?i)\b30/09/2026\b", r"(?i)\b30/09/26\b", r"(?i)\b30-09-2026\b", r"(?i)\b2026-09-30\b",
         r"(?i)\b05/10/2026\b", r"(?i)\b05/10/26\b", r"(?i)\b05-10-2026\b", r"(?i)\b2026-10-05\b",
@@ -6595,11 +6592,28 @@ def _campanha_mensagem_base_promocional(campanha: Campanha) -> str:
     return f"{CAMPANHA_ANIVERSARIO_DESTAQUE}\n\n{mensagem}".strip()
 
 
+def _migrar_mensagens_campanha_1261(db: Session) -> None:
+    # O marcador e os textos são gravados na mesma transação de inicialização.
+    marcador = db.execute(text(
+        "INSERT INTO configuracoes_sistema (chave, valor) "
+        "VALUES ('campanhas_mensagem_integral_1_2_61', 'ok') "
+        "ON CONFLICT (chave) DO NOTHING"
+    ))
+    if marcador.rowcount == 0:
+        return
+    campanhas = db.execute(text("SELECT id, mensagem FROM campanhas")).all()
+    if campanhas:
+        db.execute(text("UPDATE campanhas SET mensagem = :mensagem WHERE id = :id"), [
+            {"id": cid, "mensagem": _mensagem_legada_campanha(mensagem)}
+            for cid, mensagem in campanhas
+        ])
+
+
 def _mensagem_campanha(
     campanha: Campanha, pessoa, pacotes_override: list[str] | None = None,
     valores_override: dict | None = None, link_override: str | None = None,
 ) -> str:
-    mensagem = _campanha_mensagem_base_promocional(campanha).replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
+    mensagem = (campanha.mensagem or "").replace("{nome}", (getattr(pessoa, "nome", "") or "").strip())
     if (campanha.lista_tipo or "").upper() == "ATUALIZACAO":
         pacotes = list(pacotes_override or []) or _pacotes_atualizacao_cliente(campanha, pessoa)
         link = link_override if link_override is not None else _link_atualizacao_cliente(campanha, pessoa, pacotes)
@@ -8071,7 +8085,7 @@ def campanha_salvar_edicao(
 
     campanha.nome = nome
     campanha.lista_tipo = lista_tipo
-    campanha.pacote_alvo = obter_pacote_atual(db) if lista_tipo == "ATUALIZACAO" else None
+    campanha.pacote_alvo = (campanha.pacote_alvo or obter_pacote_atual(db)) if lista_tipo == "ATUALIZACAO" else None
     campanha.aluguel_mes = (aluguel_mes or None) if lista_tipo == "ALUGUEL" else None
     campanha.mensagem = mensagem
     campanha.link = (link or None) if lista_tipo == "ALUGUEL" else None
@@ -8210,7 +8224,7 @@ def campanha_detalhe(campanha_id: int, request: Request, usuario: Usuario = Depe
         "tamanho_lote": CAMPANHA_LOTE_TAMANHO,
         "nao_enviados_disponiveis": nao_enviados_disponiveis,
         "nao_fechados_disponiveis": nao_fechados_disponiveis,
-        "mensagem_preview": _campanha_mensagem_base_promocional(campanha),
+        "mensagem_preview": campanha.mensagem,
         "erro": request.query_params.get("erro", ""),
         "recuperacao": request.query_params.get("recuperacao", ""),
         "lotes_recuperacao": request.query_params.get("lotes_recuperacao", ""),
