@@ -4036,3 +4036,12 @@ label,.formulario label,.manutencao-page label{color:#334155 !important}
 .agenda-google-detalhe{min-width:0}
 .agenda-google-descricao{white-space:pre-line;overflow-wrap:anywhere;color:#475467!important;line-height:1.45}
 .agenda-google-local{overflow-wrap:anywhere;color:#344054!important}
+
+.campanha-envio-pagina [hidden] { display: none !important; }
+#campanhaLoteForm .campanha-lote-mobile { display: none; }
+@media (max-width: 760px) {
+  #campanhaLoteForm .campanha-lote-mobile { display: grid; }
+  #campanhaLoteForm .campanha-lotes-grid--selecao { display: none; }
+  #campanhaLoteForm select { width: 100%; min-width: 0; }
+  #campanhaLoteForm .campanha-lote-acao button { width: 100%; min-height: 48px; }
+}

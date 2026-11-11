@@ -96,6 +96,20 @@
         <span>Máximo de {{ tamanho_lote }} contatos por lote</span>
       </div>
 
+      <label class="campanha-lote-mobile campo-form">
+        <span>Lote para envio</span>
+        <select id="loteMobile">
+          <option value="">Selecione um lote</option>
+          {% for lote in lotes %}
+            {% set meu_lote = lote.reservado_por_id == usuario.id %}
+            {% set ocupado = lote.reservado_por_id and not meu_lote %}
+            <option value="{{ lote.numero }}" {% if lote.concluido or ocupado %}disabled{% endif %}>
+              Lote {{ lote.numero }} · {{ lote.processados }}/{{ lote.total }} ·
+              {% if lote.concluido %}Concluído{% elif ocupado %}Em uso por {{ lote.reservado_por }}{% elif meu_lote %}Seu lote{% else %}Livre{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
       <div class="campanha-lotes-grid campanha-lotes-grid--selecao">
         {% for lote in lotes %}
           {% set meu_lote = lote.reservado_por_id == usuario.id %}
@@ -118,7 +132,7 @@
         {% endfor %}
       </div>
 
-      <div class="campanha-lote-acao campanha-acao-principal-mobile">
+      <div class="campanha-lote-acao">
         <button class="botao primario campanha-botao-grande" type="submit" id="campanhaIniciarLote" disabled>
           {% if campanha.status == 'RASCUNHO' %}Iniciar campanha{% else %}Abrir lote selecionado{% endif %}
         </button>
@@ -132,12 +146,19 @@
       const ajuda = document.getElementById('campanhaLoteAjuda');
       if (!form || !btn) return;
       const radios = [...form.querySelectorAll('input[name="lote_numero"]')];
-      radios.forEach((radio) => radio.addEventListener('change', () => {
-        btn.disabled = false;
-        const card = radio.closest('.campanha-lote-selecionavel');
-        radios.forEach(r => r.closest('.campanha-lote-selecionavel')?.classList.toggle('selecionado', r.checked));
-        if (ajuda) ajuda.textContent = `Lote ${radio.value} selecionado.`;
-      }));
+      const seletor = document.getElementById('loteMobile');
+      function selecionar(valor) {
+        const escolhido = radios.find(r => r.value === valor && !r.disabled);
+        radios.forEach(r => {
+          r.checked = r === escolhido;
+          r.closest('.campanha-lote-selecionavel').classList.toggle('selecionado', r.checked);
+        });
+        seletor.value = escolhido ? escolhido.value : '';
+        btn.disabled = !escolhido;
+        ajuda.textContent = escolhido ? `Lote ${valor} selecionado.` : 'Selecione um lote livre.';
+      }
+      radios.forEach(r => r.addEventListener('change', () => selecionar(r.value)));
+      seletor.addEventListener('change', () => selecionar(seletor.value));
       form.addEventListener('submit', () => {
         btn.disabled = true;
         btn.textContent = 'Abrindo lote...';

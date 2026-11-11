@@ -25,9 +25,9 @@
       </div>
 
       <div class="campanha-envio-acoes">
-        <a class="campanha-whatsapp-btn" id="whatsappProximo" href="#" target="_blank" rel="noopener">
+        <button class="campanha-whatsapp-btn" id="whatsappProximo" type="button">
           <span aria-hidden="true">●</span> WhatsApp e Próximo
-        </a>
+        </button>
         <button class="campanha-pular-btn" id="pularRapido" type="button">Pular</button>
       </div>
     </section>
@@ -95,9 +95,6 @@ function renderAtual() {
   nome.textContent = atual.nome || 'Cliente';
   telefone.textContent = atual.telefone || '';
   posicao.textContent = `Contato ${indice + 1} de ${fila.length} · lote {{ lote.numero }}`;
-  whats.href = '#';
-  whats.dataset.processar = atual.processar_url;
-  pular.dataset.pular = atual.pular_url;
   if (atual.link) {
     linkWrap.hidden = false;
     link.href = atual.link;
@@ -121,27 +118,21 @@ whats.addEventListener('click', async (evento) => {
   evento.preventDefault();
   const atual = fila[indice];
   if (!atual || verificando) return;
-  const janela = window.open('about:blank', '_blank');
-  if (janela) janela.opener = null;
   verificando = true;
   pular.disabled = true;
   try {
     const resposta = await fetch(atual.processar_url, {method: 'POST', credentials: 'same-origin'});
     if (resposta.status === 410) {
-      janela?.close();
       location.assign('/organiza/campanhas/{{ campanha.id }}');
     } else if (resposta.status === 409) {
-      janela?.close();
       avancarLocal(false);
     } else if (resposta.status === 204) {
-      if (janela) janela.location.replace(atual.whatsapp_url);
-      else location.assign(atual.whatsapp_url);
       avancarLocal(true);
+      location.assign(atual.whatsapp_url);
     } else {
       throw new Error();
     }
   } catch {
-    janela?.close();
     alert('Falha ao confirmar o contato. Atualize o lote para conferir o andamento.');
   } finally {
     verificando = false;
